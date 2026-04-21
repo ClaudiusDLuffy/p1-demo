@@ -347,11 +347,119 @@ const INITIAL_WOS = [
   },
 ];
 
+// ═══════════════════════════════════════════════════════════════
+//  P1 BUSINESS INFO (from invoice 6556)
+// ═══════════════════════════════════════════════════════════════
+const P1_BUSINESS = {
+  legalName: "P Hospitality Repairs LLC",
+  dba: "P1 Pros",
+  addr1: "10181 Sample Rd #204",
+  addr2: "Coral Springs, FL 33065",
+  email: "eddie@phospitality.com",
+  phone: "+1 (561) 421-1281",
+  website: "www.p1pros.com",
+  defaultLaborRate: 110, // placeholder — pending Jeremy confirmation per contractor
+  defaultTravelRate: 110,
+  defaultTerms: "Net 30",
+};
+
+// 7-Eleven corporate AP — where all invoices are billed
+const SEVEN_BILL_TO = {
+  name: "7-ELEVEN INC",
+  addr1: "3200 Hackberry Rd",
+  addr2: "Irving, TX 75063 USA",
+};
+
+// Line item types matching real P1 invoice (6556)
+const LINE_TYPES = ["Travel", "Labor", "Parts/Hardware", "Shipping", "Other"] as const;
+
+// Helper: compute line amount
+const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
+const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
+
+// ═══════════════════════════════════════════════════════════════
+//  INITIAL INVOICES — including the REAL Invoice 6556
+// ═══════════════════════════════════════════════════════════════
 const INITIAL_INVOICES = [
-  { num: "INV2604-0189", wot: "FWKD11340089", state: "submitted", date: "Apr 16", store: "35551", total: 5240, contractor: "archer", cme: "CME-001 HVAC" },
-  { num: "INV2604-0166", wot: "FWKD11305511", state: "approved", date: "Apr 14", store: "33321", total: 1280, contractor: "starnes", cme: "CME-004 Refrigeration" },
-  { num: "INV2604-0155", wot: "FWKD11291882", state: "rejected", date: "Apr 12", store: "41005", total: 2100, contractor: "sameday", cme: "CME-002 Beverage", reason: "Missing detail on labor breakdown" },
-  { num: "INV2604-0141", wot: "FWKD11287040", state: "approved", date: "Apr 10", store: "42210", total: 580, contractor: "anytime", cme: "CME-005 Plumbing" },
+  {
+    num: "6556",
+    wot: "FWKD11234445",
+    incidentId: "INC24158515",
+    state: "submitted",
+    invoiceDate: "04/17/2026",
+    serviceDate: "03/25/2026",
+    date: "Apr 17",
+    terms: "Net 30",
+    store: "32333",
+    storeAddr: "5101 George Washington Memorial Hwy, Yorktown, VA 23692 USA",
+    cme: "CME-002 Beverage",
+    contractor: "proops",
+    lines: [
+      { type: "Travel", desc: "Travel to site — initial diagnosis", qty: 1, rate: 110, amount: 110 },
+      { type: "Travel", desc: "Second trip with parts", qty: 1, rate: 110, amount: 110 },
+      { type: "Labor", desc: "Arrived onsite checked in with the MOD, recovered charge, replaced filter dryer. Pressure and vacuum tested unit. Recharged and witnessed proper cooling operation. Management asked if tech could replace product and get all barrels going. Replaced strawberry began refilling barrel and witnessed a significant leak out of the barrel from the beater motor. Tech recommends beater motor and rear seal replacement. The refrigeration side of the machine is operational but will need beater motor replacement.", qty: 5.5, rate: 110, amount: 605 },
+      { type: "Labor", desc: "Arrived onsite checked in with the MOD, removed and replaced old beater motor and rear seal. Cleaned and ensured proper seal. Refilled barrel and witnessed proper unit operation. Unit is currently operational. Job completed.", qty: 4.5, rate: 110, amount: 495 },
+      { type: "Parts/Hardware", desc: "Field wiring kit", qty: 2, rate: 41.42, amount: 82.84 },
+      { type: "Parts/Hardware", desc: "TVRN", qty: 1, rate: 150, amount: 150 },
+      { type: "Parts/Hardware", desc: "Nitrogen", qty: 1, rate: 45, amount: 45 },
+      { type: "Parts/Hardware", desc: "Reclaim", qty: 1, rate: 55, amount: 55 },
+      { type: "Parts/Hardware", desc: "R404a refrigerant", qty: 14, rate: 35, amount: 490 },
+      { type: "Parts/Hardware", desc: "3/8 dryer", qty: 1, rate: 37.5, amount: 37.5 },
+      { type: "Parts/Hardware", desc: "Beater motor", qty: 1, rate: 1256.25, amount: 1256.25 },
+      { type: "Parts/Hardware", desc: "Rear seal", qty: 1, rate: 77.5, amount: 77.5 },
+      { type: "Shipping", desc: "NDA shipping", qty: 1, rate: 525, amount: 525 },
+    ],
+    subtotal: 4039.09,
+    salesTax: 246,
+    total: 4285.09,
+  },
+  {
+    num: "6542", wot: "FWKD11340089", incidentId: "INC24320811", state: "submitted",
+    invoiceDate: "04/16/2026", serviceDate: "04/14/2026", date: "Apr 16", terms: "Net 30",
+    store: "35551", storeAddr: "7810 Westheimer Rd, Houston, TX 77063", cme: "CME-001 HVAC", contractor: "archer",
+    lines: [
+      { type: "Travel", desc: "Travel to site", qty: 1, rate: 110, amount: 110 },
+      { type: "Labor", desc: "RTU #2 compressor replacement. Recovered charge, removed failed compressor, installed new Carrier 48HCEE06 compressor assembly. Pressure tested, evacuated, recharged with R-410A. Tested full cycle — operating to spec.", qty: 8, rate: 110, amount: 880 },
+      { type: "Parts/Hardware", desc: "Carrier 48HCEE06 compressor", qty: 1, rate: 3850, amount: 3850 },
+      { type: "Parts/Hardware", desc: "R-410A refrigerant", qty: 8, rate: 45, amount: 360 },
+    ],
+    subtotal: 5200, salesTax: 40, total: 5240,
+  },
+  {
+    num: "6528", wot: "FWKD11305511", incidentId: "INC24220811", state: "approved",
+    invoiceDate: "04/14/2026", serviceDate: "04/11/2026", date: "Apr 14", terms: "Net 30",
+    store: "33321", storeAddr: "5712 Skillman St, Dallas, TX 75206", cme: "CME-004 Refrigeration", contractor: "starnes",
+    lines: [
+      { type: "Travel", desc: "Travel to site", qty: 1, rate: 110, amount: 110 },
+      { type: "Labor", desc: "Replaced worn door gasket on walk-in cooler. Door sealing properly — tested.", qty: 2, rate: 110, amount: 220 },
+      { type: "Parts/Hardware", desc: "Walk-in door gasket (Heatcraft)", qty: 1, rate: 940, amount: 940 },
+    ],
+    subtotal: 1270, salesTax: 10, total: 1280,
+  },
+  {
+    num: "6510", wot: "FWKD11291882", incidentId: "INC24120811", state: "rejected",
+    invoiceDate: "04/12/2026", serviceDate: "04/09/2026", date: "Apr 12", terms: "Net 30",
+    store: "41005", storeAddr: "3402 W Hillsborough Ave, Tampa, FL 33614", cme: "CME-002 Beverage", contractor: "sameday",
+    reason: "Missing detail on labor breakdown",
+    lines: [
+      { type: "Travel", desc: "Travel", qty: 1, rate: 110, amount: 110 },
+      { type: "Labor", desc: "Beverage machine service.", qty: 4, rate: 110, amount: 440 },
+      { type: "Parts/Hardware", desc: "Parts", qty: 1, rate: 1500, amount: 1500 },
+    ],
+    subtotal: 2050, salesTax: 50, total: 2100,
+  },
+  {
+    num: "6495", wot: "FWKD11287040", incidentId: "INC24099011", state: "approved",
+    invoiceDate: "04/10/2026", serviceDate: "04/08/2026", date: "Apr 10", terms: "Net 30",
+    store: "42210", storeAddr: "8801 N Dale Mabry Hwy, Tampa, FL 33614", cme: "CME-005 Plumbing", contractor: "anytime",
+    lines: [
+      { type: "Travel", desc: "Travel to site", qty: 1, rate: 110, amount: 110 },
+      { type: "Labor", desc: "Snaked blocked restroom line. Cleared ~15ft in. Tested flow.", qty: 3.5, rate: 110, amount: 385 },
+      { type: "Parts/Hardware", desc: "Drain cleaner + consumables", qty: 1, rate: 80, amount: 80 },
+    ],
+    subtotal: 575, salesTax: 5, total: 580,
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -490,8 +598,28 @@ export default function P1Portal() {
   const [invoices, setInvoices] = useState(INITIAL_INVOICES);
   const [newWO, setNewWO] = useState({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
   const resetNewWO = () => setNewWO({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
-  const [newInv, setNewInv] = useState({ invNum: "", cme: "", desc: "", rate: "", hours: "", otHours: "", materials: "", trip: "25", tax: "", hasPdf: false });
-  const resetNewInv = () => setNewInv({ invNum: "", cme: "", desc: "", rate: "", hours: "", otHours: "", materials: "", trip: "25", tax: "", hasPdf: false });
+  // Invoice builder state — line-item based, matches P1's real invoice format (6556)
+  const defaultInvLines = () => [
+    { type: "Travel", desc: "Travel to site", qty: 1, rate: P1_BUSINESS.defaultTravelRate, amount: P1_BUSINESS.defaultTravelRate },
+    { type: "Labor", desc: "", qty: 1, rate: P1_BUSINESS.defaultLaborRate, amount: P1_BUSINESS.defaultLaborRate },
+  ];
+  const nextInvNum = () => {
+    const maxNum = invoices.reduce((m, i) => { const n = parseInt(i.num) || 0; return n > m ? n : m; }, 6500);
+    return String(maxNum + 1);
+  };
+  const blankNewInv = () => ({
+    num: "",
+    cme: "",
+    terms: P1_BUSINESS.defaultTerms,
+    serviceDate: new Date().toISOString().slice(0, 10),
+    invoiceDate: new Date().toISOString().slice(0, 10),
+    tax: "",
+    hasPdf: false,
+    lines: defaultInvLines(),
+  });
+  const [newInv, setNewInv] = useState<any>(blankNewInv());
+  const resetNewInv = () => setNewInv(blankNewInv());
+  const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
   // Tick every 60s so SLA countdowns update live
   const [, forceTick] = useState(0);
   useEffect(() => { const i = setInterval(() => forceTick(x => x + 1), 60000); return () => clearInterval(i); }, []);
@@ -580,16 +708,41 @@ export default function P1Portal() {
   const doMoveToInvoice = (woId: string) => { updateWO(woId, { status: "pending_invoice", newActivity: { author: "System", time: dateNow(), text: "7-Eleven portal updated. Moved to pending invoice.", type: "system" } }); fire("Moved to Pending Invoice"); };
   const doCapitalFlag = (woId: string) => { updateWO(woId, { status: "capital", functionalStatus: "Pending Capital Approval", capitalStatus: "Pending approval", newActivity: { author: "System", time: dateNow(), text: "Flagged as capital replacement — pending approval.", type: "system" } }); fire("Flagged for capital"); };
   const doSubmitInvoice = (wo: any) => {
-    if (!newInv.invNum || !newInv.cme || !newInv.rate || !newInv.hours) { fire("Fill in invoice #, CME, rate, and hours"); return false; }
+    if (!newInv.num) { fire("Enter an invoice number"); return false; }
+    if (!newInv.cme) { fire("Select a CME code"); return false; }
+    const validLines = (newInv.lines || []).filter((l: any) => l.desc && l.qty && l.rate);
+    if (validLines.length === 0) { fire("Add at least one line item with description, qty, and rate"); return false; }
     if (!newInv.hasPdf) { fire("Attach a PDF invoice before submitting"); return false; }
-    const rate = parseFloat(newInv.rate) || 0, hrs = parseFloat(newInv.hours) || 0, ot = parseFloat(newInv.otHours) || 0;
-    const mat = parseFloat(newInv.materials) || 0, trip = parseFloat(newInv.trip) || 0, tax = parseFloat(newInv.tax) || 0;
-    const total = (rate * hrs) + (rate * 1.5 * ot) + mat + trip + tax;
-    const invoice = { num: newInv.invNum, wot: wo.id, state: "submitted", date: dateShort(), store: wo.store, total: Math.round(total), contractor: wo.contractor, cme: newInv.cme, description: newInv.desc || wo.summary };
+    const subtotal = invSubtotal(validLines);
+    const tax = parseFloat(newInv.tax) || 0;
+    const total = subtotal + tax;
+    const serviceMonth = new Date(newInv.serviceDate).getMonth();
+    const invoice = {
+      num: newInv.num,
+      wot: wo.id,
+      incidentId: wo.incidentId,
+      state: "submitted",
+      invoiceDate: new Date(newInv.invoiceDate).toLocaleDateString("en-US"),
+      serviceDate: new Date(newInv.serviceDate).toLocaleDateString("en-US"),
+      date: `${MONTHS[new Date(newInv.invoiceDate).getMonth()]} ${new Date(newInv.invoiceDate).getDate()}`,
+      terms: newInv.terms,
+      store: wo.store,
+      storeAddr: wo.addr,
+      cme: newInv.cme,
+      contractor: wo.contractor,
+      lines: validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) })),
+      subtotal,
+      salesTax: tax,
+      total,
+    };
     setInvoices(prev => [invoice, ...prev]);
-    updateWO(wo.id, { status: "pending_approval", invoiceTotal: Math.round(total), newActivity: { author: currentUser.name, time: dateNow(), text: `Invoice ${newInv.invNum} submitted. Total: ${fmt(Math.round(total))}.`, type: "system" } });
+    updateWO(wo.id, {
+      status: "pending_approval",
+      invoiceTotal: total,
+      newActivity: { author: currentUser.name, time: dateNow(), text: `Invoice #${newInv.num} submitted to 7-Eleven. Total: ${fmt(total)} (${validLines.length} line item${validLines.length !== 1 ? "s" : ""}).`, type: "system" },
+    });
     resetNewInv();
-    fire(`Invoice submitted — ${fmt(Math.round(total))}`);
+    fire(`Invoice #${newInv.num} submitted — ${fmt(total)}`);
     return true;
   };
   const doCreateWO = () => {
@@ -1357,7 +1510,7 @@ export default function P1Portal() {
           )}
 
           {/* ═════ INVOICES ═════ */}
-          {page === "invoices" && (
+          {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
               <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
                 {[{ id: "all", l: "All" }, { id: "submitted", l: "Submitted" }, { id: "rejected", l: "Rejected" }, { id: "approved", l: "Approved" }].map(t => (
@@ -1368,21 +1521,22 @@ export default function P1Portal() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: T.surfaceSoft }}>
-                      {["Invoice#", "WO#", "Contractor", "State", "Date", "Store", "Total"].map(h => (
-                        <th key={h} style={{ textAlign: h === "Total" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>{h}</th>
+                      {["Invoice#", "WO#", "Contractor", "State", "Date", "Store", "Lines", "Total"].map(h => (
+                        <th key={h} style={{ textAlign: h === "Total" || h === "Lines" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {(isManager ? invoices : invoices.filter(i => i.contractor === currentUser.id)).filter(i => invTab === "all" || i.state === invTab).map(inv => (
-                      <tr key={inv.num} style={{ borderBottom: `1px solid ${T.borderSoft}` }}>
-                        <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{inv.num}</td>
+                      <tr key={inv.num} onClick={() => setSelectedInvoice(inv.num)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
+                        <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
                         <td className="mono" style={{ padding: "13px 14px", fontSize: 11, color: T.muted }}>{inv.wot}</td>
                         <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>
                         <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[inv.state]} small /></td>
                         <td style={{ padding: "13px 14px", color: T.subtle }}>{inv.date}</td>
                         <td style={{ padding: "13px 14px" }}>#{inv.store}</td>
-                        <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(inv.total)}</td>
+                        <td className="mono" style={{ padding: "13px 14px", textAlign: "right", color: T.muted }}>{(inv.lines || []).length}</td>
+                        <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(Math.round(inv.total))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1390,6 +1544,114 @@ export default function P1Portal() {
               </div>
             </div>
           )}
+
+          {/* ═════ INVOICE DETAIL (editorial receipt view) ═════ */}
+          {page === "invoices" && selectedInvoice && (() => {
+            const inv = invoices.find(i => i.num === selectedInvoice);
+            if (!inv) return null;
+            const wo = workOrders.find(w => w.id === inv.wot);
+            return (
+              <div style={{ animation: "fadeUp 0.25s" }}>
+                <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
+                <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
+                  {/* Invoice header */}
+                  <div style={{ padding: "28px 32px", borderBottom: `1px solid ${T.borderSoft}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+                      <div>
+                        <div className="display" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>Invoice</div>
+                        <div className="mono" style={{ fontSize: 16, color: T.accent, marginTop: 8, fontWeight: 600 }}>#{inv.num}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div className="display" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
+                        <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
+                          {P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.email}<br />{P1_BUSINESS.phone}<br />{P1_BUSINESS.website}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bill-to / Ship-to / Metadata */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: `1px solid ${T.borderSoft}` }}>
+                    <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Bill to</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{SEVEN_BILL_TO.name}</div>
+                      <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>7-ELEVEN STORE - {inv.store}<br />{SEVEN_BILL_TO.addr1}<br />{SEVEN_BILL_TO.addr2}</div>
+                    </div>
+                    <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Ship to</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>7-ELEVEN STORE - {inv.store}</div>
+                      <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>{inv.storeAddr || wo?.addr || "—"}</div>
+                    </div>
+                    <div style={{ padding: "20px 32px" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Invoice details</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "3px 12px", fontSize: 11 }}>
+                        <span style={{ color: T.muted }}>Invoice date</span><span className="mono" style={{ color: T.ink }}>{inv.invoiceDate}</span>
+                        <span style={{ color: T.muted }}>Service date</span><span className="mono" style={{ color: T.ink }}>{inv.serviceDate}</span>
+                        <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{inv.terms || "Net 30"}</span>
+                        <span style={{ color: T.muted }}>Work order</span><span className="mono" style={{ color: T.accent }}>{inv.wot}</span>
+                        <span style={{ color: T.muted }}>CME</span><span className="mono" style={{ color: T.ink }}>{inv.cme || "—"}</span>
+                        <span style={{ color: T.muted }}>Status</span><span><Badge conf={INV_STATE[inv.state]} small /></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Line items */}
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "12px 32px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
+                      <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div>
+                    </div>
+                    {(inv.lines || []).map((l: any, i: number) => (
+                      <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
+                        <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
+                        <div style={{ color: T.inkSoft, fontWeight: 500 }}>{l.type}</div>
+                        <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>{l.desc}</div>
+                        <div className="mono" style={{ textAlign: "right", color: T.muted }}>{l.qty}</div>
+                        <div className="mono" style={{ textAlign: "right", color: T.muted }}>{fmt(l.rate)}</div>
+                        <div className="mono" style={{ textAlign: "right", fontWeight: 600, color: T.ink }}>{fmt(Math.round(l.amount * 100) / 100)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Totals */}
+                  <div style={{ padding: "22px 32px", display: "flex", justifyContent: "flex-end" }}>
+                    <div style={{ width: 300 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0" }}>
+                        <span style={{ color: T.muted }}>Subtotal</span>
+                        <span className="mono" style={{ color: T.ink, fontWeight: 500 }}>{fmt(Math.round(inv.subtotal * 100) / 100)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0", borderBottom: `1px solid ${T.border}` }}>
+                        <span style={{ color: T.muted }}>Sales tax</span>
+                        <span className="mono" style={{ color: T.ink, fontWeight: 500 }}>{fmt(Math.round(inv.salesTax * 100) / 100)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0 0" }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Total</span>
+                        <span className="display" style={{ fontSize: 26, color: T.ink, letterSpacing: -0.5 }}>{fmt(Math.round(inv.total * 100) / 100)}</span>
+                      </div>
+                      {wo && (
+                        <div style={{ fontSize: 11, color: inv.total > wo.nte ? T.danger : T.success, textAlign: "right", marginTop: 4 }}>
+                          {inv.total > wo.nte ? `Exceeds NTE by ${fmt(inv.total - wo.nte)}` : `${fmt(wo.nte - inv.total)} under NTE`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Rejected reason */}
+                  {inv.state === "rejected" && inv.reason && (
+                    <div style={{ padding: "16px 32px", background: T.dangerSoft, borderTop: `1px solid ${T.danger}22` }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.danger, marginBottom: 4 }}>Rejection reason</div>
+                      <div style={{ fontSize: 12, color: "#8B2C20" }}>{inv.reason}</div>
+                    </div>
+                  )}
+
+                  {/* Footer — ways to pay (placeholder until Jeremy confirms) */}
+                  <div style={{ padding: "18px 32px", background: T.surfaceSoft, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, color: T.subtle, textAlign: "center" }}>
+                    Ways to pay — ACH / check (pending confirmation with Jeremy) · Questions? {P1_BUSINESS.email}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ═════ CONTRACTORS ═════ */}
           {page === "contractors" && isManager && (
@@ -1581,60 +1843,125 @@ export default function P1Portal() {
       )}
 
       {modal === "createInvoice" && woData && (() => {
-        const r = parseFloat(newInv.rate) || 0, h = parseFloat(newInv.hours) || 0, o = parseFloat(newInv.otHours) || 0;
-        const mat = parseFloat(newInv.materials) || 0, trip = parseFloat(newInv.trip) || 0, tax = parseFloat(newInv.tax) || 0;
-        const liveTotal = (r * h) + (r * 1.5 * o) + mat + trip + tax;
-        const over = liveTotal > woData.nte;
+        // Auto-fill invoice # if blank
+        if (!newInv.num) setTimeout(() => setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() }), 0);
+        const sub = invSubtotal(newInv.lines || []);
+        const tax = parseFloat(newInv.tax) || 0;
+        const total = sub + tax;
+        const over = total > woData.nte;
+        const setLine = (i: number, patch: any) => {
+          setNewInv((n: any) => ({ ...n, lines: n.lines.map((l: any, idx: number) => idx === i ? { ...l, ...patch } : l) }));
+        };
+        const addLine = (type = "Labor") => setNewInv((n: any) => ({ ...n, lines: [...n.lines, { type, desc: "", qty: 1, rate: type === "Parts/Hardware" ? 0 : P1_BUSINESS.defaultLaborRate, amount: 0 }] }));
+        const removeLine = (i: number) => setNewInv((n: any) => ({ ...n, lines: n.lines.filter((_: any, idx: number) => idx !== i) }));
         return (
-          <Modal onClose={() => { setModal(null); resetNewInv(); }} title="Create invoice" width={560}>
-            <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Invoice for {woData.id} — Store #{woData.store}</div>
-            <div style={{ display: "grid", gap: 14 }}>
-              <div style={{ padding: "12px 16px", background: T.surfaceSoft, borderRadius: 10, border: `1px solid ${T.borderSoft}`, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                <div><div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>WO#</div><div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{woData.id}</div></div>
-                <div><div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>Store</div><div style={{ fontSize: 12, fontWeight: 600 }}>#{woData.store}</div></div>
-                <div><div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>NTE</div><div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{fmt(woData.nte)}</div></div>
+          <Modal onClose={() => { setModal(null); resetNewInv(); }} title="Create invoice" width={820}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>P1 Pros invoice to 7-Eleven — Work Order {woData.id}</div>
+
+            {/* Business header + bill-to/ship-to preview */}
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14, padding: "14px 16px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginBottom: 18 }}>
+              <div>
+                <div className="display" style={{ fontSize: 16, color: T.ink, lineHeight: 1.1 }}>{P1_BUSINESS.dba}</div>
+                <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.5 }}>{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.phone}</div>
               </div>
-              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Your invoice #"><Input value={newInv.invNum} onChange={(e: any) => setNewInv({ ...newInv, invNum: e.target.value })} placeholder="INV-2026-0142" /></Field>
-                <Field label="CME #"><Sel value={newInv.cme} onChange={(e: any) => setNewInv({ ...newInv, cme: e.target.value })}>
-                  <option value="">Select CME...</option>
-                  <option>CME-001 HVAC</option>
-                  <option>CME-002 Beverage</option>
-                  <option>CME-003 Electrical</option>
-                  <option>CME-004 Refrigeration</option>
-                  <option>CME-005 Plumbing</option>
-                  <option>CME-006 General</option>
-                </Sel></Field>
+              <div>
+                <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Bill to</div>
+                <div style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}>{SEVEN_BILL_TO.name}</div>
+                <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>{SEVEN_BILL_TO.addr1}<br />{SEVEN_BILL_TO.addr2}</div>
               </div>
-              <Field label="Work description"><TA rows={2} value={newInv.desc || woData.summary} onChange={(e: any) => setNewInv({ ...newInv, desc: e.target.value })} /></Field>
-              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                <Field label="Hourly rate"><Input value={newInv.rate} onChange={(e: any) => setNewInv({ ...newInv, rate: e.target.value })} placeholder="0" type="number" /></Field>
-                <Field label="Hours"><Input value={newInv.hours} onChange={(e: any) => setNewInv({ ...newInv, hours: e.target.value })} placeholder="0" type="number" /></Field>
-                <Field label="OT hours"><Input value={newInv.otHours} onChange={(e: any) => setNewInv({ ...newInv, otHours: e.target.value })} placeholder="0" type="number" /></Field>
+              <div>
+                <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Ship to · Store #{woData.store}</div>
+                <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>{woData.addr || "—"}</div>
               </div>
-              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                <Field label="Materials"><Input value={newInv.materials} onChange={(e: any) => setNewInv({ ...newInv, materials: e.target.value })} placeholder="0" type="number" /></Field>
-                <Field label="Trip/freight"><Input value={newInv.trip} onChange={(e: any) => setNewInv({ ...newInv, trip: e.target.value })} type="number" /></Field>
-                <Field label="Tax"><Input value={newInv.tax} onChange={(e: any) => setNewInv({ ...newInv, tax: e.target.value })} placeholder="0" type="number" /></Field>
-              </div>
-              <div style={{ padding: "14px 18px", background: over ? T.dangerSoft : T.successSoft, borderRadius: 10, border: `1px solid ${over ? T.danger + "33" : T.success + "33"}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: over ? T.danger : T.success }}>Calculated total</div>
-                  {over && <div style={{ fontSize: 10, color: T.danger, marginTop: 2 }}>Exceeds NTE of {fmt(woData.nte)}</div>}
-                </div>
-                <div className="display" style={{ fontSize: 24, color: over ? T.danger : T.success }}>{fmt(Math.round(liveTotal))}</div>
-              </div>
-              <label style={{ padding: "12px 16px", background: newInv.hasPdf ? T.successSoft : T.accentSoft, borderRadius: 10, border: `1px solid ${newInv.hasPdf ? T.success + "33" : T.accentRing}`, cursor: "pointer", display: "block" }}>
-                <div style={{ border: `2px dashed ${newInv.hasPdf ? T.success : T.accent}`, borderRadius: 8, padding: 20, textAlign: "center" }}>
-                  <div style={{ fontSize: 13, color: newInv.hasPdf ? T.success : T.accent, fontWeight: 600 }}>{newInv.hasPdf ? "✓ PDF attached" : "Click to upload PDF invoice"}</div>
-                  <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>PDF attachment required</div>
-                  <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={(e: any) => setNewInv({ ...newInv, hasPdf: !!(e.target.files && e.target.files.length) })} />
-                </div>
-              </label>
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+
+            {/* Invoice meta */}
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+              <Field label="Invoice #"><Input value={newInv.num} onChange={(e: any) => setNewInv({ ...newInv, num: e.target.value })} placeholder="e.g. 6557" /></Field>
+              <Field label="Invoice date"><Input type="date" value={newInv.invoiceDate} onChange={(e: any) => setNewInv({ ...newInv, invoiceDate: e.target.value })} /></Field>
+              <Field label="Service date"><Input type="date" value={newInv.serviceDate} onChange={(e: any) => setNewInv({ ...newInv, serviceDate: e.target.value })} /></Field>
+              <Field label="Terms"><Sel value={newInv.terms} onChange={(e: any) => setNewInv({ ...newInv, terms: e.target.value })}>
+                <option>Net 30</option><option>Net 15</option><option>Due on receipt</option>
+              </Sel></Field>
+            </div>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
+              <Field label="Work Order #"><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "'JetBrains Mono', monospace" }}>{woData.id}</div></Field>
+              <Field label="Store #"><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>#{woData.store}</div></Field>
+              <Field label="CME #"><Sel value={newInv.cme} onChange={(e: any) => setNewInv({ ...newInv, cme: e.target.value })}>
+                <option value="">Select...</option>
+                <option>CME-001 HVAC</option>
+                <option>CME-002 Beverage</option>
+                <option>CME-003 Electrical</option>
+                <option>CME-004 Refrigeration</option>
+                <option>CME-005 Plumbing</option>
+                <option>CME-006 Hot food</option>
+                <option>CME-007 General</option>
+              </Sel></Field>
+            </div>
+
+            {/* Line items */}
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
+            <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
+                <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div><div></div>
+              </div>
+              {(newInv.lines || []).map((l: any, i: number) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", borderBottom: i < newInv.lines.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
+                  <div className="mono" style={{ fontSize: 12, color: T.subtle, paddingTop: 10 }}>{i + 1}</div>
+                  <select value={l.type} onChange={(e: any) => setLine(i, { type: e.target.value })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, outline: "none" }}>
+                    {LINE_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                  <textarea value={l.desc} onChange={(e: any) => setLine(i, { desc: e.target.value })} placeholder={l.type === "Labor" ? "What was done on site..." : l.type === "Parts/Hardware" ? "Part description" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
+                  <input type="number" step="0.1" value={l.qty} onChange={(e: any) => setLine(i, { qty: e.target.value })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }} />
+                  <input type="number" step="0.01" value={l.rate} onChange={(e: any) => setLine(i, { rate: e.target.value })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+                  <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(lineAmount(l) * 100) / 100)}</div>
+                  <button onClick={() => removeLine(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>×</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+              <button onClick={() => addLine("Labor")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Labor</button>
+              <button onClick={() => addLine("Travel")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Travel</button>
+              <button onClick={() => addLine("Parts/Hardware")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Parts</button>
+              <button onClick={() => addLine("Shipping")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Shipping</button>
+              <button onClick={() => addLine("Other")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Other</button>
+            </div>
+
+            {/* Totals */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 14, marginBottom: 18, alignItems: "start" }}>
+              <div />
+              <div style={{ background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, padding: "14px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13 }}>
+                  <span style={{ color: T.muted }}>Subtotal</span>
+                  <span className="mono" style={{ fontWeight: 600, color: T.ink }}>{fmt(Math.round(sub * 100) / 100)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13, gap: 10 }}>
+                  <span style={{ color: T.muted }}>Sales tax</span>
+                  <input type="number" step="0.01" value={newInv.tax} onChange={(e: any) => setNewInv({ ...newInv, tax: e.target.value })} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}>
+                  <span style={{ fontWeight: 700, color: T.ink }}>Total</span>
+                  <span className="display" style={{ fontSize: 22, color: over ? T.danger : T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span>
+                </div>
+                <div style={{ fontSize: 11, color: over ? T.danger : T.muted, marginTop: 8, textAlign: "right" }}>
+                  {over ? `Exceeds NTE by ${fmt(total - woData.nte)}` : `${fmt(woData.nte - total)} under NTE (${fmt(woData.nte)})`}
+                </div>
+              </div>
+            </div>
+
+            {/* PDF upload */}
+            <label style={{ padding: "12px 16px", background: newInv.hasPdf ? T.successSoft : T.accentSoft, borderRadius: 10, border: `1px solid ${newInv.hasPdf ? T.success + "33" : T.accentRing}`, cursor: "pointer", display: "block", marginBottom: 4 }}>
+              <div style={{ border: `2px dashed ${newInv.hasPdf ? T.success : T.accent}`, borderRadius: 8, padding: 18, textAlign: "center" }}>
+                <div style={{ fontSize: 13, color: newInv.hasPdf ? T.success : T.accent, fontWeight: 600 }}>{newInv.hasPdf ? "✓ PDF attached" : "Attach the PDF invoice (from QuickBooks)"}</div>
+                <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>Required before submit</div>
+                <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={(e: any) => setNewInv({ ...newInv, hasPdf: !!(e.target.files && e.target.files.length) })} />
+              </div>
+            </label>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
               <button onClick={() => { setModal(null); resetNewInv(); }} className="btn-soft">Cancel</button>
-              <button onClick={() => { if (doSubmitInvoice(woData)) setModal(null); }} className="btn-accent">Submit invoice</button>
+              <button onClick={() => { if (doSubmitInvoice(woData)) setModal(null); }} className="btn-accent">Submit to 7-Eleven</button>
             </div>
           </Modal>
         );
