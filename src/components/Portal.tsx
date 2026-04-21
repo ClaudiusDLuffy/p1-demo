@@ -1552,7 +1552,13 @@ export default function P1Portal() {
             const wo = workOrders.find(w => w.id === inv.wot);
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
-                <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
+                  <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
+                  <button onClick={async () => { const { downloadInvoicePDF } = await import("../lib/invoicePdf"); downloadInvoicePDF(inv as any); fire(`Invoice ${inv.num} downloaded`); }} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
+                    Download PDF
+                  </button>
+                </div>
                 <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
                   {/* Invoice header */}
                   <div style={{ padding: "28px 32px", borderBottom: `1px solid ${T.borderSoft}` }}>
