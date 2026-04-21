@@ -1,486 +1,1653 @@
 "use client";
 // @ts-nocheck
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 
+// ═══════════════════════════════════════════════════════════════
+//  THEME — Claude-inspired warm palette. Tokens are the source of truth.
+// ═══════════════════════════════════════════════════════════════
+const T = {
+  bg: "#FAF7F2",
+  bgWarm: "#F5F0E8",
+  surface: "#FFFFFF",
+  surfaceSoft: "#FCFAF6",
+  border: "#E8E1D5",
+  borderSoft: "#F0EAE0",
+  ink: "#1F1E1C",
+  inkSoft: "#3D3A36",
+  muted: "#6B6760",
+  subtle: "#9A958D",
+  accent: "#C15F3C",
+  accentSoft: "#F5E6DC",
+  accentRing: "#E8CCB8",
+  sidebar: "#1F1E1C",
+  sidebarText: "#9A958D",
+  sidebarActive: "#FAF7F2",
+  success: "#4A7C59",
+  successSoft: "#E8F0EA",
+  warn: "#A67C00",
+  warnSoft: "#FBF4DC",
+  danger: "#C0392B",
+  dangerSoft: "#FBEDEA",
+  violet: "#5B4B8A",
+  violetSoft: "#EDE9F5",
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  REAL P1 TEAM + CONTRACTORS (from Jeremy's email, Apr 20 2026)
+// ═══════════════════════════════════════════════════════════════
 const USERS = [
-  { id:"clay",name:"Clay Lawrence",role:"manager",initials:"CL",email:"clay@p1services.com",color:"#2563eb" },
-  { id:"derek",name:"Derek Morrison",role:"contractor",initials:"DM",email:"derek@dmrepairs.com",company:"DM Repair Services",territory:"Orlando / Kissimmee",color:"#0ea5e9" },
-  { id:"ray",name:"Ray Torres",role:"contractor",initials:"RT",email:"ray@raytechservices.com",company:"Ray's Technical Services",territory:"Melbourne / Daytona",color:"#8b5cf6" },
-  { id:"andy",name:"Andy Kim",role:"contractor",initials:"AK",email:"andy@akmaintenance.com",company:"AK Maintenance Co.",territory:"Tampa / Lakeland",color:"#0891b2" },
+  // Owners
+  { id: "clay", name: "Clay Etchison", role: "manager", initials: "CE", email: "claytonetchison@gmail.com", title: "Owner", color: "#1F1E1C" },
+  { id: "jeremy", name: "Jeremy Barry", role: "manager", initials: "JB", email: "jeremy@p1pros.com", title: "Owner", color: "#C15F3C" },
+  { id: "eddie", name: "Eddie Pozzuoli", role: "manager", initials: "EP", email: "eddie@phospitality.com", title: "Owner", color: "#5B4B8A" },
+  // Dispatch + back office
+  { id: "landry", name: "Landry Dillinger", role: "dispatcher", initials: "LD", email: "Landryd@phospitality.com", title: "Dispatcher", color: "#A67C00" },
+  { id: "lynzy", name: "Lynzy Barry", role: "back_office", initials: "LB", email: "Lynzy@p1pros.com", title: "Back office", color: "#4A7C59" },
+  { id: "mandy", name: "Mandy Lee", role: "back_office", initials: "ML", email: "mandy@p1pros.com", title: "Back office", color: "#7C3AED" },
+  { id: "lynette", name: "Lynette", role: "back_office", initials: "LY", email: "lynette@p1pros.com", title: "Back office", color: "#0891B2" },
+  { id: "kim", name: "Kim", role: "back_office", initials: "KM", email: "kim@p1pros.com", title: "Back office", color: "#EC4899" },
+  { id: "emily", name: "Emily Barnhart", role: "back_office", initials: "EB", email: "emilyb@phospitality.com", title: "Back office", color: "#10B981" },
+  // Contractor crews (lead tech = login identity)
+  { id: "starnes", name: "Derek Starnes", role: "contractor", initials: "DS", email: "Scrcdallastexas@gmail.com", company: "Starnes Commercial Refrigeration", territory: "Dallas, TX", trades: ["hvac", "refrigeration", "beverage", "ice"], color: "#0891B2" },
+  { id: "archer", name: "Chris Archer", role: "contractor", initials: "CA", email: "Service@archerref.com", company: "Archer Refrigeration", territory: "Houston, TX", trades: ["hvac", "refrigeration", "ice"], color: "#8B5CF6" },
+  { id: "proops", name: "Wes Cripe", role: "contractor", initials: "WC", email: "Pro.ops.inc@gmail.com", phone: "757-256-8511", company: "Pro Ops", territory: "Virginia Beach, VA", trades: ["hvac", "refrigeration", "ice"], color: "#F59E0B" },
+  { id: "sameday", name: "Demytro Bichukov", role: "contractor", initials: "DB", email: "vpdmitry@gmail.com", phone: "323-557-8452", company: "Same Day Repair", territory: "Tampa, FL", trades: ["beverage", "ice"], color: "#10B981" },
+  { id: "shecan", name: "Dave Lecerda", role: "contractor", initials: "DL", email: "shecanfacilitymaintenance@gmail.com", company: "Shecan Facility Maintenance", territory: "Dallas, TX", trades: ["hotfood"], color: "#EC4899" },
+  { id: "coleman", name: "Eric Coleman", role: "contractor", initials: "EC", email: "ctanksolutions@gmail.com", phone: "813-687-4990", company: "Coleman Tank Solutions", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
+  { id: "talne", name: "Mykola Buriak", role: "contractor", initials: "MB", email: "buriakmw@gmail.com", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
+  { id: "anytime", name: "Pete", role: "contractor", initials: "AP", email: "plumbingdayornight@gmail.com", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
 ];
 
+// ═══════════════════════════════════════════════════════════════
+//  7-ELEVEN PRIORITY ENUM (real format: P1 Critical, P2 Emergency, etc)
+// ═══════════════════════════════════════════════════════════════
+const PRIORITY = {
+  p1: { label: "P1 Critical", short: "P1", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC", icon: "⚡", slaHours: 8 },
+  p2: { label: "P2 Emergency", short: "P2", color: T.accent, bg: T.accentSoft, ring: T.accentRing, icon: "◆", slaHours: 24 },
+  p3: { label: "P3 Standard", short: "P3", color: T.warn, bg: T.warnSoft, ring: "#EED9A6", icon: "●", slaHours: 72 },
+  p4: { label: "P4 Minor", short: "P4", color: T.muted, bg: T.borderSoft, ring: T.border, icon: "○", slaHours: 168 },
+};
+
+// Internal pipeline state (our kanban)
+const STATUS = {
+  unassigned: { label: "Unassigned", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC" },
+  assigned: { label: "Assigned", color: T.accent, bg: T.accentSoft, ring: T.accentRing },
+  wip: { label: "In Progress", color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" },
+  parts: { label: "Awaiting Parts", color: T.warn, bg: T.warnSoft, ring: "#EED9A6" },
+  capital: { label: "Capital Replacement", color: "#5B4B8A", bg: "#EDE9F5", ring: "#D4C9E8" },
+  completed: { label: "Completed", color: T.success, bg: T.successSoft, ring: "#CFDED3" },
+  pending_invoice: { label: "Pending Invoice", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
+  pending_approval: { label: "Pending Approval", color: T.muted, bg: T.borderSoft, ring: T.border },
+};
+
+// 7-Eleven's Functional Status field (what Gustavo's SLA breach hinged on)
+const FUNCTIONAL_STATUS = {
+  Dispatched: { color: T.danger, bg: T.dangerSoft },
+  "Work in Progress": { color: T.violet, bg: T.violetSoft },
+  "Pending Capital Approval": { color: "#5B4B8A", bg: "#EDE9F5" },
+  "Awaiting Parts": { color: T.warn, bg: T.warnSoft },
+  Completed: { color: T.success, bg: T.successSoft },
+  Cancelled: { color: T.muted, bg: T.borderSoft },
+};
+
+const INV_STATE = {
+  submitted: { label: "Submitted", color: T.accent, bg: T.accentSoft },
+  approved: { label: "Approved", color: T.success, bg: T.successSoft },
+  rejected: { label: "Rejected", color: T.danger, bg: T.dangerSoft },
+  revised: { label: "Revised", color: T.warn, bg: T.warnSoft },
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  TRADE / TERRITORY ROUTING
+// ═══════════════════════════════════════════════════════════════
+// Map 7-Eleven's Line of Service / Category → our internal trade tags
+const SERVICE_TO_TRADES = (service: string, category: string) => {
+  const s = `${service} ${category}`.toLowerCase();
+  const tags: string[] = [];
+  if (/slurp/.test(s)) tags.push("slurpee");
+  if (/frozen beverage|slurp/.test(s)) tags.push("slurpee");
+  if (/fountain|cold beverage|beverage/.test(s)) tags.push("beverage");
+  if (/ice merchandiser|ice /.test(s)) tags.push("ice");
+  if (/refriger|freezer|cooler/.test(s)) tags.push("refrigeration");
+  if (/hvac|heating|air cond/.test(s)) tags.push("hvac");
+  if (/plumb|drain/.test(s)) tags.push("plumbing");
+  if (/grease trap|septic/.test(s)) tags.push("grease");
+  if (/hot food|oven|grill/.test(s)) tags.push("hotfood");
+  return tags.length ? tags : ["refrigeration"]; // fallback
+};
+
+// City → (state normalized) for territory matching
+const normalizeCity = (loc: string) => (loc || "").toLowerCase().split(",")[0].trim();
+// Pick best contractor for a ticket: must match at least one trade AND territory
+const contractorFor = (city: string, tradeTags: string[], contractors: any[]) => {
+  const c = normalizeCity(city);
+  const scored = contractors
+    .filter(u => u.role === "contractor")
+    .map(u => {
+      const terrMatch = u.territory?.toLowerCase().split(",")[0].trim() === c || u.territory?.toLowerCase().includes(c);
+      const tradeMatch = (u.trades || []).some((t: string) => tradeTags.includes(t));
+      return { id: u.id, score: (terrMatch ? 10 : 0) + (tradeMatch ? 5 : 0) + ((u.trades || []).filter((t: string) => tradeTags.includes(t)).length), terrMatch, tradeMatch };
+    })
+    .filter(s => s.terrMatch && s.tradeMatch)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.id || null;
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  DATE + SLA HELPERS
+// ═══════════════════════════════════════════════════════════════
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const timeNow = () => { const d = new Date(), h = d.getHours(), m = d.getMinutes(), ap = h >= 12 ? "PM" : "AM"; return `${h > 12 ? h - 12 : h || 12}:${m < 10 ? "0" + m : m} ${ap}`; };
+const dateShort = (d = new Date()) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+const dateNow = () => `${dateShort()}, ${timeNow()}`;
+const dateLong = (d = new Date()) => `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+const hoursBetween = (aIso: string, bIso: string) => (new Date(bIso).getTime() - new Date(aIso).getTime()) / 3600000;
+const slaRemaining = (wo: any) => {
+  if (!wo.dispatchedAt || !PRIORITY[wo.priority]) return null;
+  const slaH = PRIORITY[wo.priority].slaHours;
+  const elapsed = hoursBetween(wo.dispatchedAt, new Date().toISOString());
+  return { remainingHours: slaH - elapsed, elapsedHours: elapsed, slaHours: slaH, percent: Math.min(100, (elapsed / slaH) * 100) };
+};
+const slaLabel = (wo: any) => {
+  const s = slaRemaining(wo);
+  if (!s) return null;
+  if (s.remainingHours <= 0) return { text: `${Math.floor(-s.remainingHours)}h past SLA`, color: T.danger, bg: T.dangerSoft, severity: "breach" };
+  if (s.remainingHours < 1) return { text: `${Math.round(s.remainingHours * 60)}m to breach`, color: T.danger, bg: T.dangerSoft, severity: "critical" };
+  if (s.percent >= 75) return { text: `${Math.floor(s.remainingHours)}h left`, color: T.accent, bg: T.accentSoft, severity: "warn" };
+  if (s.percent >= 50) return { text: `${Math.floor(s.remainingHours)}h left`, color: T.warn, bg: T.warnSoft, severity: "ok" };
+  return { text: `${Math.floor(s.remainingHours)}h left`, color: T.success, bg: T.successSoft, severity: "safe" };
+};
+
+const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "capital"].includes(state);
+const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
+const closingStatuses = ["completed", "pending_invoice", "pending_approval"];
+
+// ═══════════════════════════════════════════════════════════════
+//  SEED WORK ORDERS — real 7-Eleven field shapes
+// ═══════════════════════════════════════════════════════════════
+// Helper: hours ago → ISO
+const hoursAgo = (n: number) => new Date(Date.now() - n * 3600 * 1000).toISOString();
+
 const INITIAL_WOS = [
-  { id:"WOT0012847",store:"36190",city:"Orlando, FL",addr:"4801 S Orange Ave",issue:"HVAC unit not cooling — store temp above 80°F, customers complaining",priority:"emergency",status:"unassigned",nte:2500,age:"2h",category:"HVAC",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",activities:[{author:"System",time:"Apr 10, 8:00 AM",text:"Service call created from FSM. NTE: $2,500.",type:"system"}] },
-  { id:"WOT0012852",store:"32236",city:"Kissimmee, FL",addr:"1920 W Vine St",issue:"Walk-in cooler compressor failure — product temp rising",priority:"emergency",status:"unassigned",nte:3000,age:"45m",category:"Refrigeration",afm:"Robert Chen",afmPhone:"(321) 555-0198",activities:[{author:"System",time:"Apr 10, 9:15 AM",text:"Service call created from FSM. NTE: $3,000.",type:"system"}] },
-  { id:"WOT0012860",store:"41005",city:"Tampa, FL",addr:"3402 W Hillsborough Ave",issue:"Front door automatic closer broken — security risk",priority:"routine",status:"unassigned",nte:500,age:"1d",category:"General",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",activities:[{author:"System",time:"Apr 9, 10:00 AM",text:"Service call created. NTE: $500.",type:"system"}] },
-  { id:"WOT0012801",store:"36190",city:"Orlando, FL",addr:"4801 S Orange Ave",issue:"Beverage dispenser leaking at base — floor hazard",priority:"critical",status:"assigned",contractor:"derek",nte:1200,age:"1d",category:"Equipment",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",eta:"Apr 10, 2:00 PM",activities:[{author:"System",time:"Apr 9, 2:00 PM",text:"Assigned to Derek Morrison. ETA: Apr 10, 2:00 PM.",type:"system"}] },
-  { id:"WOT0012815",store:"32236",city:"Kissimmee, FL",addr:"1920 W Vine St",issue:"Electrical panel cover missing — code violation",priority:"critical",status:"assigned",contractor:"ray",nte:800,age:"3d",category:"Electrical",afm:"Robert Chen",afmPhone:"(321) 555-0198",eta:"Apr 10, 10:00 AM",activities:[{author:"System",time:"Apr 7, 9:00 AM",text:"Assigned to Ray Torres. ETA: Apr 10, 10:00 AM.",type:"system"}] },
-  { id:"WOT0012822",store:"41005",city:"Tampa, FL",addr:"3402 W Hillsborough Ave",issue:"Parking lot pothole near fuel pumps — liability concern",priority:"critical",status:"assigned",contractor:"andy",nte:1500,age:"2d",category:"General",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",eta:"Apr 11, 9:00 AM",activities:[{author:"System",time:"Apr 8, 11:00 AM",text:"Assigned to Andy Kim. ETA: Apr 11, 9:00 AM.",type:"system"}] },
-  { id:"WOT0012779",store:"41022",city:"Lakeland, FL",addr:"2210 S Florida Ave",issue:"Slurpee machine motor replacement — unit offline 3 days",priority:"critical",status:"wip",contractor:"andy",nte:1800,age:"2d",category:"Equipment",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",startTime:"Apr 7, 9:15 AM",assetModel:"Taylor 428",assetSerial:"TY-2019-44821",activities:[{author:"Andy Kim",time:"Apr 7, 9:15 AM",text:"On site. Motor is completely seized, pulling it now.",type:"note"},{author:"System",time:"Apr 7, 9:15 AM",text:"Work started. Checked in at 9:15 AM.",type:"system"}] },
-  { id:"WOT0012788",store:"36501",city:"Daytona Beach, FL",addr:"801 N Atlantic Ave",issue:"Grease trap overflow in kitchen — health department risk",priority:"emergency",status:"wip",contractor:"derek",nte:2200,age:"1d",category:"Plumbing",afm:"Robert Chen",afmPhone:"(321) 555-0198",startTime:"Apr 7, 2:00 PM",assetModel:"N/A",assetSerial:"N/A",activities:[{author:"Derek Morrison",time:"Apr 7, 2:15 PM",text:"grease trap overflowing bad. cleaned it out snaked the line. running good now",type:"note"},{author:"System",time:"Apr 7, 2:00 PM",text:"Work started. Checked in at 2:00 PM.",type:"system"}] },
-  { id:"WOT0012756",store:"32100",city:"Melbourne, FL",addr:"1455 N Harbor City Blvd",issue:"Walk-in freezer evaporator coil — needs full replacement",priority:"critical",status:"capital",contractor:"ray",nte:4500,age:"5d",category:"Refrigeration",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",partNeeded:"Heatcraft BHL136BE evaporator coil",partEta:"Apr 22",assetModel:"Heatcraft PRO26",assetSerial:"HC-2021-99102",capitalStatus:"Equipment ordered",activities:[{author:"System",time:"Apr 5, 3:00 PM",text:"Flagged as capital replacement. Equipment ordered.",type:"system"}] },
-  { id:"WOT0012771",store:"36190",city:"Orlando, FL",addr:"4801 S Orange Ave",issue:"POS terminal #3 power supply failure — register offline",priority:"routine",status:"parts",contractor:"andy",nte:350,age:"4d",category:"Electrical",afm:"Robert Chen",afmPhone:"(321) 555-0198",partNeeded:"Epson PS-180 power supply",partEta:"Apr 10",assetModel:"Epson TM-T88V",assetSerial:"EP-2020-31455",activities:[{author:"Andy Kim",time:"Apr 6, 11:00 AM",text:"PSU is dead. Ordered replacement, should be here by the 10th.",type:"note"},{author:"System",time:"Apr 6, 11:00 AM",text:"Work paused — awaiting parts. Part: Epson PS-180.",type:"system"}] },
-  { id:"WOT0012745",store:"41005",city:"Tampa, FL",addr:"3402 W Hillsborough Ave",issue:"Parking lot light pole repair — 3 fixtures out",priority:"routine",status:"completed",contractor:"derek",nte:900,age:"6d",category:"Electrical",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",assetModel:"Lithonia KAD",assetSerial:"LI-2018-76321",activities:[{author:"Derek Morrison",time:"Apr 4, 4:30 PM",text:"All 3 fixtures replaced and tested. Parking lot fully lit.",type:"note"},{author:"System",time:"Apr 4, 4:30 PM",text:"Job completed. Asset: Lithonia KAD / LI-2018-76321.",type:"system"}] },
-  { id:"WOT0012730",store:"32236",city:"Kissimmee, FL",addr:"1920 W Vine St",issue:"Emergency plumbing — burst pipe in utility room",priority:"emergency",status:"pending_invoice",contractor:"ray",nte:3200,age:"8d",category:"Plumbing",afm:"Robert Chen",afmPhone:"(321) 555-0198",assetModel:"N/A",assetSerial:"N/A",activities:[{author:"System",time:"Apr 2, 10:00 AM",text:"7-Eleven portal updated. Moved to pending invoice.",type:"system"}] },
-  { id:"WOT0012718",store:"36501",city:"Daytona Beach, FL",addr:"801 N Atlantic Ave",issue:"Roof leak above walk-in cooler — water dripping on product",priority:"critical",status:"pending_invoice",contractor:"derek",nte:5000,age:"10d",category:"General",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",assetModel:"N/A",assetSerial:"N/A",activities:[{author:"System",time:"Mar 31, 2:00 PM",text:"Moved to pending invoice.",type:"system"}] },
-  { id:"WOT0012702",store:"32100",city:"Melbourne, FL",addr:"1455 N Harbor City Blvd",issue:"Complete HVAC system overhaul — both rooftop units failing",priority:"critical",status:"pending_approval",contractor:"andy",nte:8500,age:"12d",category:"HVAC",afm:"Robert Chen",afmPhone:"(321) 555-0198",invoiceTotal:7840,assetModel:"Carrier RTU",assetSerial:"CR-2015-88210",activities:[{author:"System",time:"Mar 29, 5:00 PM",text:"Invoice INV05000142 submitted. Total: $7,840.",type:"system"}] },
-  { id:"WOT0012740",store:"41022",city:"Lakeland, FL",addr:"2210 S Florida Ave",issue:"RTU #2 compressor replacement — unit completely failed",priority:"critical",status:"capital",contractor:"andy",nte:12000,age:"3w",category:"HVAC",afm:"Sandra Mitchell",afmPhone:"(407) 555-0134",assetModel:"Carrier 48HCEE06",assetSerial:"CR-2017-55891",capitalStatus:"Pending approval",partNeeded:"Carrier 48HCEE06 compressor assembly",activities:[{author:"System",time:"Mar 20, 9:00 AM",text:"Capital replacement submitted for approval.",type:"system"}] },
-  { id:"WOT0012735",store:"32236",city:"Kissimmee, FL",addr:"1920 W Vine St",issue:"Walk-in cooler condenser replacement — beyond repair",priority:"critical",status:"capital",contractor:"derek",nte:8500,age:"6w",category:"Refrigeration",afm:"Robert Chen",afmPhone:"(321) 555-0198",assetModel:"Bohn BHL4B6",assetSerial:"BN-2016-41023",capitalStatus:"Equipment received",partNeeded:"Bohn BHL4B6 condenser unit",partEta:"Apr 11",activities:[{author:"System",time:"Feb 28, 10:00 AM",text:"Equipment received. Installation pending.",type:"system"}] },
+  // ACTIVE — Dallas
+  {
+    id: "FWKD11421039", incidentId: "INC24890517",
+    store: "33321", city: "Dallas, TX", addr: "5712 Skillman St, Dallas, TX 75206",
+    lineOfService: "Refrigeration", businessService: "Refrigeration equipment",
+    category: "Ice merchandiser/freezer", subCategory: "Machine not working",
+    summary: "Ice merchandiser not cooling — product melting",
+    description: "Ice merchandiser near front counter stopped cooling overnight. Ice is melting, product at risk.",
+    priority: "p1", status: "assigned", contractor: "starnes",
+    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
+    functionalStatus: "Dispatched",
+    nte: 2500, age: "8h",
+    dispatchedAt: hoursAgo(8.2), // just breached SLA
+    activities: [{ author: "System", time: dateNow(), text: "Dispatched from 7-Eleven FSM. Functional status not updated since dispatch — SLA breach imminent.", type: "system" }],
+  },
+  {
+    id: "FWKD11290954", incidentId: "INC24395415",
+    store: "34197", city: "Plano, TX", addr: "1301 Preston Rd, Plano, TX 75093",
+    lineOfService: "Cold Beverage - Equipment", businessService: "Fountain soda",
+    category: "Fountain Machine", subCategory: "One or few flavors not dispensing",
+    summary: "Fountain machine down — 5 flavors + ice not working",
+    description: "Fountain machine five flavors and ice not working",
+    priority: "p1", status: "assigned", contractor: "starnes",
+    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
+    functionalStatus: "Dispatched",
+    nte: 1800, age: "2h",
+    dispatchedAt: hoursAgo(2),
+    activities: [{ author: "System", time: dateNow(), text: "Dispatched. ETA pending contractor check-in.", type: "system" }],
+  },
+  // ACTIVE — Virginia
+  {
+    id: "FWKD11234445", incidentId: "INC24158515",
+    store: "32333", city: "Yorktown, VA", addr: "5101 George Washington Memorial Hwy, Yorktown, VA 23692",
+    lineOfService: "Frozen Beverage - Equipment", businessService: "Slurpee and Frozen Lemonade",
+    category: "Slurpee Machine", subCategory: "One or few flavors not dispensing",
+    summary: "Slurpee machine compressor failure — evaluate for repair or replacement",
+    description: "Upon arrival, found entire slurpee machine not running. Performed refrigeration diagnostic to show error 0510. Compressor not operational. Unit possibly needs a refrigerant charge and/or a new compressor.",
+    priority: "p2", status: "capital", contractor: "proops",
+    afm: "Jason Pulley", afmEmail: "Jason.Pulley@7-11.com",
+    functionalStatus: "Pending Capital Approval",
+    capitalStatus: "Pending approval",
+    nte: 6500, age: "3d",
+    dispatchedAt: hoursAgo(72),
+    partNeeded: "Taylor 340 compressor assembly",
+    assetModel: "Taylor 340", assetSerial: "TY-2022-81402",
+    activities: [
+      { author: "Wes Cripe", time: "Apr 17, 10:45 AM", text: "Diagnostic complete. Error 0510 — compressor not operational. Capital replacement recommended.", type: "note" },
+      { author: "System", time: "Apr 17, 10:45 AM", text: "Functional status updated to Pending Capital Approval.", type: "system" },
+    ],
+  },
+  // ACTIVE — Houston
+  {
+    id: "FWKD11318902", incidentId: "INC24410088",
+    store: "35551", city: "Houston, TX", addr: "7810 Westheimer Rd, Houston, TX 77063",
+    lineOfService: "Refrigeration", businessService: "Walk-in cooler",
+    category: "Walk-in cooler/freezer", subCategory: "Temperature out of range",
+    summary: "Walk-in cooler running warm — product at risk",
+    description: "Walk-in cooler reading 48°F. Compressor cycling but not holding temp. Product at risk.",
+    priority: "p1", status: "wip", contractor: "archer",
+    afm: "Marcus Holloway", afmEmail: "Marcus.Holloway@7-11.com",
+    functionalStatus: "Work in Progress",
+    nte: 2200, age: "5h",
+    dispatchedAt: hoursAgo(5),
+    startTime: `${dateShort()}, 10:30 AM`,
+    assetModel: "Heatcraft BHL036M", assetSerial: "HC-2020-44231",
+    activities: [
+      { author: "Chris Archer", time: dateNow(), text: "On site. Suction line iced up. Cleaning coils and checking refrigerant charge.", type: "note" },
+      { author: "System", time: `${dateShort()}, 10:30 AM`, text: "Work started. Functional status: Work in Progress.", type: "system" },
+    ],
+  },
+  // ACTIVE — Tampa (Slurpee → Mykola, NOT Demytro — validates trade match)
+  {
+    id: "FWKD11401122", incidentId: "INC24660221",
+    store: "41005", city: "Tampa, FL", addr: "3402 W Hillsborough Ave, Tampa, FL 33614",
+    lineOfService: "Frozen Beverage - Equipment", businessService: "Slurpee and Frozen Lemonade",
+    category: "Slurpee Machine", subCategory: "Machine not running",
+    summary: "Slurpee machine #2 not cooling",
+    description: "Slurpee machine #2 cylinder not cooling, mix is soupy.",
+    priority: "p2", status: "assigned", contractor: "talne",
+    afm: "Sandra Mitchell", afmEmail: "Sandra.Mitchell@7-11.com",
+    functionalStatus: "Dispatched",
+    nte: 1400, age: "14h",
+    dispatchedAt: hoursAgo(14),
+    activities: [{ author: "System", time: dateNow(), text: "Dispatched to Mykola Buriak (Slurpee specialist, Tampa).", type: "system" }],
+  },
+  // ACTIVE — Tampa plumbing
+  {
+    id: "FWKD11412556", incidentId: "INC24702004",
+    store: "42210", city: "Tampa, FL", addr: "8801 N Dale Mabry Hwy, Tampa, FL 33614",
+    lineOfService: "Plumbing", businessService: "Restroom",
+    category: "Toilet", subCategory: "Leak / overflow",
+    summary: "Customer restroom toilet overflowing",
+    description: "Customer restroom toilet overflowing. Water on floor. Restroom closed.",
+    priority: "p1", status: "wip", contractor: "anytime",
+    afm: "Sandra Mitchell", afmEmail: "Sandra.Mitchell@7-11.com",
+    functionalStatus: "Work in Progress",
+    nte: 650, age: "3h",
+    dispatchedAt: hoursAgo(3),
+    startTime: `${dateShort()}, 1:15 PM`,
+    activities: [
+      { author: "Pete", time: dateNow(), text: "On site. Snaking line. Blockage ~15ft in.", type: "note" },
+      { author: "System", time: `${dateShort()}, 1:15 PM`, text: "Work started.", type: "system" },
+    ],
+  },
+  // ACTIVE — Unassigned Dallas hotfood (tests trade routing)
+  {
+    id: "FWKD11422018", incidentId: "INC24891002",
+    store: "33089", city: "Dallas, TX", addr: "2301 N Central Expy, Dallas, TX 75204",
+    lineOfService: "Food Service", businessService: "Hot food",
+    category: "Roller grill", subCategory: "Heating element failure",
+    summary: "Roller grill not heating — taquitos cold",
+    description: "Roller grill #1 heating element out. Product at risk during breakfast rush.",
+    priority: "p2", status: "unassigned",
+    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
+    functionalStatus: "Dispatched",
+    nte: 950, age: "1h",
+    dispatchedAt: hoursAgo(1),
+    activities: [{ author: "System", time: dateNow(), text: "New dispatch from FSM. Needs hot-food qualified tech.", type: "system" }],
+  },
+  // CLOSING — completed Houston
+  {
+    id: "FWKD11385501", incidentId: "INC24550890",
+    store: "35551", city: "Houston, TX", addr: "7810 Westheimer Rd, Houston, TX 77063",
+    lineOfService: "Refrigeration", businessService: "Ice merchandiser",
+    category: "Ice merchandiser", subCategory: "Not cooling",
+    summary: "Ice merchandiser rebuilt — replaced evap fan motor",
+    description: "Ice merchandiser evap fan motor replaced. Tested — cooling properly.",
+    priority: "p2", status: "completed", contractor: "archer",
+    afm: "Marcus Holloway", afmEmail: "Marcus.Holloway@7-11.com",
+    functionalStatus: "Completed",
+    nte: 850, age: "1d",
+    dispatchedAt: hoursAgo(30),
+    assetModel: "Leer FF64AS", assetSerial: "LR-2019-22014",
+    activities: [
+      { author: "Chris Archer", time: `${dateShort()}, 11:00 AM`, text: "Replaced evap fan motor. Tested, cooling to spec. Job complete.", type: "note" },
+      { author: "System", time: `${dateShort()}, 11:00 AM`, text: "Completed. Asset: Leer FF64AS / LR-2019-22014.", type: "system" },
+    ],
+  },
+  // CLOSING — pending invoice Dallas
+  {
+    id: "FWKD11372001", incidentId: "INC24490102",
+    store: "33321", city: "Dallas, TX", addr: "5712 Skillman St, Dallas, TX 75206",
+    lineOfService: "Refrigeration", businessService: "Walk-in cooler",
+    category: "Walk-in cooler", subCategory: "Door gasket",
+    summary: "Walk-in cooler door gasket replaced",
+    description: "Replaced worn door gasket. Door sealing properly.",
+    priority: "p3", status: "pending_invoice", contractor: "starnes",
+    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
+    functionalStatus: "Completed",
+    nte: 450, age: "4d",
+    dispatchedAt: hoursAgo(96),
+    assetModel: "Heatcraft PRO26", assetSerial: "HC-2018-33910",
+    activities: [
+      { author: "System", time: "Apr 17, 9:00 AM", text: "Status synced to 7-Eleven portal. Moved to Pending Invoice.", type: "system" },
+    ],
+  },
+  // CLOSING — pending approval
+  {
+    id: "FWKD11340089", incidentId: "INC24320811",
+    store: "35551", city: "Houston, TX", addr: "7810 Westheimer Rd, Houston, TX 77063",
+    lineOfService: "HVAC", businessService: "RTU",
+    category: "RTU compressor", subCategory: "Failure — replacement",
+    summary: "RTU compressor replacement",
+    description: "Rooftop unit #2 compressor replaced. Recharged system. Tested.",
+    priority: "p2", status: "pending_approval", contractor: "archer",
+    afm: "Marcus Holloway", afmEmail: "Marcus.Holloway@7-11.com",
+    functionalStatus: "Completed",
+    invoiceTotal: 5240,
+    nte: 6000, age: "1w",
+    dispatchedAt: hoursAgo(168),
+    assetModel: "Carrier 48HCEE06", assetSerial: "CR-2017-55891",
+    activities: [
+      { author: "System", time: "Apr 16, 3:00 PM", text: "Invoice INV2604-0189 submitted. Total: $5,240.", type: "system" },
+    ],
+  },
 ];
 
 const INITIAL_INVOICES = [
-  {num:"INV05000142",wot:"WOT0012702",state:"submitted",date:"Apr 6",store:"32100",total:7840,contractor:"andy"},
-  {num:"INV05000138",wot:"WOT0012698",state:"approved",date:"Apr 4",store:"36190",total:2150,contractor:"derek"},
-  {num:"INV05000135",wot:"WOT0012685",state:"rejected",date:"Apr 3",store:"41022",total:4600,contractor:"ray",reason:"Lack of invoice detail"},
-  {num:"INV05000131",wot:"WOT0012670",state:"approved",date:"Apr 1",store:"32236",total:1280,contractor:"derek"},
-  {num:"INV05000128",wot:"WOT0012660",state:"revised",date:"Mar 30",store:"36501",total:3100,contractor:"ray"},
-  {num:"INV05000125",wot:"WOT0012655",state:"approved",date:"Mar 28",store:"41005",total:890,contractor:"andy"},
+  { num: "INV2604-0189", wot: "FWKD11340089", state: "submitted", date: "Apr 16", store: "35551", total: 5240, contractor: "archer", cme: "CME-001 HVAC" },
+  { num: "INV2604-0166", wot: "FWKD11305511", state: "approved", date: "Apr 14", store: "33321", total: 1280, contractor: "starnes", cme: "CME-004 Refrigeration" },
+  { num: "INV2604-0155", wot: "FWKD11291882", state: "rejected", date: "Apr 12", store: "41005", total: 2100, contractor: "sameday", cme: "CME-002 Beverage", reason: "Missing detail on labor breakdown" },
+  { num: "INV2604-0141", wot: "FWKD11287040", state: "approved", date: "Apr 10", store: "42210", total: 580, contractor: "anytime", cme: "CME-005 Plumbing" },
 ];
 
-// Territory → contractor id map (for auto-assign). Demo data — replace with real rules once Jeremy sends the contractor roster.
-const TERRITORY_RULES:{match:(city:string)=>boolean,contractorId:string}[]=[
-  {contractorId:"derek",match:c=>/orlando|kissimmee/i.test(c)},
-  {contractorId:"ray",match:c=>/melbourne|daytona/i.test(c)},
-  {contractorId:"andy",match:c=>/tampa|lakeland/i.test(c)},
-];
-const contractorForCity=(city:string)=>{const r=TERRITORY_RULES.find(r=>r.match(city||""));return r?r.contractorId:null};
-
-// Approximate Florida city coordinates for map view. Normalized into the 800x560 SVG viewport.
-// Florida bounding box roughly: lng -87.6 to -80.0 (7.6° wide), lat 24.5 to 31.0 (6.5° tall)
-const geoToSvg=(lat:number,lng:number)=>{const x=((lng+87.6)/7.6)*800;const y=((31.0-lat)/6.5)*560;return{x,y}};
-const CITY_COORDS:Record<string,{lat:number,lng:number}>={
-  "orlando":{lat:28.5383,lng:-81.3792},
-  "kissimmee":{lat:28.2920,lng:-81.4076},
-  "tampa":{lat:27.9506,lng:-82.4572},
-  "lakeland":{lat:28.0395,lng:-81.9498},
-  "melbourne":{lat:28.0836,lng:-80.6081},
-  "daytona beach":{lat:29.2108,lng:-81.0228},
-  "daytona":{lat:29.2108,lng:-81.0228},
-  "jacksonville":{lat:30.3322,lng:-81.6557},
-  "miami":{lat:25.7617,lng:-80.1918},
-  "fort lauderdale":{lat:26.1224,lng:-80.1373},
-  "tallahassee":{lat:30.4383,lng:-84.2807},
-  "gainesville":{lat:29.6516,lng:-82.3248},
-  "pensacola":{lat:30.4213,lng:-87.2169},
-  "naples":{lat:26.1420,lng:-81.7948},
-  "fort myers":{lat:26.6406,lng:-81.8723},
+// ═══════════════════════════════════════════════════════════════
+//  US CITY COORDS — expanded beyond Florida
+// ═══════════════════════════════════════════════════════════════
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  dallas: { lat: 32.7767, lng: -96.797 },
+  plano: { lat: 33.0198, lng: -96.6989 },
+  houston: { lat: 29.7604, lng: -95.3698 },
+  yorktown: { lat: 37.2388, lng: -76.5097 },
+  "virginia beach": { lat: 36.8529, lng: -75.978 },
+  tampa: { lat: 27.9506, lng: -82.4572 },
+  orlando: { lat: 28.5383, lng: -81.3792 },
+  kissimmee: { lat: 28.292, lng: -81.4076 },
+  melbourne: { lat: 28.0836, lng: -80.6081 },
+  "daytona beach": { lat: 29.2108, lng: -81.0228 },
+  miami: { lat: 25.7617, lng: -80.1918 },
 };
-const coordsForCity=(city:string)=>{if(!city)return null;const key=city.toLowerCase().split(",")[0].trim();const c=CITY_COORDS[key];return c?geoToSvg(c.lat,c.lng):null};
-// Simplified Florida outline — smoothed path for display only, not geographically precise.
-const FLORIDA_PATH="M 112 72 L 180 74 L 240 76 L 312 78 L 384 80 L 456 82 L 524 84 L 568 90 L 598 108 L 612 136 L 618 168 L 612 198 L 598 220 L 584 228 L 560 222 L 534 212 L 506 214 L 484 232 L 472 262 L 468 296 L 476 332 L 492 370 L 516 408 L 540 442 L 560 476 L 574 506 L 576 530 L 562 536 L 542 524 L 520 498 L 496 464 L 472 428 L 446 392 L 418 358 L 388 324 L 354 292 L 318 262 L 278 234 L 236 208 L 196 188 L 156 172 L 124 160 L 100 148 L 86 130 L 84 108 L 92 86 Z";
+// US bbox (contiguous): lng -125 to -66, lat 24 to 50
+const geoToSvg = (lat: number, lng: number, w = 800, h = 460) => {
+  const x = ((lng + 125) / 59) * w;
+  const y = ((50 - lat) / 26) * h;
+  return { x, y };
+};
+const coordsForCity = (city: string) => {
+  const key = normalizeCity(city);
+  const c = CITY_COORDS[key];
+  return c ? geoToSvg(c.lat, c.lng) : null;
+};
 
-const STATUS={unassigned:{label:"Unassigned",color:"#3b82f6",bg:"#eff6ff",ring:"#bfdbfe"},assigned:{label:"Assigned",color:"#f59e0b",bg:"#fffbeb",ring:"#fde68a"},wip:{label:"In progress",color:"#8b5cf6",bg:"#f5f3ff",ring:"#c4b5fd"},parts:{label:"Parts on order",color:"#ef4444",bg:"#fef2f2",ring:"#fecaca"},capital:{label:"Capital replacement",color:"#7c3aed",bg:"#f5f3ff",ring:"#c4b5fd"},completed:{label:"Completed",color:"#22c55e",bg:"#f0fdf4",ring:"#bbf7d0"},pending_invoice:{label:"Pending invoice",color:"#ec4899",bg:"#fdf2f8",ring:"#fbcfe8"},pending_approval:{label:"Pending approval",color:"#64748b",bg:"#f1f5f9",ring:"#cbd5e1"}};
-const PRIORITY={emergency:{label:"Emergency",color:"#dc2626",bg:"#fef2f2",icon:"⚡",ring:"#fecaca"},critical:{label:"Critical",color:"#f59e0b",bg:"#fffbeb",icon:"⚠",ring:"#fde68a"},routine:{label:"Routine",color:"#22c55e",bg:"#f0fdf4",icon:"●",ring:"#bbf7d0"}};
-const INV_STATE={submitted:{label:"Submitted",color:"#3b82f6",bg:"#eff6ff"},approved:{label:"Approved",color:"#22c55e",bg:"#f0fdf4"},rejected:{label:"Rejected",color:"#ef4444",bg:"#fef2f2"},revised:{label:"Revised",color:"#f59e0b",bg:"#fffbeb"}};
-const CAP_STATUS={"Pending approval":{color:"#f59e0b",bg:"#fffbeb"},"Equipment ordered":{color:"#3b82f6",bg:"#eff6ff"},"Equipment received":{color:"#22c55e",bg:"#f0fdf4"},"Installation scheduled":{color:"#8b5cf6",bg:"#f5f3ff"}};
-const fmt=n=>"$"+n.toLocaleString();
-const activeStatuses=["unassigned","assigned","wip","parts"];
-const closingStatuses=["completed","pending_invoice","pending_approval"];
-const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const WEEKDAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-const timeNow=()=>{const d=new Date(),h=d.getHours(),m=d.getMinutes(),ap=h>=12?"PM":"AM";return`${h>12?h-12:h||12}:${m<10?"0"+m:m} ${ap}`};
-const dateShort=(d=new Date())=>`${MONTHS[d.getMonth()]} ${d.getDate()}`;
-const dateNow=()=>`${dateShort()}, ${timeNow()}`;
-const dateLong=(d=new Date())=>`${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-const ageFromDate=(iso)=>{if(!iso)return"—";const then=new Date(iso).getTime();const now=Date.now();const diff=Math.max(0,now-then);const mins=Math.floor(diff/60000);if(mins<60)return mins+"m";const hrs=Math.floor(mins/60);if(hrs<24)return hrs+"h";const days=Math.floor(hrs/24);if(days<14)return days+"d";return Math.floor(days/7)+"w"};
+// Simplified US outline (approximate, for styling)
+const US_PATH = "M 104 132 L 170 122 L 236 110 L 292 106 L 356 108 L 418 114 L 478 118 L 540 120 L 592 126 L 634 138 L 664 158 L 682 184 L 688 212 L 684 236 L 670 256 L 652 268 L 634 274 L 614 272 L 600 282 L 608 300 L 628 316 L 638 340 L 624 362 L 598 378 L 566 388 L 528 390 L 484 380 L 438 368 L 392 358 L 344 350 L 296 342 L 248 332 L 202 320 L 158 304 L 122 282 L 96 256 L 80 226 L 76 196 L 84 168 Z";
 
-const Badge=({conf})=>conf?<span style={{fontSize:10,fontWeight:600,padding:"3px 10px",borderRadius:20,background:conf.bg,color:conf.color,whiteSpace:"nowrap",letterSpacing:.3,border:`1px solid ${conf.ring||conf.bg}`}}>{conf.label}</span>:null;
-const Ico=({d,size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>;
-const Avatar=({initials,color,size=36})=><div style={{width:size,height:size,borderRadius:"50%",background:`linear-gradient(135deg,${color},${color}dd)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.33,fontWeight:700,color:"#fff",letterSpacing:-.5,flexShrink:0}}>{initials}</div>;
-const Field=({label,children})=><div><label style={{fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:.5,color:"#94a3b8",marginBottom:5,display:"block"}}>{label}</label>{children}</div>;
-const Input=(props)=><input {...props} style={{width:"100%",padding:"9px 12px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",...(props.style||{})}}/>;
-const Sel=({children,...p})=><select {...p} style={{width:"100%",padding:"9px 12px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontFamily:"inherit",background:"#fff",boxSizing:"border-box",...(p.style||{})}}>{children}</select>;
-const TA=(p)=><textarea {...p} style={{width:"100%",padding:"9px 12px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",...(p.style||{})}}/>;
+// ═══════════════════════════════════════════════════════════════
+//  TINY UI PRIMITIVES
+// ═══════════════════════════════════════════════════════════════
+const fmt = (n: number) => "$" + (n || 0).toLocaleString();
+const Badge = ({ conf, small = false }: any) => conf ? (
+  <span style={{ fontSize: small ? 10 : 11, fontWeight: 600, padding: small ? "2px 8px" : "3px 10px", borderRadius: 20, background: conf.bg, color: conf.color, border: `1px solid ${conf.ring || conf.bg}`, whiteSpace: "nowrap", letterSpacing: .2 }}>{conf.label}</span>
+) : null;
+const Ico = ({ d, size = 18, color = "currentColor" }: any) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
+);
+const Avatar = ({ initials, color, size = 36 }: any) => (
+  <div style={{ width: size, height: size, borderRadius: "50%", background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.32, fontWeight: 600, color: "#fff", letterSpacing: -0.3, flexShrink: 0, border: "1px solid rgba(255,255,255,0.12)" }}>{initials}</div>
+);
+const Field = ({ label, children }: any) => (
+  <div>
+    <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6, display: "block" }}>{label}</label>
+    {children}
+  </div>
+);
+const Input = (props: any) => <input {...props} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, boxSizing: "border-box", outline: "none", ...(props.style || {}) }} />;
+const Sel = ({ children, ...p }: any) => <select {...p} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, boxSizing: "border-box", outline: "none", ...(p.style || {}) }}>{children}</select>;
+const TA = (p: any) => <textarea {...p} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none", ...(p.style || {}) }} />;
 
-const CSS=`@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes spin{to{transform:rotate(360deg)}}@keyframes flash{0%{box-shadow:0 0 0 0 rgba(34,197,94,0.4)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}.kcard{background:#fff;border:1px solid #eef2f6;box-shadow:0 1px 2px rgba(15,23,42,0.04);transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease}.kcard:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(15,23,42,0.08);border-color:#dbe4ee}.kcol{border-radius:14px;border:1px solid #eef2f6;box-shadow:0 1px 2px rgba(15,23,42,0.03);overflow:hidden}.stat-card{border-radius:16px;border:1px solid #eef2f6;box-shadow:0 1px 2px rgba(15,23,42,0.03);transition:box-shadow .14s ease,transform .14s ease}.stat-card:hover{box-shadow:0 8px 24px rgba(15,23,42,0.06);transform:translateY(-1px)}@media(max-width:768px){.desktop-sidebar{display:none!important}.mobile-bottom-nav{display:flex!important}.main-wrap{margin-left:0!important}.stats-grid{grid-template-columns:repeat(3,1fr)!important;gap:10px!important}.kanban-active{grid-template-columns:1fr 1fr!important}.kanban-closing{grid-template-columns:1fr!important}.detail-two-col{grid-template-columns:1fr!important}.detail-fields{grid-template-columns:1fr 1fr!important}.contractors-grid{grid-template-columns:1fr!important}.capital-grid{grid-template-columns:1fr!important}.table-scroll{overflow-x:auto}.topbar-title{font-size:15px!important}.content-pad{padding:16px!important}.modal-inner{width:95%!important;padding:20px!important;max-height:85vh!important}.modal-form-row{grid-template-columns:1fr!important}.stat-value{font-size:26px!important}.stats-grid .stat-hero{grid-column:1/-1!important}}@media(min-width:769px){.mobile-bottom-nav{display:none!important}}`;
+const CSS = `
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.85 } }
+.display { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; letter-spacing: -0.5px; }
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.kcard { background: ${T.surface}; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
+.kcard:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(31,30,28,0.07); border-color: ${T.border}; }
+.kcol { border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.02); overflow: hidden; }
+.card { background: ${T.surface}; border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); }
+.card-hover { transition: box-shadow 140ms ease, transform 140ms ease; }
+.card-hover:hover { box-shadow: 0 8px 24px rgba(31,30,28,0.06); transform: translateY(-1px); }
+.btn-primary { padding: 10px 18px; border-radius: 10px; background: ${T.ink}; color: ${T.bg}; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: background 140ms; }
+.btn-primary:hover { background: #000; }
+.btn-accent { padding: 10px 18px; border-radius: 10px; background: ${T.accent}; color: #fff; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: filter 140ms; }
+.btn-accent:hover { filter: brightness(1.08); }
+.btn-soft { padding: 10px 18px; border-radius: 10px; background: ${T.surface}; color: ${T.ink}; border: 1px solid ${T.border}; cursor: pointer; font-weight: 500; font-size: 12px; font-family: inherit; transition: background 140ms; }
+.btn-soft:hover { background: ${T.bgWarm}; }
+.side-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: none; background: transparent; color: ${T.sidebarText}; cursor: pointer; font-size: 13px; font-family: inherit; margin-bottom: 2px; transition: background 140ms, color 140ms; }
+.side-btn:hover { background: rgba(250,247,242,0.06); color: ${T.sidebarActive}; }
+.side-btn.active { background: rgba(250,247,242,0.08); color: ${T.sidebarActive}; font-weight: 600; }
+.sla-bar { height: 3px; border-radius: 2px; background: ${T.borderSoft}; overflow: hidden; }
+.sla-fill { height: 100%; transition: width 300ms ease; }
+@media(max-width: 768px) {
+  .desktop-sidebar { display: none !important; }
+  .mobile-bottom-nav { display: flex !important; }
+  .main-wrap { margin-left: 0 !important; }
+  .stats-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
+  .kanban-active { grid-template-columns: 1fr 1fr !important; }
+  .kanban-closing { grid-template-columns: 1fr !important; }
+  .detail-two-col { grid-template-columns: 1fr !important; }
+  .detail-fields { grid-template-columns: 1fr 1fr !important; }
+  .contractors-grid { grid-template-columns: 1fr !important; }
+  .capital-grid { grid-template-columns: 1fr !important; }
+  .table-scroll { overflow-x: auto; }
+  .topbar-title { font-size: 22px !important; }
+  .content-pad { padding: 16px !important; }
+  .modal-inner { width: 95% !important; padding: 20px !important; max-height: 85vh !important; }
+  .modal-form-row { grid-template-columns: 1fr !important; }
+  .stat-value { font-size: 28px !important; }
+  .stats-grid .stat-hero { grid-column: 1 / -1 !important; }
+}
+@media(min-width: 769px) { .mobile-bottom-nav { display: none !important; } }
+`;
 
-const Modal=({onClose,title,children,width=480})=><div onClick={e=>{if(e.target===e.currentTarget)onClose()}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:50,padding:16}}><div className="modal-inner" style={{background:"#fff",borderRadius:18,width:"90%",maxWidth:width,padding:28,animation:"fadeUp 0.25s",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",maxHeight:"90vh",overflowY:"auto"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><div style={{fontSize:18,fontWeight:700,color:"#0f172a"}}>{title}</div><button onClick={onClose} style={{width:32,height:32,borderRadius:"50%",border:"1px solid #e2e8f0",background:"#f8fafc",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:"#64748b"}}>×</button></div>{children}</div></div>;
+const Modal = ({ onClose, title, children, width = 480 }: any) => (
+  <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(31,30,28,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}>
+    <div className="modal-inner" style={{ background: T.surface, borderRadius: 20, width: "90%", maxWidth: width, padding: 28, animation: "fadeUp 0.25s", boxShadow: "0 20px 60px rgba(31,30,28,0.22)", maxHeight: "90vh", overflowY: "auto", border: `1px solid ${T.borderSoft}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="display" style={{ fontSize: 22, color: T.ink }}>{title}</div>
+        <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", border: `1px solid ${T.border}`, background: T.bgWarm, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 16, color: T.muted }}>×</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
 
-export default function P1Portal(){
-  const [currentUser,setCurrentUser]=useState(null);
-  const [page,setPage]=useState("dashboard");
-  const [selectedWO,setSelectedWO]=useState(null);
-  const [search,setSearch]=useState("");
-  const [filterC,setFilterC]=useState("all");
-  const [filterP,setFilterP]=useState("all");
-  const [invTab,setInvTab]=useState("all");
-  const [toast,setToast]=useState(null);
-  const [loginEmail,setLoginEmail]=useState("");
-  const [loginLoading,setLoginLoading]=useState(false);
-  const [loginError,setLoginError]=useState<string|null>(null);
-  const [fadeIn,setFadeIn]=useState(false);
-  const [aiEnhancing,setAiEnhancing]=useState(false);
-  const [aiNote,setAiNote]=useState(null);
-  const [modal,setModal]=useState(null);
-  const [lightbox,setLightbox]=useState<string|null>(null);
-  const [noteText,setNoteText]=useState("");
-  // MUTABLE WORK ORDERS STATE
-  const [workOrders,setWorkOrders]=useState(INITIAL_WOS);
-  const [invoices,setInvoices]=useState(INITIAL_INVOICES);
-  // NEW WO FORM STATE
-  const [newWO,setNewWO]=useState({store:"",city:"",priority:"routine",category:"General",nte:"",issue:"",assign:"auto"});
-  const resetNewWO=()=>setNewWO({store:"",city:"",priority:"routine",category:"General",nte:"",issue:"",assign:"auto"});
-  // NEW INVOICE FORM STATE
-  const [newInv,setNewInv]=useState({invNum:"",cme:"",desc:"",rate:"",hours:"",otHours:"",materials:"",trip:"25",tax:"",hasPdf:false});
-  const resetNewInv=()=>setNewInv({invNum:"",cme:"",desc:"",rate:"",hours:"",otHours:"",materials:"",trip:"25",tax:"",hasPdf:false});
+// ═══════════════════════════════════════════════════════════════
+//  MAIN
+// ═══════════════════════════════════════════════════════════════
+export default function P1Portal() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [page, setPage] = useState("dashboard");
+  const [selectedWO, setSelectedWO] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterC, setFilterC] = useState("all");
+  const [filterP, setFilterP] = useState("all");
+  const [invTab, setInvTab] = useState("all");
+  const [toast, setToast] = useState(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [fadeIn, setFadeIn] = useState(false);
+  const [aiEnhancing, setAiEnhancing] = useState(false);
+  const [aiNote, setAiNote] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [workOrders, setWorkOrders] = useState(INITIAL_WOS);
+  const [invoices, setInvoices] = useState(INITIAL_INVOICES);
+  const [newWO, setNewWO] = useState({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
+  const resetNewWO = () => setNewWO({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
+  const [newInv, setNewInv] = useState({ invNum: "", cme: "", desc: "", rate: "", hours: "", otHours: "", materials: "", trip: "25", tax: "", hasPdf: false });
+  const resetNewInv = () => setNewInv({ invNum: "", cme: "", desc: "", rate: "", hours: "", otHours: "", materials: "", trip: "25", tax: "", hasPdf: false });
+  // Tick every 60s so SLA countdowns update live
+  const [, forceTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => forceTick(x => x + 1), 60000); return () => clearInterval(i); }, []);
 
-  useEffect(()=>{setTimeout(()=>setFadeIn(true),50)},[]);
-  // Simulated live-feed: fire a "new call" toast a few seconds after a manager signs in, once per session.
-  useEffect(()=>{
-    if(!currentUser||currentUser.role!=="manager")return;
-    const t1=setTimeout(()=>setToast("🔔 New call from FSM — Store #32236 HVAC alarm"),6000);
-    const t2=setTimeout(()=>setToast(null),9000);
-    const t3=setTimeout(()=>setToast("🔔 Derek checked in at Store #36190"),48000);
-    const t4=setTimeout(()=>setToast(null),51000);
-    return()=>{[t1,t2,t3,t4].forEach(clearTimeout)};
-  },[currentUser?.id]);
-  const fire=(msg)=>{setToast(msg);setTimeout(()=>setToast(null),2800)};
-  const doLogin=(uidOrEmail)=>{const v=(uidOrEmail||"").trim().toLowerCase();if(!v){setLoginError("Enter an email to sign in");return}const user=USERS.find(u=>u.id===v||u.email.toLowerCase()===v);if(!user){setLoginError("No account found for that email");return}setLoginError(null);setLoginLoading(true);setTimeout(()=>{setCurrentUser(user);setPage(user.role==="manager"?"dashboard":"my_jobs");setLoginLoading(false)},600)};
-  const logout=()=>{setCurrentUser(null);setPage("dashboard");setSelectedWO(null);setLoginEmail("");setAiNote(null)};
-  const nav=(p)=>{setPage(p);setSelectedWO(null);setAiNote(null)};
+  useEffect(() => { setTimeout(() => setFadeIn(true), 50); }, []);
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "manager") return;
+    const t1 = setTimeout(() => setToast("New call from FSM — Store #33089, Dallas. Roller grill down."), 6000);
+    const t2 = setTimeout(() => setToast(null), 9000);
+    const t3 = setTimeout(() => setToast("Chris checked in at Store #35551"), 48000);
+    const t4 = setTimeout(() => setToast(null), 51000);
+    return () => { [t1, t2, t3, t4].forEach(clearTimeout); };
+  }, [currentUser?.id]);
 
-  const isManager=currentUser?.role==="manager";
-  const getUser=id=>USERS.find(u=>u.id===id);
-  const myWOs=currentUser?.role==="contractor"?workOrders.filter(w=>w.contractor===currentUser.id):workOrders;
-  const filteredWOs=myWOs.filter(w=>{
-    if(search&&!w.id.toLowerCase().includes(search.toLowerCase())&&!w.store.includes(search)&&!w.issue.toLowerCase().includes(search.toLowerCase()))return false;
-    if(filterC!=="all"&&w.contractor!==filterC)return false;
-    if(filterP!=="all"&&w.priority!==filterP)return false;
+  const fire = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2800); };
+  const doLogin = (uidOrEmail: string) => {
+    const v = (uidOrEmail || "").trim().toLowerCase();
+    if (!v) { setLoginError("Enter an email to sign in"); return; }
+    const user = USERS.find(u => u.id === v || u.email.toLowerCase() === v);
+    if (!user) { setLoginError("No account found for that email"); return; }
+    setLoginError(null);
+    setLoginLoading(true);
+    setTimeout(() => {
+      setCurrentUser(user);
+      setPage(user.role === "contractor" ? "my_jobs" : "dashboard");
+      setLoginLoading(false);
+    }, 600);
+  };
+  const logout = () => { setCurrentUser(null); setPage("dashboard"); setSelectedWO(null); setLoginEmail(""); setAiNote(null); };
+  const nav = (p: string) => { setPage(p); setSelectedWO(null); setAiNote(null); };
+
+  const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
+  const getUser = (id: string) => USERS.find(u => u.id === id);
+  const contractorsOnly = USERS.filter(u => u.role === "contractor");
+  const myWOs = currentUser?.role === "contractor" ? workOrders.filter(w => w.contractor === currentUser.id) : workOrders;
+  const filteredWOs = myWOs.filter(w => {
+    if (search && !w.id.toLowerCase().includes(search.toLowerCase()) && !w.store.includes(search) && !(w.summary || "").toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterC !== "all" && w.contractor !== filterC) return false;
+    if (filterP !== "all" && w.priority !== filterP) return false;
     return true;
   });
 
-  const openCount=workOrders.filter(w=>activeStatuses.includes(w.status)).length;
-  const openValue=workOrders.filter(w=>activeStatuses.includes(w.status)).reduce((s,w)=>s+w.nte,0);
-  const emergCount=workOrders.filter(w=>w.priority==="emergency"&&activeStatuses.includes(w.status)).length;
-  const emergUnassigned=workOrders.filter(w=>w.priority==="emergency"&&w.status==="unassigned").length;
-  const capitalCount=workOrders.filter(w=>w.status==="capital").length;
-  const completedCount=workOrders.filter(w=>w.status==="completed").length;
-  const pendAppr=workOrders.filter(w=>w.status==="pending_approval").length;
-  const woData=selectedWO?workOrders.find(w=>w.id===selectedWO):null;
+  const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
+  const openCount = openWOs.length;
+  const openValue = openWOs.reduce((s, w) => s + (w.nte || 0), 0);
+  const p1Count = workOrders.filter(w => w.priority === "p1" && activeStatuses.includes(w.status)).length;
+  const p1Unassigned = workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length;
+  const capitalCount = workOrders.filter(w => w.status === "capital").length;
+  const completedCount = workOrders.filter(w => w.status === "completed").length;
+  const pendAppr = workOrders.filter(w => w.status === "pending_approval").length;
+  const slaAtRisk = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours < 2 && activeStatuses.includes(w.status); }).length;
+  const slaBreached = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours <= 0 && activeStatuses.includes(w.status); }).length;
+  const woData = selectedWO ? workOrders.find(w => w.id === selectedWO) : null;
 
-  // ── STATE TRANSITION HELPERS ──
-  const updateWO=(id,updates)=>{
-    setWorkOrders(prev=>prev.map(w=>w.id===id?{...w,...updates,activities:[...(updates.newActivity?[updates.newActivity]:[]),...w.activities]}:w));
+  // ── STATE TRANSITIONS
+  const updateWO = (id: string, updates: any) => {
+    setWorkOrders(prev => prev.map(w => w.id === id ? { ...w, ...updates, activities: [...(updates.newActivity ? [updates.newActivity] : []), ...w.activities] } : w));
   };
-  const addActivity=(id,author,text,type="system")=>{
-    const entry={author,time:dateNow(),text,type};
-    setWorkOrders(prev=>prev.map(w=>w.id===id?{...w,activities:[entry,...w.activities]}:w));
+  const addActivity = (id: string, author: string, text: string, type = "system") => {
+    const entry = { author, time: dateNow(), text, type };
+    setWorkOrders(prev => prev.map(w => w.id === id ? { ...w, activities: [entry, ...w.activities] } : w));
   };
 
-  const doAssign=(woId,contractorId)=>{
-    const c=getUser(contractorId);
-    updateWO(woId,{status:"assigned",contractor:contractorId,newActivity:{author:"System",time:dateNow(),text:`Assigned to ${c.name}.`,type:"system"}});
-    fire(`Assigned to ${c.name}`);
+  const doAssign = (woId: string, contractorId: string) => {
+    const c = getUser(contractorId);
+    updateWO(woId, { status: "assigned", contractor: contractorId, dispatchedAt: new Date().toISOString(), functionalStatus: "Dispatched", newActivity: { author: "System", time: dateNow(), text: `Dispatched to ${c.name} (${c.company}).`, type: "system" } });
+    fire(`Dispatched to ${c.name}`);
   };
-  const doSetEta=(woId,eta)=>{
-    updateWO(woId,{eta,newActivity:{author:currentUser.name,time:dateNow(),text:`ETA set: ${eta}`,type:"system"}});
-    fire("ETA set — P1 team notified");
+  const doSetEta = (woId: string, eta: string) => { updateWO(woId, { eta, newActivity: { author: currentUser.name, time: dateNow(), text: `ETA set: ${eta}`, type: "system" } }); fire("ETA set"); };
+  const doStartWork = (woId: string, notes: string) => {
+    const t = timeNow();
+    updateWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: `${dateShort()}, ${t}`, newActivity: { author: currentUser.name, time: dateNow(), text: notes || `Checked in and started work at ${t}.`, type: "note" } });
+    fire(`Work started · status synced to 7-Eleven`);
   };
-  const doStartWork=(woId,notes)=>{
-    const t=timeNow();
-    updateWO(woId,{status:"wip",startTime:`${dateShort()}, ${t}`,newActivity:{author:currentUser.name,time:dateNow(),text:notes||`Checked in and started work at ${t}.`,type:"note"}});
-    fire(`Work started at ${t} — timestamp recorded`);
+  const doPauseWork = (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
+    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts", newActivity: { author: currentUser.name, time: dateNow(), text: notes || `Work paused: ${reason}.${partDesc ? ` Part needed: ${partDesc}${partNum ? ` (${partNum})` : ""}.` : ""}`, type: "note" } };
+    if (partDesc) updates.partNeeded = partDesc + (partNum ? ` (${partNum})` : "");
+    if (partEta) updates.partEta = partEta;
+    updateWO(woId, updates);
+    fire("Paused — awaiting parts");
   };
-  const doPauseWork=(woId,reason,partDesc,partNum,partEta,notes)=>{
-    const updates:any={status:"parts",newActivity:{author:currentUser.name,time:dateNow(),text:notes||`Work paused: ${reason}.${partDesc?` Part needed: ${partDesc}${partNum?` (${partNum})`:""}.`:""}`,type:"note"}};
-    if(partDesc)updates.partNeeded=partDesc+(partNum?` (${partNum})`:"");
-    if(partEta)updates.partEta=partEta;
-    updateWO(woId,updates);
-    fire("Work paused — status updated");
+  const doCloseComplete = (woId: string, model: string, serial: string, resolution: string) => {
+    updateWO(woId, { status: "completed", functionalStatus: "Completed", assetModel: model, assetSerial: serial, newActivity: { author: currentUser.name, time: dateNow(), text: `Job completed. Asset: ${model} / ${serial}. Resolution: ${resolution || "Repaired"}.`, type: "note" } });
+    fire("Completed");
   };
-  const doCloseComplete=(woId,model,serial,resolution)=>{
-    updateWO(woId,{status:"completed",assetModel:model,assetSerial:serial,newActivity:{author:currentUser.name,time:dateNow(),text:`Job completed. Asset: ${model} / ${serial}. Resolution: ${resolution||"Repaired"}.`,type:"note"}});
-    fire("Job completed — moved to Completed");
-  };
-  const doMoveToInvoice=(woId)=>{
-    updateWO(woId,{status:"pending_invoice",newActivity:{author:"System",time:dateNow(),text:"7-Eleven portal updated. Moved to pending invoice.",type:"system"}});
-    fire("Moved to Pending Invoice");
-  };
-  const doCapitalFlag=(woId)=>{
-    updateWO(woId,{status:"capital",capitalStatus:"Pending approval",newActivity:{author:"System",time:dateNow(),text:"Flagged as capital replacement — pending approval.",type:"system"}});
-    fire("Flagged for capital replacement");
-  };
-  const doSubmitInvoice=(wo)=>{
-    if(!newInv.invNum||!newInv.cme||!newInv.rate||!newInv.hours){fire("Fill in invoice #, CME, rate, and hours");return false}
-    if(!newInv.hasPdf){fire("Attach a PDF invoice before submitting");return false}
-    const rate=parseFloat(newInv.rate)||0,hrs=parseFloat(newInv.hours)||0,ot=parseFloat(newInv.otHours)||0;
-    const mat=parseFloat(newInv.materials)||0,trip=parseFloat(newInv.trip)||0,tax=parseFloat(newInv.tax)||0;
-    const total=(rate*hrs)+(rate*1.5*ot)+mat+trip+tax;
-    const invoice={num:newInv.invNum,wot:wo.id,state:"submitted",date:dateShort(),store:wo.store,total:Math.round(total),contractor:wo.contractor,cme:newInv.cme,description:newInv.desc||wo.issue};
-    setInvoices(prev=>[invoice,...prev]);
-    updateWO(wo.id,{status:"pending_approval",invoiceTotal:Math.round(total),newActivity:{author:currentUser.name,time:dateNow(),text:`Invoice ${newInv.invNum} submitted. Total: ${fmt(Math.round(total))}.`,type:"system"}});
+  const doMoveToInvoice = (woId: string) => { updateWO(woId, { status: "pending_invoice", newActivity: { author: "System", time: dateNow(), text: "7-Eleven portal updated. Moved to pending invoice.", type: "system" } }); fire("Moved to Pending Invoice"); };
+  const doCapitalFlag = (woId: string) => { updateWO(woId, { status: "capital", functionalStatus: "Pending Capital Approval", capitalStatus: "Pending approval", newActivity: { author: "System", time: dateNow(), text: "Flagged as capital replacement — pending approval.", type: "system" } }); fire("Flagged for capital"); };
+  const doSubmitInvoice = (wo: any) => {
+    if (!newInv.invNum || !newInv.cme || !newInv.rate || !newInv.hours) { fire("Fill in invoice #, CME, rate, and hours"); return false; }
+    if (!newInv.hasPdf) { fire("Attach a PDF invoice before submitting"); return false; }
+    const rate = parseFloat(newInv.rate) || 0, hrs = parseFloat(newInv.hours) || 0, ot = parseFloat(newInv.otHours) || 0;
+    const mat = parseFloat(newInv.materials) || 0, trip = parseFloat(newInv.trip) || 0, tax = parseFloat(newInv.tax) || 0;
+    const total = (rate * hrs) + (rate * 1.5 * ot) + mat + trip + tax;
+    const invoice = { num: newInv.invNum, wot: wo.id, state: "submitted", date: dateShort(), store: wo.store, total: Math.round(total), contractor: wo.contractor, cme: newInv.cme, description: newInv.desc || wo.summary };
+    setInvoices(prev => [invoice, ...prev]);
+    updateWO(wo.id, { status: "pending_approval", invoiceTotal: Math.round(total), newActivity: { author: currentUser.name, time: dateNow(), text: `Invoice ${newInv.invNum} submitted. Total: ${fmt(Math.round(total))}.`, type: "system" } });
     resetNewInv();
-    fire(`Invoice ${newInv.invNum} submitted — ${fmt(Math.round(total))}`);
+    fire(`Invoice submitted — ${fmt(Math.round(total))}`);
     return true;
   };
-  const doCreateWO=()=>{
-    if(!newWO.store||!newWO.city||!newWO.issue||!newWO.nte){fire("Fill in store, city, issue, and NTE");return false}
-    const maxNum=workOrders.reduce((m,w)=>{const n=parseInt((w.id||"").replace(/\D/g,""))||0;return n>m?n:m},12900);
-    const id=`WOT${String(maxNum+1).padStart(7,"0")}`;
-    let contractor=null,status="unassigned";
-    if(newWO.assign==="auto"){const matched=contractorForCity(newWO.city);if(matched){contractor=matched;status="assigned"}}
-    else if(newWO.assign&&newWO.assign!=="unassigned"){contractor=newWO.assign;status="assigned"}
-    const addr=(()=>{const existing=workOrders.find(w=>w.store===newWO.store);return existing?existing.addr:""})();
-    const wo={id,store:newWO.store,city:newWO.city,addr,issue:newWO.issue,priority:newWO.priority,status,contractor,nte:parseInt(newWO.nte)||0,category:newWO.category,afm:"",afmPhone:"",createdAt:new Date().toISOString(),activities:[{author:"System",time:dateNow(),text:`Service call created. NTE: ${fmt(parseInt(newWO.nte)||0)}.${contractor?` Auto-assigned to ${getUser(contractor)?.name}.`:""}`,type:"system"}]};
-    setWorkOrders(prev=>[wo,...prev]);
+  const doCreateWO = () => {
+    if (!newWO.store || !newWO.city || !newWO.summary || !newWO.nte) { fire("Fill in store, city, summary, and NTE"); return false; }
+    // Generate WO# + INC# in 7-Eleven format
+    const base = 11400000 + Math.floor(Math.random() * 99999);
+    const id = `FWKD${base}`;
+    const incidentId = `INC${24000000 + Math.floor(Math.random() * 999999)}`;
+    const trades = SERVICE_TO_TRADES(newWO.businessService || "", newWO.category || "");
+    let contractor = null, status = "unassigned";
+    if (newWO.assign === "auto") {
+      const matched = contractorFor(newWO.city, trades, USERS);
+      if (matched) { contractor = matched; status = "assigned"; }
+    } else if (newWO.assign && newWO.assign !== "unassigned") { contractor = newWO.assign; status = "assigned"; }
+    const wo = {
+      id, incidentId,
+      store: newWO.store, city: newWO.city, addr: "",
+      lineOfService: newWO.businessService || "General",
+      businessService: newWO.businessService || "General",
+      category: newWO.category || "General",
+      subCategory: "",
+      summary: newWO.summary, description: newWO.summary,
+      priority: newWO.priority, status, contractor,
+      afm: "", afmEmail: "",
+      functionalStatus: contractor ? "Dispatched" : "New",
+      nte: parseInt(newWO.nte) || 0,
+      age: "now",
+      dispatchedAt: contractor ? new Date().toISOString() : null,
+      createdAt: new Date().toISOString(),
+      activities: [{ author: "System", time: dateNow(), text: `Work order created. NTE: ${fmt(parseInt(newWO.nte) || 0)}.${contractor ? ` Auto-dispatched to ${getUser(contractor)?.name} (trade + territory match).` : ""}`, type: "system" }],
+    };
+    setWorkOrders(prev => [wo, ...prev]);
     resetNewWO();
-    fire(contractor?`${id} created — assigned to ${getUser(contractor)?.name.split(" ")[0]}`:`${id} created — unassigned`);
+    fire(contractor ? `${id} — dispatched to ${getUser(contractor)?.name.split(" ")[0]}` : `${id} created — unassigned`);
     return true;
   };
-  const doAutoAssign=()=>{
-    const unassigned=workOrders.filter(w=>w.status==="unassigned");
-    if(unassigned.length===0){fire("No unassigned calls");return}
-    let count=0,skipped=0;
-    unassigned.forEach(w=>{
-      const matched=contractorForCity(w.city);
-      if(!matched){skipped++;return}
-      updateWO(w.id,{status:"assigned",contractor:matched,newActivity:{author:"System",time:dateNow(),text:`Auto-assigned to ${getUser(matched)?.name} by territory rule.`,type:"system"}});
+  const doAutoAssign = () => {
+    const unassigned = workOrders.filter(w => w.status === "unassigned");
+    if (unassigned.length === 0) { fire("No unassigned calls"); return; }
+    let count = 0, skipped = 0;
+    unassigned.forEach(w => {
+      const trades = SERVICE_TO_TRADES(w.businessService || "", w.category || "");
+      const matched = contractorFor(w.city, trades, USERS);
+      if (!matched) { skipped++; return; }
+      updateWO(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt: new Date().toISOString(), newActivity: { author: "System", time: dateNow(), text: `Auto-dispatched to ${getUser(matched)?.name}. Territory + trade match.`, type: "system" } });
       count++;
     });
-    fire(skipped>0?`Auto-assigned ${count} · ${skipped} skipped (no territory match)`:`Auto-assigned ${count} call${count!==1?"s":""} by territory`);
+    fire(skipped > 0 ? `Auto-dispatched ${count} · ${skipped} need manual assignment` : `Auto-dispatched ${count} call${count !== 1 ? "s" : ""}`);
   };
-  const doPostNote=(woId)=>{
-    if(!noteText.trim())return;
-    addActivity(woId,currentUser.name,noteText,"note");
-    setNoteText("");
-    fire("Note posted");
+  const doPostNote = (woId: string) => { if (!noteText.trim()) return; addActivity(woId, currentUser.name, noteText, "note"); setNoteText(""); fire("Note posted"); };
+  const doAiEnhance = () => {
+    setAiEnhancing(true);
+    setTimeout(() => { setAiNote("Arrived on site at the designated time. Performed a systematic diagnostic of the affected equipment, isolating the root cause through sequential testing of primary components. Identified the failure mode and carried out the appropriate corrective action in accordance with manufacturer specifications and industry best practices. Verified system performance post-repair against operational parameters and confirmed restoration to normal operating conditions. Area cleaned and secured. Recommending routine preventive maintenance at the standard scheduled interval to reduce the likelihood of recurrence."); setAiEnhancing(false); }, 1400);
   };
-  const doAddPhotos=(woId,files)=>{
-    if(!files||files.length===0)return;
-    const readers=Array.from(files).slice(0,8).map(f=>new Promise<string>((res)=>{const r=new FileReader();r.onload=()=>res(r.result as string);r.readAsDataURL(f)}));
-    Promise.all(readers).then(urls=>{
-      setWorkOrders(prev=>prev.map(w=>w.id===woId?{...w,photos:[...(w.photos||[]),...urls],activities:[{author:currentUser.name,time:dateNow(),text:`Added ${urls.length} photo${urls.length>1?"s":""}.`,type:"note"},...w.activities]}:w));
-      fire(`${urls.length} photo${urls.length>1?"s":""} added`);
+  const doAddPhotos = (woId: string, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const readers = Array.from(files).slice(0, 8).map(f => new Promise<string>(res => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(f); }));
+    Promise.all(readers).then(urls => {
+      setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: [...(w.photos || []), ...urls], activities: [{ author: currentUser.name, time: dateNow(), text: `Added ${urls.length} photo${urls.length > 1 ? "s" : ""}.`, type: "note" }, ...w.activities] } : w));
+      fire(`${urls.length} photo${urls.length > 1 ? "s" : ""} added`);
     });
   };
-  const doRemovePhoto=(woId,idx)=>{
-    setWorkOrders(prev=>prev.map(w=>w.id===woId?{...w,photos:(w.photos||[]).filter((_,i)=>i!==idx)}:w));
-    fire("Photo removed");
-  };
-  const doAiEnhance=()=>{
-    setAiEnhancing(true);
-    setTimeout(()=>{setAiNote("Arrived on site at approximately 14:00. Conducted initial diagnostic assessment of the grease trap system. Identified overflow condition caused by accumulated grease buildup exceeding trap capacity. Performed full cleanout of the trap basin, cleared the outflow line using a mechanical snake, and verified proper drainage flow rate. Tested system post-service — operating within normal parameters. Recommended quarterly maintenance schedule to prevent recurrence. Area cleaned and sanitized per health department guidelines.");setAiEnhancing(false)},1800);
-  };
+  const doRemovePhoto = (woId: string, idx: number) => { setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((_, i) => i !== idx) } : w)); fire("Photo removed"); };
 
-  // ── LOGIN ──
-  if(!currentUser){
-    return(
-      <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#0f172a 0%,#1e293b 40%,#0f172a 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',system-ui,sans-serif",position:"relative",opacity:fadeIn?1:0,transition:"opacity 0.6s",padding:16}}>
+  // ═══════════════════════════════════════════════════════════════
+  //  LOGIN
+  // ═══════════════════════════════════════════════════════════════
+  if (!currentUser) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Inter', system-ui, sans-serif", padding: 16, opacity: fadeIn ? 1 : 0, transition: "opacity 0.6s", position: "relative" }}>
         <style>{CSS}</style>
-        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-        <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(circle at 1px 1px,rgba(148,163,184,0.08) 1px,transparent 0)",backgroundSize:"32px 32px"}}/>
-        <div style={{position:"relative",zIndex:1,width:"100%",maxWidth:420}}>
-          <div style={{textAlign:"center",marginBottom:32}}>
-            <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:56,height:56,borderRadius:14,background:"linear-gradient(135deg,#2563eb,#3b82f6)",marginBottom:14,boxShadow:"0 8px 32px rgba(37,99,235,0.3)"}}><span style={{fontSize:22,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace",letterSpacing:-1}}>P1</span></div>
-            <div style={{fontSize:22,fontWeight:700,color:"#f1f5f9",letterSpacing:-.5}}>P1 Service Portal</div>
-            <div style={{fontSize:13,color:"#64748b",marginTop:4}}>Operations management for 7-Eleven facility services</div>
+        <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle at 1px 1px, rgba(31,30,28,0.04) 1px, transparent 0)", backgroundSize: "28px 28px" }} />
+        <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 420 }}>
+          <div style={{ textAlign: "center", marginBottom: 36 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 56, height: 56, borderRadius: 14, background: T.ink, marginBottom: 18, boxShadow: "0 8px 24px rgba(31,30,28,0.12)" }}>
+              <span className="display" style={{ fontSize: 28, color: T.bg, letterSpacing: -1 }}>P1</span>
+            </div>
+            <div className="display" style={{ fontSize: 34, color: T.ink, lineHeight: 1.1 }}>P1 Service Portal</div>
+            <div style={{ fontSize: 14, color: T.muted, marginTop: 8 }}>Operations for 7-Eleven facility services</div>
           </div>
-          <div style={{background:"rgba(30,41,59,0.7)",backdropFilter:"blur(20px)",borderRadius:16,border:"1px solid rgba(148,163,184,0.1)",padding:"24px 22px"}}>
-            <div style={{fontSize:14,fontWeight:600,color:"#e2e8f0",marginBottom:16}}>Sign in to your account</div>
-            <div style={{marginBottom:12}}><label style={{fontSize:11,fontWeight:500,color:"#94a3b8",marginBottom:6,display:"block",textTransform:"uppercase",letterSpacing:.6}}>Email</label><input value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} placeholder="you@company.com" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid rgba(148,163,184,0.15)",background:"rgba(15,23,42,0.5)",color:"#f1f5f9",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/></div>
-            <div style={{marginBottom:20}}><label style={{fontSize:11,fontWeight:500,color:"#94a3b8",marginBottom:6,display:"block",textTransform:"uppercase",letterSpacing:.6}}>Password</label><input type="password" defaultValue="••••••••" style={{width:"100%",padding:"11px 14px",borderRadius:10,border:"1px solid rgba(148,163,184,0.15)",background:"rgba(15,23,42,0.5)",color:"#f1f5f9",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/></div>
-            {loginError&&<div style={{fontSize:11,color:"#fca5a5",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.25)",borderRadius:8,padding:"8px 12px",marginBottom:12}}>{loginError}</div>}
-            {loginLoading?<div style={{textAlign:"center",padding:"12px 0"}}><div style={{width:24,height:24,border:"3px solid rgba(37,99,235,0.2)",borderTopColor:"#3b82f6",borderRadius:"50%",animation:"spin 0.7s linear infinite",margin:"0 auto"}}/></div>:<button onClick={()=>doLogin(loginEmail)} style={{width:"100%",padding:"12px",borderRadius:10,background:"linear-gradient(135deg,#2563eb,#3b82f6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:14,fontFamily:"inherit",boxShadow:"0 4px 16px rgba(37,99,235,0.3)"}}>Sign in</button>}
+          <div className="card" style={{ padding: 28 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 18 }}>Sign in to your account</div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 7, display: "block", textTransform: "uppercase", letterSpacing: 0.8 }}>Email</label>
+              <input value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="you@p1pros.com" style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 7, display: "block", textTransform: "uppercase", letterSpacing: 0.8 }}>Password</label>
+              <input type="password" defaultValue="••••••••" style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            </div>
+            {loginError && <div style={{ fontSize: 12, color: T.danger, background: T.dangerSoft, border: `1px solid ${T.dangerSoft}`, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>{loginError}</div>}
+            {loginLoading ? <div style={{ textAlign: "center", padding: "12px 0" }}><div style={{ width: 22, height: 22, border: `3px solid ${T.borderSoft}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto" }} /></div>
+              : <button onClick={() => doLogin(loginEmail)} style={{ width: "100%", padding: 13, borderRadius: 10, background: T.ink, color: T.bg, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>Sign in</button>}
           </div>
-          <div style={{marginTop:24}}><div style={{fontSize:11,fontWeight:500,color:"#475569",textAlign:"center",marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Demo — quick access</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{USERS.map(u=><button key={u.id} onClick={()=>{setLoginEmail(u.email);doLogin(u.id)}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"1px solid rgba(148,163,184,0.1)",background:"rgba(30,41,59,0.5)",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}><Avatar initials={u.initials} color={u.color} size={32}/><div><div style={{fontSize:12,fontWeight:600,color:"#e2e8f0"}}>{u.name}</div><div style={{fontSize:10,color:"#64748b"}}>{u.role==="manager"?"Manager":u.territory}</div></div></button>)}</div></div>
+          <div style={{ marginTop: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 500, color: T.subtle, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Demo — quick access</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[USERS.find(u => u.id === "clay"), USERS.find(u => u.id === "jeremy"), USERS.find(u => u.id === "landry"), USERS.find(u => u.id === "starnes")].map(u => u && (
+                <button key={u.id} onClick={() => { setLoginEmail(u.email); doLogin(u.id); }} className="card-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                  <Avatar initials={u.initials} color={u.color} size={32} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                    <div style={{ fontSize: 10, color: T.muted }}>{u.role === "contractor" ? u.territory : u.title}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
-  // ── NAV ITEMS ──
-  const sideItems=isManager?[{id:"dashboard",label:"Dashboard",icon:"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"},{id:"map",label:"Map",icon:"M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16"},{id:"work_orders",label:"Work orders",icon:"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",badge:openCount},{id:"capital",label:"Capital projects",icon:"M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4",badge:capitalCount||null},{id:"invoices",label:"Invoices",icon:"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8",badge:pendAppr||null},{id:"contractors",label:"Contractors",icon:"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"}]:[{id:"my_jobs",label:"My jobs",icon:"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",badge:myWOs.filter(w=>activeStatuses.includes(w.status)).length},{id:"invoices",label:"Invoices",icon:"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8"}];
+  // ═══════════════════════════════════════════════════════════════
+  //  APP SHELL
+  // ═══════════════════════════════════════════════════════════════
+  const sideItems = isManager
+    ? [
+      { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
+      { id: "map", label: "Map", icon: "M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16" },
+      { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
+      { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
+      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
+      { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
+    ]
+    : [
+      { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: myWOs.filter(w => activeStatuses.includes(w.status)).length },
+      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8" },
+    ];
 
-  const renderCard=(wo)=>{const pr=PRIORITY[wo.priority];return(<div key={wo.id} className="kcard" onClick={()=>{setSelectedWO(wo.id);setAiNote(null);if(!isManager)setPage("wo_detail");else setPage("work_orders")}} style={{position:"relative",padding:"12px 14px 12px 16px",borderRadius:12,marginBottom:8,cursor:"pointer"}}><div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:2,background:pr?.color||"#cbd5e1"}}/><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:11,fontWeight:600,color:"#94a3b8",fontFamily:"'DM Mono',monospace",letterSpacing:.3}}>{wo.id}</span><span style={{fontSize:11,color:pr?.color}}>{pr?.icon}</span></div><div style={{fontSize:13,fontWeight:600,color:"#0f172a",marginBottom:3,letterSpacing:-.1}}>Store #{wo.store}</div><div style={{fontSize:12,color:"#64748b",lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{wo.issue}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:8,borderTop:"1px solid #f1f5f9",fontSize:11,color:"#94a3b8"}}><span style={{fontWeight:600,color:wo.contractor?"#475569":"#cbd5e1"}}>{wo.contractor?getUser(wo.contractor)?.name.split(" ")[0]:"Unassigned"}</span><div style={{display:"flex",gap:8,alignItems:"center"}}>{wo.eta&&<span style={{color:"#d97706",fontWeight:700,background:"#fffbeb",padding:"2px 8px",borderRadius:10,fontSize:10}}>{wo.eta.split(", ")[1]}</span>}<span style={{fontFamily:"'DM Mono',monospace",color:"#cbd5e1"}}>{wo.age}</span></div></div></div>)};
+  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", wo_detail: woData?.id || "Work order", capital: "Capital projects", map: "Map" };
 
-  const renderKanbanCol=(sk)=>{const c=STATUS[sk];const cards=filteredWOs.filter(w=>w.status===sk);return(<div key={sk} className="kcol" style={{background:c.bg}}><div style={{padding:"14px 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:9,height:9,borderRadius:"50%",background:c.color,boxShadow:`0 0 10px ${c.color}55`}}/><span style={{fontSize:13,fontWeight:700,color:"#0f172a",letterSpacing:-.1}}>{c.label}</span></div><span style={{fontSize:11,fontWeight:800,color:c.color,background:"#fff",border:`1px solid ${c.ring||c.color}33`,borderRadius:20,padding:"3px 10px",minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{cards.length}</span></div><div style={{padding:"0 10px 10px",minHeight:60}}>{cards.map(renderCard)}{cards.length===0&&<div style={{textAlign:"center",padding:"24px 0",fontSize:11,color:"#cbd5e1",fontWeight:500}}>No items</div>}</div></div>)};
+  const renderCard = (wo: any) => {
+    const pr = PRIORITY[wo.priority];
+    const sla = slaLabel(wo);
+    return (
+      <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer" }}>
+        <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: pr?.color || T.subtle }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>Store #{wo.store}</div>
+        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{wo.summary}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11 }}>
+          <span style={{ fontWeight: 600, color: wo.contractor ? T.inkSoft : T.subtle }}>{wo.contractor ? getUser(wo.contractor)?.name.split(" ")[0] : "Unassigned"}</span>
+          {sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, border: `1px solid ${sla.color}20` }}>{sla.text}</span>}
+        </div>
+      </div>
+    );
+  };
 
-  const pageTitle={dashboard:"Dashboard",work_orders:selectedWO?woData?.id:"Work orders",invoices:"Invoices",contractors:"Contractors",my_jobs:"My jobs",wo_detail:woData?.id||"Work order",capital:"Capital projects",map:"Map view"};
+  const renderKanbanCol = (sk: string) => {
+    const c = STATUS[sk];
+    const cards = filteredWOs.filter(w => w.status === sk);
+    return (
+      <div key={sk} className="kcol" style={{ background: c.bg }}>
+        <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 9, height: 9, borderRadius: "50%", background: c.color }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: T.ink, letterSpacing: -0.1 }}>{c.label}</span>
+          </div>
+          <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: c.color, background: T.surface, border: `1px solid ${c.ring || c.color}33`, borderRadius: 20, padding: "3px 10px", minWidth: 24, textAlign: "center" }}>{cards.length}</span>
+        </div>
+        <div style={{ padding: "0 10px 10px", minHeight: 60 }}>
+          {cards.map(renderCard)}
+          {cards.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 11, color: T.subtle, fontWeight: 500 }}>No items</div>}
+        </div>
+      </div>
+    );
+  };
 
-  return(
-    <div style={{display:"flex",minHeight:"100vh",fontFamily:"'DM Sans',system-ui,sans-serif",fontSize:13,color:"#1e293b",background:"#f8fafc",position:"relative"}}>
+  // ═══════════════════════════════════════════════════════════════
+  //  LAYOUT
+  // ═══════════════════════════════════════════════════════════════
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
       <style>{CSS}</style>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 
       {/* Sidebar */}
-      <div className="desktop-sidebar" style={{width:230,background:"#0f172a",color:"#94a3b8",display:"flex",flexDirection:"column",flexShrink:0,position:"fixed",top:0,left:0,bottom:0,zIndex:30}}>
-        <div style={{padding:"20px 18px 18px",borderBottom:"1px solid rgba(148,163,184,0.08)"}}><div style={{display:"flex",alignItems:"center",gap:11}}><div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#2563eb,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14,color:"#fff",fontFamily:"'DM Mono',monospace",letterSpacing:-.5}}>P1</div><div><div style={{fontSize:14,fontWeight:700,color:"#f1f5f9",letterSpacing:-.3}}>P1 Service</div><div style={{fontSize:10,color:"#475569",letterSpacing:.5,textTransform:"uppercase"}}>{isManager?"Operations":"Contractor"}</div></div></div></div>
-        <div style={{padding:"14px 12px",flex:1}}>{sideItems.map(item=><button key={item.id} onClick={()=>nav(item.id)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",borderRadius:10,border:"none",background:page===item.id?"rgba(37,99,235,0.12)":"transparent",color:page===item.id?"#e2e8f0":"#64748b",cursor:"pointer",fontSize:13,fontWeight:page===item.id?600:400,fontFamily:"inherit",marginBottom:2}}><Ico d={item.icon} size={16} color={page===item.id?"#60a5fa":"#64748b"}/>{item.label}{item.badge!=null&&<span style={{marginLeft:"auto",fontSize:10,background:item.id==="capital"?"#7c3aed":"#ef4444",color:"#fff",borderRadius:10,padding:"2px 8px",fontWeight:700}}>{item.badge}</span>}</button>)}</div>
-        <div style={{padding:16,borderTop:"1px solid rgba(148,163,184,0.08)"}}><div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><Avatar initials={currentUser.initials} color={currentUser.color} size={32}/><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"#e2e8f0",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUser.name}</div><div style={{fontSize:10,color:"#475569"}}>{isManager?"Manager":currentUser.company}</div></div></div><button onClick={logout} style={{width:"100%",padding:"7px",borderRadius:8,border:"1px solid rgba(148,163,184,0.1)",background:"transparent",color:"#64748b",fontSize:11,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>Sign out</button></div>
+      <div className="desktop-sidebar" style={{ width: 232, background: T.sidebar, color: T.sidebarText, display: "flex", flexDirection: "column", flexShrink: 0, position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30 }}>
+        <div style={{ padding: "22px 20px 18px", borderBottom: "1px solid rgba(250,247,242,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span className="display" style={{ fontSize: 18, color: "#fff", letterSpacing: -0.5 }}>P1</span>
+            </div>
+            <div>
+              <div className="display" style={{ fontSize: 18, color: T.bg, letterSpacing: -0.3, lineHeight: 1 }}>P1 Service</div>
+              <div style={{ fontSize: 10, color: T.sidebarText, letterSpacing: 0.8, textTransform: "uppercase", marginTop: 3 }}>{currentUser.role === "manager" ? "Operations" : currentUser.role === "dispatcher" ? "Dispatch" : currentUser.role === "back_office" ? "Back office" : "Contractor"}</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "14px 12px", flex: 1 }}>
+          {sideItems.map(item => (
+            <button key={item.id} onClick={() => nav(item.id)} className={`side-btn ${page === item.id ? "active" : ""}`}>
+              <Ico d={item.icon} size={16} color={page === item.id ? T.accent : T.sidebarText} />
+              <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
+              {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
+            </button>
+          ))}
+        </div>
+        <div style={{ padding: 16, borderTop: "1px solid rgba(250,247,242,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <Avatar initials={currentUser.initials} color={currentUser.color} size={32} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: T.bg, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUser.name}</div>
+              <div style={{ fontSize: 10, color: T.sidebarText }}>{currentUser.title || currentUser.company}</div>
+            </div>
+          </div>
+          <button onClick={logout} style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid rgba(250,247,242,0.1)", background: "transparent", color: T.sidebarText, fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Sign out</button>
+        </div>
       </div>
 
-      {/* Mobile nav */}
-      <div className="mobile-bottom-nav" style={{display:"none",position:"fixed",bottom:0,left:0,right:0,background:"#0f172a",zIndex:40,borderTop:"1px solid #1e293b",justifyContent:"space-around",padding:"6px 0 env(safe-area-inset-bottom,6px)"}}>{sideItems.slice(0,4).map(item=><button key={item.id} onClick={()=>nav(item.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",cursor:"pointer",padding:"6px 8px",position:"relative",fontFamily:"inherit"}}><Ico d={item.icon} size={20} color={page===item.id?"#60a5fa":"#64748b"}/><span style={{fontSize:8,fontWeight:page===item.id?600:400,color:page===item.id?"#e2e8f0":"#64748b"}}>{item.label.split(" ")[0]}</span></button>)}<button onClick={logout} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",cursor:"pointer",padding:"6px 8px",fontFamily:"inherit"}}><Ico d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" size={20} color="#64748b"/><span style={{fontSize:8,color:"#64748b"}}>Out</span></button></div>
+      {/* Mobile bottom nav */}
+      <div className="mobile-bottom-nav" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebar, zIndex: 40, borderTop: "1px solid rgba(250,247,242,0.08)", justifyContent: "space-around", padding: "6px 0 env(safe-area-inset-bottom, 6px)" }}>
+        {sideItems.slice(0, 4).map(item => (
+          <button key={item.id} onClick={() => nav(item.id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: "pointer", padding: "6px 8px", fontFamily: "inherit" }}>
+            <Ico d={item.icon} size={20} color={page === item.id ? T.accent : T.sidebarText} />
+            <span style={{ fontSize: 8, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.bg : T.sidebarText }}>{item.label.split(" ")[0]}</span>
+          </button>
+        ))}
+        <button onClick={logout} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: "pointer", padding: "6px 8px", fontFamily: "inherit" }}>
+          <Ico d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" size={20} color={T.sidebarText} />
+          <span style={{ fontSize: 8, color: T.sidebarText }}>Out</span>
+        </button>
+      </div>
 
       {/* Main */}
-      <div className="main-wrap" style={{flex:1,marginLeft:230,display:"flex",flexDirection:"column",minHeight:"100vh"}}>
-        <div style={{padding:"14px 24px",borderBottom:"1px solid #e2e8f0",background:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:20}}>
-          <div><div className="topbar-title" style={{fontSize:18,fontWeight:700,color:"#0f172a",letterSpacing:-.4}}>{pageTitle[page]}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:1}}>{isManager?dateLong():currentUser.company}</div></div>
-          {isManager&&<div style={{display:"flex",gap:8}}><button onClick={doAutoAssign} style={{padding:"9px 16px",borderRadius:10,background:"#fff",color:"#475569",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Auto-assign</button><button onClick={()=>setModal("newWO")} style={{padding:"9px 16px",borderRadius:10,background:"linear-gradient(135deg,#2563eb,#3b82f6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>+ New</button></div>}
+      <div className="main-wrap" style={{ flex: 1, marginLeft: 232, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        {/* Topbar */}
+        <div style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
+          <div>
+            <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
+          </div>
+          {isManager && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
+              <button onClick={() => setModal("newWO")} className="btn-primary">+ New work order</button>
+            </div>
+          )}
         </div>
 
-        <div className="content-pad" style={{flex:1,overflow:"auto",padding:24,paddingBottom:80}}>
-          {/* DASHBOARD */}
-          {page==="dashboard"&&isManager&&<div style={{animation:"fadeUp 0.35s"}}>
-            {emergUnassigned>0&&<div style={{background:"linear-gradient(135deg,#fef2f2,#fff1f2)",border:"1px solid #fecaca",borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}><div style={{width:40,height:40,borderRadius:10,background:"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🚨</div><div style={{flex:1}}><div style={{fontWeight:700,color:"#dc2626",fontSize:13}}>{emergUnassigned} emergency call{emergUnassigned>1?"s":""} need dispatch</div><div style={{fontSize:11,color:"#991b1b",marginTop:2}}>Waiting for contractor assignment</div></div><button onClick={()=>{nav("work_orders");setFilterP("emergency")}} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #fecaca",background:"#fff",color:"#dc2626",fontWeight:600,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>View →</button></div>}
-            <div className="stats-grid" style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:16,marginBottom:32}}>
-              {/* HERO: Revenue at risk */}
-              <div className="stat-card stat-hero" style={{background:"linear-gradient(135deg,#fef2f2 0%,#fff7ed 100%)",padding:"24px 28px",animation:"fadeUp 0.4s both",cursor:"pointer",position:"relative",overflow:"hidden"}} onClick={()=>nav("work_orders")}>
-                <div style={{position:"absolute",top:-30,right:-30,width:140,height:140,borderRadius:"50%",background:"radial-gradient(circle,rgba(239,68,68,0.08),transparent 70%)"}}/>
-                <div style={{fontSize:11,color:"#991b1b",fontWeight:700,textTransform:"uppercase",letterSpacing:1.1,marginBottom:12}}>Revenue at risk</div>
-                <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}>
-                  <div className="stat-value" style={{fontSize:40,fontWeight:800,color:"#dc2626",letterSpacing:-1.8,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{fmt(openValue)}</div>
-                  <div style={{display:"flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,color:"#16a34a",background:"#f0fdf4",padding:"4px 10px",borderRadius:20,border:"1px solid #bbf7d0"}}>
-                    <span style={{fontSize:9}}>▲</span> {fmt(Math.round(openValue*0.17))} this week
+        <div className="content-pad" style={{ flex: 1, overflow: "auto", padding: 28, paddingBottom: 80 }}>
+          {/* ═════ DASHBOARD ═════ */}
+          {page === "dashboard" && isManager && (
+            <div style={{ animation: "fadeUp 0.35s" }}>
+              {/* Alert bars */}
+              {slaBreached > 0 && (
+                <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: T.danger, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, animation: "pulse 1.6s infinite" }}>!</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>{slaBreached} SLA breach{slaBreached > 1 ? "es" : ""} — act now</div>
+                    <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>7-Eleven KPI missed. Update functional status immediately to stop further damage.</div>
+                  </div>
+                  <button onClick={() => nav("work_orders")} className="btn-soft" style={{ borderColor: `${T.danger}33`, color: T.danger }}>View →</button>
+                </div>
+              )}
+              {p1Unassigned > 0 && (
+                <div className="card" style={{ background: T.accentSoft, border: `1px solid ${T.accentRing}`, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>⚡</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: T.accent, fontSize: 13 }}>{p1Unassigned} P1 Critical call{p1Unassigned > 1 ? "s" : ""} need dispatch</div>
+                    <div style={{ fontSize: 11, color: "#8A4428", marginTop: 2 }}>8-hour SLA clock is running. Auto-dispatch or assign manually.</div>
+                  </div>
+                  <button onClick={doAutoAssign} className="btn-accent">Auto-dispatch all</button>
+                </div>
+              )}
+
+              {/* Hero + stats */}
+              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
+                <div className="card card-hover stat-hero" style={{ background: `linear-gradient(135deg, ${T.accentSoft} 0%, ${T.warnSoft} 100%)`, padding: "28px 32px", animation: "fadeUp 0.4s both", cursor: "pointer", position: "relative", overflow: "hidden", border: `1px solid ${T.accentRing}` }} onClick={() => nav("work_orders")}>
+                  <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: `radial-gradient(circle, ${T.accent}15, transparent 70%)` }} />
+                  <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 14 }}>Revenue at risk</div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+                    <div className="display stat-value" style={{ fontSize: 44, color: T.ink, letterSpacing: -1.2, lineHeight: 1 }}>{fmt(openValue)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: T.success, background: T.successSoft, padding: "4px 10px", borderRadius: 20, border: `1px solid ${T.success}22` }}>
+                      <span style={{ fontSize: 9 }}>▲</span> {fmt(Math.round(openValue * 0.15))} this week
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 12, color: T.inkSoft, fontWeight: 500 }}>{openCount} open · {new Set(openWOs.map(w => w.store)).size} stores · {new Set(openWOs.map(w => w.city.split(",")[1]?.trim())).size} states</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: T.accent, background: T.surface, padding: "4px 10px", borderRadius: 20, border: `1px solid ${T.accentRing}` }}>
+                      <span style={{ fontSize: 11 }}>⏱</span> P1 saved {(workOrders.reduce((s, w) => s + (w.activities?.length || 0), 0) * 2.3 / 60).toFixed(1)}h this week
+                    </div>
                   </div>
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,gap:12,flexWrap:"wrap"}}>
-                  <div style={{fontSize:12,color:"#7f1d1d",fontWeight:500}}>{openCount} open call{openCount!==1?"s":""} across {new Set(workOrders.filter(w=>activeStatuses.includes(w.status)).map(w=>w.store)).size} stores</div>
-                  <div style={{display:"flex",alignItems:"center",gap:6,fontSize:10,fontWeight:700,color:"#1e40af",background:"rgba(59,130,246,0.08)",padding:"4px 10px",borderRadius:20,border:"1px solid rgba(59,130,246,0.18)"}}>
-                    <span style={{fontSize:11}}>⏱</span> P1 saved {(workOrders.reduce((s,w)=>s+(w.activities?.length||0),0)*2.3/60).toFixed(1)}h this week
+                {[
+                  { label: "P1 Critical", value: p1Count, color: T.danger, sub: `${p1Unassigned} unassigned`, bg: T.dangerSoft, onClick: () => nav("work_orders") },
+                  { label: "SLA at risk", value: slaAtRisk, color: T.warn, sub: "Needs status update", bg: T.warnSoft, onClick: () => nav("work_orders") },
+                  { label: "Capital", value: capitalCount, color: T.violet, sub: "Pending equipment", bg: T.violetSoft, onClick: () => nav("capital") },
+                ].map((s, i) => (
+                  <div key={i} className="card card-hover" style={{ background: s.bg, padding: "22px 24px", animation: `fadeUp 0.4s ${(i + 1) * 0.06}s both`, cursor: "pointer" }} onClick={s.onClick}>
+                    <div style={{ fontSize: 11, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 12 }}>{s.label}</div>
+                    <div className="display stat-value" style={{ fontSize: 34, color: s.color, letterSpacing: -0.8, lineHeight: 1 }}>{s.value}</div>
+                    <div style={{ fontSize: 11, color: T.muted, marginTop: 8, fontWeight: 500 }}>{s.sub}</div>
                   </div>
-                </div>
-              </div>
-              {[{label:"Open calls",value:openCount,color:"#2563eb",sub:`${emergCount} emergency`,g:"linear-gradient(135deg,#eff6ff,#f0f9ff)",onClick:()=>nav("work_orders")},{label:"Completed",value:completedCount,color:"#16a34a",sub:"Clear 7-Eleven portal",g:"linear-gradient(135deg,#f0fdf4,#ecfdf5)",onClick:()=>nav("work_orders")},{label:"Capital",value:capitalCount,color:"#7c3aed",sub:"Pending equipment",g:"linear-gradient(135deg,#f5f3ff,#ede9fe)",onClick:()=>nav("capital")}].map((s,i)=><div key={i} className="stat-card" style={{background:s.g,padding:"20px 22px",animation:`fadeUp 0.4s ${(i+1)*.06}s both`,cursor:"pointer"}} onClick={s.onClick}><div style={{fontSize:11,color:"#64748b",fontWeight:700,textTransform:"uppercase",letterSpacing:1.1,marginBottom:12}}>{s.label}</div><div className="stat-value" style={{fontSize:30,fontWeight:800,color:s.color,letterSpacing:-1.2,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{s.value}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:8,fontWeight:500}}>{s.sub}</div></div>)}
-            </div>
-            <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:1.4,color:"#64748b",marginBottom:12,display:"flex",alignItems:"center",gap:8}}><span style={{width:18,height:2,background:"#cbd5e1",display:"inline-block",borderRadius:2}}/>Active pipeline</div>
-            <div className="kanban-active" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:12,marginBottom:32}}>{activeStatuses.map(renderKanbanCol)}</div>
-            <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:1.4,color:"#64748b",marginBottom:12,display:"flex",alignItems:"center",gap:8}}><span style={{width:18,height:2,background:"#cbd5e1",display:"inline-block",borderRadius:2}}/>Closing pipeline</div>
-            <div className="kanban-closing" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:12}}>{closingStatuses.map(renderKanbanCol)}</div>
-          </div>}
-
-          {/* MAP VIEW */}
-          {page==="map"&&isManager&&(()=>{const byStore=workOrders.filter(w=>activeStatuses.includes(w.status)||w.status==="capital").reduce((acc:any,w)=>{const key=`${w.store}|${w.city}`;if(!acc[key])acc[key]={store:w.store,city:w.city,wos:[]};acc[key].wos.push(w);return acc},{});const stores=Object.values(byStore) as any[];const worstStatus=(wos:any[])=>{if(wos.some(w=>w.priority==="emergency"&&w.status==="unassigned"))return"#dc2626";if(wos.some(w=>w.status==="unassigned"))return"#3b82f6";if(wos.some(w=>w.priority==="emergency"))return"#f59e0b";if(wos.some(w=>w.status==="wip"))return"#8b5cf6";return"#22c55e"};return(<div style={{animation:"fadeUp 0.3s"}}>
-            <div style={{background:"linear-gradient(135deg,#f0f9ff,#eff6ff)",border:"1px solid #bfdbfe",borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
-              <div style={{width:40,height:40,borderRadius:10,background:"#dbeafe",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ico d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16" size={20} color="#2563eb"/></div>
-              <div style={{flex:1}}><div style={{fontWeight:700,color:"#1e40af",fontSize:13}}>{stores.length} store{stores.length!==1?"s":""} with active work</div><div style={{fontSize:11,color:"#1d4ed8",marginTop:2}}>Click a pin to filter work orders. Red = unassigned emergency, blue = unassigned, amber = active emergency, purple = in progress.</div></div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:20}} className="detail-two-col">
-              <div style={{background:"linear-gradient(135deg,#f8fafc,#eff6ff)",borderRadius:16,border:"1px solid #e2e8f0",padding:20,position:"relative",overflow:"hidden"}}>
-                <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(circle at 1px 1px,rgba(148,163,184,0.15) 1px,transparent 0)",backgroundSize:"20px 20px",opacity:0.6}}/>
-                <svg viewBox="0 0 720 600" style={{width:"100%",height:"auto",display:"block",position:"relative",zIndex:1}}>
-                  <defs><filter id="pinshadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.25"/></filter></defs>
-                  <path d={FLORIDA_PATH} fill="#fff" stroke="#cbd5e1" strokeWidth="1.5" strokeLinejoin="round" opacity="0.95"/>
-                  <path d={FLORIDA_PATH} fill="none" stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,3" opacity="0.4"/>
-                  {stores.map((s,i)=>{const pos=coordsForCity(s.city);if(!pos)return null;const color=worstStatus(s.wos);const hasEmerg=s.wos.some(w=>w.priority==="emergency");const r=8+Math.min(s.wos.length*2,8);return(<g key={i} style={{cursor:"pointer"}} onClick={()=>{nav("work_orders");setSearch(s.store)}}>{hasEmerg&&<circle cx={pos.x} cy={pos.y} r={r+6} fill={color} opacity="0.15"><animate attributeName="r" values={`${r+4};${r+12};${r+4}`} dur="2s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.3;0;0.3" dur="2s" repeatCount="indefinite"/></circle>}<circle cx={pos.x} cy={pos.y} r={r} fill={color} stroke="#fff" strokeWidth="2.5" filter="url(#pinshadow)"/><text x={pos.x} y={pos.y+4} textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff" fontFamily="'DM Mono',monospace">{s.wos.length}</text><text x={pos.x} y={pos.y-r-6} textAnchor="middle" fontSize="9" fontWeight="600" fill="#334155">#{s.store}</text></g>)})}
-                </svg>
-                <div style={{position:"absolute",bottom:16,left:16,background:"rgba(255,255,255,0.92)",backdropFilter:"blur(10px)",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontSize:10,fontWeight:500,color:"#64748b",zIndex:2}}>
-                  <div style={{fontWeight:700,color:"#0f172a",marginBottom:6,fontSize:10,textTransform:"uppercase",letterSpacing:.6}}>Pin legend</div>
-                  {[{c:"#dc2626",l:"Unassigned emergency"},{c:"#3b82f6",l:"Unassigned"},{c:"#f59e0b",l:"Emergency in progress"},{c:"#8b5cf6",l:"In progress"},{c:"#22c55e",l:"All routine"}].map((l,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><div style={{width:8,height:8,borderRadius:"50%",background:l.c}}/><span>{l.l}</span></div>)}
-                </div>
-              </div>
-              <div style={{background:"#fff",borderRadius:16,border:"1px solid #e2e8f0",padding:20,maxHeight:600,overflowY:"auto"}}>
-                <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#94a3b8",marginBottom:12}}>Stores on the map</div>
-                {stores.sort((a,b)=>b.wos.length-a.wos.length).map((s,i)=>{const emerg=s.wos.filter(w=>w.priority==="emergency").length;const open=s.wos.filter(w=>activeStatuses.includes(w.status)).length;return(<div key={i} onClick={()=>{nav("work_orders");setSearch(s.store)}} style={{padding:"12px 0",borderBottom:i<stores.length-1?"1px solid #f1f5f9":"none",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}><div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>Store #{s.store}</div><span style={{fontSize:10,fontWeight:700,color:worstStatus(s.wos),background:worstStatus(s.wos)+"22",padding:"2px 8px",borderRadius:12}}>{s.wos.length}</span></div><div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{s.city}</div>{emerg>0&&<div style={{fontSize:10,color:"#dc2626",fontWeight:600}}>⚡ {emerg} emergency</div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{open} open · {fmt(s.wos.reduce((sum,w)=>sum+w.nte,0))}</div></div>)})}
-              </div>
-            </div>
-          </div>)})()}
-
-          {/* CAPITAL */}
-          {page==="capital"&&isManager&&<div style={{animation:"fadeUp 0.3s"}}><div style={{background:"linear-gradient(135deg,#f5f3ff,#ede9fe)",border:"1px solid #c4b5fd",borderRadius:12,padding:"14px 20px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}><div style={{width:40,height:40,borderRadius:10,background:"#ede9fe",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#7c3aed"/></div><div><div style={{fontWeight:700,color:"#5b21b6",fontSize:13}}>{capitalCount} capital replacement{capitalCount!==1?"s":""}</div><div style={{fontSize:11,color:"#6d28d9",marginTop:2}}>Equipment orders — separate from regular pipeline</div></div></div><div className="capital-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>{workOrders.filter(w=>w.status==="capital").map((wo,i)=><div key={wo.id} onClick={()=>{setSelectedWO(wo.id);setPage("work_orders");setAiNote(null)}} style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20,cursor:"pointer",animation:`fadeUp 0.3s ${i*.06}s both`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:600,color:"#7c3aed"}}>{wo.id}</span>{wo.capitalStatus&&<span style={{fontSize:10,fontWeight:600,padding:"3px 10px",borderRadius:20,background:CAP_STATUS[wo.capitalStatus]?.bg||"#f1f5f9",color:CAP_STATUS[wo.capitalStatus]?.color||"#64748b"}}>{wo.capitalStatus}</span>}</div><div style={{fontSize:14,fontWeight:600,color:"#0f172a",marginBottom:4}}>Store #{wo.store} · {wo.city}</div><div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{wo.issue}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"10px 0",borderTop:"1px solid #f1f5f9"}}><div><div style={{fontSize:9,fontWeight:600,textTransform:"uppercase",letterSpacing:.5,color:"#94a3b8",marginBottom:2}}>Equipment</div><div style={{fontSize:11,fontWeight:500}}>{wo.partNeeded||"TBD"}</div></div><div><div style={{fontSize:9,fontWeight:600,textTransform:"uppercase",letterSpacing:.5,color:"#94a3b8",marginBottom:2}}>NTE</div><div style={{fontSize:11,fontWeight:600,fontFamily:"'DM Mono',monospace"}}>{fmt(wo.nte)}</div></div></div><div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>Contractor: {getUser(wo.contractor)?.name}</div></div>)}</div></div>}
-
-          {/* WORK ORDERS TABLE */}
-          {page==="work_orders"&&!selectedWO&&<div style={{animation:"fadeUp 0.3s"}}><div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search WOT#, store, keyword..." style={{padding:"9px 14px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:12,width:260,fontFamily:"inherit",background:"#fff"}}/><select value={filterC} onChange={e=>setFilterC(e.target.value)} style={{padding:"9px 14px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}><option value="all">All contractors</option>{USERS.filter(u=>u.role==="contractor").map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select><select value={filterP} onChange={e=>setFilterP(e.target.value)} style={{padding:"9px 14px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}><option value="all">All priorities</option><option value="emergency">Emergency</option><option value="critical">Critical</option><option value="routine">Routine</option></select>{(filterC!=="all"||filterP!=="all"||search)&&<button onClick={()=>{setFilterC("all");setFilterP("all");setSearch("")}} style={{fontSize:11,color:"#64748b",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Clear</button>}</div>
-            <div className="table-scroll" style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",overflow:"hidden"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#f8fafc"}}>{["WOT#","Store","Issue","Priority","Status","Contractor","ETA","NTE"].map(h=><th key={h} style={{textAlign:h==="NTE"?"right":"left",padding:"11px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#94a3b8",borderBottom:"1px solid #e2e8f0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{filteredWOs.filter(w=>w.status!=="capital").map((wo,i)=><tr key={wo.id} onClick={()=>{setSelectedWO(wo.id);setAiNote(null)}} style={{cursor:"pointer",borderBottom:"1px solid #f1f5f9",animation:`fadeUp 0.3s ${i*.02}s both`}}><td style={{padding:"11px 14px",fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:11,color:"#2563eb"}}>{wo.id}</td><td style={{padding:"11px 14px",fontWeight:600}}>#{wo.store}</td><td style={{padding:"11px 14px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#475569"}}>{wo.issue}</td><td style={{padding:"11px 14px"}}><Badge conf={PRIORITY[wo.priority]}/></td><td style={{padding:"11px 14px"}}><Badge conf={STATUS[wo.status]}/></td><td style={{padding:"11px 14px",color:"#64748b"}}>{wo.contractor?getUser(wo.contractor)?.name:"—"}</td><td style={{padding:"11px 14px",color:wo.eta?"#f59e0b":"#cbd5e1",fontWeight:wo.eta?600:400,fontSize:11}}>{wo.eta?wo.eta.split(", ")[1]:"—"}</td><td style={{padding:"11px 14px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmt(wo.nte)}</td></tr>)}</tbody></table></div>
-          </div>}
-
-          {/* DETAIL */}
-          {(page==="work_orders"||page==="wo_detail")&&selectedWO&&woData&&(()=>{const storeHistory=workOrders.filter(w=>w.store===woData.store&&w.id!==woData.id);const repeatCount=storeHistory.length;const sameCategory=storeHistory.filter(w=>w.category===woData.category).length;const invoiceTotal=woData.invoiceTotal||0;const nteBreach=invoiceTotal>woData.nte&&invoiceTotal>0;const nteHeadroom=woData.nte-invoiceTotal;return(<div style={{animation:"fadeUp 0.25s"}}>
-            <button onClick={()=>{setSelectedWO(null);setAiNote(null);if(!isManager)setPage("my_jobs")}} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"#64748b",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",marginBottom:16,padding:0}}><Ico d="M15 18l-6-6 6-6" size={14}/> Back</button>
-            {/* Alert banners — repeat visit, NTE breach */}
-            {repeatCount>=2&&<div style={{background:"linear-gradient(135deg,#fffbeb,#fef3c7)",border:"1px solid #fde68a",borderRadius:12,padding:"12px 18px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}><div style={{fontSize:20}}>🔁</div><div style={{flex:1}}><div style={{fontWeight:700,color:"#92400e",fontSize:12}}>Repeat visit — Store #{woData.store} has {repeatCount} other work order{repeatCount!==1?"s":""}{sameCategory>0?` (${sameCategory} same category)`:""}</div><div style={{fontSize:11,color:"#a16207",marginTop:2}}>{sameCategory>=2?"Consider flagging for capital replacement — may be a chronic equipment issue":"Cross-reference previous repairs before dispatch"}</div></div></div>}
-            {nteBreach&&<div style={{background:"linear-gradient(135deg,#fef2f2,#fff1f2)",border:"1px solid #fecaca",borderRadius:12,padding:"12px 18px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}><div style={{fontSize:20}}>⚠️</div><div style={{flex:1}}><div style={{fontWeight:700,color:"#991b1b",fontSize:12}}>Invoice exceeds NTE by {fmt(invoiceTotal-woData.nte)}</div><div style={{fontSize:11,color:"#b91c1c",marginTop:2}}>Invoiced {fmt(invoiceTotal)} vs authorized {fmt(woData.nte)} — requires AFM approval before processing</div></div></div>}
-            {!nteBreach&&invoiceTotal>0&&<div style={{background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)",border:"1px solid #bbf7d0",borderRadius:12,padding:"12px 18px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}><div style={{fontSize:18}}>✓</div><div style={{flex:1}}><div style={{fontWeight:700,color:"#14532d",fontSize:12}}>Within budget — {fmt(nteHeadroom)} under NTE</div><div style={{fontSize:11,color:"#15803d",marginTop:2}}>Invoiced {fmt(invoiceTotal)} of {fmt(woData.nte)} authorized</div></div></div>}
-            <div className="detail-two-col" style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20}}>
-              <div>
-                <div style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20,marginBottom:16}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:600,color:"#94a3b8",marginBottom:4}}>{woData.id}</div>
-                  <div style={{fontSize:18,fontWeight:700,color:"#0f172a",letterSpacing:-.4}}>Store #{woData.store} · {woData.city}</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>{woData.addr}</div>
-                  <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}><Badge conf={STATUS[woData.status]}/><Badge conf={PRIORITY[woData.priority]}/>{woData.capitalStatus&&<Badge conf={{label:woData.capitalStatus,color:CAP_STATUS[woData.capitalStatus]?.color,bg:CAP_STATUS[woData.capitalStatus]?.bg}}/>}</div>
-                  <div style={{fontSize:14,color:"#475569",lineHeight:1.65,marginTop:14,padding:"12px 16px",background:"#f8fafc",borderRadius:10,border:"1px solid #f1f5f9"}}>{woData.issue}</div>
-                  <div className="detail-fields" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:18,marginTop:16}}>
-                    {[{l:"Category",v:woData.category},{l:"NTE",v:fmt(woData.nte)},{l:"ETA",v:woData.eta||"Not set"},{l:"Assigned to",v:woData.contractor?getUser(woData.contractor)?.name:"Unassigned"},{l:"Start time",v:woData.startTime||"Not started"},{l:"AFM",v:woData.afm},{l:"Asset model",v:woData.assetModel||"Not captured"},{l:"Serial #",v:woData.assetSerial||"Not captured"},{l:"AFM phone",v:woData.afmPhone}].map((d,i)=><div key={i}><div style={{fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:.6,color:"#94a3b8",marginBottom:3}}>{d.l}</div><div style={{fontSize:13,fontWeight:500,color:["Not captured","Not set","Not started","Unassigned"].includes(d.v)?"#ef4444":"#1e293b"}}>{d.v}</div></div>)}
-                  </div>
-                </div>
-
-                {/* ACTIONS — THESE ACTUALLY WORK NOW */}
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
-                  {woData.status==="unassigned"&&isManager&&<><button onClick={()=>doAssign(woData.id,"derek")} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#2563eb,#3b82f6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Assign → Derek</button><button onClick={()=>doAssign(woData.id,"ray")} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#8b5cf6,#a78bfa)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Assign → Ray</button><button onClick={()=>doAssign(woData.id,"andy")} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#0891b2,#22d3ee)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Assign → Andy</button></>}
-
-                  {woData.status==="assigned"&&!isManager&&<><button onClick={()=>setModal("setEta")} style={{padding:"9px 18px",borderRadius:10,background:"#fffbeb",color:"#d97706",border:"1px solid #fde68a",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Set / update ETA</button><button onClick={()=>setModal("startWork")} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#8b5cf6,#a78bfa)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Start work</button></>}
-
-                  {woData.status==="wip"&&<><button onClick={()=>setModal("pauseWork")} style={{padding:"9px 18px",borderRadius:10,background:"#fffbeb",color:"#d97706",border:"1px solid #fde68a",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Pause work</button>{isManager&&<button onClick={()=>doCapitalFlag(woData.id)} style={{padding:"9px 18px",borderRadius:10,background:"#f5f3ff",color:"#7c3aed",border:"1px solid #c4b5fd",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Capital replacement</button>}<button onClick={()=>setModal("closeComplete")} style={{padding:"9px 18px",borderRadius:10,background:"#f0fdf4",color:"#16a34a",border:"1px solid #bbf7d0",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Close complete</button></>}
-
-                  {woData.status==="parts"&&!isManager&&<button onClick={()=>setModal("startWork")} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#8b5cf6,#a78bfa)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Resume work</button>}
-
-                  {woData.status==="completed"&&isManager&&<button onClick={()=>doMoveToInvoice(woData.id)} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#ec4899,#f472b6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Portal updated → pending invoice</button>}
-
-                  {(woData.status==="completed"||woData.status==="pending_invoice")&&!isManager&&<button onClick={()=>setModal("createInvoice")} style={{padding:"9px 18px",borderRadius:10,background:"linear-gradient(135deg,#ec4899,#f472b6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Create invoice</button>}
-                </div>
-
-                {/* PHOTOS */}
-                <div style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20,marginBottom:16}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                    <div style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>Photos{(woData.photos?.length||0)>0?` (${woData.photos.length})`:""}</div>
-                    <label style={{padding:"7px 14px",borderRadius:8,background:"#eff6ff",color:"#1d4ed8",border:"1px solid #bfdbfe",cursor:"pointer",fontWeight:600,fontSize:11,fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                      Add photos
-                      <input type="file" accept="image/*" multiple capture="environment" style={{display:"none"}} onChange={e=>{doAddPhotos(woData.id,e.target.files);e.target.value=""}}/>
-                    </label>
-                  </div>
-                  {(woData.photos||[]).length===0?<div style={{textAlign:"center",padding:"24px 0",fontSize:12,color:"#cbd5e1",background:"#f8fafc",borderRadius:10,border:"1px dashed #e2e8f0"}}>No photos yet. Add site pics, asset tags, part numbers, completed work.</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:8}}>{woData.photos.map((url,i)=><div key={i} style={{position:"relative",aspectRatio:"1",borderRadius:10,overflow:"hidden",border:"1px solid #e2e8f0",cursor:"pointer"}} onClick={()=>setLightbox(url)}><img src={url} alt={`Photo ${i+1}`} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/><button onClick={e=>{e.stopPropagation();doRemovePhoto(woData.id,i)}} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:"50%",background:"rgba(15,23,42,0.75)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>×</button></div>)}</div>}
-                </div>
-
-                {/* ACTIVITY FEED — LIVE */}
-                <div style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:20}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                    <div style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>Activity ({woData.activities?.length||0})</div>
-                    {isManager&&<button onClick={doAiEnhance} disabled={aiEnhancing} style={{padding:"6px 14px",borderRadius:8,background:aiEnhancing?"#f1f5f9":"linear-gradient(135deg,#7c3aed,#a78bfa)",color:aiEnhancing?"#94a3b8":"#fff",border:"none",cursor:aiEnhancing?"default":"pointer",fontWeight:600,fontSize:10,fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>{aiEnhancing?<><span style={{display:"inline-block",width:12,height:12,border:"2px solid #c4b5fd",borderTopColor:"#7c3aed",borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/> Enhancing...</>:"✨ AI enhance notes"}</button>}
-                  </div>
-                  <div style={{display:"flex",gap:8,marginBottom:18}}><input value={noteText} onChange={e=>setNoteText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")doPostNote(woData.id)}} placeholder="Add a note..." style={{flex:1,padding:"9px 14px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:12,fontFamily:"inherit"}}/><button onClick={()=>doPostNote(woData.id)} style={{padding:"9px 16px",borderRadius:10,background:"#0f172a",color:"#fff",border:"none",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>Post</button></div>
-                  {aiNote&&<div style={{background:"linear-gradient(135deg,#f5f3ff,#ede9fe)",border:"1px solid #c4b5fd",borderRadius:10,padding:14,marginBottom:16,animation:"fadeUp 0.3s"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:10,fontWeight:700,color:"#7c3aed",textTransform:"uppercase",letterSpacing:.5}}>✨ AI-enhanced version</span><button onClick={()=>{navigator.clipboard?.writeText(aiNote);fire("Copied")}} style={{fontSize:10,color:"#7c3aed",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Copy</button></div><div style={{fontSize:12,color:"#3c3489",lineHeight:1.6}}>{aiNote}</div></div>}
-                  {(woData.activities||[]).map((e,i)=><div key={i} style={{display:"flex",gap:12,marginBottom:16,animation:i===0?"fadeUp 0.3s":"none"}}><div style={{width:8,height:8,borderRadius:"50%",background:e.type==="system"?"#e2e8f0":"#3b82f6",marginTop:5,flexShrink:0}}/><div><div style={{fontSize:12}}><span style={{fontWeight:600,color:"#1e293b"}}>{e.author}</span><span style={{color:"#94a3b8",marginLeft:8,fontSize:10}}>{e.time}</span></div><div style={{fontSize:12,color:"#64748b",lineHeight:1.5,marginTop:2}}>{e.text}</div></div></div>)}
-                </div>
+                ))}
               </div>
 
-              {/* Right sidebar */}
-              <div>
-                {woData.contractor&&<div style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:18,marginBottom:14}}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#94a3b8",marginBottom:10}}>Contractor</div><div style={{display:"flex",alignItems:"center",gap:10}}><Avatar initials={getUser(woData.contractor)?.initials} color={getUser(woData.contractor)?.color} size={38}/><div><div style={{fontSize:13,fontWeight:700}}>{getUser(woData.contractor)?.name}</div><div style={{fontSize:11,color:"#64748b"}}>{getUser(woData.contractor)?.company}</div></div></div></div>}
-                {woData.eta&&<div style={{background:"#fffbeb",borderRadius:14,border:"1px solid #fde68a",padding:18,marginBottom:14}}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#92400e",marginBottom:6}}>Contractor ETA</div><div style={{fontSize:15,fontWeight:700,color:"#78350f"}}>{woData.eta}</div><div style={{fontSize:10,color:"#a16207",marginTop:4}}>Auto-notify if not checked in</div></div>}
-                <div style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",padding:18,marginBottom:14}}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#94a3b8",marginBottom:12}}>Progress</div>{[{label:"Created",done:true},{label:"Assigned + ETA",done:["assigned","wip","parts","capital","completed","pending_invoice","pending_approval"].includes(woData.status)},{label:"Work started",done:["wip","parts","capital","completed","pending_invoice","pending_approval"].includes(woData.status)},{label:"Asset captured",done:!!woData.assetModel},{label:"Completed",done:["completed","pending_invoice","pending_approval"].includes(woData.status)},{label:"Portal updated",done:["pending_invoice","pending_approval"].includes(woData.status)},{label:"Invoiced",done:["pending_approval"].includes(woData.status)}].map((s,i,a)=><div key={i} style={{display:"flex",gap:12,position:"relative"}}>{i<a.length-1&&<div style={{position:"absolute",left:9,top:20,width:2,height:20,background:s.done&&a[i+1]?.done?"#22c55e":"#e2e8f0"}}/>}<div style={{width:20,height:20,borderRadius:"50%",border:s.done?"none":"2px solid #e2e8f0",background:s.done?"#22c55e":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{s.done&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>}</div><div style={{paddingBottom:16}}><div style={{fontSize:12,fontWeight:s.done?600:400,color:s.done?"#1e293b":"#94a3b8"}}>{s.label}</div></div></div>)}</div>
-                {woData.partNeeded&&<div style={{background:"linear-gradient(135deg,#fffbeb,#fef9c3)",borderRadius:14,border:"1px solid #fde68a",padding:18}}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#92400e",marginBottom:6}}>{woData.status==="capital"?"Equipment":"Part"} on order</div><div style={{fontSize:13,fontWeight:600,color:"#78350f"}}>{woData.partNeeded}</div>{woData.partEta&&<div style={{fontSize:11,color:"#a16207",marginTop:4}}>ETA: {woData.partEta}</div>}</div>}
+              <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.muted, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 18, height: 2, background: T.border, display: "inline-block", borderRadius: 2 }} />Active pipeline
+              </div>
+              <div className="kanban-active" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginBottom: 32 }}>
+                {activeStatuses.map(renderKanbanCol)}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.muted, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 18, height: 2, background: T.border, display: "inline-block", borderRadius: 2 }} />Closing pipeline
+              </div>
+              <div className="kanban-closing" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+                {closingStatuses.map(renderKanbanCol)}
               </div>
             </div>
-          </div>)})()}
+          )}
 
-          {/* MY JOBS */}
-          {page==="my_jobs"&&!isManager&&<div style={{animation:"fadeUp 0.3s"}}><div className="stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>{[{l:"Active",v:myWOs.filter(w=>activeStatuses.includes(w.status)).length,c:"#3b82f6",bg:"linear-gradient(135deg,#eff6ff,#f0f9ff)"},{l:"Pending inv.",v:myWOs.filter(w=>w.status==="pending_invoice").length,c:"#ec4899",bg:"linear-gradient(135deg,#fdf2f8,#fff1f3)"},{l:"Capital",v:myWOs.filter(w=>w.status==="capital").length,c:"#7c3aed",bg:"linear-gradient(135deg,#f5f3ff,#ede9fe)"}].map((s,i)=><div key={i} style={{background:s.bg,borderRadius:14,padding:"18px 22px",border:"1px solid #e2e8f0"}}><div style={{fontSize:10,color:"#64748b",fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>{s.l}</div><div className="stat-value" style={{fontSize:28,fontWeight:800,color:s.c,fontFamily:"'DM Mono',monospace",letterSpacing:-1.5}}>{s.v}</div></div>)}</div>{myWOs.map((wo,i)=><div key={wo.id} onClick={()=>{setSelectedWO(wo.id);setPage("wo_detail");setAiNote(null)}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",background:"#fff",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:8,cursor:"pointer",animation:`fadeUp 0.3s ${i*.04}s both`,gap:12}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}><span style={{fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:600,color:"#3b82f6"}}>{wo.id}</span><Badge conf={PRIORITY[wo.priority]}/>{wo.eta&&<span style={{fontSize:10,fontWeight:600,color:"#f59e0b"}}>ETA {wo.eta.split(", ")[1]}</span>}</div><div style={{fontSize:14,fontWeight:600,color:"#0f172a",marginBottom:2}}>Store #{wo.store} · {wo.city}</div><div style={{fontSize:12,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{wo.issue}</div></div><div style={{textAlign:"right",flexShrink:0}}><Badge conf={STATUS[wo.status]}/><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>{wo.age}</div></div></div>)}</div>}
+          {/* ═════ MAP ═════ */}
+          {page === "map" && isManager && (() => {
+            const byStore = workOrders.filter(w => activeStatuses.includes(w.status) || w.status === "capital").reduce((acc: any, w) => {
+              const key = `${w.store}|${w.city}`;
+              if (!acc[key]) acc[key] = { store: w.store, city: w.city, wos: [] };
+              acc[key].wos.push(w);
+              return acc;
+            }, {});
+            const stores = Object.values(byStore) as any[];
+            const worstColor = (wos: any[]) => {
+              if (wos.some(w => w.priority === "p1" && w.status === "unassigned")) return T.danger;
+              if (wos.some(w => { const s = slaRemaining(w); return s && s.remainingHours < 2; })) return T.danger;
+              if (wos.some(w => w.priority === "p1")) return T.accent;
+              if (wos.some(w => w.status === "wip")) return T.violet;
+              return T.success;
+            };
+            return (
+              <div style={{ animation: "fadeUp 0.3s" }}>
+                <div className="card" style={{ background: T.accentSoft, border: `1px solid ${T.accentRing}`, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ico d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16" size={20} color="#fff" /></div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: T.accent, fontSize: 13 }}>{stores.length} stores with active work across {new Set(stores.map(s => s.city.split(",")[1]?.trim())).size} states</div>
+                    <div style={{ fontSize: 11, color: "#8A4428", marginTop: 2 }}>Click a pin to filter. Red = SLA risk, amber = active P1, violet = work in progress, green = on track.</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }} className="detail-two-col">
+                  <div className="card" style={{ padding: 20, position: "relative", overflow: "hidden", background: T.surfaceSoft }}>
+                    <div style={{ position: "absolute", inset: 0, backgroundImage: `radial-gradient(circle at 1px 1px, ${T.border} 1px, transparent 0)`, backgroundSize: "20px 20px", opacity: 0.5 }} />
+                    <svg viewBox="0 0 800 500" style={{ width: "100%", height: "auto", display: "block", position: "relative", zIndex: 1 }}>
+                      <defs><filter id="ps"><feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.2" /></filter></defs>
+                      <path d={US_PATH} fill={T.surface} stroke={T.border} strokeWidth="1.5" strokeLinejoin="round" />
+                      {stores.map((s, i) => {
+                        const pos = coordsForCity(s.city);
+                        if (!pos) return null;
+                        const color = worstColor(s.wos);
+                        const hasRisk = s.wos.some(w => { const x = slaRemaining(w); return x && x.remainingHours < 2; });
+                        const r = 9 + Math.min(s.wos.length * 2, 10);
+                        return (
+                          <g key={i} style={{ cursor: "pointer" }} onClick={() => { nav("work_orders"); setSearch(s.store); }}>
+                            {hasRisk && <circle cx={pos.x} cy={pos.y} r={r + 8} fill={color} opacity="0.18"><animate attributeName="r" values={`${r + 4};${r + 14};${r + 4}`} dur="1.8s" repeatCount="indefinite" /><animate attributeName="opacity" values="0.3;0;0.3" dur="1.8s" repeatCount="indefinite" /></circle>}
+                            <circle cx={pos.x} cy={pos.y} r={r} fill={color} stroke="#fff" strokeWidth="2.5" filter="url(#ps)" />
+                            <text x={pos.x} y={pos.y + 4} textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff" fontFamily="'JetBrains Mono', monospace">{s.wos.length}</text>
+                            <text x={pos.x} y={pos.y - r - 6} textAnchor="middle" fontSize="10" fontWeight="600" fill={T.ink}>#{s.store}</text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    <div style={{ position: "absolute", bottom: 16, left: 16, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(10px)", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 11, fontWeight: 500, color: T.muted, zIndex: 2 }}>
+                      <div style={{ fontWeight: 700, color: T.ink, marginBottom: 6, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Pin legend</div>
+                      {[{ c: T.danger, l: "SLA risk / breach" }, { c: T.accent, l: "P1 Critical active" }, { c: T.violet, l: "In progress" }, { c: T.success, l: "On track" }].map((l, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: l.c }} />
+                          <span>{l.l}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="card" style={{ padding: 20, maxHeight: 600, overflowY: "auto" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Stores ranked by volume</div>
+                    {stores.sort((a, b) => b.wos.length - a.wos.length).map((s: any, i) => {
+                      const p1 = s.wos.filter((w: any) => w.priority === "p1").length;
+                      return (
+                        <div key={i} onClick={() => { nav("work_orders"); setSearch(s.store); }} style={{ padding: "13px 0", borderBottom: i < stores.length - 1 ? `1px solid ${T.borderSoft}` : "none", cursor: "pointer" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>Store #{s.store}</div>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: worstColor(s.wos), background: worstColor(s.wos) + "22", padding: "2px 8px", borderRadius: 12 }}>{s.wos.length}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{s.city}</div>
+                          {p1 > 0 && <div style={{ fontSize: 10, color: T.danger, fontWeight: 600 }}>⚡ {p1} P1 Critical</div>}
+                          <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{fmt(s.wos.reduce((sum: number, w: any) => sum + (w.nte || 0), 0))} at risk</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
-          {/* INVOICES */}
-          {page==="invoices"&&<div style={{animation:"fadeUp 0.3s"}}><div style={{display:"flex",gap:0,marginBottom:16,borderBottom:"2px solid #e2e8f0"}}>{[{id:"all",l:"All"},{id:"submitted",l:"Submitted"},{id:"rejected",l:"Rejected"},{id:"approved",l:"Approved"}].map(t=><button key={t.id} onClick={()=>setInvTab(t.id)} style={{padding:"10px 18px",fontSize:12,fontWeight:invTab===t.id?700:400,color:invTab===t.id?"#0f172a":"#94a3b8",background:"none",border:"none",borderBottom:invTab===t.id?"2px solid #0f172a":"2px solid transparent",cursor:"pointer",fontFamily:"inherit",marginBottom:-2}}>{t.l}</button>)}</div><div className="table-scroll" style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",overflow:"hidden"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#f8fafc"}}>{["Invoice#","WOT","Contractor","State","Date","Store","Total"].map(h=><th key={h} style={{textAlign:h==="Total"?"right":"left",padding:"11px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.6,color:"#94a3b8",borderBottom:"1px solid #e2e8f0"}}>{h}</th>)}</tr></thead><tbody>{(isManager?invoices:invoices.filter(i=>i.contractor===currentUser.id)).filter(i=>invTab==="all"||i.state===invTab).map((inv,i)=><tr key={inv.num} style={{borderBottom:"1px solid #f1f5f9"}}><td style={{padding:"12px 14px",fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:11,color:"#3b82f6"}}>{inv.num}</td><td style={{padding:"12px 14px",fontFamily:"'DM Mono',monospace",fontSize:11,color:"#64748b"}}>{inv.wot}</td><td style={{padding:"12px 14px",color:"#475569"}}>{getUser(inv.contractor)?.name}</td><td style={{padding:"12px 14px"}}><Badge conf={INV_STATE[inv.state]}/></td><td style={{padding:"12px 14px",color:"#94a3b8"}}>{inv.date}</td><td style={{padding:"12px 14px"}}>#{inv.store}</td><td style={{padding:"12px 14px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(inv.total)}</td></tr>)}</tbody></table></div></div>}
+          {/* ═════ CAPITAL ═════ */}
+          {page === "capital" && isManager && (
+            <div style={{ animation: "fadeUp 0.3s" }}>
+              <div className="card" style={{ background: T.violetSoft, border: `1px solid ${T.violet}33`, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: T.violet, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#fff" /></div>
+                <div>
+                  <div style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{capitalCount} capital replacement{capitalCount !== 1 ? "s" : ""}</div>
+                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Equipment orders — separate from regular pipeline, 4-12 week lifecycle</div>
+                </div>
+              </div>
+              <div className="capital-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                {workOrders.filter(w => w.status === "capital").map((wo, i) => (
+                  <div key={wo.id} className="card card-hover" onClick={() => { setSelectedWO(wo.id); setPage("work_orders"); setAiNote(null); }} style={{ padding: 22, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.06}s both` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.violet }}>{wo.id}</span>
+                      {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>Store #{wo.store} · {wo.city}</div>
+                    <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>{wo.summary}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>
+                      <div>
+                        <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>Equipment</div>
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{wo.partNeeded || "TBD"}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>NTE</div>
+                        <div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{fmt(wo.nte)}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: T.subtle, marginTop: 10 }}>Contractor: {getUser(wo.contractor)?.name}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-          {/* CONTRACTORS */}
-          {page==="contractors"&&<div className="contractors-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,animation:"fadeUp 0.3s"}}>{USERS.filter(u=>u.role==="contractor").map((c,i)=>{const cWOs=workOrders.filter(w=>w.contractor===c.id);return<div key={c.id} style={{background:"#fff",borderRadius:14,border:"1px solid #e2e8f0",overflow:"hidden",animation:`fadeUp 0.35s ${i*.08}s both`}}><div style={{padding:"22px 22px 16px",borderBottom:"1px solid #f1f5f9"}}><div style={{display:"flex",alignItems:"center",gap:12}}><Avatar initials={c.initials} color={c.color} size={46}/><div><div style={{fontSize:16,fontWeight:700,color:"#0f172a"}}>{c.name}</div><div style={{fontSize:12,color:"#64748b"}}>{c.territory}</div></div></div></div><div style={{padding:"16px 22px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><div><div style={{fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:.5,color:"#94a3b8",marginBottom:3}}>Active</div><div style={{fontSize:14,fontWeight:700,color:"#3b82f6"}}>{cWOs.filter(w=>activeStatuses.includes(w.status)).length}</div></div><div><div style={{fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:.5,color:"#94a3b8",marginBottom:3}}>Capital</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{cWOs.filter(w=>w.status==="capital").length}</div></div></div><div style={{padding:"0 22px 18px"}}><button onClick={()=>{nav("work_orders");setFilterC(c.id)}} style={{width:"100%",padding:"9px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>View work orders →</button></div></div>})}</div>}
+          {/* ═════ WORK ORDERS TABLE ═════ */}
+          {page === "work_orders" && !selectedWO && (
+            <div style={{ animation: "fadeUp 0.3s" }}>
+              <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search WO#, INC#, store, keyword..." style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, width: 300, fontFamily: "inherit", background: T.surface }} />
+                {isManager && (
+                  <select value={filterC} onChange={e => setFilterC(e.target.value)} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+                    <option value="all">All contractors</option>
+                    {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                )}
+                <select value={filterP} onChange={e => setFilterP(e.target.value)} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+                  <option value="all">All priorities</option>
+                  {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+                {(filterC !== "all" || filterP !== "all" || search) && <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Clear</button>}
+              </div>
+              <div className="card table-scroll" style={{ overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: T.surfaceSoft }}>
+                      {["WO#", "INC#", "Store", "Summary", "Priority", "Status", "Contractor", "SLA", "NTE"].map(h => (
+                        <th key={h} style={{ textAlign: h === "NTE" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredWOs.filter(w => w.status !== "capital").map((wo, i) => {
+                      const sla = slaLabel(wo);
+                      return (
+                        <tr key={wo.id} onClick={() => { setSelectedWO(wo.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
+                          <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{wo.id}</td>
+                          <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>{wo.incidentId}</td>
+                          <td style={{ padding: "12px 14px", fontWeight: 600 }}>#{wo.store}</td>
+                          <td style={{ padding: "12px 14px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary}</td>
+                          <td style={{ padding: "12px 14px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
+                          <td style={{ padding: "12px 14px" }}><Badge conf={STATUS[wo.status]} small /></td>
+                          <td style={{ padding: "12px 14px", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "—"}</td>
+                          <td style={{ padding: "12px 14px" }}>{sla ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span> : <span style={{ color: T.subtle }}>—</span>}</td>
+                          <td className="mono" style={{ padding: "12px 14px", textAlign: "right", fontWeight: 600 }}>{fmt(wo.nte)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ═════ WO DETAIL ═════ */}
+          {(page === "work_orders" || page === "wo_detail") && selectedWO && woData && (() => {
+            const storeHistory = workOrders.filter(w => w.store === woData.store && w.id !== woData.id);
+            const repeatCount = storeHistory.length;
+            const sameCategory = storeHistory.filter(w => w.category === woData.category).length;
+            const invoiceTotal = woData.invoiceTotal || 0;
+            const nteBreach = invoiceTotal > woData.nte && invoiceTotal > 0;
+            const nteHeadroom = woData.nte - invoiceTotal;
+            const sla = slaLabel(woData);
+            const slaR = slaRemaining(woData);
+            return (
+              <div style={{ animation: "fadeUp 0.25s" }}>
+                <button onClick={() => { setSelectedWO(null); setAiNote(null); if (!isManager) setPage("my_jobs"); }} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
+
+                {/* Alert stack */}
+                {sla?.severity === "breach" && (
+                  <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 22 }}>🚨</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>SLA breach — {Math.floor(-slaR.remainingHours)}h past {PRIORITY[woData.priority].slaHours}h limit</div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Functional status is "{woData.functionalStatus}" — update immediately to close the gap with 7-Eleven.</div>
+                    </div>
+                  </div>
+                )}
+                {sla?.severity === "critical" && (
+                  <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 20 }}>⚠️</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>SLA at risk — {Math.round(slaR.remainingHours * 60)} minutes to breach</div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Check in with the contractor and update functional status now.</div>
+                    </div>
+                  </div>
+                )}
+                {repeatCount >= 2 && (
+                  <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 20 }}>🔁</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.warn, fontSize: 12 }}>Repeat visit — Store #{woData.store} has {repeatCount} other work order{repeatCount !== 1 ? "s" : ""}{sameCategory > 0 ? ` (${sameCategory} same category)` : ""}</div>
+                      <div style={{ fontSize: 11, color: "#73560C", marginTop: 2 }}>{sameCategory >= 2 ? "Consider flagging for capital replacement — chronic equipment issue." : "Cross-reference previous repairs before dispatch."}</div>
+                    </div>
+                  </div>
+                )}
+                {nteBreach && (
+                  <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 20 }}>⚠️</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 12 }}>Invoice exceeds NTE by {fmt(invoiceTotal - woData.nte)}</div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Invoiced {fmt(invoiceTotal)} vs authorized {fmt(woData.nte)} — requires AFM approval.</div>
+                    </div>
+                  </div>
+                )}
+                {!nteBreach && invoiceTotal > 0 && (
+                  <div className="card" style={{ background: T.successSoft, border: `1px solid ${T.success}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 18 }}>✓</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.success, fontSize: 12 }}>Within budget — {fmt(nteHeadroom)} under NTE</div>
+                      <div style={{ fontSize: 11, color: "#2F5B3C", marginTop: 2 }}>Invoiced {fmt(invoiceTotal)} of {fmt(woData.nte)} authorized.</div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="detail-two-col" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
+                  <div>
+                    {/* Header card */}
+                    <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                        <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>{woData.id}</span>
+                        <span style={{ color: T.subtle, fontSize: 12 }}>/</span>
+                        <span className="mono" style={{ fontSize: 11, color: T.muted }}>{woData.incidentId}</span>
+                      </div>
+                      <div className="display" style={{ fontSize: 28, fontWeight: 500, color: T.ink, letterSpacing: -0.4, lineHeight: 1.1 }}>Store #{woData.store} · {woData.city}</div>
+                      <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{woData.addr}</div>
+                      <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
+                        <Badge conf={PRIORITY[woData.priority]} />
+                        <Badge conf={STATUS[woData.status]} />
+                        {woData.functionalStatus && <Badge conf={{ label: `FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
+                        {sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
+                      </div>
+                      <div style={{ padding: "14px 18px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginTop: 16 }}>
+                        <div style={{ fontSize: 12, color: T.subtle, marginBottom: 4, fontWeight: 600 }}>{woData.businessService} · {woData.category}{woData.subCategory ? ` · ${woData.subCategory}` : ""}</div>
+                        <div style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.6, fontWeight: 500 }}>{woData.summary}</div>
+                        {woData.description && woData.description !== woData.summary && <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>{woData.description}</div>}
+                      </div>
+                      <div className="detail-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 18 }}>
+                        {[
+                          { l: "Line of Service", v: woData.lineOfService },
+                          { l: "NTE", v: fmt(woData.nte) },
+                          { l: "ETA", v: woData.eta || "Not set" },
+                          { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
+                          { l: "Start time", v: woData.startTime || "Not started" },
+                          { l: "AFM", v: woData.afm || "—" },
+                          { l: "Asset model", v: woData.assetModel || "Not captured" },
+                          { l: "Serial #", v: woData.assetSerial || "Not captured" },
+                          { l: "AFM email", v: woData.afmEmail || "—" },
+                        ].map((d, i) => (
+                          <div key={i}>
+                            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>{d.l}</div>
+                            <div style={{ fontSize: 13, fontWeight: 500, color: ["Not captured", "Not set", "Not started", "Unassigned", "—"].includes(d.v) ? T.danger : T.ink }}>{d.v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                      {woData.status === "unassigned" && isManager && contractorsOnly.slice(0, 4).map(c => (
+                        <button key={c.id} onClick={() => doAssign(woData.id, c.id)} className="btn-soft">Assign → {c.name.split(" ")[0]}</button>
+                      ))}
+                      {woData.status === "assigned" && !isManager && (
+                        <>
+                          <button onClick={() => setModal("setEta")} className="btn-soft">Set ETA</button>
+                          <button onClick={() => setModal("startWork")} className="btn-accent">Start work</button>
+                        </>
+                      )}
+                      {woData.status === "wip" && (
+                        <>
+                          <button onClick={() => setModal("pauseWork")} className="btn-soft">Pause (parts)</button>
+                          {isManager && <button onClick={() => doCapitalFlag(woData.id)} className="btn-soft">Flag capital</button>}
+                          <button onClick={() => setModal("closeComplete")} className="btn-primary">Close complete</button>
+                        </>
+                      )}
+                      {woData.status === "parts" && !isManager && <button onClick={() => setModal("startWork")} className="btn-accent">Resume work</button>}
+                      {woData.status === "completed" && isManager && <button onClick={() => doMoveToInvoice(woData.id)} className="btn-accent">Portal updated → pending invoice</button>}
+                      {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
+                    </div>
+
+                    {/* Photos */}
+                    <div className="card" style={{ padding: 22, marginBottom: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos{(woData.photos?.length || 0) > 0 ? ` (${woData.photos.length})` : ""}</div>
+                        <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "8px 14px" }}>
+                          <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
+                          Add photos
+                          <input type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => { doAddPhotos(woData.id, e.target.files); e.target.value = ""; }} />
+                        </label>
+                      </div>
+                      {(woData.photos || []).length === 0
+                        ? <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: T.subtle, background: T.surfaceSoft, borderRadius: 10, border: `1px dashed ${T.border}` }}>No photos yet. Add site pics, asset tags, part numbers, completed work.</div>
+                        : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
+                          {woData.photos.map((url: string, i: number) => (
+                            <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}`, cursor: "pointer" }} onClick={() => setLightbox(url)}>
+                              <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                              <button onClick={e => { e.stopPropagation(); doRemovePhoto(woData.id, i); }} style={{ position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: "50%", background: "rgba(31,30,28,0.8)", border: "none", color: "#fff", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                            </div>
+                          ))}
+                        </div>}
+                    </div>
+
+                    {/* Activity */}
+                    <div className="card" style={{ padding: 22 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activities?.length || 0}</div>
+                        {isManager && <button onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Enhancing...</> : "✨ AI enhance notes"}</button>}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+                        <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id); }} placeholder="Add a note..." style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
+                        <button onClick={() => doPostNote(woData.id)} className="btn-primary" style={{ padding: "10px 18px" }}>Post</button>
+                      </div>
+                      {aiNote && (
+                        <div style={{ background: T.surfaceSoft, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, marginBottom: 16, animation: "fadeUp 0.3s" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: 0.8 }}>✨ AI-enhanced</span>
+                            <button onClick={() => { navigator.clipboard?.writeText(aiNote); fire("Copied"); }} className="btn-soft" style={{ padding: "4px 10px", fontSize: 10 }}>Copy</button>
+                          </div>
+                          <div style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.65 }}>{aiNote}</div>
+                        </div>
+                      )}
+                      {(woData.activities || []).map((e: any, i: number) => (
+                        <div key={i} style={{ display: "flex", gap: 12, marginBottom: 16, animation: i === 0 ? "fadeUp 0.3s" : "none" }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: e.type === "system" ? T.border : T.accent, marginTop: 6, flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12 }}>
+                              <span style={{ fontWeight: 600, color: T.ink }}>{e.author}</span>
+                              <span style={{ color: T.subtle, marginLeft: 8, fontSize: 11 }}>{e.time}</span>
+                            </div>
+                            <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginTop: 3 }}>{e.text}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Right sidebar */}
+                  <div>
+                    {slaR && (
+                      <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
+                        <div className="display" style={{ fontSize: 28, color: slaR.remainingHours < 2 ? T.danger : slaR.percent > 50 ? T.warn : T.ink, lineHeight: 1 }}>{slaR.remainingHours > 0 ? `${Math.floor(slaR.remainingHours)}h ${Math.round((slaR.remainingHours % 1) * 60)}m` : `-${Math.floor(-slaR.remainingHours)}h`}</div>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{PRIORITY[woData.priority].label} · {PRIORITY[woData.priority].slaHours}h SLA</div>
+                        <div className="sla-bar" style={{ marginTop: 10 }}>
+                          <div className="sla-fill" style={{ width: `${slaR.percent}%`, background: slaR.percent > 90 ? T.danger : slaR.percent > 75 ? T.accent : slaR.percent > 50 ? T.warn : T.success }} />
+                        </div>
+                      </div>
+                    )}
+                    {woData.contractor && (
+                      <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>Contractor</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <Avatar initials={getUser(woData.contractor)?.initials} color={getUser(woData.contractor)?.color} size={38} />
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{getUser(woData.contractor)?.name}</div>
+                            <div style={{ fontSize: 11, color: T.muted }}>{getUser(woData.contractor)?.company}</div>
+                            {getUser(woData.contractor)?.phone && <div className="mono" style={{ fontSize: 11, color: T.subtle, marginTop: 3 }}>{getUser(woData.contractor)?.phone}</div>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {woData.eta && (
+                      <div className="card" style={{ padding: 18, marginBottom: 14, background: T.warnSoft, borderColor: `${T.warn}33` }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn, marginBottom: 6 }}>ETA</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#73560C" }}>{woData.eta}</div>
+                        <div style={{ fontSize: 10, color: T.warn, marginTop: 4 }}>Auto-notify if not checked in</div>
+                      </div>
+                    )}
+                    <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Progress</div>
+                      {[
+                        { label: "Created", done: true },
+                        { label: "Dispatched + ETA", done: ["assigned", "wip", "parts", "capital", "completed", "pending_invoice", "pending_approval"].includes(woData.status) },
+                        { label: "Work started", done: ["wip", "parts", "capital", "completed", "pending_invoice", "pending_approval"].includes(woData.status) },
+                        { label: "Asset captured", done: !!woData.assetModel },
+                        { label: "Completed", done: ["completed", "pending_invoice", "pending_approval"].includes(woData.status) },
+                        { label: "7-Eleven updated", done: ["pending_invoice", "pending_approval"].includes(woData.status) },
+                        { label: "Invoiced", done: ["pending_approval"].includes(woData.status) },
+                      ].map((s, i, a) => (
+                        <div key={i} style={{ display: "flex", gap: 12, position: "relative" }}>
+                          {i < a.length - 1 && <div style={{ position: "absolute", left: 9, top: 20, width: 2, height: 20, background: s.done && a[i + 1]?.done ? T.success : T.borderSoft }} />}
+                          <div style={{ width: 20, height: 20, borderRadius: "50%", border: s.done ? "none" : `2px solid ${T.border}`, background: s.done ? T.success : T.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {s.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>}
+                          </div>
+                          <div style={{ paddingBottom: 18 }}>
+                            <div style={{ fontSize: 12, fontWeight: s.done ? 600 : 400, color: s.done ? T.ink : T.subtle }}>{s.label}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {woData.partNeeded && (
+                      <div className="card" style={{ padding: 18, background: T.warnSoft, borderColor: `${T.warn}33` }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn, marginBottom: 6 }}>{woData.status === "capital" ? "Equipment" : "Part"} on order</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#73560C" }}>{woData.partNeeded}</div>
+                        {woData.partEta && <div style={{ fontSize: 11, color: T.warn, marginTop: 4 }}>ETA: {woData.partEta}</div>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ═════ MY JOBS (contractor) ═════ */}
+          {page === "my_jobs" && !isManager && (
+            <div style={{ animation: "fadeUp 0.3s" }}>
+              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 24 }}>
+                {[
+                  { l: "Active", v: myWOs.filter(w => activeStatuses.includes(w.status)).length, c: T.accent, bg: T.accentSoft },
+                  { l: "Pending inv.", v: myWOs.filter(w => w.status === "pending_invoice").length, c: T.violet, bg: T.violetSoft },
+                  { l: "Capital", v: myWOs.filter(w => w.status === "capital").length, c: T.warn, bg: T.warnSoft },
+                ].map((s, i) => (
+                  <div key={i} className="card" style={{ background: s.bg, padding: "20px 22px" }}>
+                    <div style={{ fontSize: 11, color: s.c, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>{s.l}</div>
+                    <div className="display stat-value" style={{ fontSize: 30, fontWeight: 500, color: s.c, letterSpacing: -0.6 }}>{s.v}</div>
+                  </div>
+                ))}
+              </div>
+              {myWOs.map((wo, i) => {
+                const sla = slaLabel(wo);
+                return (
+                  <div key={wo.id} className="card card-hover" onClick={() => { setSelectedWO(wo.id); setPage("wo_detail"); setAiNote(null); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", marginBottom: 10, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.04}s both`, gap: 12 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                        <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.accent }}>{wo.id}</span>
+                        <Badge conf={PRIORITY[wo.priority]} small />
+                        {sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>}
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3 }}>Store #{wo.store} · {wo.city}</div>
+                      <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary}</div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <Badge conf={STATUS[wo.status]} small />
+                      <div style={{ fontSize: 10, color: T.subtle, marginTop: 4 }}>{wo.age}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═════ INVOICES ═════ */}
+          {page === "invoices" && (
+            <div style={{ animation: "fadeUp 0.3s" }}>
+              <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
+                {[{ id: "all", l: "All" }, { id: "submitted", l: "Submitted" }, { id: "rejected", l: "Rejected" }, { id: "approved", l: "Approved" }].map(t => (
+                  <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>{t.l}</button>
+                ))}
+              </div>
+              <div className="card table-scroll" style={{ overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: T.surfaceSoft }}>
+                      {["Invoice#", "WO#", "Contractor", "State", "Date", "Store", "Total"].map(h => (
+                        <th key={h} style={{ textAlign: h === "Total" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(isManager ? invoices : invoices.filter(i => i.contractor === currentUser.id)).filter(i => invTab === "all" || i.state === invTab).map(inv => (
+                      <tr key={inv.num} style={{ borderBottom: `1px solid ${T.borderSoft}` }}>
+                        <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{inv.num}</td>
+                        <td className="mono" style={{ padding: "13px 14px", fontSize: 11, color: T.muted }}>{inv.wot}</td>
+                        <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>
+                        <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[inv.state]} small /></td>
+                        <td style={{ padding: "13px 14px", color: T.subtle }}>{inv.date}</td>
+                        <td style={{ padding: "13px 14px" }}>#{inv.store}</td>
+                        <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(inv.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ═════ CONTRACTORS ═════ */}
+          {page === "contractors" && isManager && (
+            <div className="contractors-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, animation: "fadeUp 0.3s" }}>
+              {contractorsOnly.map((c, i) => {
+                const cWOs = workOrders.filter(w => w.contractor === c.id);
+                return (
+                  <div key={c.id} className="card card-hover" style={{ overflow: "hidden", animation: `fadeUp 0.35s ${i * 0.06}s both` }}>
+                    <div style={{ padding: "22px 22px 16px", borderBottom: `1px solid ${T.borderSoft}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <Avatar initials={c.initials} color={c.color} size={46} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>{c.name}</div>
+                          <div style={{ fontSize: 12, color: T.muted }}>{c.company}</div>
+                          <div style={{ fontSize: 11, color: T.subtle, marginTop: 3 }}>{c.territory}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 5, marginTop: 12, flexWrap: "wrap" }}>
+                        {(c.trades || []).map((t: string) => (
+                          <span key={t} style={{ fontSize: 10, fontWeight: 600, color: T.accent, background: T.accentSoft, padding: "2px 8px", borderRadius: 10, textTransform: "capitalize" }}>{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ padding: "14px 22px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>Active</div>
+                        <div className="display" style={{ fontSize: 20, fontWeight: 500, color: T.accent }}>{cWOs.filter(w => activeStatuses.includes(w.status)).length}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>Capital</div>
+                        <div className="display" style={{ fontSize: 20, fontWeight: 500, color: T.violet }}>{cWOs.filter(w => w.status === "capital").length}</div>
+                      </div>
+                    </div>
+                    <div style={{ padding: "0 22px 18px" }}>
+                      <button onClick={() => { nav("work_orders"); setFilterC(c.id); }} className="btn-soft" style={{ width: "100%" }}>View work orders →</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
         </div>
       </div>
 
-      {/* ═══ MODALS ═══ */}
+      {/* ═════ MODALS ═════ */}
+      {modal === "newWO" && (
+        <Modal onClose={() => { setModal(null); resetNewWO(); }} title="New work order" width={520}>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Store #"><Input value={newWO.store} onChange={(e: any) => setNewWO({ ...newWO, store: e.target.value })} placeholder="e.g. 33321" /></Field>
+              <Field label="City, State"><Input value={newWO.city} onChange={(e: any) => setNewWO({ ...newWO, city: e.target.value })} placeholder="e.g. Dallas, TX" /></Field>
+            </div>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Business Service"><Sel value={newWO.businessService} onChange={(e: any) => setNewWO({ ...newWO, businessService: e.target.value })}>
+                <option value="">Select...</option>
+                {["Refrigeration equipment", "Frozen Beverage - Equipment", "Cold Beverage - Equipment", "HVAC", "Plumbing", "Hot food", "Ice merchandiser", "Walk-in cooler/freezer", "Septic/Grease"].map(c => <option key={c}>{c}</option>)}
+              </Sel></Field>
+              <Field label="Priority"><Sel value={newWO.priority} onChange={(e: any) => setNewWO({ ...newWO, priority: e.target.value })}>
+                {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
+              </Sel></Field>
+            </div>
+            <Field label="Category"><Input value={newWO.category} onChange={(e: any) => setNewWO({ ...newWO, category: e.target.value })} placeholder="e.g. Slurpee Machine, Fountain Machine, RTU compressor" /></Field>
+            <Field label="Summary"><TA rows={3} value={newWO.summary} onChange={(e: any) => setNewWO({ ...newWO, summary: e.target.value })} placeholder="Describe the issue..." /></Field>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="NTE ($)"><Input type="number" value={newWO.nte} onChange={(e: any) => setNewWO({ ...newWO, nte: e.target.value })} placeholder="1000" /></Field>
+              <Field label="Dispatch"><Sel value={newWO.assign} onChange={(e: any) => setNewWO({ ...newWO, assign: e.target.value })}>
+                <option value="auto">Auto — territory + trade match</option>
+                <option value="unassigned">Leave unassigned</option>
+                {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name} ({u.territory})</option>)}
+              </Sel></Field>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => { setModal(null); resetNewWO(); }} className="btn-soft">Cancel</button>
+            <button onClick={() => { if (doCreateWO()) setModal(null); }} className="btn-primary">Create</button>
+          </div>
+        </Modal>
+      )}
 
-      {modal==="newWO"&&<Modal onClose={()=>{setModal(null);resetNewWO()}} title="New work order"><div style={{display:"grid",gap:14}}><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Store #"><Input value={newWO.store} onChange={e=>setNewWO({...newWO,store:e.target.value})} placeholder="e.g. 36190"/></Field><Field label="City"><Input value={newWO.city} onChange={e=>setNewWO({...newWO,city:e.target.value})} placeholder="e.g. Orlando, FL"/></Field></div><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Category"><Sel value={newWO.category} onChange={e=>setNewWO({...newWO,category:e.target.value})}>{["HVAC","Plumbing","Electrical","Refrigeration","Equipment","General"].map(c=><option key={c}>{c}</option>)}</Sel></Field><Field label="Priority"><Sel value={newWO.priority} onChange={e=>setNewWO({...newWO,priority:e.target.value})}><option value="routine">Routine</option><option value="critical">Critical</option><option value="emergency">Emergency</option></Sel></Field></div><Field label="Description"><TA rows={3} value={newWO.issue} onChange={e=>setNewWO({...newWO,issue:e.target.value})} placeholder="Describe the repair needed..."/></Field><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="NTE ($)"><Input type="number" value={newWO.nte} onChange={e=>setNewWO({...newWO,nte:e.target.value})} placeholder="1000"/></Field><Field label="Assign"><Sel value={newWO.assign} onChange={e=>setNewWO({...newWO,assign:e.target.value})}><option value="auto">Auto-assign by territory</option><option value="unassigned">Leave unassigned</option>{USERS.filter(u=>u.role==="contractor").map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</Sel></Field></div></div><div style={{display:"flex",gap:8,marginTop:22,justifyContent:"flex-end"}}><button onClick={()=>{setModal(null);resetNewWO()}} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:500,fontSize:12,fontFamily:"inherit"}}>Cancel</button><button onClick={()=>{if(doCreateWO())setModal(null)}} style={{padding:"10px 24px",borderRadius:10,background:"linear-gradient(135deg,#2563eb,#3b82f6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>Create</button></div></Modal>}
+      {modal === "setEta" && woData && (
+        <Modal onClose={() => setModal(null)} title="Set ETA" width={400}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>When will you arrive at Store #{woData.store}?</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Date"><Input type="date" id="eta-date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+              <Field label="Time"><Input type="time" id="eta-time" defaultValue="14:00" /></Field>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const dv = (document.getElementById("eta-date") as any)?.value || new Date().toISOString().slice(0, 10);
+              const t = (document.getElementById("eta-time") as any)?.value || "14:00";
+              const h = parseInt(t); const m = t.split(":")[1];
+              const ap = h >= 12 ? "PM" : "AM";
+              const d = new Date(dv + "T00:00:00");
+              const eta = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${h > 12 ? h - 12 : h || 12}:${m} ${ap}`;
+              doSetEta(woData.id, eta); setModal(null);
+            }} className="btn-primary">Set ETA</button>
+          </div>
+        </Modal>
+      )}
 
-      {modal==="setEta"&&woData&&<Modal onClose={()=>setModal(null)} title="Set ETA" width={400}><div style={{fontSize:12,color:"#64748b",marginBottom:16}}>When will you arrive at Store #{woData.store}?</div><div style={{display:"grid",gap:14}}><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Date"><Input type="date" id="eta-date" defaultValue={new Date().toISOString().slice(0,10)}/></Field><Field label="Time"><Input type="time" id="eta-time" defaultValue="14:00"/></Field></div></div><div style={{display:"flex",gap:8,marginTop:22,justifyContent:"flex-end"}}><button onClick={()=>setModal(null)} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:500,fontSize:12,fontFamily:"inherit"}}>Cancel</button><button onClick={()=>{const dv=(document.getElementById("eta-date") as any)?.value||new Date().toISOString().slice(0,10);const t=(document.getElementById("eta-time") as any)?.value||"14:00";const h=parseInt(t);const m=t.split(":")[1];const ap=h>=12?"PM":"AM";const d=new Date(dv+"T00:00:00");const eta=`${MONTHS[d.getMonth()]} ${d.getDate()}, ${h>12?h-12:h||12}:${m} ${ap}`;doSetEta(woData.id,eta);setModal(null)}} style={{padding:"10px 24px",borderRadius:10,background:"#d97706",color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>Set ETA</button></div></Modal>}
+      {modal === "startWork" && woData && (
+        <Modal onClose={() => setModal(null)} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Arrival date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+              <Field label="Arrival time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+            </div>
+            <Field label="Initial notes"><TA id="start-notes" rows={2} placeholder="What are you seeing on site?" /></Field>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => { doStartWork(woData.id, (document.getElementById("start-notes") as any)?.value); setModal(null); }} className="btn-accent">{woData.status === "parts" ? "Resume" : "Start work"}</button>
+          </div>
+        </Modal>
+      )}
 
-      {modal==="startWork"&&woData&&<Modal onClose={()=>setModal(null)} title={woData.status==="parts"?"Resume work":"Start work"} width={420}><div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Checking in at Store #{woData.store}.</div><div style={{display:"grid",gap:14}}><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Arrival date"><Input type="date" defaultValue={new Date().toISOString().slice(0,10)}/></Field><Field label="Arrival time"><Input type="time" defaultValue={new Date().toTimeString().slice(0,5)}/></Field></div><Field label="Initial notes"><TA id="start-notes" rows={2} placeholder="What are you seeing on site?"/></Field></div><div style={{display:"flex",gap:8,marginTop:22,justifyContent:"flex-end"}}><button onClick={()=>setModal(null)} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:500,fontSize:12,fontFamily:"inherit"}}>Cancel</button><button onClick={()=>{doStartWork(woData.id,(document.getElementById("start-notes") as any)?.value);setModal(null)}} style={{padding:"10px 24px",borderRadius:10,background:"linear-gradient(135deg,#8b5cf6,#a78bfa)",color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>{woData.status==="parts"?"Resume":"Start work"}</button></div></Modal>}
+      {modal === "pauseWork" && woData && (
+        <Modal onClose={() => setModal(null)} title="Pause work" width={500}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Why can't the job be completed this trip?</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <Field label="Reason"><Sel id="pause-reason">
+              <option value="">Select...</option>
+              <option value="Temporary fix">Temporary fix — equipment partially working</option>
+              <option value="Awaiting parts">Awaiting parts — equipment completely down</option>
+            </Sel></Field>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Stamp-out date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+              <Field label="Stamp-out time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+            </div>
+            <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts information</div>
+              <div style={{ display: "grid", gap: 10 }}>
+                <Field label="Part description (generic)"><Input id="part-desc" placeholder="e.g. Evaporator coil, blower motor..." /></Field>
+                <Field label="Specific part number"><Input id="part-num" placeholder="e.g. Heatcraft BHL136BE" /></Field>
+                <Field label="Expected return date"><Input id="part-eta" type="date" /></Field>
+              </div>
+            </div>
+            <Field label="Notes"><TA id="pause-notes" rows={2} placeholder="Explain what was done so far..." /></Field>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => { doPauseWork(woData.id, (document.getElementById("pause-reason") as any)?.value, (document.getElementById("part-desc") as any)?.value, (document.getElementById("part-num") as any)?.value, (document.getElementById("part-eta") as any)?.value, (document.getElementById("pause-notes") as any)?.value); setModal(null); }} className="btn-accent">Pause work</button>
+          </div>
+        </Modal>
+      )}
 
-      {modal==="pauseWork"&&woData&&<Modal onClose={()=>setModal(null)} title="Pause work" width={480}><div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Why can't the job be completed this trip?</div><div style={{display:"grid",gap:14}}><Field label="Reason"><Sel id="pause-reason"><option value="">Select...</option><option value="Temporary fix">Temporary fix — equipment partially working</option><option value="Awaiting parts">Awaiting parts — equipment completely down</option></Sel></Field><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Stamp-out date"><Input type="date" defaultValue={new Date().toISOString().slice(0,10)}/></Field><Field label="Stamp-out time"><Input type="time" defaultValue={new Date().toTimeString().slice(0,5)}/></Field></div><div style={{padding:"14px 16px",background:"#fef2f2",borderRadius:10,border:"1px solid #fecaca"}}><div style={{fontSize:11,fontWeight:700,color:"#991b1b",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Parts information</div><div style={{display:"grid",gap:10}}><Field label="Part description (generic)"><Input id="part-desc" placeholder="e.g. Evaporator coil, blower motor..."/></Field><Field label="Specific part number"><Input id="part-num" placeholder="e.g. Heatcraft BHL136BE"/></Field><Field label="Expected return date"><Input id="part-eta" type="date"/></Field></div></div><Field label="Notes"><TA id="pause-notes" rows={2} placeholder="Explain what was done so far..."/></Field></div><div style={{display:"flex",gap:8,marginTop:22,justifyContent:"flex-end"}}><button onClick={()=>setModal(null)} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:500,fontSize:12,fontFamily:"inherit"}}>Cancel</button><button onClick={()=>{doPauseWork(woData.id,(document.getElementById("pause-reason") as any)?.value,(document.getElementById("part-desc") as any)?.value,(document.getElementById("part-num") as any)?.value,(document.getElementById("part-eta") as any)?.value,(document.getElementById("pause-notes") as any)?.value);setModal(null)}} style={{padding:"10px 24px",borderRadius:10,background:"#d97706",color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>Pause work</button></div></Modal>}
+      {modal === "closeComplete" && woData && (
+        <Modal onClose={() => setModal(null)} title="Close complete" width={540}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Complete the job for Store #{woData.store}. Asset info is required.</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Asset information (required)</div>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Asset model"><Input id="asset-model" placeholder="e.g. Taylor 340" defaultValue={woData.assetModel || ""} /></Field>
+                <Field label="Serial number"><Input id="asset-serial" placeholder="e.g. TY-2022-81402" defaultValue={woData.assetSerial || ""} /></Field>
+              </div>
+            </div>
+            <div style={{ padding: "14px 16px", background: T.successSoft, borderRadius: 10, border: `1px solid ${T.success}33` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.success, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>DSP closure</div>
+              <Field label="Resolution code"><Sel id="resolution">
+                <option value="">Select...</option>
+                <option>Current asset evaluated</option>
+                <option>Current asset repaired</option>
+                <option>Current asset replaced</option>
+                <option>OEM warranty related</option>
+              </Sel></Field>
+            </div>
+            <Field label="Resolution details"><TA id="resolution-notes" rows={3} placeholder="Brief summary of what was found and done..." /></Field>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="End date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+              <Field label="End time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const m = (document.getElementById("asset-model") as any)?.value;
+              const s = (document.getElementById("asset-serial") as any)?.value;
+              if (!m || !s) { fire("Asset model and serial number are required"); return; }
+              doCloseComplete(woData.id, m, s, (document.getElementById("resolution") as any)?.value); setModal(null);
+            }} className="btn-primary">Close complete</button>
+          </div>
+        </Modal>
+      )}
 
-      {modal==="closeComplete"&&woData&&<Modal onClose={()=>setModal(null)} title="Close complete" width={520}><div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Complete the job for Store #{woData.store}. Asset info is required.</div><div style={{display:"grid",gap:14}}><div style={{padding:"14px 16px",background:"#eff6ff",borderRadius:10,border:"1px solid #bfdbfe"}}><div style={{fontSize:11,fontWeight:700,color:"#1e40af",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Asset information (required)</div><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Asset model"><Input id="asset-model" placeholder="e.g. Taylor 428" defaultValue={woData.assetModel||""}/></Field><Field label="Serial number"><Input id="asset-serial" placeholder="e.g. TY-2019-44821" defaultValue={woData.assetSerial||""}/></Field></div></div><div style={{padding:"14px 16px",background:"#f0fdf4",borderRadius:10,border:"1px solid #bbf7d0"}}><div style={{fontSize:11,fontWeight:700,color:"#14532d",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>DSP closure</div><Field label="Resolution code"><Sel id="resolution"><option value="">Select...</option><option>Current asset evaluated</option><option>Current asset repaired</option><option>Current asset replaced</option><option>OEM warranty related</option></Sel></Field></div><Field label="Resolution details"><TA id="resolution-notes" rows={3} placeholder="Brief summary of what was found and done..."/></Field><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="End date"><Input type="date" defaultValue={new Date().toISOString().slice(0,10)}/></Field><Field label="End time"><Input type="time" defaultValue={new Date().toTimeString().slice(0,5)}/></Field></div></div><div style={{display:"flex",gap:8,marginTop:22,justifyContent:"flex-end"}}><button onClick={()=>setModal(null)} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:500,fontSize:12,fontFamily:"inherit"}}>Cancel</button><button onClick={()=>{const m=(document.getElementById("asset-model") as any)?.value;const s=(document.getElementById("asset-serial") as any)?.value;if(!m||!s){fire("Asset model and serial number are required");return}doCloseComplete(woData.id,m,s,(document.getElementById("resolution") as any)?.value);setModal(null)}} style={{padding:"10px 24px",borderRadius:10,background:"#16a34a",color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>Close complete</button></div></Modal>}
+      {modal === "createInvoice" && woData && (() => {
+        const r = parseFloat(newInv.rate) || 0, h = parseFloat(newInv.hours) || 0, o = parseFloat(newInv.otHours) || 0;
+        const mat = parseFloat(newInv.materials) || 0, trip = parseFloat(newInv.trip) || 0, tax = parseFloat(newInv.tax) || 0;
+        const liveTotal = (r * h) + (r * 1.5 * o) + mat + trip + tax;
+        const over = liveTotal > woData.nte;
+        return (
+          <Modal onClose={() => { setModal(null); resetNewInv(); }} title="Create invoice" width={560}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Invoice for {woData.id} — Store #{woData.store}</div>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ padding: "12px 16px", background: T.surfaceSoft, borderRadius: 10, border: `1px solid ${T.borderSoft}`, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <div><div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>WO#</div><div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{woData.id}</div></div>
+                <div><div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>Store</div><div style={{ fontSize: 12, fontWeight: 600 }}>#{woData.store}</div></div>
+                <div><div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>NTE</div><div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{fmt(woData.nte)}</div></div>
+              </div>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Your invoice #"><Input value={newInv.invNum} onChange={(e: any) => setNewInv({ ...newInv, invNum: e.target.value })} placeholder="INV-2026-0142" /></Field>
+                <Field label="CME #"><Sel value={newInv.cme} onChange={(e: any) => setNewInv({ ...newInv, cme: e.target.value })}>
+                  <option value="">Select CME...</option>
+                  <option>CME-001 HVAC</option>
+                  <option>CME-002 Beverage</option>
+                  <option>CME-003 Electrical</option>
+                  <option>CME-004 Refrigeration</option>
+                  <option>CME-005 Plumbing</option>
+                  <option>CME-006 General</option>
+                </Sel></Field>
+              </div>
+              <Field label="Work description"><TA rows={2} value={newInv.desc || woData.summary} onChange={(e: any) => setNewInv({ ...newInv, desc: e.target.value })} /></Field>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <Field label="Hourly rate"><Input value={newInv.rate} onChange={(e: any) => setNewInv({ ...newInv, rate: e.target.value })} placeholder="0" type="number" /></Field>
+                <Field label="Hours"><Input value={newInv.hours} onChange={(e: any) => setNewInv({ ...newInv, hours: e.target.value })} placeholder="0" type="number" /></Field>
+                <Field label="OT hours"><Input value={newInv.otHours} onChange={(e: any) => setNewInv({ ...newInv, otHours: e.target.value })} placeholder="0" type="number" /></Field>
+              </div>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <Field label="Materials"><Input value={newInv.materials} onChange={(e: any) => setNewInv({ ...newInv, materials: e.target.value })} placeholder="0" type="number" /></Field>
+                <Field label="Trip/freight"><Input value={newInv.trip} onChange={(e: any) => setNewInv({ ...newInv, trip: e.target.value })} type="number" /></Field>
+                <Field label="Tax"><Input value={newInv.tax} onChange={(e: any) => setNewInv({ ...newInv, tax: e.target.value })} placeholder="0" type="number" /></Field>
+              </div>
+              <div style={{ padding: "14px 18px", background: over ? T.dangerSoft : T.successSoft, borderRadius: 10, border: `1px solid ${over ? T.danger + "33" : T.success + "33"}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: over ? T.danger : T.success }}>Calculated total</div>
+                  {over && <div style={{ fontSize: 10, color: T.danger, marginTop: 2 }}>Exceeds NTE of {fmt(woData.nte)}</div>}
+                </div>
+                <div className="display" style={{ fontSize: 24, color: over ? T.danger : T.success }}>{fmt(Math.round(liveTotal))}</div>
+              </div>
+              <label style={{ padding: "12px 16px", background: newInv.hasPdf ? T.successSoft : T.accentSoft, borderRadius: 10, border: `1px solid ${newInv.hasPdf ? T.success + "33" : T.accentRing}`, cursor: "pointer", display: "block" }}>
+                <div style={{ border: `2px dashed ${newInv.hasPdf ? T.success : T.accent}`, borderRadius: 8, padding: 20, textAlign: "center" }}>
+                  <div style={{ fontSize: 13, color: newInv.hasPdf ? T.success : T.accent, fontWeight: 600 }}>{newInv.hasPdf ? "✓ PDF attached" : "Click to upload PDF invoice"}</div>
+                  <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>PDF attachment required</div>
+                  <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={(e: any) => setNewInv({ ...newInv, hasPdf: !!(e.target.files && e.target.files.length) })} />
+                </div>
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+              <button onClick={() => { setModal(null); resetNewInv(); }} className="btn-soft">Cancel</button>
+              <button onClick={() => { if (doSubmitInvoice(woData)) setModal(null); }} className="btn-accent">Submit invoice</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
-      {modal==="createInvoice"&&woData&&(()=>{const r=parseFloat(newInv.rate)||0,h=parseFloat(newInv.hours)||0,o=parseFloat(newInv.otHours)||0,mat=parseFloat(newInv.materials)||0,trip=parseFloat(newInv.trip)||0,tax=parseFloat(newInv.tax)||0;const liveTotal=(r*h)+(r*1.5*o)+mat+trip+tax;const over=liveTotal>woData.nte;return(<Modal onClose={()=>{setModal(null);resetNewInv()}} title="Create invoice" width={540}><div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Invoice for {woData.id} — Store #{woData.store}</div><div style={{display:"grid",gap:14}}><div style={{padding:"12px 16px",background:"#f8fafc",borderRadius:10,border:"1px solid #e2e8f0",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><div><div style={{fontSize:9,fontWeight:600,textTransform:"uppercase",color:"#94a3b8"}}>WOT</div><div style={{fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace"}}>{woData.id}</div></div><div><div style={{fontSize:9,fontWeight:600,textTransform:"uppercase",color:"#94a3b8"}}>Store</div><div style={{fontSize:12,fontWeight:600}}>#{woData.store}</div></div><div><div style={{fontSize:9,fontWeight:600,textTransform:"uppercase",color:"#94a3b8"}}>NTE</div><div style={{fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace"}}>{fmt(woData.nte)}</div></div></div><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Your invoice #"><Input value={newInv.invNum} onChange={e=>setNewInv({...newInv,invNum:e.target.value})} placeholder="INV-2026-0142"/></Field><Field label="CME #"><Sel value={newInv.cme} onChange={e=>setNewInv({...newInv,cme:e.target.value})}><option value="">Select CME...</option><option>CME-001 HVAC</option><option>CME-002 Plumbing</option><option>CME-003 Electrical</option><option>CME-004 Refrigeration</option><option>CME-005 General</option></Sel></Field></div><Field label="Work description"><TA rows={2} value={newInv.desc||woData.issue} onChange={e=>setNewInv({...newInv,desc:e.target.value})}/></Field><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><Field label="Hourly rate"><Input value={newInv.rate} onChange={e=>setNewInv({...newInv,rate:e.target.value})} placeholder="0" type="number"/></Field><Field label="Hours"><Input value={newInv.hours} onChange={e=>setNewInv({...newInv,hours:e.target.value})} placeholder="0" type="number"/></Field><Field label="OT hours"><Input value={newInv.otHours} onChange={e=>setNewInv({...newInv,otHours:e.target.value})} placeholder="0" type="number"/></Field></div><div className="modal-form-row" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><Field label="Materials"><Input value={newInv.materials} onChange={e=>setNewInv({...newInv,materials:e.target.value})} placeholder="0" type="number"/></Field><Field label="Trip/freight"><Input value={newInv.trip} onChange={e=>setNewInv({...newInv,trip:e.target.value})} type="number"/></Field><Field label="Tax"><Input value={newInv.tax} onChange={e=>setNewInv({...newInv,tax:e.target.value})} placeholder="0" type="number"/></Field></div><div style={{padding:"12px 16px",background:over?"#fef2f2":"#f0fdf4",borderRadius:10,border:`1px solid ${over?"#fecaca":"#bbf7d0"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,color:over?"#991b1b":"#14532d"}}>Calculated total</div>{over&&<div style={{fontSize:10,color:"#b91c1c",marginTop:2}}>Exceeds NTE of {fmt(woData.nte)}</div>}</div><div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:over?"#dc2626":"#16a34a"}}>{fmt(Math.round(liveTotal))}</div></div><label style={{padding:"12px 16px",background:newInv.hasPdf?"#f0fdf4":"#fdf2f8",borderRadius:10,border:`1px solid ${newInv.hasPdf?"#bbf7d0":"#fbcfe8"}`,cursor:"pointer",display:"block"}}><div style={{border:`2px dashed ${newInv.hasPdf?"#86efac":"#fbcfe8"}`,borderRadius:8,padding:20,textAlign:"center"}}><div style={{fontSize:12,color:newInv.hasPdf?"#15803d":"#db2777",fontWeight:600}}>{newInv.hasPdf?"✓ PDF attached":"Click to upload PDF invoice"}</div><div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>PDF attachment required</div><input type="file" accept="application/pdf" style={{display:"none"}} onChange={e=>setNewInv({...newInv,hasPdf:!!(e.target.files&&e.target.files.length)})}/></div></label></div><div style={{display:"flex",gap:8,marginTop:22,justifyContent:"flex-end"}}><button onClick={()=>{setModal(null);resetNewInv()}} style={{padding:"10px 20px",borderRadius:10,background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",cursor:"pointer",fontWeight:500,fontSize:12,fontFamily:"inherit"}}>Cancel</button><button onClick={()=>{if(doSubmitInvoice(woData))setModal(null)}} style={{padding:"10px 24px",borderRadius:10,background:"linear-gradient(135deg,#ec4899,#f472b6)",color:"#fff",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>Submit invoice</button></div></Modal>)})()}
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, background: "rgba(31,30,28,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 20, cursor: "zoom-out" }}>
+          <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} />
+          <button onClick={e => { e.stopPropagation(); setLightbox(null); }} style={{ position: "absolute", top: 20, right: 20, width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+        </div>
+      )}
 
-      {lightbox&&<div onClick={()=>setLightbox(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.92)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:70,padding:20,cursor:"zoom-out"}}><img src={lightbox} alt="" style={{maxWidth:"100%",maxHeight:"100%",borderRadius:10,boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}/><button onClick={e=>{e.stopPropagation();setLightbox(null)}} style={{position:"absolute",top:20,right:20,width:40,height:40,borderRadius:"50%",background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.2)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(10px)"}}>×</button></div>}
-      {toast&&<div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:"#0f172a",color:"#f1f5f9",padding:"11px 24px",borderRadius:12,fontSize:13,fontWeight:600,animation:"fadeUp 0.25s",zIndex:60,boxShadow:"0 8px 32px rgba(0,0,0,0.2)",whiteSpace:"nowrap"}}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", background: T.ink, color: T.bg, padding: "12px 22px", borderRadius: 12, fontSize: 13, fontWeight: 500, animation: "fadeUp 0.25s", zIndex: 60, boxShadow: "0 8px 32px rgba(31,30,28,0.3)", whiteSpace: "nowrap", border: `1px solid rgba(250,247,242,0.1)` }}>{toast}</div>}
     </div>
   );
 }
