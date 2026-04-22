@@ -63,33 +63,45 @@ const USERS: Seed[] = [
   { email: "plumbingdayornight@gmail.com", name: "Pete (Anytime Plumbing)", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
 ];
 
+// Cache the user list once per run — listUsers per row is slow + brittle
+let userListCache: any[] | null = null;
 async function ensureUser(s: Seed): Promise<string> {
-  // Check if user already exists
-  const { data: existing } = await sb.auth.admin.listUsers();
-  const found = existing?.users?.find(u => u.email?.toLowerCase() === s.email.toLowerCase());
-  if (found) {
-    // Make sure profile fields are up to date
-    await sb.from("profiles").update({
-      name: s.name, initials: s.initials, role: s.role, title: s.title || null,
-      company: s.company || null, phone: s.phone || null, territory: s.territory || null,
-      trades: s.trades || [], color: s.color,
-    }).eq("id", found.id);
-    return found.id;
+  if (!userListCache) {
+    const { data: existing } = await sb.auth.admin.listUsers();
+    userListCache = existing?.users || [];
   }
-  const { data, error } = await sb.auth.admin.createUser({
+  let userId: string;
+  const found = userListCache.find(u => u.email?.toLowerCase() === s.email.toLowerCase());
+  if (found) {
+    userId = found.id;
+  } else {
+    const { data, error } = await sb.auth.admin.createUser({
+      email: s.email,
+      password: DEFAULT_PASSWORD,
+      email_confirm: true,
+      user_metadata: { name: s.name, role: s.role },
+    });
+    if (error) throw error;
+    userId = data.user.id;
+    userListCache.push(data.user);
+  }
+  // Insert/update profile manually — we dropped the trigger, so script handles it
+  const profile = {
+    id: userId,
+    name: s.name,
     email: s.email,
-    password: DEFAULT_PASSWORD,
-    email_confirm: true,
-    user_metadata: { name: s.name, role: s.role },
-  });
-  if (error) throw error;
-  // Update profile (trigger created the row, now fill it in)
-  await sb.from("profiles").update({
-    initials: s.initials, role: s.role, title: s.title || null,
-    company: s.company || null, phone: s.phone || null, territory: s.territory || null,
-    trades: s.trades || [], color: s.color,
-  }).eq("id", data.user.id);
-  return data.user.id;
+    initials: s.initials,
+    role: s.role,
+    title: s.title || null,
+    company: s.company || null,
+    phone: s.phone || null,
+    territory: s.territory || null,
+    trades: s.trades || [],
+    color: s.color,
+  };
+  const { error: pErr } = await sb.from("profiles").upsert(profile, { onConflict: "id" });
+  if (pErr) throw new Error(`profile upsert: ${pErr.message}`);
+  return userId;
 }
 
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3600 * 1000).toISOString();

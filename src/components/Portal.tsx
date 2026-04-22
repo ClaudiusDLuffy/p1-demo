@@ -1,6 +1,8 @@
 "use client";
 // @ts-nocheck
 import { useState, useEffect, useMemo } from "react";
+import { signIn, signOut, getSession, loadAllProfiles, loadWorkOrders, loadInvoices } from "../lib/db";
+import { supabase } from "../lib/supabase/client";
 
 // ═══════════════════════════════════════════════════════════════
 //  THEME — Claude-inspired warm palette. Tokens are the source of truth.
@@ -35,28 +37,15 @@ const T = {
 // ═══════════════════════════════════════════════════════════════
 //  REAL P1 TEAM + CONTRACTORS (from Jeremy's email, Apr 20 2026)
 // ═══════════════════════════════════════════════════════════════
-const USERS = [
-  // Owners
-  { id: "clay", name: "Clay Etchison", role: "manager", initials: "CE", email: "claytonetchison@gmail.com", title: "Owner", color: "#1F1E1C" },
-  { id: "jeremy", name: "Jeremy Barry", role: "manager", initials: "JB", email: "jeremy@p1pros.com", title: "Owner", color: "#C15F3C" },
-  { id: "eddie", name: "Eddie Pozzuoli", role: "manager", initials: "EP", email: "eddie@phospitality.com", title: "Owner", color: "#5B4B8A" },
-  // Dispatch + back office
-  { id: "landry", name: "Landry Dillinger", role: "dispatcher", initials: "LD", email: "Landryd@phospitality.com", title: "Dispatcher", color: "#A67C00" },
-  { id: "lynzy", name: "Lynzy Barry", role: "back_office", initials: "LB", email: "Lynzy@p1pros.com", title: "Back office", color: "#4A7C59" },
-  { id: "mandy", name: "Mandy Lee", role: "back_office", initials: "ML", email: "mandy@p1pros.com", title: "Back office", color: "#7C3AED" },
-  { id: "lynette", name: "Lynette", role: "back_office", initials: "LY", email: "lynette@p1pros.com", title: "Back office", color: "#0891B2" },
-  { id: "kim", name: "Kim", role: "back_office", initials: "KM", email: "kim@p1pros.com", title: "Back office", color: "#EC4899" },
-  { id: "emily", name: "Emily Barnhart", role: "back_office", initials: "EB", email: "emilyb@phospitality.com", title: "Back office", color: "#10B981" },
-  // Contractor crews (lead tech = login identity)
-  { id: "starnes", name: "Derek Starnes", role: "contractor", initials: "DS", email: "Scrcdallastexas@gmail.com", company: "Starnes Commercial Refrigeration", territory: "Dallas, TX", trades: ["hvac", "refrigeration", "beverage", "ice"], color: "#0891B2" },
-  { id: "archer", name: "Chris Archer", role: "contractor", initials: "CA", email: "Service@archerref.com", company: "Archer Refrigeration", territory: "Houston, TX", trades: ["hvac", "refrigeration", "ice"], color: "#8B5CF6" },
-  { id: "proops", name: "Wes Cripe", role: "contractor", initials: "WC", email: "Pro.ops.inc@gmail.com", phone: "757-256-8511", company: "Pro Ops", territory: "Virginia Beach, VA", trades: ["hvac", "refrigeration", "ice"], color: "#F59E0B" },
-  { id: "sameday", name: "Demytro Bichukov", role: "contractor", initials: "DB", email: "vpdmitry@gmail.com", phone: "323-557-8452", company: "Same Day Repair", territory: "Tampa, FL", trades: ["beverage", "ice"], color: "#10B981" },
-  { id: "shecan", name: "Dave Lecerda", role: "contractor", initials: "DL", email: "shecanfacilitymaintenance@gmail.com", company: "Shecan Facility Maintenance", territory: "Dallas, TX", trades: ["hotfood"], color: "#EC4899" },
-  { id: "coleman", name: "Eric Coleman", role: "contractor", initials: "EC", email: "ctanksolutions@gmail.com", phone: "813-687-4990", company: "Coleman Tank Solutions", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
-  { id: "talne", name: "Mykola Buriak", role: "contractor", initials: "MB", email: "buriakmw@gmail.com", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
-  { id: "anytime", name: "Pete", role: "contractor", initials: "AP", email: "plumbingdayornight@gmail.com", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
+// Demo quick-access buttons on the login screen (clicks pre-fill email + sign in).
+// Real user/profile data loads from Supabase after successful auth.
+const DEMO_ACCOUNTS = [
+  { email: "claytonetchison@gmail.com", name: "Clay Etchison", initials: "CE", color: "#1F1E1C", subtitle: "Owner" },
+  { email: "jeremy@p1pros.com", name: "Jeremy Barry", initials: "JB", color: "#C15F3C", subtitle: "Owner" },
+  { email: "landryd@phospitality.com", name: "Landry Dillinger", initials: "LD", color: "#A67C00", subtitle: "Dispatcher" },
+  { email: "scrcdallastexas@gmail.com", name: "Derek Starnes", initials: "DS", color: "#0891B2", subtitle: "Contractor — Dallas" },
 ];
+const DEMO_PASSWORD = "p1demo2026!";
 
 // ═══════════════════════════════════════════════════════════════
 //  7-ELEVEN PRIORITY ENUM (real format: P1 Critical, P2 Emergency, etc)
@@ -169,183 +158,6 @@ const closingStatuses = ["completed", "pending_invoice", "pending_approval"];
 // Helper: hours ago → ISO
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3600 * 1000).toISOString();
 
-const INITIAL_WOS = [
-  // ACTIVE — Dallas
-  {
-    id: "FWKD11421039", incidentId: "INC24890517",
-    store: "33321", city: "Dallas, TX", addr: "5712 Skillman St, Dallas, TX 75206",
-    lineOfService: "Refrigeration", businessService: "Refrigeration equipment",
-    category: "Ice merchandiser/freezer", subCategory: "Machine not working",
-    summary: "Ice merchandiser not cooling — product melting",
-    description: "Ice merchandiser near front counter stopped cooling overnight. Ice is melting, product at risk.",
-    priority: "p1", status: "assigned", contractor: "starnes",
-    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
-    functionalStatus: "Dispatched",
-    nte: 2500, age: "8h",
-    dispatchedAt: hoursAgo(8.2), // just breached SLA
-    activities: [{ author: "System", time: dateNow(), text: "Dispatched from 7-Eleven FSM. Functional status not updated since dispatch — SLA breach imminent.", type: "system" }],
-  },
-  {
-    id: "FWKD11290954", incidentId: "INC24395415",
-    store: "34197", city: "Plano, TX", addr: "1301 Preston Rd, Plano, TX 75093",
-    lineOfService: "Cold Beverage - Equipment", businessService: "Fountain soda",
-    category: "Fountain Machine", subCategory: "One or few flavors not dispensing",
-    summary: "Fountain machine down — 5 flavors + ice not working",
-    description: "Fountain machine five flavors and ice not working",
-    priority: "p1", status: "assigned", contractor: "starnes",
-    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
-    functionalStatus: "Dispatched",
-    nte: 1800, age: "2h",
-    dispatchedAt: hoursAgo(2),
-    activities: [{ author: "System", time: dateNow(), text: "Dispatched. ETA pending contractor check-in.", type: "system" }],
-  },
-  // ACTIVE — Virginia
-  {
-    id: "FWKD11234445", incidentId: "INC24158515",
-    store: "32333", city: "Yorktown, VA", addr: "5101 George Washington Memorial Hwy, Yorktown, VA 23692",
-    lineOfService: "Frozen Beverage - Equipment", businessService: "Slurpee and Frozen Lemonade",
-    category: "Slurpee Machine", subCategory: "One or few flavors not dispensing",
-    summary: "Slurpee machine compressor failure — evaluate for repair or replacement",
-    description: "Upon arrival, found entire slurpee machine not running. Performed refrigeration diagnostic to show error 0510. Compressor not operational. Unit possibly needs a refrigerant charge and/or a new compressor.",
-    priority: "p2", status: "capital", contractor: "proops",
-    afm: "Jason Pulley", afmEmail: "Jason.Pulley@7-11.com",
-    functionalStatus: "Pending Capital Approval",
-    capitalStatus: "Pending approval",
-    nte: 6500, age: "3d",
-    dispatchedAt: hoursAgo(72),
-    partNeeded: "Taylor 340 compressor assembly",
-    assetModel: "Taylor 340", assetSerial: "TY-2022-81402",
-    activities: [
-      { author: "Wes Cripe", time: "Apr 17, 10:45 AM", text: "Diagnostic complete. Error 0510 — compressor not operational. Capital replacement recommended.", type: "note" },
-      { author: "System", time: "Apr 17, 10:45 AM", text: "Functional status updated to Pending Capital Approval.", type: "system" },
-    ],
-  },
-  // ACTIVE — Houston
-  {
-    id: "FWKD11318902", incidentId: "INC24410088",
-    store: "35551", city: "Houston, TX", addr: "7810 Westheimer Rd, Houston, TX 77063",
-    lineOfService: "Refrigeration", businessService: "Walk-in cooler",
-    category: "Walk-in cooler/freezer", subCategory: "Temperature out of range",
-    summary: "Walk-in cooler running warm — product at risk",
-    description: "Walk-in cooler reading 48°F. Compressor cycling but not holding temp. Product at risk.",
-    priority: "p1", status: "wip", contractor: "archer",
-    afm: "Marcus Holloway", afmEmail: "Marcus.Holloway@7-11.com",
-    functionalStatus: "Work in Progress",
-    nte: 2200, age: "5h",
-    dispatchedAt: hoursAgo(5),
-    startTime: `${dateShort()}, 10:30 AM`,
-    assetModel: "Heatcraft BHL036M", assetSerial: "HC-2020-44231",
-    activities: [
-      { author: "Chris Archer", time: dateNow(), text: "On site. Suction line iced up. Cleaning coils and checking refrigerant charge.", type: "note" },
-      { author: "System", time: `${dateShort()}, 10:30 AM`, text: "Work started. Functional status: Work in Progress.", type: "system" },
-    ],
-  },
-  // ACTIVE — Tampa (Slurpee → Mykola, NOT Demytro — validates trade match)
-  {
-    id: "FWKD11401122", incidentId: "INC24660221",
-    store: "41005", city: "Tampa, FL", addr: "3402 W Hillsborough Ave, Tampa, FL 33614",
-    lineOfService: "Frozen Beverage - Equipment", businessService: "Slurpee and Frozen Lemonade",
-    category: "Slurpee Machine", subCategory: "Machine not running",
-    summary: "Slurpee machine #2 not cooling",
-    description: "Slurpee machine #2 cylinder not cooling, mix is soupy.",
-    priority: "p2", status: "assigned", contractor: "talne",
-    afm: "Sandra Mitchell", afmEmail: "Sandra.Mitchell@7-11.com",
-    functionalStatus: "Dispatched",
-    nte: 1400, age: "14h",
-    dispatchedAt: hoursAgo(14),
-    activities: [{ author: "System", time: dateNow(), text: "Dispatched to Mykola Buriak (Slurpee specialist, Tampa).", type: "system" }],
-  },
-  // ACTIVE — Tampa plumbing
-  {
-    id: "FWKD11412556", incidentId: "INC24702004",
-    store: "42210", city: "Tampa, FL", addr: "8801 N Dale Mabry Hwy, Tampa, FL 33614",
-    lineOfService: "Plumbing", businessService: "Restroom",
-    category: "Toilet", subCategory: "Leak / overflow",
-    summary: "Customer restroom toilet overflowing",
-    description: "Customer restroom toilet overflowing. Water on floor. Restroom closed.",
-    priority: "p1", status: "wip", contractor: "anytime",
-    afm: "Sandra Mitchell", afmEmail: "Sandra.Mitchell@7-11.com",
-    functionalStatus: "Work in Progress",
-    nte: 650, age: "3h",
-    dispatchedAt: hoursAgo(3),
-    startTime: `${dateShort()}, 1:15 PM`,
-    activities: [
-      { author: "Pete", time: dateNow(), text: "On site. Snaking line. Blockage ~15ft in.", type: "note" },
-      { author: "System", time: `${dateShort()}, 1:15 PM`, text: "Work started.", type: "system" },
-    ],
-  },
-  // ACTIVE — Unassigned Dallas hotfood (tests trade routing)
-  {
-    id: "FWKD11422018", incidentId: "INC24891002",
-    store: "33089", city: "Dallas, TX", addr: "2301 N Central Expy, Dallas, TX 75204",
-    lineOfService: "Food Service", businessService: "Hot food",
-    category: "Roller grill", subCategory: "Heating element failure",
-    summary: "Roller grill not heating — taquitos cold",
-    description: "Roller grill #1 heating element out. Product at risk during breakfast rush.",
-    priority: "p2", status: "unassigned",
-    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
-    functionalStatus: "Dispatched",
-    nte: 950, age: "1h",
-    dispatchedAt: hoursAgo(1),
-    activities: [{ author: "System", time: dateNow(), text: "New dispatch from FSM. Needs hot-food qualified tech.", type: "system" }],
-  },
-  // CLOSING — completed Houston
-  {
-    id: "FWKD11385501", incidentId: "INC24550890",
-    store: "35551", city: "Houston, TX", addr: "7810 Westheimer Rd, Houston, TX 77063",
-    lineOfService: "Refrigeration", businessService: "Ice merchandiser",
-    category: "Ice merchandiser", subCategory: "Not cooling",
-    summary: "Ice merchandiser rebuilt — replaced evap fan motor",
-    description: "Ice merchandiser evap fan motor replaced. Tested — cooling properly.",
-    priority: "p2", status: "completed", contractor: "archer",
-    afm: "Marcus Holloway", afmEmail: "Marcus.Holloway@7-11.com",
-    functionalStatus: "Completed",
-    nte: 850, age: "1d",
-    dispatchedAt: hoursAgo(30),
-    assetModel: "Leer FF64AS", assetSerial: "LR-2019-22014",
-    activities: [
-      { author: "Chris Archer", time: `${dateShort()}, 11:00 AM`, text: "Replaced evap fan motor. Tested, cooling to spec. Job complete.", type: "note" },
-      { author: "System", time: `${dateShort()}, 11:00 AM`, text: "Completed. Asset: Leer FF64AS / LR-2019-22014.", type: "system" },
-    ],
-  },
-  // CLOSING — pending invoice Dallas
-  {
-    id: "FWKD11372001", incidentId: "INC24490102",
-    store: "33321", city: "Dallas, TX", addr: "5712 Skillman St, Dallas, TX 75206",
-    lineOfService: "Refrigeration", businessService: "Walk-in cooler",
-    category: "Walk-in cooler", subCategory: "Door gasket",
-    summary: "Walk-in cooler door gasket replaced",
-    description: "Replaced worn door gasket. Door sealing properly.",
-    priority: "p3", status: "pending_invoice", contractor: "starnes",
-    afm: "Greg Peterman", afmEmail: "Greg.Peterman@7-11.com",
-    functionalStatus: "Completed",
-    nte: 450, age: "4d",
-    dispatchedAt: hoursAgo(96),
-    assetModel: "Heatcraft PRO26", assetSerial: "HC-2018-33910",
-    activities: [
-      { author: "System", time: "Apr 17, 9:00 AM", text: "Status synced to 7-Eleven portal. Moved to Pending Invoice.", type: "system" },
-    ],
-  },
-  // CLOSING — pending approval
-  {
-    id: "FWKD11340089", incidentId: "INC24320811",
-    store: "35551", city: "Houston, TX", addr: "7810 Westheimer Rd, Houston, TX 77063",
-    lineOfService: "HVAC", businessService: "RTU",
-    category: "RTU compressor", subCategory: "Failure — replacement",
-    summary: "RTU compressor replacement",
-    description: "Rooftop unit #2 compressor replaced. Recharged system. Tested.",
-    priority: "p2", status: "pending_approval", contractor: "archer",
-    afm: "Marcus Holloway", afmEmail: "Marcus.Holloway@7-11.com",
-    functionalStatus: "Completed",
-    invoiceTotal: 5240,
-    nte: 6000, age: "1w",
-    dispatchedAt: hoursAgo(168),
-    assetModel: "Carrier 48HCEE06", assetSerial: "CR-2017-55891",
-    activities: [
-      { author: "System", time: "Apr 16, 3:00 PM", text: "Invoice INV2604-0189 submitted. Total: $5,240.", type: "system" },
-    ],
-  },
-];
 
 // ═══════════════════════════════════════════════════════════════
 //  P1 BUSINESS INFO (from invoice 6556)
@@ -381,86 +193,6 @@ const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat
 // ═══════════════════════════════════════════════════════════════
 //  INITIAL INVOICES — including the REAL Invoice 6556
 // ═══════════════════════════════════════════════════════════════
-const INITIAL_INVOICES = [
-  {
-    num: "6556",
-    wot: "FWKD11234445",
-    incidentId: "INC24158515",
-    state: "submitted",
-    invoiceDate: "04/17/2026",
-    serviceDate: "03/25/2026",
-    date: "Apr 17",
-    terms: "Net 30",
-    store: "32333",
-    storeAddr: "5101 George Washington Memorial Hwy, Yorktown, VA 23692 USA",
-    cme: "CME-002 Beverage",
-    contractor: "proops",
-    lines: [
-      { type: "Travel", desc: "Travel to site — initial diagnosis", qty: 1, rate: 110, amount: 110 },
-      { type: "Travel", desc: "Second trip with parts", qty: 1, rate: 110, amount: 110 },
-      { type: "Labor", desc: "Arrived onsite checked in with the MOD, recovered charge, replaced filter dryer. Pressure and vacuum tested unit. Recharged and witnessed proper cooling operation. Management asked if tech could replace product and get all barrels going. Replaced strawberry began refilling barrel and witnessed a significant leak out of the barrel from the beater motor. Tech recommends beater motor and rear seal replacement. The refrigeration side of the machine is operational but will need beater motor replacement.", qty: 5.5, rate: 110, amount: 605 },
-      { type: "Labor", desc: "Arrived onsite checked in with the MOD, removed and replaced old beater motor and rear seal. Cleaned and ensured proper seal. Refilled barrel and witnessed proper unit operation. Unit is currently operational. Job completed.", qty: 4.5, rate: 110, amount: 495 },
-      { type: "Parts/Hardware", desc: "Field wiring kit", qty: 2, rate: 41.42, amount: 82.84 },
-      { type: "Parts/Hardware", desc: "TVRN", qty: 1, rate: 150, amount: 150 },
-      { type: "Parts/Hardware", desc: "Nitrogen", qty: 1, rate: 45, amount: 45 },
-      { type: "Parts/Hardware", desc: "Reclaim", qty: 1, rate: 55, amount: 55 },
-      { type: "Parts/Hardware", desc: "R404a refrigerant", qty: 14, rate: 35, amount: 490 },
-      { type: "Parts/Hardware", desc: "3/8 dryer", qty: 1, rate: 37.5, amount: 37.5 },
-      { type: "Parts/Hardware", desc: "Beater motor", qty: 1, rate: 1256.25, amount: 1256.25 },
-      { type: "Parts/Hardware", desc: "Rear seal", qty: 1, rate: 77.5, amount: 77.5 },
-      { type: "Shipping", desc: "NDA shipping", qty: 1, rate: 525, amount: 525 },
-    ],
-    subtotal: 4039.09,
-    salesTax: 246,
-    total: 4285.09,
-  },
-  {
-    num: "6542", wot: "FWKD11340089", incidentId: "INC24320811", state: "submitted",
-    invoiceDate: "04/16/2026", serviceDate: "04/14/2026", date: "Apr 16", terms: "Net 30",
-    store: "35551", storeAddr: "7810 Westheimer Rd, Houston, TX 77063", cme: "CME-001 HVAC", contractor: "archer",
-    lines: [
-      { type: "Travel", desc: "Travel to site", qty: 1, rate: 110, amount: 110 },
-      { type: "Labor", desc: "RTU #2 compressor replacement. Recovered charge, removed failed compressor, installed new Carrier 48HCEE06 compressor assembly. Pressure tested, evacuated, recharged with R-410A. Tested full cycle — operating to spec.", qty: 8, rate: 110, amount: 880 },
-      { type: "Parts/Hardware", desc: "Carrier 48HCEE06 compressor", qty: 1, rate: 3850, amount: 3850 },
-      { type: "Parts/Hardware", desc: "R-410A refrigerant", qty: 8, rate: 45, amount: 360 },
-    ],
-    subtotal: 5200, salesTax: 40, total: 5240,
-  },
-  {
-    num: "6528", wot: "FWKD11305511", incidentId: "INC24220811", state: "approved",
-    invoiceDate: "04/14/2026", serviceDate: "04/11/2026", date: "Apr 14", terms: "Net 30",
-    store: "33321", storeAddr: "5712 Skillman St, Dallas, TX 75206", cme: "CME-004 Refrigeration", contractor: "starnes",
-    lines: [
-      { type: "Travel", desc: "Travel to site", qty: 1, rate: 110, amount: 110 },
-      { type: "Labor", desc: "Replaced worn door gasket on walk-in cooler. Door sealing properly — tested.", qty: 2, rate: 110, amount: 220 },
-      { type: "Parts/Hardware", desc: "Walk-in door gasket (Heatcraft)", qty: 1, rate: 940, amount: 940 },
-    ],
-    subtotal: 1270, salesTax: 10, total: 1280,
-  },
-  {
-    num: "6510", wot: "FWKD11291882", incidentId: "INC24120811", state: "rejected",
-    invoiceDate: "04/12/2026", serviceDate: "04/09/2026", date: "Apr 12", terms: "Net 30",
-    store: "41005", storeAddr: "3402 W Hillsborough Ave, Tampa, FL 33614", cme: "CME-002 Beverage", contractor: "sameday",
-    reason: "Missing detail on labor breakdown",
-    lines: [
-      { type: "Travel", desc: "Travel", qty: 1, rate: 110, amount: 110 },
-      { type: "Labor", desc: "Beverage machine service.", qty: 4, rate: 110, amount: 440 },
-      { type: "Parts/Hardware", desc: "Parts", qty: 1, rate: 1500, amount: 1500 },
-    ],
-    subtotal: 2050, salesTax: 50, total: 2100,
-  },
-  {
-    num: "6495", wot: "FWKD11287040", incidentId: "INC24099011", state: "approved",
-    invoiceDate: "04/10/2026", serviceDate: "04/08/2026", date: "Apr 10", terms: "Net 30",
-    store: "42210", storeAddr: "8801 N Dale Mabry Hwy, Tampa, FL 33614", cme: "CME-005 Plumbing", contractor: "anytime",
-    lines: [
-      { type: "Travel", desc: "Travel to site", qty: 1, rate: 110, amount: 110 },
-      { type: "Labor", desc: "Snaked blocked restroom line. Cleared ~15ft in. Tested flow.", qty: 3.5, rate: 110, amount: 385 },
-      { type: "Parts/Hardware", desc: "Drain cleaner + consumables", qty: 1, rate: 80, amount: 80 },
-    ],
-    subtotal: 575, salesTax: 5, total: 580,
-  },
-];
 
 // ═══════════════════════════════════════════════════════════════
 //  US CITY COORDS — expanded beyond Florida
@@ -594,8 +326,10 @@ export default function P1Portal() {
   const [modal, setModal] = useState(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
-  const [workOrders, setWorkOrders] = useState(INITIAL_WOS);
-  const [invoices, setInvoices] = useState(INITIAL_INVOICES);
+  const [workOrders, setWorkOrders] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [USERS, setUsers] = useState<any[]>(DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })));
+  const [dataLoading, setDataLoading] = useState(true);
   const [newWO, setNewWO] = useState({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
   const resetNewWO = () => setNewWO({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
   // Invoice builder state — line-item based, matches P1's real invoice format (6556)
@@ -635,20 +369,93 @@ export default function P1Portal() {
   }, [currentUser?.id]);
 
   const fire = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2800); };
-  const doLogin = (uidOrEmail: string) => {
-    const v = (uidOrEmail || "").trim().toLowerCase();
+
+  // Real Supabase auth — replaces demo button login
+  const doLogin = async (email: string, password: string = DEMO_PASSWORD) => {
+    const v = (email || "").trim();
     if (!v) { setLoginError("Enter an email to sign in"); return; }
-    const user = USERS.find(u => u.id === v || u.email.toLowerCase() === v);
-    if (!user) { setLoginError("No account found for that email"); return; }
     setLoginError(null);
     setLoginLoading(true);
-    setTimeout(() => {
-      setCurrentUser(user);
-      setPage(user.role === "contractor" ? "my_jobs" : "dashboard");
+    try {
+      await signIn(v, password);
+      // currentUser will populate via the auth listener effect below
+    } catch (err: any) {
+      setLoginError(err.message || "Sign in failed");
       setLoginLoading(false);
-    }, 600);
+    }
   };
-  const logout = () => { setCurrentUser(null); setPage("dashboard"); setSelectedWO(null); setLoginEmail(""); setAiNote(null); };
+  const logout = async () => {
+    await signOut();
+    setCurrentUser(null);
+    setPage("dashboard");
+    setSelectedWO(null);
+    setLoginEmail("");
+    setAiNote(null);
+    setWorkOrders([]);
+    setInvoices([]);
+  };
+
+  // ── DATA LOADERS — fire when auth session is available ───────────────
+  // Hydrate session on mount + listen for changes
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const session = await getSession();
+      if (!session?.user || !mounted) return;
+      // Pull this user's profile (only once per session)
+      const sb = supabase();
+      const { data: prof } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
+      if (prof && mounted) {
+        setCurrentUser({
+          id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
+          title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
+          trades: prof.trades || [], color: prof.color,
+        });
+        setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
+        setLoginLoading(false);
+      }
+    })();
+    const sb = supabase();
+    const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+      if (event === "SIGNED_IN" && session?.user) {
+        const { data: prof } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
+        if (prof) {
+          setCurrentUser({
+            id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
+            title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
+            trades: prof.trades || [], color: prof.color,
+          });
+          setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
+          setLoginLoading(false);
+        }
+      } else if (event === "SIGNED_OUT") {
+        setCurrentUser(null);
+      }
+    });
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
+
+  // Load profiles + work orders + invoices once we have a current user
+  useEffect(() => {
+    if (!currentUser) return;
+    let mounted = true;
+    (async () => {
+      setDataLoading(true);
+      try {
+        const [profs, wos, invs] = await Promise.all([loadAllProfiles(), loadWorkOrders(), loadInvoices()]);
+        if (!mounted) return;
+        setUsers(profs);
+        setWorkOrders(wos);
+        setInvoices(invs);
+      } catch (err: any) {
+        fire(`Load error: ${err.message || err}`);
+      } finally {
+        if (mounted) setDataLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [currentUser?.id]);
   const nav = (p: string) => { setPage(p); setSelectedWO(null); setAiNote(null); };
 
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
@@ -840,12 +647,12 @@ export default function P1Portal() {
           <div style={{ marginTop: 24 }}>
             <div style={{ fontSize: 11, fontWeight: 500, color: T.subtle, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Demo — quick access</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[USERS.find(u => u.id === "clay"), USERS.find(u => u.id === "jeremy"), USERS.find(u => u.id === "landry"), USERS.find(u => u.id === "starnes")].map(u => u && (
-                <button key={u.id} onClick={() => { setLoginEmail(u.email); doLogin(u.id); }} className="card-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+              {DEMO_ACCOUNTS.map(u => (
+                <button key={u.email} onClick={() => { setLoginEmail(u.email); doLogin(u.email); }} className="card-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                   <Avatar initials={u.initials} color={u.color} size={32} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
-                    <div style={{ fontSize: 10, color: T.muted }}>{u.role === "contractor" ? u.territory : u.title}</div>
+                    <div style={{ fontSize: 10, color: T.muted }}>{u.subtitle}</div>
                   </div>
                 </button>
               ))}
