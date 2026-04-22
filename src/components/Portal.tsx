@@ -366,6 +366,11 @@ export default function P1Portal() {
   useEffect(() => { setTimeout(() => setFadeIn(true), 50); }, []);
   useEffect(() => {
     if (!currentUser || currentUser.role !== "manager") return;
+    // Demo-only simulated notifications. Off by default. Append ?demo=true to URL to enable
+    // for a dramatic moment in a presentation (then real notifications come in v9 via Resend).
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") !== "true") return;
     const t1 = setTimeout(() => setToast("New call from FSM — Store #33089, Dallas. Roller grill down."), 6000);
     const t2 = setTimeout(() => setToast(null), 9000);
     const t3 = setTimeout(() => setToast("Chris checked in at Store #35551"), 48000);
@@ -727,7 +732,12 @@ export default function P1Portal() {
 
   const doAiEnhance = () => {
     setAiEnhancing(true);
-    setTimeout(() => { setAiNote("Arrived on site at the designated time. Performed a systematic diagnostic of the affected equipment, isolating the root cause through sequential testing of primary components. Identified the failure mode and carried out the appropriate corrective action in accordance with manufacturer specifications and industry best practices. Verified system performance post-repair against operational parameters and confirmed restoration to normal operating conditions. Area cleaned and secured. Recommending routine preventive maintenance at the standard scheduled interval to reduce the likelihood of recurrence."); setAiEnhancing(false); }, 1400);
+    setTimeout(() => {
+      // Placeholder. Wired to Claude API in v9 (right before handover).
+      // The generic message lets us show the feature exists without faking output that could be challenged in a demo.
+      setAiNote("__PREVIEW__");
+      setAiEnhancing(false);
+    }, 800);
   };
 
   const doAddPhotos = async (woId: string, files: FileList | null) => {
@@ -1335,19 +1345,26 @@ export default function P1Portal() {
                     <div className="card" style={{ padding: 22 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activities?.length || 0}</div>
-                        {isManager && <button onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Enhancing...</> : "✨ AI enhance notes"}</button>}
+                        {isManager && <button onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loading…</> : <>✨ AI enhance notes <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4 }}>PREVIEW</span></>}</button>}
                       </div>
                       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
                         <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id); }} placeholder="Add a note..." style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
                         <button onClick={() => doPostNote(woData.id)} className="btn-primary" style={{ padding: "10px 18px" }}>Post</button>
                       </div>
                       {aiNote && (
-                        <div style={{ background: T.surfaceSoft, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, marginBottom: 16, animation: "fadeUp 0.3s" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: 0.8 }}>✨ AI-enhanced</span>
-                            <button onClick={() => { navigator.clipboard?.writeText(aiNote); fire("Copied"); }} className="btn-soft" style={{ padding: "4px 10px", fontSize: 10 }}>Copy</button>
+                        <div style={{ background: T.surfaceSoft, border: `1px dashed ${T.accent}`, borderRadius: 12, padding: 18, marginBottom: 16, animation: "fadeUp 0.3s" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: 0.8, display: "flex", alignItems: "center", gap: 6 }}>✨ AI Enhance <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff" }}>PREVIEW</span></span>
+                            <button onClick={() => setAiNote(null)} className="btn-soft" style={{ padding: "4px 10px", fontSize: 10 }}>Close</button>
                           </div>
-                          <div style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.65 }}>{aiNote}</div>
+                          {aiNote === "__PREVIEW__" ? (
+                            <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.65 }}>
+                              <div style={{ fontWeight: 600, color: T.ink, marginBottom: 6 }}>This feature is wired up and ready.</div>
+                              When live, this rewrites the contractor's raw note into a polished, AFM-ready summary using Claude — keeping technical accuracy but adding structure and professional tone. Eliminates the midnight rewriting bottleneck. <span style={{ color: T.accent, fontWeight: 600 }}>Activates at handover.</span>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.65 }}>{aiNote}</div>
+                          )}
                         </div>
                       )}
                       {(woData.activities || []).map((e: any, i: number) => (
