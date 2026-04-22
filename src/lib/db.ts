@@ -211,3 +211,188 @@ export async function getPhotoUrl(path: string): Promise<string | null> {
   const { data } = await sb.storage.from("photos").createSignedUrl(path, 3600);
   return data?.signedUrl || null;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MUTATION HELPERS — every do* function in Portal.tsx routes through here
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Map UI camelCase → DB snake_case for work_orders updates
+const WO_FIELD_MAP: Record<string, string> = {
+  contractor: "contractor_id",
+  functionalStatus: "functional_status",
+  dispatchedAt: "dispatched_at",
+  startTime: "start_time",
+  endTime: "end_time",
+  assetModel: "asset_model",
+  assetSerial: "asset_serial",
+  capitalStatus: "capital_status",
+  partNeeded: "part_needed",
+  partEta: "part_eta",
+  invoiceTotal: "invoice_total",
+  resolutionCode: "resolution_code",
+  resolutionNotes: "resolution_notes",
+  isCapital: "is_capital",
+};
+function toDbWoPatch(patch: any) {
+  const out: any = {};
+  for (const k of Object.keys(patch)) {
+    out[WO_FIELD_MAP[k] || k] = patch[k];
+  }
+  return out;
+}
+
+export async function updateWorkOrder(id: string, patch: any) {
+  const sb = supabase();
+  const { data, error } = await sb.from("work_orders").update(toDbWoPatch(patch)).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function insertActivity(workOrderId: string, authorName: string, text: string, type: "note" | "system" | "ai" = "note") {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from("activities").insert({
+    work_order_id: workOrderId,
+    author_id: user?.id || null,
+    author_name: authorName,
+    text,
+    type,
+  });
+  if (error) throw error;
+}
+
+// Atomically generate the next FWKD work order ID via a Postgres sequence
+export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("next_wo_id");
+  if (error) throw error;
+  // Returns shape { wo: 'FWKD11400001', inc: 'INC24000001' }
+  return data;
+}
+
+export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string) {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const dbRow = {
+    id: wo.id,
+    incident_id: wo.incidentId,
+    store_number: wo.store,
+    city: wo.city,
+    address: wo.addr,
+    line_of_service: wo.lineOfService,
+    business_service: wo.businessService,
+    category: wo.category,
+    sub_category: wo.subCategory,
+    summary: wo.summary,
+    description: wo.description,
+    priority: wo.priority,
+    status: wo.status,
+    functional_status: wo.functionalStatus,
+    contractor_id: wo.contractor || null,
+    afm_name: wo.afm || null,
+    afm_email: wo.afmEmail || null,
+    nte: wo.nte || 0,
+    dispatched_at: wo.dispatchedAt || null,
+    is_capital: !!wo.isCapital,
+    created_by: user?.id || null,
+  };
+  const { data, error } = await sb.from("work_orders").insert(dbRow).select().single();
+  if (error) throw error;
+  if (activityText && authorName) {
+    await insertActivity(wo.id, authorName, activityText, "system");
+  }
+  return data;
+}
+
+export async function insertInvoice(inv: any, lines: any[], authorName: string) {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  // Insert header
+  const subtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
+  const salesTax = parseFloat(inv.salesTax) || 0;
+  const total = subtotal + salesTax;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const { data: header, error: hErr } = await sb.from("invoices").insert({
+    num: inv.num,
+    work_order_id: inv.wot,
+    store_number: inv.store,
+    store_address: inv.storeAddr || null,
+    contractor_id: inv.contractor || null,
+    cme: inv.cme || null,
+    invoice_date: inv.invoiceDate || todayIso,
+    service_date: inv.serviceDate || null,
+    due_date: inv.dueDate || null,
+    terms: inv.terms || "Net 30",
+    state: inv.state || "submitted",
+    subtotal,
+    sales_tax: salesTax,
+    total,
+    created_by: user?.id || null,
+  }).select().single();
+  if (hErr) throw hErr;
+  // Insert lines (1:N)
+  if (lines.length > 0) {
+    const lineRows = lines.map((l, i) => ({
+      invoice_id: header.id,
+      position: i + 1,
+      type: l.type,
+      description: l.desc || l.description || "",
+      qty: parseFloat(l.qty) || 1,
+      rate: parseFloat(l.rate) || 0,
+    }));
+    const { error: lErr } = await sb.from("invoice_lines").insert(lineRows);
+    if (lErr) throw lErr;
+  }
+  // Mark WO as pending approval and stamp invoice total
+  await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
+  await insertActivity(inv.wot, authorName, `Invoice ${inv.num} submitted. Total: $${total.toFixed(2)}.`, "system");
+  return { ...header, total };
+}
+
+// ── PHOTO STORAGE ─────────────────────────────────────────────────────────
+export async function uploadPhotos(workOrderId: string, files: FileList | File[], authorName: string): Promise<string[]> {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const uploaded: string[] = [];
+  const arr = Array.from(files);
+  for (const file of arr) {
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `wo/${workOrderId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error: upErr } = await sb.storage.from("photos").upload(path, file, { contentType: file.type, upsert: false });
+    if (upErr) throw upErr;
+    const { error: rowErr } = await sb.from("photos").insert({
+      work_order_id: workOrderId,
+      storage_path: path,
+      uploader_id: user?.id || null,
+      uploader_name: authorName,
+    });
+    if (rowErr) throw rowErr;
+    uploaded.push(path);
+  }
+  if (uploaded.length > 0) {
+    await insertActivity(workOrderId, authorName, `Added ${uploaded.length} photo${uploaded.length > 1 ? "s" : ""}.`, "note");
+  }
+  return uploaded;
+}
+
+export async function removePhoto(workOrderId: string, storagePath: string) {
+  const sb = supabase();
+  // Delete the row (RLS allows uploader or staff)
+  await sb.from("photos").delete().eq("work_order_id", workOrderId).eq("storage_path", storagePath);
+  // Delete the file from storage
+  await sb.storage.from("photos").remove([storagePath]);
+}
+
+// ── REALTIME SUBSCRIPTION ──────────────────────────────────────────────────
+// Returns an unsubscribe function. Caller passes a callback that re-fetches.
+export function subscribeToChanges(onChange: () => void): () => void {
+  const sb = supabase();
+  const channel = sb
+    .channel("portal-changes")
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "activities" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, onChange)
+    .subscribe();
+  return () => { sb.removeChannel(channel); };
+}

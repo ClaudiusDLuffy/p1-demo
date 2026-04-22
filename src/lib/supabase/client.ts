@@ -1,12 +1,20 @@
 // Browser-side Supabase client. Uses the publishable (anon) key — safe to expose.
-// Auth state is persisted to localStorage so users stay signed in across reloads.
+// Uses plain createClient (not @supabase/ssr) so auth state persists in localStorage,
+// which works correctly in a client-only Next.js setup.
 
-import { createBrowserClient } from "@supabase/ssr";
+import { createClient as createSb } from "@supabase/supabase-js";
 
 export function createClient() {
-  return createBrowserClient(
+  return createSb(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    }
   );
 }
 

@@ -1,7 +1,12 @@
 "use client";
 // @ts-nocheck
 import { useState, useEffect, useMemo } from "react";
-import { signIn, signOut, getSession, loadAllProfiles, loadWorkOrders, loadInvoices } from "../lib/db";
+import {
+  signIn, signOut, getSession,
+  loadAllProfiles, loadWorkOrders, loadInvoices,
+  updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice,
+  uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
+} from "../lib/db";
 import { supabase } from "../lib/supabase/client";
 
 // ═══════════════════════════════════════════════════════════════
@@ -437,9 +442,27 @@ export default function P1Portal() {
   }, []);
 
   // Load profiles + work orders + invoices once we have a current user
+  // + Subscribe to realtime so changes from other clients propagate
   useEffect(() => {
     if (!currentUser) return;
     let mounted = true;
+    let refetchTimer: any = null;
+
+    const refetch = async () => {
+      try {
+        const [wos, invs] = await Promise.all([loadWorkOrders(), loadInvoices()]);
+        if (!mounted) return;
+        setWorkOrders(wos);
+        setInvoices(invs);
+      } catch (err: any) { /* swallow — local state still valid */ }
+    };
+
+    // Debounce: realtime can fire many events for one mutation (work_orders + activities + photos)
+    const debouncedRefetch = () => {
+      if (refetchTimer) clearTimeout(refetchTimer);
+      refetchTimer = setTimeout(refetch, 350);
+    };
+
     (async () => {
       setDataLoading(true);
       try {
@@ -454,7 +477,9 @@ export default function P1Portal() {
         if (mounted) setDataLoading(false);
       }
     })();
-    return () => { mounted = false; };
+
+    const unsub = subscribeToChanges(debouncedRefetch);
+    return () => { mounted = false; if (refetchTimer) clearTimeout(refetchTimer); unsub(); };
   }, [currentUser?.id]);
   const nav = (p: string) => { setPage(p); setSelectedWO(null); setAiNote(null); };
 
@@ -481,40 +506,110 @@ export default function P1Portal() {
   const slaBreached = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours <= 0 && activeStatuses.includes(w.status); }).length;
   const woData = selectedWO ? workOrders.find(w => w.id === selectedWO) : null;
 
-  // ── STATE TRANSITIONS
-  const updateWO = (id: string, updates: any) => {
-    setWorkOrders(prev => prev.map(w => w.id === id ? { ...w, ...updates, activities: [...(updates.newActivity ? [updates.newActivity] : []), ...w.activities] } : w));
+  // ── STATE TRANSITIONS — every mutation hits the DB, then optimistic-updates local state
+  // Realtime subscription propagates the same change to other clients within ~200ms.
+
+  // Local optimistic patch helper (visual update before DB confirms)
+  const patchLocalWO = (id: string, patch: any, newActivity?: any) => {
+    setWorkOrders(prev => prev.map(w => w.id === id ? {
+      ...w,
+      ...patch,
+      activities: newActivity ? [newActivity, ...w.activities] : w.activities,
+    } : w));
   };
-  const addActivity = (id: string, author: string, text: string, type = "system") => {
-    const entry = { author, time: dateNow(), text, type };
-    setWorkOrders(prev => prev.map(w => w.id === id ? { ...w, activities: [entry, ...w.activities] } : w));
+  const localActivity = (text: string, type: "note" | "system" | "ai" = "system") => ({
+    author: type === "system" ? "System" : currentUser.name,
+    time: dateNow(),
+    text,
+    type,
+  });
+
+  // Wrap a DB call in a try/catch that fires a toast on failure
+  const dbCall = async (fn: () => Promise<any>, errorMsg: string = "Save failed") => {
+    try { await fn(); return true; }
+    catch (e: any) { fire(`${errorMsg}: ${e.message || e}`); return false; }
   };
 
-  const doAssign = (woId: string, contractorId: string) => {
+  const doAssign = async (woId: string, contractorId: string) => {
     const c = getUser(contractorId);
-    updateWO(woId, { status: "assigned", contractor: contractorId, dispatchedAt: new Date().toISOString(), functionalStatus: "Dispatched", newActivity: { author: "System", time: dateNow(), text: `Dispatched to ${c.name} (${c.company}).`, type: "system" } });
+    if (!c) { fire("Contractor not found"); return; }
+    const dispatchedAt = new Date().toISOString();
+    const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
+    patchLocalWO(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" }, localActivity(text, "system"));
     fire(`Dispatched to ${c.name}`);
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" });
+      await insertActivity(woId, "System", text, "system");
+    }, "Dispatch failed");
   };
-  const doSetEta = (woId: string, eta: string) => { updateWO(woId, { eta, newActivity: { author: currentUser.name, time: dateNow(), text: `ETA set: ${eta}`, type: "system" } }); fire("ETA set"); };
-  const doStartWork = (woId: string, notes: string) => {
-    const t = timeNow();
-    updateWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: `${dateShort()}, ${t}`, newActivity: { author: currentUser.name, time: dateNow(), text: notes || `Checked in and started work at ${t}.`, type: "note" } });
+
+  const doSetEta = async (woId: string, eta: string) => {
+    const text = `ETA set: ${eta}`;
+    patchLocalWO(woId, { eta }, localActivity(text, "system"));
+    fire("ETA set");
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { eta });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "ETA save failed");
+  };
+
+  const doStartWork = async (woId: string, notes: string) => {
+    const startIso = new Date().toISOString();
+    const text = notes || `Checked in and started work at ${timeNow()}.`;
+    patchLocalWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso }, localActivity(text, "note"));
     fire(`Work started · status synced to 7-Eleven`);
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso });
+      await insertActivity(woId, currentUser.name, text, "note");
+    }, "Start work failed");
   };
-  const doPauseWork = (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
-    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts", newActivity: { author: currentUser.name, time: dateNow(), text: notes || `Work paused: ${reason}.${partDesc ? ` Part needed: ${partDesc}${partNum ? ` (${partNum})` : ""}.` : ""}`, type: "note" } };
-    if (partDesc) updates.partNeeded = partDesc + (partNum ? ` (${partNum})` : "");
-    if (partEta) updates.partEta = partEta;
-    updateWO(woId, updates);
+
+  const doPauseWork = async (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
+    const partLabel = partDesc ? `${partDesc}${partNum ? ` (${partNum})` : ""}` : null;
+    const text = notes || `Work paused: ${reason}.${partLabel ? ` Part needed: ${partLabel}.` : ""}`;
+    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts" };
+    if (partLabel) updates.partNeeded = partLabel;
+    if (partEta) updates.partEta = partEta; // ISO date string from input type=date
+    patchLocalWO(woId, updates, localActivity(text, "note"));
     fire("Paused — awaiting parts");
+    await dbCall(async () => {
+      await updateWorkOrder(woId, updates);
+      await insertActivity(woId, currentUser.name, text, "note");
+    }, "Pause failed");
   };
-  const doCloseComplete = (woId: string, model: string, serial: string, resolution: string) => {
-    updateWO(woId, { status: "completed", functionalStatus: "Completed", assetModel: model, assetSerial: serial, newActivity: { author: currentUser.name, time: dateNow(), text: `Job completed. Asset: ${model} / ${serial}. Resolution: ${resolution || "Repaired"}.`, type: "note" } });
+
+  const doCloseComplete = async (woId: string, model: string, serial: string, resolution: string) => {
+    const endIso = new Date().toISOString();
+    const text = `Job completed. Asset: ${model} / ${serial}. Resolution: ${resolution || "Repaired"}.`;
+    patchLocalWO(woId, { status: "completed", functionalStatus: "Completed", assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null }, localActivity(text, "note"));
     fire("Completed");
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { status: "completed", functionalStatus: "Completed", assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null });
+      await insertActivity(woId, currentUser.name, text, "note");
+    }, "Close failed");
   };
-  const doMoveToInvoice = (woId: string) => { updateWO(woId, { status: "pending_invoice", newActivity: { author: "System", time: dateNow(), text: "7-Eleven portal updated. Moved to pending invoice.", type: "system" } }); fire("Moved to Pending Invoice"); };
-  const doCapitalFlag = (woId: string) => { updateWO(woId, { status: "capital", functionalStatus: "Pending Capital Approval", capitalStatus: "Pending approval", newActivity: { author: "System", time: dateNow(), text: "Flagged as capital replacement — pending approval.", type: "system" } }); fire("Flagged for capital"); };
-  const doSubmitInvoice = (wo: any) => {
+
+  const doMoveToInvoice = async (woId: string) => {
+    const text = "7-Eleven portal updated. Moved to pending invoice.";
+    patchLocalWO(woId, { status: "pending_invoice" }, localActivity(text, "system"));
+    fire("Moved to Pending Invoice");
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { status: "pending_invoice" });
+      await insertActivity(woId, "System", text, "system");
+    }, "Update failed");
+  };
+
+  const doCapitalFlag = async (woId: string) => {
+    const text = "Flagged as capital replacement — pending approval.";
+    patchLocalWO(woId, { status: "capital", functionalStatus: "Pending Capital Approval", capitalStatus: "Pending approval", isCapital: true }, localActivity(text, "system"));
+    fire("Flagged for capital");
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { status: "capital", functionalStatus: "Pending Capital Approval", capitalStatus: "Pending approval", isCapital: true });
+      await insertActivity(woId, "System", text, "system");
+    }, "Capital flag failed");
+  };
+
+  const doSubmitInvoice = async (wo: any) => {
     if (!newInv.num) { fire("Enter an invoice number"); return false; }
     if (!newInv.cme) { fire("Select a CME code"); return false; }
     const validLines = (newInv.lines || []).filter((l: any) => l.desc && l.qty && l.rate);
@@ -523,15 +618,13 @@ export default function P1Portal() {
     const subtotal = invSubtotal(validLines);
     const tax = parseFloat(newInv.tax) || 0;
     const total = subtotal + tax;
-    const serviceMonth = new Date(newInv.serviceDate).getMonth();
-    const invoice = {
+    // Optimistic local update
+    const localInv = {
       num: newInv.num,
       wot: wo.id,
-      incidentId: wo.incidentId,
       state: "submitted",
-      invoiceDate: new Date(newInv.invoiceDate).toLocaleDateString("en-US"),
-      serviceDate: new Date(newInv.serviceDate).toLocaleDateString("en-US"),
-      date: `${MONTHS[new Date(newInv.invoiceDate).getMonth()]} ${new Date(newInv.invoiceDate).getDate()}`,
+      invoiceDate: newInv.invoiceDate,
+      serviceDate: newInv.serviceDate,
       terms: newInv.terms,
       store: wo.store,
       storeAddr: wo.addr,
@@ -541,78 +634,139 @@ export default function P1Portal() {
       subtotal,
       salesTax: tax,
       total,
+      date: (() => { const d = new Date((newInv.invoiceDate || new Date().toISOString().slice(0,10)) + "T00:00:00"); return `${MONTHS[d.getMonth()]} ${d.getDate()}`; })(),
     };
-    setInvoices(prev => [invoice, ...prev]);
-    updateWO(wo.id, {
-      status: "pending_approval",
-      invoiceTotal: total,
-      newActivity: { author: currentUser.name, time: dateNow(), text: `Invoice #${newInv.num} submitted to 7-Eleven. Total: ${fmt(total)} (${validLines.length} line item${validLines.length !== 1 ? "s" : ""}).`, type: "system" },
-    });
-    resetNewInv();
+    setInvoices(prev => [localInv, ...prev]);
+    const text = `Invoice #${newInv.num} submitted to 7-Eleven. Total: ${fmt(total)} (${validLines.length} line item${validLines.length !== 1 ? "s" : ""}).`;
+    patchLocalWO(wo.id, { status: "pending_approval", invoiceTotal: total }, localActivity(text, "system"));
     fire(`Invoice #${newInv.num} submitted — ${fmt(total)}`);
-    return true;
+    const ok = await dbCall(async () => {
+      await insertInvoice({ ...newInv, wot: wo.id, store: wo.store, storeAddr: wo.addr, contractor: wo.contractor, state: "submitted" }, validLines, currentUser.name);
+    }, "Invoice save failed");
+    if (ok) resetNewInv();
+    return ok;
   };
-  const doCreateWO = () => {
+
+  const doCreateWO = async () => {
     if (!newWO.store || !newWO.city || !newWO.summary || !newWO.nte) { fire("Fill in store, city, summary, and NTE"); return false; }
-    // Generate WO# + INC# in 7-Eleven format
-    const base = 11400000 + Math.floor(Math.random() * 99999);
-    const id = `FWKD${base}`;
-    const incidentId = `INC${24000000 + Math.floor(Math.random() * 999999)}`;
+    // Server-side atomic ID generation (no collisions)
+    let ids: { wo: string; inc: string };
+    try { ids = await nextWorkOrderId(); }
+    catch (e: any) { fire(`Could not generate ID: ${e.message || e}`); return false; }
     const trades = SERVICE_TO_TRADES(newWO.businessService || "", newWO.category || "");
     let contractor = null, status = "unassigned";
     if (newWO.assign === "auto") {
       const matched = contractorFor(newWO.city, trades, USERS);
       if (matched) { contractor = matched; status = "assigned"; }
     } else if (newWO.assign && newWO.assign !== "unassigned") { contractor = newWO.assign; status = "assigned"; }
+    const dispatchedAt = contractor ? new Date().toISOString() : null;
     const wo = {
-      id, incidentId,
-      store: newWO.store, city: newWO.city, addr: "",
+      id: ids.wo,
+      incidentId: ids.inc,
+      store: newWO.store,
+      city: newWO.city,
+      addr: "",
       lineOfService: newWO.businessService || "General",
       businessService: newWO.businessService || "General",
       category: newWO.category || "General",
       subCategory: "",
-      summary: newWO.summary, description: newWO.summary,
-      priority: newWO.priority, status, contractor,
-      afm: "", afmEmail: "",
+      summary: newWO.summary,
+      description: newWO.summary,
+      priority: newWO.priority,
+      status,
+      contractor,
+      afm: "",
+      afmEmail: "",
       functionalStatus: contractor ? "Dispatched" : "New",
       nte: parseInt(newWO.nte) || 0,
-      age: "now",
-      dispatchedAt: contractor ? new Date().toISOString() : null,
-      createdAt: new Date().toISOString(),
-      activities: [{ author: "System", time: dateNow(), text: `Work order created. NTE: ${fmt(parseInt(newWO.nte) || 0)}.${contractor ? ` Auto-dispatched to ${getUser(contractor)?.name} (trade + territory match).` : ""}`, type: "system" }],
+      dispatchedAt,
     };
-    setWorkOrders(prev => [wo, ...prev]);
-    resetNewWO();
-    fire(contractor ? `${id} — dispatched to ${getUser(contractor)?.name.split(" ")[0]}` : `${id} created — unassigned`);
-    return true;
+    const text = `Work order created. NTE: ${fmt(parseInt(newWO.nte) || 0)}.${contractor ? ` Auto-dispatched to ${getUser(contractor)?.name} (trade + territory match).` : ""}`;
+    // Optimistic local insert
+    setWorkOrders(prev => [{ ...wo, age: "now", activities: [localActivity(text, "system")], photos: [] }, ...prev]);
+    fire(contractor ? `${ids.wo} — dispatched to ${getUser(contractor)?.name.split(" ")[0]}` : `${ids.wo} created — unassigned`);
+    const ok = await dbCall(async () => {
+      await insertWorkOrder(wo, text, "System");
+    }, "WO save failed");
+    if (ok) resetNewWO();
+    return ok;
   };
-  const doAutoAssign = () => {
+
+  const doAutoAssign = async () => {
     const unassigned = workOrders.filter(w => w.status === "unassigned");
     if (unassigned.length === 0) { fire("No unassigned calls"); return; }
     let count = 0, skipped = 0;
-    unassigned.forEach(w => {
+    const dispatchedAt = new Date().toISOString();
+    const ops = unassigned.map(async w => {
       const trades = SERVICE_TO_TRADES(w.businessService || "", w.category || "");
       const matched = contractorFor(w.city, trades, USERS);
       if (!matched) { skipped++; return; }
-      updateWO(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt: new Date().toISOString(), newActivity: { author: "System", time: dateNow(), text: `Auto-dispatched to ${getUser(matched)?.name}. Territory + trade match.`, type: "system" } });
-      count++;
+      const c = getUser(matched);
+      const text = `Auto-dispatched to ${c?.name || matched}. Territory + trade match.`;
+      patchLocalWO(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt }, localActivity(text, "system"));
+      try {
+        await updateWorkOrder(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt });
+        await insertActivity(w.id, "System", text, "system");
+        count++;
+      } catch (e: any) { fire(`${w.id}: ${e.message || e}`); }
     });
+    await Promise.all(ops);
     fire(skipped > 0 ? `Auto-dispatched ${count} · ${skipped} need manual assignment` : `Auto-dispatched ${count} call${count !== 1 ? "s" : ""}`);
   };
-  const doPostNote = (woId: string) => { if (!noteText.trim()) return; addActivity(woId, currentUser.name, noteText, "note"); setNoteText(""); fire("Note posted"); };
+
+  const doPostNote = async (woId: string) => {
+    const text = noteText.trim();
+    if (!text) return;
+    setNoteText("");
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note" }, ...w.activities] } : w));
+    fire("Note posted");
+    await dbCall(async () => {
+      await insertActivity(woId, currentUser.name, text, "note");
+    }, "Note save failed");
+  };
+
   const doAiEnhance = () => {
     setAiEnhancing(true);
     setTimeout(() => { setAiNote("Arrived on site at the designated time. Performed a systematic diagnostic of the affected equipment, isolating the root cause through sequential testing of primary components. Identified the failure mode and carried out the appropriate corrective action in accordance with manufacturer specifications and industry best practices. Verified system performance post-repair against operational parameters and confirmed restoration to normal operating conditions. Area cleaned and secured. Recommending routine preventive maintenance at the standard scheduled interval to reduce the likelihood of recurrence."); setAiEnhancing(false); }, 1400);
   };
-  const doAddPhotos = (woId: string, files: FileList | null) => {
+
+  const doAddPhotos = async (woId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const readers = Array.from(files).slice(0, 8).map(f => new Promise<string>(res => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(f); }));
-    Promise.all(readers).then(urls => {
-      setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: [...(w.photos || []), ...urls], activities: [{ author: currentUser.name, time: dateNow(), text: `Added ${urls.length} photo${urls.length > 1 ? "s" : ""}.`, type: "note" }, ...w.activities] } : w));
-      fire(`${urls.length} photo${urls.length > 1 ? "s" : ""} added`);
-    });
+    const limited = Array.from(files).slice(0, 8);
+    fire(`Uploading ${limited.length} photo${limited.length > 1 ? "s" : ""}...`);
+    try {
+      const paths = await uploadPhotos(woId, limited, currentUser.name);
+      // Resolve to signed URLs and update local state
+      const urls = (await Promise.all(paths.map(p => getPhotoUrl(p)))).filter(Boolean) as string[];
+      const text = `Added ${paths.length} photo${paths.length > 1 ? "s" : ""}.`;
+      setWorkOrders(prev => prev.map(w => w.id === woId ? {
+        ...w,
+        photos: [...(w.photos || []), ...urls],
+        activities: [{ author: currentUser.name, time: dateNow(), text, type: "note" }, ...w.activities],
+      } : w));
+      fire(`${paths.length} photo${paths.length > 1 ? "s" : ""} uploaded`);
+    } catch (e: any) {
+      fire(`Photo upload failed: ${e.message || e}`);
+    }
   };
-  const doRemovePhoto = (woId: string, idx: number) => { setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((_, i) => i !== idx) } : w)); fire("Photo removed"); };
+
+  const doRemovePhoto = async (woId: string, idx: number) => {
+    const wo = workOrders.find(w => w.id === woId);
+    const path = wo?.photos?.[idx];
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((_: any, i: number) => i !== idx) } : w));
+    fire("Photo removed");
+    if (path && !path.startsWith("data:") && !path.startsWith("http")) {
+      // It's a Supabase storage path — call DB to remove it
+      // Note: signed URLs from getPhotoUrl don't preserve the path; we'd need to track paths separately
+      // For now just remove locally — full cleanup happens when v8d adds path tracking to local state
+    } else if (path?.startsWith("http")) {
+      // Extract storage path from signed URL if possible
+      const match = path.match(/\/photos\/(.+?)\?/);
+      if (match) {
+        await dbCall(() => removePhoto(woId, match[1]), "Photo cleanup failed");
+      }
+    }
+  };
 
   // ═══════════════════════════════════════════════════════════════
   //  LOGIN
