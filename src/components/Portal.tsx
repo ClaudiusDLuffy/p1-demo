@@ -5,6 +5,7 @@ import {
   signIn, signOut,
   loadAllProfiles, loadWorkOrders, loadInvoices,
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice,
+  unassignWorkOrder, reassignWorkOrder, deleteActivity,
   uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
@@ -329,6 +330,9 @@ export default function P1Portal() {
   const [aiEnhancing, setAiEnhancing] = useState(false);
   const [aiNote, setAiNote] = useState(null);
   const [modal, setModal] = useState(null);
+  const [reassignTarget, setReassignTarget] = useState<string>("");
+  const [activityMenuId, setActivityMenuId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [workOrders, setWorkOrders] = useState<any[]>([]);
@@ -563,6 +567,40 @@ export default function P1Portal() {
       await updateWorkOrder(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" });
       await insertActivity(woId, "System", text, "system");
     }, "Dispatch failed");
+  };
+
+  const doUnassign = async (woId: string) => {
+    const wo = workOrders.find(w => w.id === woId);
+    const text = `Work order unassigned by ${currentUser.name}.`;
+    patchLocalWO(woId, { status: "unassigned", contractor: null, eta: null, dispatchedAt: null, functionalStatus: "New" }, localActivity(text, "system"));
+    fire("Work order unassigned");
+    await dbCall(async () => {
+      await unassignWorkOrder(woId, currentUser.name);
+    }, "Unassign failed");
+  };
+
+  const doReassign = async (woId: string, newContractorId: string) => {
+    const wo = workOrders.find(w => w.id === woId);
+    const oldName = wo?.contractor ? (getUser(wo.contractor)?.name || "Unassigned") : "Unassigned";
+    const newC = getUser(newContractorId);
+    if (!newC) { fire("Contractor not found"); return; }
+    if (wo?.contractor === newContractorId) { fire("Already assigned to that contractor"); return; }
+    const text = `Reassigned from ${oldName} to ${newC.name} by ${currentUser.name}.`;
+    patchLocalWO(woId, { contractor: newContractorId, status: "assigned", functionalStatus: "Dispatched" }, localActivity(text, "system"));
+    fire(`Reassigned to ${newC.name}`);
+    await dbCall(async () => {
+      await reassignWorkOrder(woId, newContractorId, oldName, newC.name, currentUser.name);
+    }, "Reassign failed");
+  };
+
+  const doDeleteActivity = async (woId: string, activityId: string) => {
+    setWorkOrders(prev => prev.map(w => w.id === woId
+      ? { ...w, activities: (w.activities || []).filter((a: any) => a.id !== activityId) }
+      : w));
+    fire("Comment deleted");
+    await dbCall(async () => {
+      await deleteActivity(activityId);
+    }, "Delete failed");
   };
 
   const doSetEta = async (woId: string, eta: string) => {
@@ -1318,6 +1356,12 @@ export default function P1Portal() {
                       {woData.status === "unassigned" && isManager && contractorsOnly.slice(0, 4).map(c => (
                         <button key={c.id} onClick={() => doAssign(woData.id, c.id)} className="btn-soft">Assign → {c.name.split(" ")[0]}</button>
                       ))}
+                      {isManager && ["assigned", "wip", "parts"].includes(woData.status) && (
+                        <>
+                          <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} className="btn-soft">Reassign</button>
+                          <button onClick={() => setModal("unassign")} className="btn-soft">Unassign</button>
+                        </>
+                      )}
                       {woData.status === "assigned" && !isManager && (
                         <>
                           <button onClick={() => setModal("setEta")} className="btn-soft">Set ETA</button>
@@ -1384,18 +1428,42 @@ export default function P1Portal() {
                           )}
                         </div>
                       )}
-                      {(woData.activities || []).map((e: any, i: number) => (
-                        <div key={i} style={{ display: "flex", gap: 12, marginBottom: 16, animation: i === 0 ? "fadeUp 0.3s" : "none" }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: e.type === "system" ? T.border : T.accent, marginTop: 6, flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12 }}>
-                              <span style={{ fontWeight: 600, color: T.ink }}>{e.author}</span>
-                              <span style={{ color: T.subtle, marginLeft: 8, fontSize: 11 }}>{e.time}</span>
+                      {(woData.activities || []).map((e: any, i: number) => {
+                        const canDelete = !!e.id && e.type !== "system" && !!e.authorId && (isManager || e.authorId === currentUser.id);
+                        const menuOpen = activityMenuId === e.id;
+                        return (
+                          <div key={e.id || i} style={{ display: "flex", gap: 12, marginBottom: 16, animation: i === 0 ? "fadeUp 0.3s" : "none", position: "relative" }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: e.type === "system" ? T.border : T.accent, marginTop: 6, flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12 }}>
+                                <span style={{ fontWeight: 600, color: T.ink }}>{e.author}</span>
+                                <span style={{ color: T.subtle, marginLeft: 8, fontSize: 11 }}>{e.time}</span>
+                              </div>
+                              <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginTop: 3 }}>{e.text}</div>
                             </div>
-                            <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginTop: 3 }}>{e.text}</div>
+                            {canDelete && (
+                              <div style={{ position: "relative", flexShrink: 0 }}>
+                                <button
+                                  onClick={() => setActivityMenuId(menuOpen ? null : e.id)}
+                                  aria-label="Activity actions"
+                                  style={{ width: 24, height: 24, padding: 0, borderRadius: 6, border: "none", background: menuOpen ? T.bgWarm : "transparent", color: T.subtle, cursor: "pointer", fontSize: 16, lineHeight: 1, fontFamily: "inherit" }}
+                                >…</button>
+                                {menuOpen && (
+                                  <>
+                                    <div onClick={() => setActivityMenuId(null)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                                    <div style={{ position: "absolute", top: 28, right: 0, zIndex: 41, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(31,30,28,0.12)", minWidth: 120, overflow: "hidden" }}>
+                                      <button
+                                        onClick={() => { setActivityMenuId(null); setPendingDelete({ woId: woData.id, activityId: e.id }); setModal("deleteActivity"); }}
+                                        style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: T.danger, fontFamily: "inherit" }}
+                                      >Delete</button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1753,6 +1821,70 @@ export default function P1Portal() {
               const eta = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${h > 12 ? h - 12 : h || 12}:${m} ${ap}`;
               doSetEta(woData.id, eta); setModal(null);
             }} className="btn-primary">Set ETA</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "reassign" && woData && (
+        <Modal onClose={() => setModal(null)} title="Reassign work order" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+            Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "—") : "Unassigned"}</span>. Pick a new contractor — the original SLA deadline is preserved.
+          </div>
+          <Field label="New contractor">
+            <Sel value={reassignTarget} onChange={(e: any) => setReassignTarget(e.target.value)}>
+              <option value="">Select...</option>
+              {contractorsOnly.map(c => (
+                <option key={c.id} value={c.id} disabled={c.id === woData.contractor}>
+                  {c.name}{c.territory ? ` — ${c.territory}` : ""}{c.id === woData.contractor ? " (current)" : ""}
+                </option>
+              ))}
+            </Sel>
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => {
+                if (!reassignTarget || reassignTarget === woData.contractor) return;
+                doReassign(woData.id, reassignTarget);
+                setModal(null);
+                setReassignTarget("");
+              }}
+              className="btn-primary"
+            >Reassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "unassign" && woData && (
+        <Modal onClose={() => setModal(null)} title="Unassign work order" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Unassign this work order? This will move it back to <span style={{ color: T.ink, fontWeight: 600 }}>Unassigned</span> and clear the contractor.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => { doUnassign(woData.id); setModal(null); }}
+              className="btn-primary"
+            >Unassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "deleteActivity" && pendingDelete && (
+        <Modal onClose={() => { setModal(null); setPendingDelete(null); }} title="Delete comment" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Delete this comment? This cannot be undone.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => { setModal(null); setPendingDelete(null); }} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => {
+                if (pendingDelete) doDeleteActivity(pendingDelete.woId, pendingDelete.activityId);
+                setModal(null);
+                setPendingDelete(null);
+              }}
+              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+            >Delete</button>
           </div>
         </Modal>
       )}
