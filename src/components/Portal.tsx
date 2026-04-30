@@ -6,6 +6,7 @@ import {
   loadAllProfiles, loadWorkOrders, loadInvoices,
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice,
   unassignWorkOrder, reassignWorkOrder, deleteActivity,
+  uploadInvoicePdf, downloadInvoicePdfBlob,
   uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
@@ -363,6 +364,8 @@ export default function P1Portal() {
   const [newInv, setNewInv] = useState<any>(blankNewInv());
   const resetNewInv = () => setNewInv(blankNewInv());
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
+  const [submittedInvoiceNum, setSubmittedInvoiceNum] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   // Tick every 60s so SLA countdowns update live
   const [, forceTick] = useState(0);
   useEffect(() => { const i = setInterval(() => forceTick(x => x + 1), 60000); return () => clearInterval(i); }, []);
@@ -678,6 +681,7 @@ export default function P1Portal() {
     const subtotal = invSubtotal(validLines);
     const tax = parseFloat(newInv.tax) || 0;
     const total = subtotal + tax;
+    const mappedLines = validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) }));
     // Optimistic local update
     const localInv = {
       num: newInv.num,
@@ -690,7 +694,7 @@ export default function P1Portal() {
       storeAddr: wo.addr,
       cme: newInv.cme,
       contractor: wo.contractor,
-      lines: validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) })),
+      lines: mappedLines,
       subtotal,
       salesTax: tax,
       total,
@@ -699,12 +703,70 @@ export default function P1Portal() {
     setInvoices(prev => [localInv, ...prev]);
     const text = `Invoice #${newInv.num} submitted to 7-Eleven. Total: ${fmt(total)} (${validLines.length} line item${validLines.length !== 1 ? "s" : ""}).`;
     patchLocalWO(wo.id, { status: "pending_approval", invoiceTotal: total }, localActivity(text, "system"));
-    fire(`Invoice #${newInv.num} submitted — ${fmt(total)}`);
-    const ok = await dbCall(async () => {
-      await insertInvoice({ ...newInv, wot: wo.id, store: wo.store, storeAddr: wo.addr, contractor: wo.contractor, state: "submitted" }, validLines, currentUser.name);
-    }, "Invoice save failed");
-    if (ok) resetNewInv();
-    return ok;
+    try {
+      const header: any = await insertInvoice(
+        { ...newInv, wot: wo.id, store: wo.store, storeAddr: wo.addr, contractor: wo.contractor, state: "submitted" },
+        validLines,
+        currentUser.name,
+      );
+      // Generate + upload PDF so manager + contractor can pull the same bytes later.
+      try {
+        const { generateInvoicePDFBlob } = await import("../lib/invoicePdf");
+        const blob = generateInvoicePDFBlob({
+          num: newInv.num, wot: wo.id, store: wo.store, storeAddr: wo.addr,
+          invoiceDate: newInv.invoiceDate, serviceDate: newInv.serviceDate, terms: newInv.terms,
+          cme: newInv.cme, lines: mappedLines, subtotal, salesTax: tax, total,
+        });
+        const path = await uploadInvoicePdf(header.id, newInv.num, blob);
+        setInvoices(prev => prev.map(i => i.num === newInv.num ? { ...i, id: header.id, pdfStoragePath: path } : i));
+      } catch (e: any) {
+        // Non-fatal — PDF can be (re)generated on first download via the same path.
+        fire(`PDF upload skipped: ${e.message || e}`);
+      }
+      setSubmittedInvoiceNum(newInv.num);
+      setModal("invoiceSubmitted");
+      resetNewInv();
+      return true;
+    } catch (e: any) {
+      // Roll back the optimistic local insert so the list doesn't show a phantom row
+      setInvoices(prev => prev.filter(i => i.num !== newInv.num));
+      fire(`Invoice save failed: ${e.message || e}`);
+      return false;
+    }
+  };
+
+  // Storage-first download with lazy-backfill: if the invoice already has a
+  // stored PDF, pull bytes directly; otherwise generate, upload, persist the
+  // path, then trigger the download. Either way the user gets a file.
+  const doDownloadInvoice = async (inv: any) => {
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename } = await import("../lib/invoicePdf");
+      const filename = invoiceFilename(inv);
+      if (inv.pdfStoragePath) {
+        const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
+        triggerBlobDownload(blob, filename);
+        fire(`Invoice ${inv.num} downloaded`);
+        return;
+      }
+      // Lazy backfill — covers the seeded invoice + any pre-existing rows.
+      const blob = generateInvoicePDFBlob(inv);
+      if (inv.id) {
+        try {
+          const path = await uploadInvoicePdf(inv.id, inv.num, blob);
+          setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, pdfStoragePath: path } : i));
+        } catch (e: any) {
+          fire(`PDF cache failed: ${e.message || e}`);
+        }
+      }
+      triggerBlobDownload(blob, filename);
+      fire(`Invoice ${inv.num} downloaded`);
+    } catch (e: any) {
+      fire(`Download failed: ${e.message || e}`);
+    } finally {
+      setPdfBusy(false);
+    }
   };
 
   const doCreateWO = async () => {
@@ -896,7 +958,7 @@ export default function P1Portal() {
     ]
     : [
       { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: myWOs.filter(w => activeStatuses.includes(w.status)).length },
-      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8" },
+      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: invoices.filter(i => i.contractor === currentUser.id && (i.state === "submitted" || i.state === "revised")).length || null },
     ];
 
   const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", wo_detail: woData?.id || "Work order", capital: "Capital projects", map: "Map" };
@@ -1584,7 +1646,10 @@ export default function P1Portal() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: T.surfaceSoft }}>
-                      {["Invoice#", "WO#", "Contractor", "State", "Date", "Store", "Lines", "Total"].map(h => (
+                      {(isManager
+                        ? ["Invoice#", "WO#", "Contractor", "State", "Date", "Store", "Lines", "Total"]
+                        : ["Invoice#", "WO#", "State", "Date", "Store", "Lines", "Total"]
+                      ).map(h => (
                         <th key={h} style={{ textAlign: h === "Total" || h === "Lines" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>{h}</th>
                       ))}
                     </tr>
@@ -1594,7 +1659,7 @@ export default function P1Portal() {
                       <tr key={inv.num} onClick={() => setSelectedInvoice(inv.num)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
                         <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
                         <td className="mono" style={{ padding: "13px 14px", fontSize: 11, color: T.muted }}>{inv.wot}</td>
-                        <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>
+                        {isManager && <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>}
                         <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[inv.state]} small /></td>
                         <td style={{ padding: "13px 14px", color: T.subtle }}>{inv.date}</td>
                         <td style={{ padding: "13px 14px" }}>#{inv.store}</td>
@@ -1617,9 +1682,9 @@ export default function P1Portal() {
               <div style={{ animation: "fadeUp 0.25s" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
                   <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
-                  <button onClick={async () => { const { downloadInvoicePDF } = await import("../lib/invoicePdf"); downloadInvoicePDF(inv as any); fire(`Invoice ${inv.num} downloaded`); }} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
                     <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
-                    Download PDF
+                    {pdfBusy ? "Preparing…" : "Download PDF"}
                   </button>
                 </div>
                 <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
@@ -2094,7 +2159,30 @@ export default function P1Portal() {
 
             <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
               <button onClick={() => { setModal(null); resetNewInv(); }} className="btn-soft">Cancel</button>
-              <button onClick={() => { if (doSubmitInvoice(woData)) setModal(null); }} className="btn-accent">Submit to 7-Eleven</button>
+              <button onClick={() => doSubmitInvoice(woData)} className="btn-accent">Submit to 7-Eleven</button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
+        const inv = invoices.find(i => i.num === submittedInvoiceNum);
+        return (
+          <Modal onClose={() => { setModal(null); setSubmittedInvoiceNum(null); }} title={`Invoice #${submittedInvoiceNum} submitted`} width={440}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 22, lineHeight: 1.55 }}>
+              Submitted to AFM for approval. You can find a copy in your Invoices tab anytime.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { fire(`Invoice #${submittedInvoiceNum} saved`); setModal(null); setSubmittedInvoiceNum(null); }} className="btn-soft">Done</button>
+              <button
+                onClick={async () => { if (inv) await doDownloadInvoice(inv); }}
+                disabled={pdfBusy || !inv}
+                className="btn-primary"
+                style={{ display: "flex", alignItems: "center", gap: 6, opacity: (pdfBusy || !inv) ? 0.6 : 1, cursor: (pdfBusy || !inv) ? "default" : "pointer" }}
+              >
+                <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
+                {pdfBusy ? "Preparing…" : "Download PDF"}
+              </button>
             </div>
           </Modal>
         );
