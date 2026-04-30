@@ -2,7 +2,7 @@
 // @ts-nocheck
 import { useState, useEffect, useMemo } from "react";
 import {
-  signIn, signOut, getSession,
+  signIn, signOut,
   loadAllProfiles, loadWorkOrders, loadInvoices,
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice,
   uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
@@ -382,13 +382,18 @@ export default function P1Portal() {
 
   // Real Supabase auth — replaces demo button login
   const doLogin = async (email: string, password: string = DEMO_PASSWORD) => {
+    if (loginLoading) return;
     const v = (email || "").trim();
     if (!v) { setLoginError("Enter an email to sign in"); return; }
     setLoginError(null);
     setLoginLoading(true);
     try {
+      // Clear any stale session before signing in fresh — guards against
+      // wedged refresh tokens left over from a previous demo run.
+      await signOut().catch(() => {});
       await signIn(v, password);
-      // currentUser will populate via the auth listener effect below
+      // currentUser will populate via the auth listener effect below.
+      // loginLoading will be cleared there once the profile resolves (or fails).
     } catch (err: any) {
       setLoginError(err.message || "Sign in failed");
       setLoginLoading(false);
@@ -406,41 +411,53 @@ export default function P1Portal() {
   };
 
   // ── DATA LOADERS — fire when auth session is available ───────────────
-  // Hydrate session on mount + listen for changes
+  // Single listener handles mount (INITIAL_SESSION), fresh logins (SIGNED_IN),
+  // and logout (SIGNED_OUT). Profile fetch is deferred via setTimeout to
+  // release the GoTrue internal lock — calling supabase-js methods directly
+  // inside onAuthStateChange can deadlock and cause the spinner to hang.
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const session = await getSession();
-      if (!session?.user || !mounted) return;
-      // Pull this user's profile (only once per session)
-      const sb = supabase();
-      const { data: prof } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
-      if (prof && mounted) {
-        setCurrentUser({
-          id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
-          title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
-          trades: prof.trades || [], color: prof.color,
-        });
-        setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
-        setLoginLoading(false);
-      }
-    })();
-    const sb = supabase();
-    const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
-      if (event === "SIGNED_IN" && session?.user) {
-        const { data: prof } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
-        if (prof) {
+    let lastLoadedUserId: string | null = null;
+
+    const hydrate = (userId: string) => {
+      setTimeout(async () => {
+        if (!mounted) return;
+        try {
+          const sb = supabase();
+          const { data: prof, error } = await sb
+            .from("profiles").select("*").eq("id", userId).single();
+          if (!mounted) return;
+          if (error) throw error;
+          if (!prof) throw new Error("Profile not found for this account");
+          if (lastLoadedUserId === prof.id) return; // dedupe rapid events
+          lastLoadedUserId = prof.id;
           setCurrentUser({
             id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
             title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
             trades: prof.trades || [], color: prof.color,
           });
           setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
-          setLoginLoading(false);
+        } catch (err: any) {
+          if (!mounted) return;
+          setLoginError(err?.message || "Could not load your profile");
+        } finally {
+          if (mounted) setLoginLoading(false);
         }
+      }, 0);
+    };
+
+    const sb = supabase();
+    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if ((event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session?.user) {
+        hydrate(session.user.id);
+      } else if (event === "INITIAL_SESSION" && !session) {
+        // No session on mount — make sure the spinner isn't left on.
+        setLoginLoading(false);
       } else if (event === "SIGNED_OUT") {
+        lastLoadedUserId = null;
         setCurrentUser(null);
+        setLoginLoading(false);
       }
     });
     return () => { mounted = false; subscription.unsubscribe(); };
