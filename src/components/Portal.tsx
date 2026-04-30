@@ -950,7 +950,6 @@ export default function P1Portal() {
   const sideItems = isManager
     ? [
       { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
-      { id: "map", label: "Map", icon: "M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16" },
       { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
       { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
@@ -961,7 +960,7 @@ export default function P1Portal() {
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: invoices.filter(i => i.contractor === currentUser.id && (i.state === "submitted" || i.state === "revised")).length || null },
     ];
 
-  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", wo_detail: woData?.id || "Work order", capital: "Capital projects", map: "Map" };
+  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", wo_detail: woData?.id || "Work order", capital: "Capital projects" };
 
   const renderCard = (wo: any) => {
     const pr = PRIORITY[wo.priority];
@@ -1146,84 +1145,6 @@ export default function P1Portal() {
             </div>
           )}
 
-          {/* ═════ MAP ═════ */}
-          {page === "map" && isManager && (() => {
-            const byStore = workOrders.filter(w => activeStatuses.includes(w.status) || w.status === "capital").reduce((acc: any, w) => {
-              const key = `${w.store}|${w.city}`;
-              if (!acc[key]) acc[key] = { store: w.store, city: w.city, wos: [] };
-              acc[key].wos.push(w);
-              return acc;
-            }, {});
-            const stores = Object.values(byStore) as any[];
-            const worstColor = (wos: any[]) => {
-              if (wos.some(w => w.priority === "p1" && w.status === "unassigned")) return T.danger;
-              if (wos.some(w => { const s = slaRemaining(w); return s && s.remainingHours < 2; })) return T.danger;
-              if (wos.some(w => w.priority === "p1")) return T.accent;
-              if (wos.some(w => w.status === "wip")) return T.violet;
-              return T.success;
-            };
-            return (
-              <div style={{ animation: "fadeUp 0.3s" }}>
-                <div className="card" style={{ background: T.accentSoft, border: `1px solid ${T.accentRing}`, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ico d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16" size={20} color="#fff" /></div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, color: T.accent, fontSize: 13 }}>{stores.length} stores with active work across {new Set(stores.map(s => s.city.split(",")[1]?.trim())).size} states</div>
-                    <div style={{ fontSize: 11, color: "#8A4428", marginTop: 2 }}>Click a pin to filter. Red = SLA risk, amber = active P1, violet = work in progress, green = on track.</div>
-                  </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }} className="detail-two-col">
-                  <div className="card" style={{ padding: 20, position: "relative", overflow: "hidden", background: T.surfaceSoft }}>
-                    <div style={{ position: "absolute", inset: 0, backgroundImage: `radial-gradient(circle at 1px 1px, ${T.border} 1px, transparent 0)`, backgroundSize: "20px 20px", opacity: 0.5 }} />
-                    <svg viewBox="0 0 800 500" style={{ width: "100%", height: "auto", display: "block", position: "relative", zIndex: 1 }}>
-                      <defs><filter id="ps"><feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.2" /></filter></defs>
-                      <path d={US_PATH} fill={T.surface} stroke={T.border} strokeWidth="1.5" strokeLinejoin="round" />
-                      {stores.map((s, i) => {
-                        const pos = coordsForCity(s.city);
-                        if (!pos) return null;
-                        const color = worstColor(s.wos);
-                        const hasRisk = s.wos.some(w => { const x = slaRemaining(w); return x && x.remainingHours < 2; });
-                        const r = 9 + Math.min(s.wos.length * 2, 10);
-                        return (
-                          <g key={i} style={{ cursor: "pointer" }} onClick={() => { nav("work_orders"); setSearch(s.store); }}>
-                            {hasRisk && <circle cx={pos.x} cy={pos.y} r={r + 8} fill={color} opacity="0.18"><animate attributeName="r" values={`${r + 4};${r + 14};${r + 4}`} dur="1.8s" repeatCount="indefinite" /><animate attributeName="opacity" values="0.3;0;0.3" dur="1.8s" repeatCount="indefinite" /></circle>}
-                            <circle cx={pos.x} cy={pos.y} r={r} fill={color} stroke="#fff" strokeWidth="2.5" filter="url(#ps)" />
-                            <text x={pos.x} y={pos.y + 4} textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff" fontFamily="'JetBrains Mono', monospace">{s.wos.length}</text>
-                            <text x={pos.x} y={pos.y - r - 6} textAnchor="middle" fontSize="10" fontWeight="600" fill={T.ink}>#{s.store}</text>
-                          </g>
-                        );
-                      })}
-                    </svg>
-                    <div style={{ position: "absolute", bottom: 16, left: 16, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(10px)", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 11, fontWeight: 500, color: T.muted, zIndex: 2 }}>
-                      <div style={{ fontWeight: 700, color: T.ink, marginBottom: 6, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Pin legend</div>
-                      {[{ c: T.danger, l: "SLA risk / breach" }, { c: T.accent, l: "P1 Critical active" }, { c: T.violet, l: "In progress" }, { c: T.success, l: "On track" }].map((l, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: l.c }} />
-                          <span>{l.l}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="card" style={{ padding: 20, maxHeight: 600, overflowY: "auto" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Stores ranked by volume</div>
-                    {stores.sort((a, b) => b.wos.length - a.wos.length).map((s: any, i) => {
-                      const p1 = s.wos.filter((w: any) => w.priority === "p1").length;
-                      return (
-                        <div key={i} onClick={() => { nav("work_orders"); setSearch(s.store); }} style={{ padding: "13px 0", borderBottom: i < stores.length - 1 ? `1px solid ${T.borderSoft}` : "none", cursor: "pointer" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>Store #{s.store}</div>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: worstColor(s.wos), background: worstColor(s.wos) + "22", padding: "2px 8px", borderRadius: 12 }}>{s.wos.length}</span>
-                          </div>
-                          <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{s.city}</div>
-                          {p1 > 0 && <div style={{ fontSize: 10, color: T.danger, fontWeight: 600 }}>⚡ {p1} P1 Critical</div>}
-                          <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{fmt(s.wos.reduce((sum: number, w: any) => sum + (w.nte || 0), 0))} at risk</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
 
           {/* ═════ CAPITAL ═════ */}
           {page === "capital" && isManager && (
