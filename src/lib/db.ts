@@ -64,7 +64,7 @@ export async function loadWorkOrders() {
   // Pull WOs + activities + photos in 3 queries, stitch together
   const [woRes, actRes, photoRes] = await Promise.all([
     sb.from("work_orders").select("*").order("created_at", { ascending: false }),
-    sb.from("activities").select("*").order("created_at", { ascending: false }),
+    sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("photos").select("*"),
   ]);
   if (woRes.error) throw woRes.error;
@@ -120,6 +120,8 @@ const mapWO = (w: any) => ({
 });
 
 const mapActivity = (a: any) => ({
+  id: a.id,
+  authorId: a.author_id,
   author: a.author_name,
   time: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
   text: a.text,
@@ -259,6 +261,57 @@ export async function insertActivity(workOrderId: string, authorName: string, te
     type,
   });
   if (error) throw error;
+}
+
+// Soft delete — the row stays in the DB but loadWorkOrders filters it out.
+// RLS allows the author to update their own row, and managers/dispatchers/
+// back-office (is_staff) to update any row.
+export async function deleteActivity(activityId: string) {
+  const sb = supabase();
+  const { error } = await sb.from("activities")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", activityId);
+  if (error) throw error;
+}
+
+// Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,
+// and writes a system activity entry.
+export async function unassignWorkOrder(workOrderId: string, authorName: string) {
+  const sb = supabase();
+  const { error } = await sb.from("work_orders").update({
+    contractor_id: null,
+    status: "unassigned",
+    functional_status: "New",
+    eta: null,
+    dispatched_at: null,
+  }).eq("id", workOrderId);
+  if (error) throw error;
+  await insertActivity(workOrderId, "System", `Work order unassigned by ${authorName}.`, "system");
+}
+
+// Swaps contractor_id, keeps status as 'assigned', preserves the original
+// SLA deadline (we never touch sla_deadline_at). The caller passes display
+// names so the activity entry reads cleanly.
+export async function reassignWorkOrder(
+  workOrderId: string,
+  newContractorId: string,
+  oldContractorName: string,
+  newContractorName: string,
+  authorName: string,
+) {
+  const sb = supabase();
+  const { error } = await sb.from("work_orders").update({
+    contractor_id: newContractorId,
+    status: "assigned",
+    functional_status: "Dispatched",
+  }).eq("id", workOrderId);
+  if (error) throw error;
+  await insertActivity(
+    workOrderId,
+    "System",
+    `Reassigned from ${oldContractorName || "Unassigned"} to ${newContractorName} by ${authorName}.`,
+    "system",
+  );
 }
 
 // Atomically generate the next FWKD work order ID via a Postgres sequence
