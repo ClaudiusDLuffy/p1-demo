@@ -180,9 +180,35 @@ const mapInvoice = (i: any) => ({
   subtotal: parseFloat(i.subtotal || 0),
   salesTax: parseFloat(i.sales_tax || 0),
   total: parseFloat(i.total || 0),
+  pdfStoragePath: i.pdf_storage_path || null,
   date: shortMonthDay(i.invoice_date),
   rejectionReason: i.rejection_reason,
 });
+
+// ── INVOICE PDF STORAGE ────────────────────────────────────────────────────
+// Bucket is private; reads use sb.storage.download which authenticates via
+// the user's session. Path layout: {invoice_id}/{invoice_number}.pdf.
+export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, blob: Blob): Promise<string> {
+  const sb = supabase();
+  const path = `${invoiceId}/${invoiceNum}.pdf`;
+  const { error: upErr } = await sb.storage.from("invoice-pdfs").upload(path, blob, {
+    contentType: "application/pdf",
+    upsert: true,
+  });
+  if (upErr) throw upErr;
+  const { error: rowErr } = await sb.from("invoices")
+    .update({ pdf_storage_path: path }).eq("id", invoiceId);
+  if (rowErr) throw rowErr;
+  return path;
+}
+
+export async function downloadInvoicePdfBlob(storagePath: string): Promise<Blob> {
+  const sb = supabase();
+  const { data, error } = await sb.storage.from("invoice-pdfs").download(storagePath);
+  if (error) throw error;
+  if (!data) throw new Error("Empty PDF response from storage");
+  return data;
+}
 
 const mapInvoiceLine = (l: any) => ({
   type: l.type,

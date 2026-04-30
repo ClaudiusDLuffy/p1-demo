@@ -252,3 +252,27 @@ export function downloadInvoicePDF(inv: Invoice): void {
   const doc = generateInvoicePDF(inv);
   doc.save(`Invoice-${inv.num}-${inv.wot}.pdf`);
 }
+
+// Used when we want the raw bytes (e.g. to upload to Supabase Storage)
+// rather than trigger a browser download.
+export function generateInvoicePDFBlob(inv: Invoice): Blob {
+  const doc = generateInvoicePDF(inv);
+  return doc.output("blob") as Blob;
+}
+
+// Trigger a download of an arbitrary blob (used when we pull the PDF
+// back from Storage instead of regenerating it locally).
+export function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export function invoiceFilename(inv: Pick<Invoice, "num" | "wot">): string {
+  return `Invoice-${inv.num}-${inv.wot}.pdf`;
+}
