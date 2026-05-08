@@ -4,6 +4,7 @@
 // don't need to change. Keep this thin — heavy logic stays in components.
 
 import { supabase } from "./supabase/client";
+import { computeSlaBreaches } from "./slaConfig";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -116,6 +117,11 @@ const mapWO = (w: any) => ({
   capitalStatus: w.capital_status,
   partNeeded: w.part_needed,
   partEta: w.part_eta,
+  createdAt: w.created_at,
+  updatedAt: w.updated_at,
+  slaStartedAt: w.sla_started_at,
+  responseBreachAt: w.response_breach_at,
+  resolutionBreachAt: w.resolution_breach_at,
   age: ageString(w.created_at, w.dispatched_at),
 });
 
@@ -260,6 +266,9 @@ const WO_FIELD_MAP: Record<string, string> = {
   resolutionCode: "resolution_code",
   resolutionNotes: "resolution_notes",
   isCapital: "is_capital",
+  slaStartedAt: "sla_started_at",
+  responseBreachAt: "response_breach_at",
+  resolutionBreachAt: "resolution_breach_at",
 };
 function toDbWoPatch(patch: any) {
   const out: any = {};
@@ -298,6 +307,36 @@ export async function deleteActivity(activityId: string) {
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", activityId);
   if (error) throw error;
+}
+
+// Approves an invoice — flips invoice.state to 'approved' and pushes the
+// associated work order from `pending_approval` to `pending_payment`. The
+// AFM approval timestamp goes into the activity log so we can compute aging
+// in the dashboard.
+export async function approveInvoice(invoiceId: string, workOrderId: string, approverName: string) {
+  const sb = supabase();
+  const { error: invErr } = await sb.from("invoices")
+    .update({ state: "approved" }).eq("id", invoiceId);
+  if (invErr) throw invErr;
+  const { error: woErr } = await sb.from("work_orders")
+    .update({ status: "pending_payment" }).eq("id", workOrderId);
+  if (woErr) throw woErr;
+  await insertActivity(workOrderId, "System", `Invoice approved by ${approverName}. Awaiting payment from 7-Eleven.`, "system");
+}
+
+// Marks a work order paid — terminal state. Stamps invoice.paid_at and the
+// activity log so we have an audit trail of who closed the loop.
+export async function markWorkOrderPaid(workOrderId: string, invoiceId: string | null, authorName: string) {
+  const sb = supabase();
+  const { error: woErr } = await sb.from("work_orders")
+    .update({ status: "closed" }).eq("id", workOrderId);
+  if (woErr) throw woErr;
+  if (invoiceId) {
+    const { error: invErr } = await sb.from("invoices")
+      .update({ state: "paid", paid_at: new Date().toISOString() }).eq("id", invoiceId);
+    if (invErr) throw invErr;
+  }
+  await insertActivity(workOrderId, "System", `Marked paid by ${authorName}. Work order closed.`, "system");
 }
 
 // Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,
@@ -352,6 +391,11 @@ export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
 export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string) {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
+  // SLA clock starts at intake (creation), NOT at assignment. For email-
+  // ingested WOs (Phase 1.5), pass slaStartedAt as the email's received-at;
+  // for portal-created WOs we use now.
+  const startedAt = wo.slaStartedAt ? new Date(wo.slaStartedAt) : new Date();
+  const breaches = computeSlaBreaches(wo.priority, startedAt);
   const dbRow = {
     id: wo.id,
     incident_id: wo.incidentId,
@@ -373,6 +417,9 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
     nte: wo.nte || 0,
     dispatched_at: wo.dispatchedAt || null,
     is_capital: !!wo.isCapital,
+    sla_started_at: startedAt.toISOString(),
+    response_breach_at: breaches.responseBreachAt.toISOString(),
+    resolution_breach_at: breaches.resolutionBreachAt.toISOString(),
     created_by: user?.id || null,
   };
   const { data, error } = await sb.from("work_orders").insert(dbRow).select().single();
