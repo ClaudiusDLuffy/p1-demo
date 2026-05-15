@@ -80,10 +80,25 @@ export async function loadWorkOrders() {
     (photosByWo[p.work_order_id] ||= []).push(p);
   }
 
+  // The photos bucket is private, so a raw storage path is not loadable by
+  // <img src>. Batch-resolve every path to a short-lived signed URL here.
+  // Paths whose object is missing return no URL and are dropped, so an
+  // orphaned photo row renders as "no photo" instead of a broken thumbnail.
+  const allPaths = (photoRes.data || []).map(p => p.storage_path).filter(Boolean);
+  const urlByPath: Record<string, string> = {};
+  if (allPaths.length > 0) {
+    const { data: signed } = await sb.storage.from("photos").createSignedUrls(allPaths, 3600);
+    for (const s of signed || []) {
+      if (s.signedUrl && s.path) urlByPath[s.path] = s.signedUrl;
+    }
+  }
+
   return (woRes.data || []).map(wo => ({
     ...mapWO(wo),
     activities: actsByWo[wo.id] || [],
-    photos: (photosByWo[wo.id] || []).map(p => p.storage_path), // resolved to URLs in component
+    photos: (photosByWo[wo.id] || [])
+      .map(p => urlByPath[p.storage_path])
+      .filter(Boolean),
   }));
 }
 
