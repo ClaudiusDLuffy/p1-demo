@@ -842,11 +842,19 @@ export default function P1Portal() {
     const text = `Work order created. NTE: ${fmt(parseInt(newWO.nte) || 0)}.${contractor ? ` Auto-dispatched to ${getUser(contractor)?.name} (trade + territory match).` : ""}`;
     // Optimistic local insert
     setWorkOrders(prev => [{ ...wo, age: "now", activities: [localActivity(text, "system")], photos: [] }, ...prev]);
-    fire(contractor ? `${ids.wo} — dispatched to ${getUser(contractor)?.name.split(" ")[0]}` : `${ids.wo} created — unassigned`);
     const ok = await dbCall(async () => {
       await insertWorkOrder(wo, text, "System");
-    }, "WO save failed");
-    if (ok) resetNewWO();
+    }, "Couldn't save work order");
+    if (ok) {
+      fire(contractor
+        ? `Work order ${ids.wo} created. Dispatched to ${getUser(contractor)?.name.split(" ")[0]}.`
+        : `Work order ${ids.wo} created. Added to Unassigned.`);
+      resetNewWO();
+    } else {
+      // Insert failed — roll back the optimistic card so the UI doesn't show
+      // a phantom WO that the realtime refetch would silently drop anyway.
+      setWorkOrders(prev => prev.filter(w => w.id !== wo.id));
+    }
     return ok;
   };
 
@@ -1828,7 +1836,7 @@ export default function P1Portal() {
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => { setModal(null); resetNewWO(); }} className="btn-soft">Cancel</button>
-            <button onClick={() => { if (doCreateWO()) setModal(null); }} className="btn-primary">Create</button>
+            <button onClick={async () => { if (await doCreateWO()) setModal(null); }} className="btn-primary">Create</button>
           </div>
         </Modal>
       )}

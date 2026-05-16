@@ -367,6 +367,18 @@ export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
 export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string) {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
+  // work_orders.store_number is a FK to stores. The intake form accepts any
+  // store number, so ensure the parent row exists before inserting the WO.
+  // ignoreDuplicates: don't clobber a seeded store's address/AFM — we only
+  // need the row to exist so the FK resolves.
+  if (wo.store) {
+    const [city, state] = String(wo.city || "").split(",").map((s: string) => s.trim());
+    const { error: sErr } = await sb.from("stores").upsert(
+      { store_number: wo.store, city: city || null, state: state || null, address: wo.addr || null },
+      { onConflict: "store_number", ignoreDuplicates: true },
+    );
+    if (sErr) throw sErr;
+  }
   const dbRow = {
     id: wo.id,
     incident_id: wo.incidentId,
