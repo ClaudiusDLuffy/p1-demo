@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   signIn, signOut,
   loadAllProfiles, loadWorkOrders, loadInvoices,
-  updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice,
+  updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice, updateInvoiceState,
   unassignWorkOrder, reassignWorkOrder, deleteActivity,
   uploadInvoicePdf, downloadInvoicePdfBlob,
   uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
@@ -48,7 +48,10 @@ const T = {
 // Real user/profile data loads from Supabase after successful auth.
 const DEMO_ACCOUNTS = [
   { email: "claytonetchison@gmail.com", name: "Clay Etchison", initials: "CE", color: "#1F1E1C", subtitle: "Owner" },
-  { email: "jeremy@p1pros.com", name: "Jeremy Barry", initials: "JB", color: "#C15F3C", subtitle: "Owner" },
+  // Jeremy's demo auth user is the gustavo@ mailbox (Gustavo runs the demo and
+  // owns that inbox for confirmations) — must match bootstrap.ts so the
+  // quick-access button signs into a real auth user with the demo password.
+  { email: "gustavo@myamzteam.com", name: "Jeremy Barry", initials: "JB", color: "#C15F3C", subtitle: "Owner" },
   { email: "landryd@phospitality.com", name: "Landry Dillinger", initials: "LD", color: "#A67C00", subtitle: "Dispatcher" },
   { email: "scrcdallastexas@gmail.com", name: "Derek Starnes", initials: "DS", color: "#0891B2", subtitle: "Contractor — Dallas" },
 ];
@@ -74,6 +77,8 @@ const STATUS = {
   completed: { label: "Completed", color: T.success, bg: T.successSoft, ring: "#CFDED3" },
   pending_invoice: { label: "Pending Invoice", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
   pending_approval: { label: "Pending Approval", color: T.muted, bg: T.borderSoft, ring: T.border },
+  pending_payment: { label: "Pending Payment", color: "#0E7C7B", bg: "#E0F2F1", ring: "#B2DFDB" },
+  closed: { label: "Closed", color: T.subtle, bg: T.borderSoft, ring: T.border },
 };
 
 // 7-Eleven's Functional Status field (what Gustavo's SLA breach hinged on)
@@ -155,9 +160,9 @@ const slaLabel = (wo: any) => {
   return { text: `${Math.floor(s.remainingHours)}h left`, color: T.success, bg: T.successSoft, severity: "safe" };
 };
 
-const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "capital"].includes(state);
+const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "pending_payment", "closed", "capital"].includes(state);
 const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
-const closingStatuses = ["completed", "pending_invoice", "pending_approval"];
+const closingStatuses = ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"];
 
 // ═══════════════════════════════════════════════════════════════
 //  SEED WORK ORDERS — real 7-Eleven field shapes
@@ -531,6 +536,7 @@ export default function P1Portal() {
   const capitalCount = workOrders.filter(w => w.status === "capital").length;
   const completedCount = workOrders.filter(w => w.status === "completed").length;
   const pendAppr = workOrders.filter(w => w.status === "pending_approval").length;
+  const awaitingPayment = workOrders.filter(w => w.status === "pending_payment").length;
   const slaAtRisk = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours < 2 && activeStatuses.includes(w.status); }).length;
   const slaBreached = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours <= 0 && activeStatuses.includes(w.status); }).length;
   const woData = selectedWO ? workOrders.find(w => w.id === selectedWO) : null;
@@ -660,6 +666,36 @@ export default function P1Portal() {
       await updateWorkOrder(woId, { status: "pending_invoice" });
       await insertActivity(woId, "System", text, "system");
     }, "Update failed");
+  };
+
+  // Owner approves on behalf of AFM (Phase 1 has no AFM role). Clears the
+  // submitted invoice for payment and carries the WO to Pending Payment.
+  const doApproveInvoice = async (woId: string) => {
+    const inv = invoices.find(i => i.wot === woId && (i.state === "submitted" || i.state === "revised"));
+    const text = `Approved on behalf of AFM by ${currentUser.name}.${inv ? ` Invoice #${inv.num} cleared for payment.` : ""}`;
+    if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "approved" } : i));
+    patchLocalWO(woId, { status: "pending_payment" }, localActivity(text, "system"));
+    fire("Approved — moved to Pending Payment");
+    await dbCall(async () => {
+      if (inv) await updateInvoiceState(inv.num, "approved");
+      await updateWorkOrder(woId, { status: "pending_payment" });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "Approval failed");
+  };
+
+  // Owner records payment received → WO is fully closed.
+  const doMarkPaid = async (woId: string) => {
+    const inv = invoices.find(i => i.wot === woId);
+    const paidAt = new Date().toISOString();
+    const text = `Marked paid by ${currentUser.name}. Work order closed.`;
+    if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "paid" } : i));
+    patchLocalWO(woId, { status: "closed" }, localActivity(text, "system"));
+    fire("Marked paid — work order closed");
+    await dbCall(async () => {
+      if (inv) await updateInvoiceState(inv.num, "paid", { paid_at: paidAt });
+      await updateWorkOrder(woId, { status: "closed" });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "Mark paid failed");
   };
 
   const doCapitalFlag = async (woId: string) => {
@@ -1100,7 +1136,7 @@ export default function P1Portal() {
               )}
 
               {/* Hero + stats */}
-              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
+              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
                 <div className="card card-hover stat-hero" style={{ background: `linear-gradient(135deg, ${T.accentSoft} 0%, ${T.warnSoft} 100%)`, padding: "28px 32px", animation: "fadeUp 0.4s both", cursor: "pointer", position: "relative", overflow: "hidden", border: `1px solid ${T.accentRing}` }} onClick={() => nav("work_orders")}>
                   <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: `radial-gradient(circle, ${T.accent}15, transparent 70%)` }} />
                   <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 14 }}>Revenue at risk</div>
@@ -1121,6 +1157,7 @@ export default function P1Portal() {
                   { label: "P1 Critical", value: p1Count, color: T.danger, sub: `${p1Unassigned} unassigned`, bg: T.dangerSoft, onClick: () => nav("work_orders") },
                   { label: "SLA at risk", value: slaAtRisk, color: T.warn, sub: "Needs status update", bg: T.warnSoft, onClick: () => nav("work_orders") },
                   { label: "Capital", value: capitalCount, color: T.violet, sub: "Pending equipment", bg: T.violetSoft, onClick: () => nav("capital") },
+                  { label: "Awaiting Payment", value: awaitingPayment, color: "#0E7C7B", sub: "Approved · unpaid", bg: "#E0F2F1", onClick: () => nav("work_orders") },
                 ].map((s, i) => (
                   <div key={i} className="card card-hover" style={{ background: s.bg, padding: "22px 24px", animation: `fadeUp 0.4s ${(i + 1) * 0.06}s both`, cursor: "pointer" }} onClick={s.onClick}>
                     <div style={{ fontSize: 11, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 12 }}>{s.label}</div>
@@ -1139,7 +1176,7 @@ export default function P1Portal() {
               <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.muted, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ width: 18, height: 2, background: T.border, display: "inline-block", borderRadius: 2 }} />Closing pipeline
               </div>
-              <div className="kanban-closing" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+              <div className="kanban-closing" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12 }}>
                 {closingStatuses.map(renderKanbanCol)}
               </div>
             </div>
@@ -1361,6 +1398,8 @@ export default function P1Portal() {
                       {woData.status === "parts" && !isManager && <button onClick={() => setModal("startWork")} className="btn-accent">Resume work</button>}
                       {woData.status === "completed" && isManager && <button onClick={() => doMoveToInvoice(woData.id)} className="btn-accent">Portal updated → pending invoice</button>}
                       {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
+                      {woData.status === "pending_approval" && isManager && <button onClick={() => doApproveInvoice(woData.id)} className="btn-accent">Approve (on behalf of AFM)</button>}
+                      {woData.status === "pending_payment" && isManager && <button onClick={() => setModal("markPaid")} className="btn-primary">Mark paid → close</button>}
                     </div>
 
                     {/* Photos */}
@@ -1486,12 +1525,14 @@ export default function P1Portal() {
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Progress</div>
                       {[
                         { label: "Created", done: true },
-                        { label: "Dispatched + ETA", done: ["assigned", "wip", "parts", "capital", "completed", "pending_invoice", "pending_approval"].includes(woData.status) },
-                        { label: "Work started", done: ["wip", "parts", "capital", "completed", "pending_invoice", "pending_approval"].includes(woData.status) },
+                        { label: "Dispatched + ETA", done: ["assigned", "wip", "parts", "capital", "completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
+                        { label: "Work started", done: ["wip", "parts", "capital", "completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
                         { label: "Asset captured", done: !!woData.assetModel },
-                        { label: "Completed", done: ["completed", "pending_invoice", "pending_approval"].includes(woData.status) },
-                        { label: "7-Eleven updated", done: ["pending_invoice", "pending_approval"].includes(woData.status) },
-                        { label: "Invoiced", done: ["pending_approval"].includes(woData.status) },
+                        { label: "Completed", done: ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
+                        { label: "7-Eleven updated", done: ["pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
+                        { label: "Invoiced", done: ["pending_approval", "pending_payment", "closed"].includes(woData.status) },
+                        { label: "Approved (AFM)", done: ["pending_payment", "closed"].includes(woData.status) },
+                        { label: "Paid + closed", done: woData.status === "closed" },
                       ].map((s, i, a) => (
                         <div key={i} style={{ display: "flex", gap: 12, position: "relative" }}>
                           {i < a.length - 1 && <div style={{ position: "absolute", left: 9, top: 20, width: 2, height: 20, background: s.done && a[i + 1]?.done ? T.success : T.borderSoft }} />}
@@ -1603,10 +1644,15 @@ export default function P1Portal() {
               <div style={{ animation: "fadeUp 0.25s" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
                   <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
-                  <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
-                    <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
-                    {pdfBusy ? "Preparing…" : "Download PDF"}
-                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
+                      <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
+                      {pdfBusy ? "Preparing…" : "Download PDF"}
+                    </button>
+                    {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                      <button onClick={() => { doApproveInvoice(inv.wot); setSelectedInvoice(null); }} className="btn-primary">Approve (on behalf of AFM)</button>
+                    )}
+                  </div>
                 </div>
                 <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
                   {/* Invoice header */}
@@ -1852,6 +1898,21 @@ export default function P1Portal() {
               onClick={() => { doUnassign(woData.id); setModal(null); }}
               className="btn-primary"
             >Unassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "markPaid" && woData && (
+        <Modal onClose={() => setModal(null)} title="Mark paid" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Confirm payment received for this work order? It will move to <span style={{ color: T.ink, fontWeight: 600 }}>Closed</span> and the linked invoice will be marked paid.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => { doMarkPaid(woData.id); setModal(null); }}
+              className="btn-primary"
+            >Mark paid</button>
           </div>
         </Modal>
       )}

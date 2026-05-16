@@ -42,7 +42,7 @@ type Seed = {
 const USERS: Seed[] = [
   // P1 internal — owners
   { email: "claytonetchison@gmail.com", name: "Clay Etchison", initials: "CE", role: "manager", title: "Owner", color: "#1F1E1C" },
-  { email: "jeremy@p1pros.com", name: "Jeremy Barry", initials: "JB", role: "manager", title: "Owner", color: "#C15F3C" },
+  { email: "gustavo@myamzteam.com", name: "Jeremy Barry", initials: "JB", role: "manager", title: "Owner", color: "#C15F3C" },
   { email: "eddie@phospitality.com", name: "Eddie Pozzuoli", initials: "EP", role: "manager", title: "Owner", color: "#5B4B8A" },
   // Dispatcher
   { email: "landryd@phospitality.com", name: "Landry Dillinger", initials: "LD", role: "dispatcher", title: "Dispatcher", color: "#A67C00" },
@@ -74,6 +74,14 @@ async function ensureUser(s: Seed): Promise<string> {
   const found = userListCache.find(u => u.email?.toLowerCase() === s.email.toLowerCase());
   if (found) {
     userId = found.id;
+    // Re-running must guarantee the demo password is in sync for every account.
+    // Existing users (e.g. Jeremy remapped to the gustavo@ mailbox) may have a
+    // stale/unknown password — reset it so all quick-access logins behave alike.
+    const { error: pwErr } = await sb.auth.admin.updateUserById(userId, {
+      password: DEFAULT_PASSWORD,
+      email_confirm: true,
+    });
+    if (pwErr) throw new Error(`password reset: ${pwErr.message}`);
   } else {
     const { data, error } = await sb.auth.admin.createUser({
       email: s.email,
@@ -225,7 +233,7 @@ async function main() {
   console.log("Default password for every user: " + DEFAULT_PASSWORD);
   console.log("Try signing in with: clay@p1services.com... wait — use the REAL emails:");
   console.log("  claytonetchison@gmail.com / p1demo2026!");
-  console.log("  jeremy@p1pros.com / p1demo2026!");
+  console.log("  gustavo@myamzteam.com / p1demo2026!  (Jeremy Barry, owner — demo mailbox)");
   console.log("  scrcdallastexas@gmail.com / p1demo2026!  (Derek Starnes, contractor)");
 }
 
