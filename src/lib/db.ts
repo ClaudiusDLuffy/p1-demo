@@ -443,6 +443,14 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string) 
   return { ...header, total };
 }
 
+// Patch an invoice's state (and optionally paid_at). Used by the Owner
+// approve / mark-paid actions that carry a WO from pending_approval → closed.
+export async function updateInvoiceState(num: string, state: string, extra: Record<string, any> = {}) {
+  const sb = supabase();
+  const { error } = await sb.from("invoices").update({ state, ...extra }).eq("num", num);
+  if (error) throw error;
+}
+
 // ── PHOTO STORAGE ─────────────────────────────────────────────────────────
 export async function uploadPhotos(workOrderId: string, files: FileList | File[], authorName: string): Promise<string[]> {
   const sb = supabase();
