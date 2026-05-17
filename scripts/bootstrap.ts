@@ -61,6 +61,7 @@ const USERS: Seed[] = [
   { email: "ctanksolutions@gmail.com", name: "Eric Coleman", initials: "EC", role: "contractor", phone: "813-687-4990", company: "Coleman Tank Solutions", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
   { email: "buriakmw@gmail.com", name: "Mykola Buriak", initials: "MB", role: "contractor", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
   { email: "plumbingdayornight@gmail.com", name: "Pete (Anytime Plumbing)", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
+  { email: "nik@p1pros.com", name: "Nik", initials: "NK", role: "contractor", company: "P1 Internal Tech", territory: "Tampa, FL", trades: ["hvac", "refrigeration", "beverage", "ice", "plumbing", "hotfood"], color: "#2563EB" },
 ];
 
 // Cache the user list once per run — listUsers per row is slow + brittle

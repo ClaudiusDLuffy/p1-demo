@@ -7,7 +7,7 @@ import {
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice, updateInvoiceState,
   unassignWorkOrder, reassignWorkOrder, deleteActivity,
   uploadInvoicePdf, downloadInvoicePdfBlob,
-  uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
+  uploadPhotos, removePhoto, subscribeToChanges, getPhotoUrl,
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
 import { SlaBadge } from "./SlaBadge";
@@ -347,8 +347,10 @@ export default function P1Portal() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [USERS, setUsers] = useState<any[]>(DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })));
   const [dataLoading, setDataLoading] = useState(true);
-  const [newWO, setNewWO] = useState({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
-  const resetNewWO = () => setNewWO({ store: "", city: "", priority: "p3", businessService: "", category: "", summary: "", nte: "", assign: "auto" });
+  const BLANK_WO = { wot: "", incidentId: "", store: "", addr: "", city: "", afm: "", afmEmail: "", priority: "", lineOfService: "", businessService: "", category: "", subCategory: "", summary: "", description: "", nte: "", assign: "" };
+  const [newWO, setNewWO] = useState({ ...BLANK_WO });
+  const [createErr, setCreateErr] = useState<string | null>(null);
+  const resetNewWO = () => { setNewWO({ ...BLANK_WO }); setCreateErr(null); };
   // Invoice builder state — line-item based, matches P1's real invoice format (6556)
   const defaultInvLines = () => [
     { type: "Travel", desc: "Travel to site", qty: 1, rate: P1_BUSINESS.defaultTravelRate, amount: P1_BUSINESS.defaultTravelRate },
@@ -836,56 +838,72 @@ export default function P1Portal() {
   };
 
   const doCreateWO = async () => {
-    if (!newWO.store || !newWO.city || !newWO.summary || !newWO.nte) { fire("Fill in store, city, summary, and NTE"); return false; }
-    // Server-side atomic ID generation (no collisions)
-    let ids: { wo: string; inc: string };
-    try { ids = await nextWorkOrderId(); }
-    catch (e: any) { fire(`Could not generate ID: ${e.message || e}`); return false; }
-    const trades = SERVICE_TO_TRADES(newWO.businessService || "", newWO.category || "");
-    let contractor = null, status = "unassigned";
-    if (newWO.assign === "auto") {
-      const matched = contractorFor(newWO.city, trades, USERS);
-      if (matched) { contractor = matched; status = "assigned"; }
-    } else if (newWO.assign && newWO.assign !== "unassigned") { contractor = newWO.assign; status = "assigned"; }
+    setCreateErr(null);
+    // WOT# is the ONLY required field. Everything else is optional with
+    // sensible defaults — manual intake must never be blocked on data we
+    // don't have yet.
+    const wot = (newWO.wot || "").trim();
+    if (!wot) { setCreateErr("WOT number is required."); return false; }
+    if (workOrders.some(w => w.id === wot)) {
+      setCreateErr("That WOT number already exists — try a different one.");
+      return false;
+    }
+    // Assign-on-create: blank → Unassigned; a contractor id → Assigned.
+    const contractor = newWO.assign || null;
+    const status = contractor ? "assigned" : "unassigned";
+    const contractorName = contractor ? getUser(contractor)?.name : null;
     const dispatchedAt = contractor ? new Date().toISOString() : null;
+    // Priority defaults to P4 (standard) when left blank. Text fields default
+    // to "" so the UI renders cleanly; incidentId stays null when blank
+    // because incident_id carries a UNIQUE constraint ('' would collide).
+    const priority = newWO.priority || "p4";
+    const incidentId = (newWO.incidentId || "").trim() || null;
     const wo = {
-      id: ids.wo,
-      incidentId: ids.inc,
-      store: newWO.store,
-      city: newWO.city,
-      addr: "",
-      lineOfService: newWO.businessService || "General",
-      businessService: newWO.businessService || "General",
-      category: newWO.category || "General",
-      subCategory: "",
-      summary: newWO.summary,
-      description: newWO.summary,
-      priority: newWO.priority,
+      id: wot,
+      incidentId,
+      store: (newWO.store || "").trim(),
+      city: (newWO.city || "").trim(),
+      addr: (newWO.addr || "").trim(),
+      lineOfService: (newWO.lineOfService || "").trim(),
+      businessService: (newWO.businessService || "").trim(),
+      category: (newWO.category || "").trim(),
+      subCategory: (newWO.subCategory || "").trim(),
+      summary: (newWO.summary || "").trim(),
+      description: (newWO.description || "").trim(),
+      priority,
       status,
       contractor,
-      afm: "",
-      afmEmail: "",
+      afm: (newWO.afm || "").trim(),
+      afmEmail: (newWO.afmEmail || "").trim(),
       functionalStatus: contractor ? "Dispatched" : "New",
-      nte: parseInt(newWO.nte) || 0,
+      nte: parseFloat(newWO.nte) || 0,
       dispatchedAt,
+      source: "manual",
     };
-    const text = `Work order created. NTE: ${fmt(parseInt(newWO.nte) || 0)}.${contractor ? ` Auto-dispatched to ${getUser(contractor)?.name} (trade + territory match).` : ""}`;
-    // Optimistic local insert
-    setWorkOrders(prev => [{ ...wo, age: "now", activities: [localActivity(text, "system")], photos: [] }, ...prev]);
-    const ok = await dbCall(async () => {
-      await insertWorkOrder(wo, text, "System");
-    }, "Couldn't save work order");
-    if (ok) {
+    const createdText = `Work order created manually by ${currentUser.name}.`;
+    const assignedText = contractor ? `Assigned to ${contractorName} by ${currentUser.name}.` : null;
+    // Optimistic local insert (with both activity entries).
+    const optimisticActivities = [localActivity(createdText, "system")];
+    if (assignedText) optimisticActivities.unshift(localActivity(assignedText, "system"));
+    setWorkOrders(prev => [{ ...wo, age: "now", activities: optimisticActivities, photos: [] }, ...prev]);
+    try {
+      await insertWorkOrder(wo, createdText, "System");
+      if (assignedText) await insertActivity(wot, "System", assignedText, "system");
       fire(contractor
-        ? `Work order ${ids.wo} created. Dispatched to ${getUser(contractor)?.name.split(" ")[0]}.`
-        : `Work order ${ids.wo} created. Added to Unassigned.`);
+        ? `Work order ${wot} created. Assigned to ${contractorName}.`
+        : `Work order ${wot} created. Added to Unassigned.`);
       resetNewWO();
-    } else {
-      // Insert failed — roll back the optimistic card so the UI doesn't show
-      // a phantom WO that the realtime refetch would silently drop anyway.
+      return true;
+    } catch (e: any) {
+      // Roll back the optimistic card so no phantom WO lingers, and surface
+      // the failure inline in the modal — never a silent failure.
       setWorkOrders(prev => prev.filter(w => w.id !== wo.id));
+      const msg = String(e?.message || e);
+      setCreateErr(/duplicate|unique/i.test(msg)
+        ? "That WOT number already exists — try a different one."
+        : `Save failed: ${msg}`);
+      return false;
     }
-    return ok;
   };
 
   const doAutoAssign = async () => {
@@ -1052,7 +1070,7 @@ export default function P1Portal() {
           <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
           <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>Store #{wo.store}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{wo.store ? `Store #${wo.store}` : wo.id}</div>
         <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{wo.summary || "—"}</div>
         {cardNte > 0 && (
           <div style={{ marginTop: 6 }}>
@@ -1157,7 +1175,7 @@ export default function P1Portal() {
           {isManager && (
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
-              <button onClick={() => setModal("newWO")} className="btn-primary">+ New work order</button>
+              <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
             </div>
           )}
         </div>
@@ -1253,8 +1271,8 @@ export default function P1Portal() {
                       <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.violet }}>{wo.id}</span>
                       {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>Store #{wo.store} · {wo.city}</div>
-                    <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>{wo.summary}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
+                    <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>{wo.summary || "—"}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>
                       <div>
                         <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>Equipment</div>
@@ -1305,9 +1323,9 @@ export default function P1Portal() {
                       return (
                         <tr key={wo.id} onClick={() => { setSelectedWO(wo.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
                           <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{wo.id}</td>
-                          <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>{wo.incidentId}</td>
-                          <td style={{ padding: "12px 14px", fontWeight: 600 }}>#{wo.store}</td>
-                          <td style={{ padding: "12px 14px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary}</td>
+                          <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>{wo.incidentId || "—"}</td>
+                          <td style={{ padding: "12px 14px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "—"}</td>
+                          <td style={{ padding: "12px 14px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "—"}</td>
                           <td style={{ padding: "12px 14px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
                           <td style={{ padding: "12px 14px" }}><Badge conf={STATUS[wo.status]} small /></td>
                           <td style={{ padding: "12px 14px", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "—"}</td>
@@ -1424,11 +1442,13 @@ export default function P1Portal() {
                     <div className="card" style={{ padding: 24, marginBottom: 16 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
                         <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>{woData.id}</span>
-                        <span style={{ color: T.subtle, fontSize: 12 }}>/</span>
-                        <span className="mono" style={{ fontSize: 11, color: T.muted }}>{woData.incidentId}</span>
+                        {woData.incidentId && <span style={{ color: T.subtle, fontSize: 12 }}>/</span>}
+                        {woData.incidentId && <span className="mono" style={{ fontSize: 11, color: T.muted }}>{woData.incidentId}</span>}
                       </div>
-                      <div className="display" style={{ fontSize: 28, fontWeight: 500, color: T.ink, letterSpacing: -0.4, lineHeight: 1.1 }}>Store #{woData.store} · {woData.city}</div>
-                      <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{woData.addr}</div>
+                      <div className="display" style={{ fontSize: 28, fontWeight: 500, color: T.ink, letterSpacing: -0.4, lineHeight: 1.1 }}>
+                        {[woData.store ? `Store #${woData.store}` : null, woData.city || null].filter(Boolean).join(" · ") || woData.id}
+                      </div>
+                      {woData.addr && <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{woData.addr}</div>}
                       <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
                         <Badge conf={PRIORITY[woData.priority]} />
                         <Badge conf={STATUS[woData.status]} />
@@ -1437,14 +1457,22 @@ export default function P1Portal() {
                           ? <SlaBadge responseBreachAt={woData.responseBreachAt} resolutionBreachAt={woData.resolutionBreachAt} size="sm" />
                           : sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
                       </div>
-                      <div style={{ padding: "14px 18px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginTop: 16 }}>
-                        <div style={{ fontSize: 12, color: T.subtle, marginBottom: 4, fontWeight: 600 }}>{woData.businessService} · {woData.category}{woData.subCategory ? ` · ${woData.subCategory}` : ""}</div>
-                        <div style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.6, fontWeight: 500 }}>{woData.summary}</div>
-                        {woData.description && woData.description !== woData.summary && <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>{woData.description}</div>}
-                      </div>
+                      {(() => {
+                        const classParts = [woData.businessService, woData.category, woData.subCategory].filter(Boolean);
+                        const hasClassification = classParts.length > 0;
+                        const hasBody = hasClassification || woData.summary || woData.description;
+                        if (!hasBody) return null;
+                        return (
+                          <div style={{ padding: "14px 18px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginTop: 16 }}>
+                            {hasClassification && <div style={{ fontSize: 12, color: T.subtle, marginBottom: 4, fontWeight: 600 }}>{classParts.join(" · ")}</div>}
+                            {woData.summary && <div style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.6, fontWeight: 500 }}>{woData.summary}</div>}
+                            {woData.description && woData.description !== woData.summary && <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, marginTop: 8 }}>{woData.description}</div>}
+                          </div>
+                        );
+                      })()}
                       <div className="detail-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 18 }}>
                         {[
-                          { l: "Line of Service", v: woData.lineOfService },
+                          { l: "Line of Service", v: woData.lineOfService || "Not set" },
                           { l: "NTE", v: fmt(woData.nte) },
                           { l: "ETA", v: woData.eta || "Not set" },
                           { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
@@ -1740,8 +1768,8 @@ export default function P1Portal() {
                           ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
                           : sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>}
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3 }}>Store #{wo.store} · {wo.city}</div>
-                      <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
+                      <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary || "—"}</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <Badge conf={STATUS[wo.status]} small />
@@ -1957,32 +1985,54 @@ export default function P1Portal() {
 
       {/* ═════ MODALS ═════ */}
       {modal === "newWO" && (
-        <Modal onClose={() => { setModal(null); resetNewWO(); }} title="New work order" width={520}>
+        <Modal onClose={() => { setModal(null); resetNewWO(); }} title="Create Work Order" width={520}>
+          <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>
+            Only the WOT number is required. Everything else is optional — fill in what you have; the rest takes sensible defaults.
+          </div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Store #"><Input value={newWO.store} onChange={(e: any) => setNewWO({ ...newWO, store: e.target.value })} placeholder="e.g. 33321" /></Field>
-              <Field label="City, State"><Input value={newWO.city} onChange={(e: any) => setNewWO({ ...newWO, city: e.target.value })} placeholder="e.g. Dallas, TX" /></Field>
+              <Field label="WOT Number *"><Input value={newWO.wot} onChange={(e: any) => { setNewWO({ ...newWO, wot: e.target.value }); if (createErr) setCreateErr(null); }} placeholder="e.g. FWKD11400123" /></Field>
+              <Field label="Incident ID"><Input value={newWO.incidentId} onChange={(e: any) => setNewWO({ ...newWO, incidentId: e.target.value })} placeholder="optional — e.g. INC24890517" /></Field>
             </div>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Store Number"><Input value={newWO.store} onChange={(e: any) => setNewWO({ ...newWO, store: e.target.value })} placeholder="optional — e.g. 33321" /></Field>
+              <Field label="City, State"><Input value={newWO.city} onChange={(e: any) => setNewWO({ ...newWO, city: e.target.value })} placeholder="optional — e.g. Dallas, TX" /></Field>
+            </div>
+            <Field label="Store Address"><Input value={newWO.addr} onChange={(e: any) => setNewWO({ ...newWO, addr: e.target.value })} placeholder="optional — street address" /></Field>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="AFM Name"><Input value={newWO.afm} onChange={(e: any) => setNewWO({ ...newWO, afm: e.target.value })} placeholder="optional" /></Field>
+              <Field label="AFM Email"><Input value={newWO.afmEmail} onChange={(e: any) => setNewWO({ ...newWO, afmEmail: e.target.value })} placeholder="optional" /></Field>
+            </div>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Line of Service"><Input value={newWO.lineOfService} onChange={(e: any) => setNewWO({ ...newWO, lineOfService: e.target.value })} placeholder="optional" /></Field>
               <Field label="Business Service"><Sel value={newWO.businessService} onChange={(e: any) => setNewWO({ ...newWO, businessService: e.target.value })}>
-                <option value="">Select...</option>
+                <option value="">Not set</option>
                 {["Refrigeration equipment", "Frozen Beverage - Equipment", "Cold Beverage - Equipment", "HVAC", "Plumbing", "Hot food", "Ice merchandiser", "Walk-in cooler/freezer", "Septic/Grease"].map(c => <option key={c}>{c}</option>)}
               </Sel></Field>
+            </div>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Category"><Input value={newWO.category} onChange={(e: any) => setNewWO({ ...newWO, category: e.target.value })} placeholder="optional" /></Field>
+              <Field label="Sub Category"><Input value={newWO.subCategory} onChange={(e: any) => setNewWO({ ...newWO, subCategory: e.target.value })} placeholder="optional" /></Field>
+            </div>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Priority"><Sel value={newWO.priority} onChange={(e: any) => setNewWO({ ...newWO, priority: e.target.value })}>
+                <option value="">P4 Minor (default)</option>
                 {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
               </Sel></Field>
+              <Field label="NTE ($)"><Input type="number" value={newWO.nte} onChange={(e: any) => setNewWO({ ...newWO, nte: e.target.value })} placeholder="optional" /></Field>
             </div>
-            <Field label="Category"><Input value={newWO.category} onChange={(e: any) => setNewWO({ ...newWO, category: e.target.value })} placeholder="e.g. Slurpee Machine, Fountain Machine, RTU compressor" /></Field>
-            <Field label="Summary"><TA rows={3} value={newWO.summary} onChange={(e: any) => setNewWO({ ...newWO, summary: e.target.value })} placeholder="Describe the issue..." /></Field>
-            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="NTE ($)"><Input type="number" value={newWO.nte} onChange={(e: any) => setNewWO({ ...newWO, nte: e.target.value })} placeholder="1000" /></Field>
-              <Field label="Dispatch"><Sel value={newWO.assign} onChange={(e: any) => setNewWO({ ...newWO, assign: e.target.value })}>
-                <option value="auto">Auto — territory + trade match</option>
-                <option value="unassigned">Leave unassigned</option>
-                {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name} ({u.territory})</option>)}
-              </Sel></Field>
-            </div>
+            <Field label="Assign to contractor (optional)"><Sel value={newWO.assign} onChange={(e: any) => setNewWO({ ...newWO, assign: e.target.value })}>
+              <option value="">Leave unassigned</option>
+              {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name}{u.company ? ` — ${u.company}` : ""}</option>)}
+            </Sel></Field>
+            <Field label="Short Description"><Input value={newWO.summary} onChange={(e: any) => setNewWO({ ...newWO, summary: e.target.value })} placeholder="optional — one-line summary" /></Field>
+            <Field label="Description"><TA rows={3} value={newWO.description} onChange={(e: any) => setNewWO({ ...newWO, description: e.target.value })} placeholder="optional — full description" /></Field>
           </div>
+          {createErr && (
+            <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, background: T.dangerSoft, border: `1px solid ${T.danger}44`, color: T.danger, fontSize: 12, fontWeight: 600 }}>
+              {createErr}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => { setModal(null); resetNewWO(); }} className="btn-soft">Cancel</button>
             <button onClick={async () => { if (await doCreateWO()) setModal(null); }} className="btn-primary">Create</button>
