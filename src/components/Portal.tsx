@@ -5,7 +5,7 @@ import {
   signIn, signOut,
   loadAllProfiles, loadWorkOrders, loadInvoices,
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice, updateInvoiceState,
-  unassignWorkOrder, reassignWorkOrder, deleteActivity,
+  unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
   uploadInvoicePdf, downloadInvoicePdfBlob,
   uploadPhotos, removePhoto, subscribeToChanges, getPhotoUrl,
 } from "../lib/db";
@@ -606,6 +606,23 @@ export default function P1Portal() {
     await dbCall(async () => {
       await unassignWorkOrder(woId, currentUser.name);
     }, "Unassign failed");
+  };
+
+  // Soft delete. Optimistically pull the card from every view, drop the
+  // detail panel, navigate home. Roll the card back if the DB write fails
+  // so a failed delete is never silently swallowed.
+  const doDeleteWO = async (woId: string) => {
+    const wo = workOrders.find(w => w.id === woId);
+    if (!wo) return;
+    setWorkOrders(prev => prev.filter(w => w.id !== woId));
+    setSelectedWO(null);
+    setAiNote(null);
+    setPage(isManager ? "dashboard" : "my_jobs");
+    const ok = await dbCall(async () => {
+      await deleteWorkOrder(woId, currentUser.name);
+    }, "Delete failed");
+    if (ok) fire(`Work order ${woId} deleted.`);
+    else setWorkOrders(prev => prev.some(w => w.id === woId) ? prev : [wo, ...prev]);
   };
 
   const doReassign = async (woId: string, newContractorId: string) => {
@@ -1552,6 +1569,15 @@ export default function P1Portal() {
                       {woData.status === "pending_payment" && isManager && <button onClick={() => setModal("markPaid")} className="btn-primary">Mark paid → close</button>}
                     </div>
 
+                    {/* Destructive secondary action — deliberately separated from the
+                        primary action zone above. Soft delete, manager/dispatcher/
+                        back-office only (never contractor). */}
+                    {isManager && (
+                      <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}` }}>
+                        <button onClick={() => setModal("deleteWO")} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3 }}>Delete work order</button>
+                      </div>
+                    )}
+
                     {/* Photos */}
                     <div className="card" style={{ padding: 22, marginBottom: 16 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -2106,6 +2132,21 @@ export default function P1Portal() {
               onClick={() => { doUnassign(woData.id); setModal(null); }}
               className="btn-primary"
             >Unassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "deleteWO" && woData && (
+        <Modal onClose={() => setModal(null)} title="Delete work order?" width={440}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            This will remove WOT <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{woData.id}</span> from all views. This action can be undone by an admin via the database.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => { doDeleteWO(woData.id); setModal(null); }}
+              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+            >Delete</button>
           </div>
         </Modal>
       )}
