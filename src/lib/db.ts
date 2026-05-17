@@ -64,7 +64,7 @@ export async function loadWorkOrders() {
   const sb = supabase();
   // Pull WOs + activities + photos in 3 queries, stitch together
   const [woRes, actRes, photoRes] = await Promise.all([
-    sb.from("work_orders").select("*").order("created_at", { ascending: false }),
+    sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("photos").select("*"),
   ]);
@@ -325,6 +325,21 @@ export async function deleteActivity(activityId: string) {
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", activityId);
   if (error) throw error;
+}
+
+// Soft delete only — sets deleted_at + deleted_by, never hard delete.
+// Related invoices / photos / activities are intentionally left intact so
+// the row can be restored via SQL. Writes a system activity entry as the
+// audit trail for this destructive (but recoverable) action.
+export async function deleteWorkOrder(workOrderId: string, authorName: string) {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from("work_orders").update({
+    deleted_at: new Date().toISOString(),
+    deleted_by: user?.id || null,
+  }).eq("id", workOrderId);
+  if (error) throw error;
+  await insertActivity(workOrderId, "System", `Work order deleted by ${authorName}.`, "system");
 }
 
 // Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,
