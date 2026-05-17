@@ -667,13 +667,14 @@ export default function P1Portal() {
     }, "Pause failed");
   };
 
-  const doCloseComplete = async (woId: string, model: string, serial: string, resolution: string) => {
+  const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string) => {
     const endIso = new Date().toISOString();
-    const text = `Job completed. Asset: ${model} / ${serial}. Resolution: ${resolution || "Repaired"}.`;
-    patchLocalWO(woId, { status: "completed", functionalStatus: "Completed", assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null }, localActivity(text, "note"));
+    const text = `Job completed. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.`;
+    const patch = { status: "completed", functionalStatus: "Completed", assetMake: make, assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null };
+    patchLocalWO(woId, patch, localActivity(text, "note"));
     fire("Completed");
     await dbCall(async () => {
-      await updateWorkOrder(woId, { status: "completed", functionalStatus: "Completed", assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null });
+      await updateWorkOrder(woId, patch);
       await insertActivity(woId, currentUser.name, text, "note");
     }, "Close failed");
   };
@@ -2216,7 +2217,8 @@ export default function P1Portal() {
           <div style={{ display: "grid", gap: 14 }}>
             <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Asset information (required)</div>
-              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Equipment make"><Input id="asset-make" placeholder="e.g. Taylor" defaultValue={woData.assetMake || ""} /></Field>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
                 <Field label="Asset model"><Input id="asset-model" placeholder="e.g. Taylor 340" defaultValue={woData.assetModel || ""} /></Field>
                 <Field label="Serial number"><Input id="asset-serial" placeholder="e.g. TY-2022-81402" defaultValue={woData.assetSerial || ""} /></Field>
               </div>
@@ -2225,10 +2227,11 @@ export default function P1Portal() {
               <div style={{ fontSize: 11, fontWeight: 700, color: T.success, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>DSP closure</div>
               <Field label="Resolution code"><Sel id="resolution">
                 <option value="">Select...</option>
-                <option>Current asset evaluated</option>
-                <option>Current asset repaired</option>
-                <option>Current asset replaced</option>
-                <option>OEM warranty related</option>
+                <option>Nuisance</option>
+                <option>Current Asset Repaired</option>
+                <option>Current Asset Replaced</option>
+                <option>OEM Warranty Related</option>
+                <option>Other</option>
               </Sel></Field>
             </div>
             <Field label="Resolution details"><TA id="resolution-notes" rows={3} placeholder="Brief summary of what was found and done..." /></Field>
@@ -2240,10 +2243,11 @@ export default function P1Portal() {
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button onClick={() => {
-              const m = (document.getElementById("asset-model") as any)?.value;
-              const s = (document.getElementById("asset-serial") as any)?.value;
-              if (!m || !s) { fire("Asset model and serial number are required"); return; }
-              doCloseComplete(woData.id, m, s, (document.getElementById("resolution") as any)?.value); setModal(null);
+              const mk = (document.getElementById("asset-make") as any)?.value?.trim();
+              const m = (document.getElementById("asset-model") as any)?.value?.trim();
+              const s = (document.getElementById("asset-serial") as any)?.value?.trim();
+              if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
+              doCloseComplete(woData.id, mk, m, s, (document.getElementById("resolution") as any)?.value); setModal(null);
             }} className="btn-primary">Close complete</button>
           </div>
         </Modal>
