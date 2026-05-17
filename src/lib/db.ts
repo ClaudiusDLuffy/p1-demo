@@ -4,6 +4,7 @@
 // don't need to change. Keep this thin — heavy logic stays in components.
 
 import { supabase } from "./supabase/client";
+import { computeSlaBreaches } from "./slaConfig";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -131,6 +132,11 @@ const mapWO = (w: any) => ({
   capitalStatus: w.capital_status,
   partNeeded: w.part_needed,
   partEta: w.part_eta,
+  createdAt: w.created_at,
+  updatedAt: w.updated_at,
+  slaStartedAt: w.sla_started_at,
+  responseBreachAt: w.response_breach_at,
+  resolutionBreachAt: w.resolution_breach_at,
   age: ageString(w.created_at, w.dispatched_at),
 });
 
@@ -275,6 +281,9 @@ const WO_FIELD_MAP: Record<string, string> = {
   resolutionCode: "resolution_code",
   resolutionNotes: "resolution_notes",
   isCapital: "is_capital",
+  slaStartedAt: "sla_started_at",
+  responseBreachAt: "response_breach_at",
+  resolutionBreachAt: "resolution_breach_at",
 };
 function toDbWoPatch(patch: any) {
   const out: any = {};
@@ -367,6 +376,11 @@ export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
 export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string) {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
+  // SLA clock starts at intake (creation), NOT at assignment. For email-
+  // ingested WOs (Phase 1.5), pass slaStartedAt as the email's received-at;
+  // for portal-created WOs we use now.
+  const startedAt = wo.slaStartedAt ? new Date(wo.slaStartedAt) : new Date();
+  const breaches = computeSlaBreaches(wo.priority, startedAt);
   // Best-effort: keep the stores table populated for the Stores/Kanban
   // context. The store_number FK was dropped (migration 0004) so a failed
   // store upsert must NOT block work-order creation — swallow any error.
@@ -400,6 +414,9 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
     nte: wo.nte || 0,
     dispatched_at: wo.dispatchedAt || null,
     is_capital: !!wo.isCapital,
+    sla_started_at: startedAt.toISOString(),
+    response_breach_at: breaches.responseBreachAt.toISOString(),
+    resolution_breach_at: breaches.resolutionBreachAt.toISOString(),
     created_by: user?.id || null,
   };
   const { data, error } = await sb.from("work_orders").insert(dbRow).select().single();

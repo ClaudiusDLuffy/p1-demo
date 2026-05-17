@@ -10,6 +10,8 @@ import {
   uploadPhotos, removePhoto, subscribeToChanges, nextWorkOrderId, getPhotoUrl,
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
+import { SlaBadge } from "./SlaBadge";
+import { computeSlaState } from "../lib/slaConfig";
 
 // ═══════════════════════════════════════════════════════════════
 //  THEME — Claude-inspired warm palette. Tokens are the source of truth.
@@ -537,8 +539,24 @@ export default function P1Portal() {
   const completedCount = workOrders.filter(w => w.status === "completed").length;
   const pendAppr = workOrders.filter(w => w.status === "pending_approval").length;
   const awaitingPayment = workOrders.filter(w => w.status === "pending_payment").length;
-  const slaAtRisk = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours < 2 && activeStatuses.includes(w.status); }).length;
-  const slaBreached = workOrders.filter(w => { const s = slaRemaining(w); return s && s.remainingHours <= 0 && activeStatuses.includes(w.status); }).length;
+  // SLA risk considers BOTH response and resolution breaches. A WO is "at
+  // risk" if either deadline is < 2h away; "breached" if either has passed.
+  // Falls back to the legacy single-deadline calc for pre-migration rows.
+  const slaAtRisk = workOrders.filter(w => {
+    if (!activeStatuses.includes(w.status)) return false;
+    const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt);
+    if (s2) return !s2.responseBreached && !s2.resolutionBreached
+      && (s2.responseRemainingHours < 2 || s2.resolutionRemainingHours < 2);
+    const s = slaRemaining(w);
+    return s && s.remainingHours < 2 && s.remainingHours > 0;
+  }).length;
+  const slaBreached = workOrders.filter(w => {
+    if (!activeStatuses.includes(w.status)) return false;
+    const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt);
+    if (s2) return s2.responseBreached || s2.resolutionBreached;
+    const s = slaRemaining(w);
+    return s && s.remainingHours <= 0;
+  }).length;
   const woData = selectedWO ? workOrders.find(w => w.id === selectedWO) : null;
 
   // ── STATE TRANSITIONS — every mutation hits the DB, then optimistic-updates local state
@@ -696,6 +714,18 @@ export default function P1Portal() {
       await updateWorkOrder(woId, { status: "closed" });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "Mark paid failed");
+  };
+
+  // Manager-side NTE override. Soft cap — no hard stop, contractors can still
+  // submit invoices that exceed it (per Jeremy's May 1 directive).
+  const doEditNte = async (woId: string, newNte: number, prevNte: number) => {
+    const text = `NTE updated by ${currentUser.name}: ${fmt(prevNte)} → ${fmt(newNte)}.`;
+    patchLocalWO(woId, { nte: newNte }, localActivity(text, "system"));
+    fire(`NTE set to ${fmt(newNte)}`);
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { nte: newNte });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "NTE save failed");
   };
 
   const doCapitalFlag = async (woId: string) => {
@@ -1009,6 +1039,12 @@ export default function P1Portal() {
   const renderCard = (wo: any) => {
     const pr = PRIORITY[wo.priority];
     const sla = slaLabel(wo);
+    // NTE pill — quick-glance budget signal. Sums every non-draft invoice for
+    // the WO so multi-invoice work orders surface overage early.
+    const cardSpend = invoices.reduce((s, i) => i.wot === wo.id && i.state !== "draft" ? s + (i.total || 0) : s, 0);
+    const cardNte = wo.nte || 0;
+    const cardOver = cardNte > 0 && cardSpend > cardNte;
+    const nteShort = cardNte >= 1000 ? `$${(cardNte / 1000).toFixed(cardNte % 1000 === 0 ? 0 : 1)}K` : `$${cardNte}`;
     return (
       <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer" }}>
         <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: pr?.color || T.subtle }} />
@@ -1017,10 +1053,19 @@ export default function P1Portal() {
           <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>Store #{wo.store}</div>
-        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{wo.summary}</div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11 }}>
+        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{wo.summary || "—"}</div>
+        {cardNte > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.4, padding: "2px 7px", borderRadius: 10, background: cardOver ? T.danger : T.borderSoft, color: cardOver ? "#fff" : T.muted, border: cardOver ? "none" : `1px solid ${T.border}` }}>
+              {cardOver ? "OVER NTE" : `NTE ${nteShort}`}
+            </span>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, gap: 6 }}>
           <span style={{ fontWeight: 600, color: wo.contractor ? T.inkSoft : T.subtle }}>{wo.contractor ? getUser(wo.contractor)?.name.split(" ")[0] : "Unassigned"}</span>
-          {sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, border: `1px solid ${sla.color}20` }}>{sla.text}</span>}
+          {(wo.responseBreachAt || wo.resolutionBreachAt)
+            ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
+            : sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, border: `1px solid ${sla.color}20` }}>{sla.text}</span>}
         </div>
       </div>
     );
@@ -1256,6 +1301,7 @@ export default function P1Portal() {
                   <tbody>
                     {filteredWOs.filter(w => w.status !== "capital").map((wo, i) => {
                       const sla = slaLabel(wo);
+                      const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                       return (
                         <tr key={wo.id} onClick={() => { setSelectedWO(wo.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
                           <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{wo.id}</td>
@@ -1265,7 +1311,11 @@ export default function P1Portal() {
                           <td style={{ padding: "12px 14px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
                           <td style={{ padding: "12px 14px" }}><Badge conf={STATUS[wo.status]} small /></td>
                           <td style={{ padding: "12px 14px", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "—"}</td>
-                          <td style={{ padding: "12px 14px" }}>{sla ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span> : <span style={{ color: T.subtle }}>—</span>}</td>
+                          <td style={{ padding: "12px 14px" }}>
+                            {hasNewSla
+                              ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
+                              : (sla ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span> : <span style={{ color: T.subtle }}>—</span>)}
+                          </td>
                           <td className="mono" style={{ padding: "12px 14px", textAlign: "right", fontWeight: 600 }}>{fmt(wo.nte)}</td>
                         </tr>
                       );
@@ -1281,26 +1331,57 @@ export default function P1Portal() {
             const storeHistory = workOrders.filter(w => w.store === woData.store && w.id !== woData.id);
             const repeatCount = storeHistory.length;
             const sameCategory = storeHistory.filter(w => w.category === woData.category).length;
-            const invoiceTotal = woData.invoiceTotal || 0;
-            const nteBreach = invoiceTotal > woData.nte && invoiceTotal > 0;
-            const nteHeadroom = woData.nte - invoiceTotal;
+            // Current spend = sum of every non-draft invoice on the work order
+            // (matches what the AFM sees when reviewing).
+            const woInvoices = invoices.filter(i => i.wot === woData.id && i.state !== "draft");
+            const currentSpend = woInvoices.reduce((s, i) => s + (i.total || 0), 0);
+            const nte = woData.nte || 0;
+            const nteBreach = currentSpend > nte && currentSpend > 0 && nte > 0;
+            const nteHeadroom = nte - currentSpend;
+            const ntePercent = nte > 0 ? (currentSpend / nte) * 100 : 0;
             const sla = slaLabel(woData);
             const slaR = slaRemaining(woData);
+            const sla2 = computeSlaState(woData.responseBreachAt, woData.resolutionBreachAt);
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
                 <button onClick={() => { setSelectedWO(null); setAiNote(null); if (!isManager) setPage("my_jobs"); }} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
 
-                {/* Alert stack */}
-                {sla?.severity === "breach" && (
+                {/* Alert stack — two-breach SLA replaces the single-deadline view */}
+                {sla2 && (sla2.responseBreached || sla2.resolutionBreached) && (
+                  <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 22 }}>🚨</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>
+                        {sla2.responseBreached && sla2.resolutionBreached
+                          ? "Both SLA deadlines breached"
+                          : sla2.responseBreached
+                            ? `Response breached — ${Math.floor(-sla2.responseRemainingHours)}h past arrival deadline`
+                            : `Resolution breached — ${Math.floor(-sla2.resolutionRemainingHours)}h past resolve deadline`}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Functional status is "{woData.functionalStatus || "—"}" — update immediately to close the gap with 7-Eleven.</div>
+                    </div>
+                  </div>
+                )}
+                {sla2 && !sla2.responseBreached && sla2.responseRemainingHours < 1 && (
+                  <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 20 }}>⚠️</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>Response SLA at risk — {Math.round(sla2.responseRemainingHours * 60)} minutes to breach</div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Check in with the contractor — they need to be on site soon.</div>
+                    </div>
+                  </div>
+                )}
+                {/* Legacy single-deadline alert — only when the new fields are missing */}
+                {!sla2 && sla?.severity === "breach" && (
                   <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 22 }}>🚨</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>SLA breach — {Math.floor(-slaR.remainingHours)}h past {PRIORITY[woData.priority].slaHours}h limit</div>
-                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Functional status is "{woData.functionalStatus}" — update immediately to close the gap with 7-Eleven.</div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Functional status is "{woData.functionalStatus || "—"}" — update immediately to close the gap with 7-Eleven.</div>
                     </div>
                   </div>
                 )}
-                {sla?.severity === "critical" && (
+                {!sla2 && sla?.severity === "critical" && (
                   <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 20 }}>⚠️</div>
                     <div style={{ flex: 1 }}>
@@ -1322,17 +1403,17 @@ export default function P1Portal() {
                   <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 20 }}>⚠️</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 12 }}>Invoice exceeds NTE by {fmt(invoiceTotal - woData.nte)}</div>
-                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Invoiced {fmt(invoiceTotal)} vs authorized {fmt(woData.nte)} — requires AFM approval.</div>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 12 }}>Spend exceeds NTE by {fmt(currentSpend - nte)}</div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Invoiced {fmt(currentSpend)} vs authorized {fmt(nte)} — requires AFM approval / justification.</div>
                     </div>
                   </div>
                 )}
-                {!nteBreach && invoiceTotal > 0 && (
+                {!nteBreach && currentSpend > 0 && (
                   <div className="card" style={{ background: T.successSoft, border: `1px solid ${T.success}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 18 }}>✓</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, color: T.success, fontSize: 12 }}>Within budget — {fmt(nteHeadroom)} under NTE</div>
-                      <div style={{ fontSize: 11, color: "#2F5B3C", marginTop: 2 }}>Invoiced {fmt(invoiceTotal)} of {fmt(woData.nte)} authorized.</div>
+                      <div style={{ fontSize: 11, color: "#2F5B3C", marginTop: 2 }}>Invoiced {fmt(currentSpend)} of {fmt(nte)} authorized.</div>
                     </div>
                   </div>
                 )}
@@ -1352,7 +1433,9 @@ export default function P1Portal() {
                         <Badge conf={PRIORITY[woData.priority]} />
                         <Badge conf={STATUS[woData.status]} />
                         {woData.functionalStatus && <Badge conf={{ label: `FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
-                        {sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
+                        {sla2
+                          ? <SlaBadge responseBreachAt={woData.responseBreachAt} resolutionBreachAt={woData.resolutionBreachAt} size="sm" />
+                          : sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
                       </div>
                       <div style={{ padding: "14px 18px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginTop: 16 }}>
                         <div style={{ fontSize: 12, color: T.subtle, marginBottom: 4, fontWeight: 600 }}>{woData.businessService} · {woData.category}{woData.subCategory ? ` · ${woData.subCategory}` : ""}</div>
@@ -1377,6 +1460,36 @@ export default function P1Portal() {
                           </div>
                         ))}
                       </div>
+                    </div>
+
+                    {/* NTE summary — visible on every WO. Edit in-place. No hard stop on overage. */}
+                    <div className="card" style={{ padding: 18, marginBottom: 16, background: nteBreach ? T.dangerSoft : T.surface, border: nteBreach ? `1px solid ${T.danger}33` : `1px solid ${T.borderSoft}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>NTE</div>
+                          <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: T.ink }}>{nte > 0 ? fmt(nte) : "Not set"}</div>
+                          {nteBreach && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: T.danger, padding: "2px 8px", borderRadius: 10, letterSpacing: 0.4 }}>EXCEEDS NTE</span>}
+                        </div>
+                        {isManager && (
+                          <button onClick={() => setModal("editNte")} className="btn-soft" style={{ padding: "6px 12px", fontSize: 11 }}>{nte > 0 ? "Edit" : "Add NTE"}</button>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: T.muted, marginBottom: 8 }}>
+                        <span>Current spend: <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{fmt(currentSpend)}</span></span>
+                        <span style={{ color: nteBreach ? T.danger : T.muted, fontWeight: nteBreach ? 700 : 500 }}>{nte > 0 ? `${Math.round(ntePercent)}% of NTE` : "No NTE set"}</span>
+                      </div>
+                      {/* Progress bar — fills past 100% with red overflow when exceeded */}
+                      <div style={{ height: 8, borderRadius: 4, background: T.borderSoft, overflow: "hidden", display: "flex" }}>
+                        <div style={{ width: `${Math.min(100, ntePercent)}%`, height: "100%", background: ntePercent > 90 ? T.danger : ntePercent > 75 ? T.warn : T.success, transition: "width 300ms ease" }} />
+                        {ntePercent > 100 && (
+                          <div style={{ width: `${Math.min(100, ntePercent - 100)}%`, height: "100%", background: T.danger, opacity: 0.55 }} />
+                        )}
+                      </div>
+                      {woInvoices.length > 0 && (
+                        <div style={{ fontSize: 10, color: T.subtle, marginTop: 8 }}>
+                          {woInvoices.length} invoice{woInvoices.length !== 1 ? "s" : ""} on file
+                        </div>
+                      )}
                     </div>
 
                     {/* Actions */}
@@ -1499,7 +1612,40 @@ export default function P1Portal() {
 
                   {/* Right sidebar */}
                   <div>
-                    {slaR && (
+                    {sla2 ? (
+                      <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
+                        <div className="display" style={{ fontSize: 28, color: sla2.headlineRemainingHours <= 0 ? T.danger : sla2.headlineRemainingHours < 2 ? T.danger : sla2.headlineRemainingHours < 4 ? T.warn : T.ink, lineHeight: 1 }}>
+                          {sla2.headlineRemainingHours > 0
+                            ? `${Math.floor(sla2.headlineRemainingHours)}h ${Math.round((sla2.headlineRemainingHours % 1) * 60)}m`
+                            : `-${Math.floor(-sla2.headlineRemainingHours)}h`}
+                        </div>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>
+                          {sla2.headline === "response" ? "to Response Breach" : "to Resolution Breach"} · {PRIORITY[woData.priority]?.label || woData.priority}
+                        </div>
+                        <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "grid", gap: 6, fontSize: 11 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: T.muted }}>Response</span>
+                            <span style={{ color: sla2.responseBreached ? T.danger : T.ink, fontWeight: 600 }}>
+                              {sla2.responseBreachAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                              {sla2.responseBreached ? " · BREACHED" : ""}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: T.muted }}>Resolution</span>
+                            <span style={{ color: sla2.resolutionBreached ? T.danger : T.ink, fontWeight: 600 }}>
+                              {sla2.resolutionBreachAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                              {sla2.resolutionBreached ? " · BREACHED" : ""}
+                            </span>
+                          </div>
+                          {woData.slaStartedAt && (
+                            <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>
+                              Clock started {new Date(woData.slaStartedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : slaR && (
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
                         <div className="display" style={{ fontSize: 28, color: slaR.remainingHours < 2 ? T.danger : slaR.percent > 50 ? T.warn : T.ink, lineHeight: 1 }}>{slaR.remainingHours > 0 ? `${Math.floor(slaR.remainingHours)}h ${Math.round((slaR.remainingHours % 1) * 60)}m` : `-${Math.floor(-slaR.remainingHours)}h`}</div>
@@ -1583,13 +1729,16 @@ export default function P1Portal() {
               </div>
               {myWOs.map((wo, i) => {
                 const sla = slaLabel(wo);
+                const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                 return (
                   <div key={wo.id} className="card card-hover" onClick={() => { setSelectedWO(wo.id); setPage("wo_detail"); setAiNote(null); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", marginBottom: 10, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.04}s both`, gap: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                         <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.accent }}>{wo.id}</span>
                         <Badge conf={PRIORITY[wo.priority]} small />
-                        {sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>}
+                        {hasNewSla
+                          ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
+                          : sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>}
                       </div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3 }}>Store #{wo.store} · {wo.city}</div>
                       <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary}</div>
@@ -1944,6 +2093,26 @@ export default function P1Portal() {
         </Modal>
       )}
 
+      {modal === "editNte" && woData && (
+        <Modal onClose={() => setModal(null)} title={woData.nte > 0 ? "Edit NTE" : "Add NTE"} width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
+            Update the Not-To-Exceed cap for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Contractors can still submit invoices over NTE — the system flags overage but won't block.
+          </div>
+          <Field label="NTE ($)">
+            <Input id="nte-input" type="number" step="0.01" defaultValue={woData.nte || ""} placeholder="e.g. 1500" />
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const v = parseFloat((document.getElementById("nte-input") as any)?.value);
+              if (!isFinite(v) || v < 0) { fire("Enter a non-negative number"); return; }
+              doEditNte(woData.id, v, woData.nte || 0);
+              setModal(null);
+            }} className="btn-primary">Save</button>
+          </div>
+        </Modal>
+      )}
+
       {modal === "startWork" && woData && (
         <Modal onClose={() => setModal(null)} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
@@ -2036,7 +2205,11 @@ export default function P1Portal() {
         const sub = invSubtotal(newInv.lines || []);
         const tax = parseFloat(newInv.tax) || 0;
         const total = sub + tax;
-        const over = total > woData.nte;
+        // Includes any prior non-draft invoices for this WO so the running
+        // total reflects what the AFM will see — not just this draft.
+        const priorSpend = invoices.reduce((s, i) => i.wot === woData.id && i.state !== "draft" ? s + (i.total || 0) : s, 0);
+        const projectedSpend = priorSpend + total;
+        const over = (woData.nte || 0) > 0 && projectedSpend > woData.nte;
         const setLine = (i: number, patch: any) => {
           setNewInv((n: any) => ({ ...n, lines: n.lines.map((l: any, idx: number) => idx === i ? { ...l, ...patch } : l) }));
         };
@@ -2133,10 +2306,25 @@ export default function P1Portal() {
                   <span className="display" style={{ fontSize: 22, color: over ? T.danger : T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span>
                 </div>
                 <div style={{ fontSize: 11, color: over ? T.danger : T.muted, marginTop: 8, textAlign: "right" }}>
-                  {over ? `Exceeds NTE by ${fmt(total - woData.nte)}` : `${fmt(woData.nte - total)} under NTE (${fmt(woData.nte)})`}
+                  {(woData.nte || 0) > 0
+                    ? (over
+                        ? `Total spend would be ${fmt(projectedSpend)} — exceeds NTE by ${fmt(projectedSpend - woData.nte)}`
+                        : `${fmt(woData.nte - projectedSpend)} under NTE (${fmt(woData.nte)})${priorSpend > 0 ? ` · prior invoices ${fmt(priorSpend)}` : ""}`)
+                    : "No NTE set on this work order"}
                 </div>
               </div>
             </div>
+
+            {/* Non-blocking exceeds-NTE warning (no hard stop per Jeremy May 1) */}
+            {over && (
+              <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}55`, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div style={{ fontSize: 18, lineHeight: 1 }}>⚠️</div>
+                <div style={{ flex: 1, fontSize: 12, color: "#73560C", lineHeight: 1.55 }}>
+                  <div style={{ fontWeight: 700, color: T.warn, marginBottom: 2 }}>This invoice will push the total to {fmt(projectedSpend)} — exceeds the {fmt(woData.nte)} NTE.</div>
+                  You can still submit. Be ready to justify the overage.
+                </div>
+              </div>
+            )}
 
             {/* PDF upload */}
             <label style={{ padding: "12px 16px", background: newInv.hasPdf ? T.successSoft : T.accentSoft, borderRadius: 10, border: `1px solid ${newInv.hasPdf ? T.success + "33" : T.accentRing}`, cursor: "pointer", display: "block", marginBottom: 4 }}>
