@@ -6,6 +6,7 @@ import {
   loadAllProfiles, loadWorkOrders, loadInvoices,
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice, updateInvoiceState,
   unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
+  findExistingWoId,
   uploadInvoicePdf, downloadInvoicePdfBlob,
   uploadPhotos, removePhoto, subscribeToChanges, getPhotoUrl,
 } from "../lib/db";
@@ -349,7 +350,7 @@ export default function P1Portal() {
   const [dataLoading, setDataLoading] = useState(true);
   const BLANK_WO = { wot: "", incidentId: "", store: "", addr: "", city: "", afm: "", afmEmail: "", priority: "", lineOfService: "", businessService: "", category: "", subCategory: "", summary: "", description: "", nte: "", assign: "" };
   const [newWO, setNewWO] = useState({ ...BLANK_WO });
-  const [createErr, setCreateErr] = useState<string | null>(null);
+  const [createErr, setCreateErr] = useState<{ msg: string; openWoId?: string } | null>(null);
   const resetNewWO = () => { setNewWO({ ...BLANK_WO }); setCreateErr(null); };
   // Invoice builder state — line-item based, matches P1's real invoice format (6556)
   const defaultInvLines = () => [
@@ -863,9 +864,26 @@ export default function P1Portal() {
     // sensible defaults — manual intake must never be blocked on data we
     // don't have yet.
     const wot = (newWO.wot || "").trim();
-    if (!wot) { setCreateErr("WOT number is required."); return false; }
-    if (workOrders.some(w => w.id === wot)) {
-      setCreateErr("That WOT number already exists — try a different one.");
+    if (!wot) { setCreateErr({ msg: "WOT number is required." }); return false; }
+    // Dedup: case-insensitive, trimmed. Local cache catches most duplicates
+    // (incl. ones I just created); DB lookup catches duplicates that
+    // landed from another session since this page loaded. Same WOT/FWKD
+    // means double-dispatch risk (Jeremy's Nuance B), so we surface the
+    // existing WO by name with an "open it" affordance, not a generic error.
+    const wotLc = wot.toLowerCase();
+    const localDup = workOrders.find(w => w.id?.toLowerCase() === wotLc);
+    if (localDup) {
+      setCreateErr({ msg: `${localDup.id} already exists — open it instead?`, openWoId: localDup.id });
+      return false;
+    }
+    try {
+      const dbDup = await findExistingWoId(wot);
+      if (dbDup) {
+        setCreateErr({ msg: `${dbDup} already exists — open it instead?`, openWoId: dbDup });
+        return false;
+      }
+    } catch (e: any) {
+      setCreateErr({ msg: `Dedup check failed: ${e?.message || e}` });
       return false;
     }
     // Assign-on-create: blank → Unassigned; a contractor id → Assigned.
@@ -919,9 +937,22 @@ export default function P1Portal() {
       // the failure inline in the modal — never a silent failure.
       setWorkOrders(prev => prev.filter(w => w.id !== wo.id));
       const msg = String(e?.message || e);
-      setCreateErr(/duplicate|unique/i.test(msg)
-        ? "That WOT number already exists — try a different one."
-        : `Save failed: ${msg}`);
+      // The async DB dedup above usually catches this, but a race between
+      // the pre-check and the insert can still trip the unique constraint.
+      // When that happens we don't know the existing id from the error
+      // alone, so look it up before showing the open affordance.
+      if (/duplicate|unique/i.test(msg)) {
+        try {
+          const existing = await findExistingWoId(wot);
+          setCreateErr(existing
+            ? { msg: `${existing} already exists — open it instead?`, openWoId: existing }
+            : { msg: "That WOT number already exists — try a different one." });
+        } catch {
+          setCreateErr({ msg: "That WOT number already exists — try a different one." });
+        }
+      } else {
+        setCreateErr({ msg: `Save failed: ${msg}` });
+      }
       return false;
     }
   };
@@ -1128,18 +1159,25 @@ export default function P1Portal() {
   const renderKanbanCol = (sk: string) => {
     const c = STATUS[sk];
     const cards = filteredWOs.filter(w => w.status === sk);
+    // Unassigned is the manual-dispatch triage bucket (Florida HVAC etc. have
+    // no auto-routed vendor). Give it an explicit subtitle so it reads as
+    // a deliberate queue, not an empty default.
+    const isTriage = sk === "unassigned";
     return (
-      <div key={sk} className="kcol" style={{ background: c.bg }}>
+      <div key={sk} className="kcol" style={{ background: c.bg }} title={isTriage ? "Work orders with no auto-assigned vendor land here for manual dispatch." : undefined}>
         <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={{ width: 9, height: 9, borderRadius: "50%", background: c.color }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: T.ink, letterSpacing: -0.1 }}>{c.label}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+            <div style={{ width: 9, height: 9, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.ink, letterSpacing: -0.1 }}>{c.label}</div>
+              {isTriage && <div style={{ fontSize: 9, fontWeight: 600, color: T.muted, letterSpacing: 0.4, textTransform: "uppercase", marginTop: 2 }}>Needs manual dispatch</div>}
+            </div>
           </div>
           <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: c.color, background: T.surface, border: `1px solid ${c.ring || c.color}33`, borderRadius: 20, padding: "3px 10px", minWidth: 24, textAlign: "center" }}>{cards.length}</span>
         </div>
         <div style={{ padding: "0 10px 10px", minHeight: 60 }}>
           {cards.map(renderCard)}
-          {cards.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 11, color: T.subtle, fontWeight: 500 }}>No items</div>}
+          {cards.length === 0 && <div style={{ textAlign: "center", padding: "24px 0", fontSize: 11, color: T.subtle, fontWeight: 500 }}>{isTriage ? "No work orders awaiting dispatch" : "No items"}</div>}
         </div>
       </div>
     );
@@ -2089,8 +2127,14 @@ export default function P1Portal() {
             <Field label="Description"><TA rows={3} value={newWO.description} onChange={(e: any) => setNewWO({ ...newWO, description: e.target.value })} placeholder="optional — full description" /></Field>
           </div>
           {createErr && (
-            <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, background: T.dangerSoft, border: `1px solid ${T.danger}44`, color: T.danger, fontSize: 12, fontWeight: 600 }}>
-              {createErr}
+            <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, background: T.dangerSoft, border: `1px solid ${T.danger}44`, color: T.danger, fontSize: 12, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span>{createErr.msg}</span>
+              {createErr.openWoId && (
+                <button
+                  onClick={() => { const id = createErr.openWoId!; setModal(null); resetNewWO(); setSelectedWO(id); setAiNote(null); setPage(isManager ? "work_orders" : "wo_detail"); }}
+                  style={{ background: T.danger, color: "#fff", border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+                >Open {createErr.openWoId}</button>
+              )}
             </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>

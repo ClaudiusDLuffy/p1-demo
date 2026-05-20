@@ -382,6 +382,27 @@ export async function reassignWorkOrder(
   );
 }
 
+// Case-insensitive WOT lookup. The manual Create form has an in-memory
+// dedup check, but the source of truth is the DB — a duplicate could
+// have landed from another session since the local cache was loaded.
+// Returns the canonical existing id (or null) so the caller can render
+// an "open it instead?" affordance with the actual stored casing.
+export async function findExistingWoId(wot: string): Promise<string | null> {
+  const trimmed = (wot || "").trim();
+  if (!trimmed) return null;
+  const sb = supabase();
+  // Escape ilike wildcards so a WOT containing % or _ doesn't broaden the match.
+  const escaped = trimmed.replace(/[\\%_]/g, m => "\\" + m);
+  const { data, error } = await sb
+    .from("work_orders")
+    .select("id")
+    .ilike("id", escaped)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id || null;
+}
+
 // Atomically generate the next FWKD work order ID via a Postgres sequence
 export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
   const sb = supabase();

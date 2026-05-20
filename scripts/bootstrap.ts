@@ -54,14 +54,15 @@ const USERS: Seed[] = [
   { email: "emilyb@phospitality.com", name: "Emily Barnhart", initials: "EB", role: "back_office", title: "Back office", color: "#10B981" },
   // Contractors
   { email: "scrcdallastexas@gmail.com", name: "Derek Starnes", initials: "DS", role: "contractor", company: "Starnes Commercial Refrigeration", territory: "Dallas, TX", trades: ["hvac", "refrigeration", "beverage", "ice"], color: "#0891B2" },
-  { email: "service@archerref.com", name: "Chris Archer", initials: "CA", role: "contractor", company: "Archer Refrigeration", territory: "Houston, TX", trades: ["hvac", "refrigeration", "ice"], color: "#8B5CF6" },
-  { email: "pro.ops.inc@gmail.com", name: "Wes Cripe", initials: "WC", role: "contractor", phone: "757-256-8511", company: "Pro Ops", territory: "Virginia Beach, VA", trades: ["hvac", "refrigeration", "ice"], color: "#F59E0B" },
+  { email: "service@archerref.com", name: "Archer Refrigeration", initials: "AR", role: "contractor", company: "Archer Refrigeration, LLC", territory: "Houston, TX", trades: ["hvac", "refrigeration", "ice"], color: "#8B5CF6" },
+  { email: "pro.ops.inc@gmail.com", name: "Pro-Ops", initials: "PO", role: "contractor", phone: "757-256-8511", company: "Pro-Ops, Inc", territory: "Virginia Beach, VA", trades: ["hvac", "refrigeration", "ice"], color: "#F59E0B" },
   { email: "vpdmitry@gmail.com", name: "Demytro Bichukov", initials: "DB", role: "contractor", phone: "323-557-8452", company: "Same Day Repair", territory: "Tampa, FL", trades: ["beverage", "ice"], color: "#10B981" },
   { email: "shecanfacilitymaintenance@gmail.com", name: "Dave Lecerda", initials: "DL", role: "contractor", company: "Shecan Facility Maintenance", territory: "Dallas, TX", trades: ["hotfood"], color: "#EC4899" },
-  { email: "ctanksolutions@gmail.com", name: "Eric Coleman", initials: "EC", role: "contractor", phone: "813-687-4990", company: "Coleman Tank Solutions", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
+  { email: "ctanksolutions@gmail.com", name: "Coleman", initials: "CO", role: "contractor", phone: "813-687-4990", company: "Coleman Tank Solutions, Inc.", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
   { email: "buriakmw@gmail.com", name: "Mykola Buriak", initials: "MB", role: "contractor", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
-  { email: "plumbingdayornight@gmail.com", name: "Pete (Anytime Plumbing)", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
-  { email: "nik@p1pros.com", name: "Nik", initials: "NK", role: "contractor", company: "P1 Internal Tech", territory: "Tampa, FL", trades: ["hvac", "refrigeration", "beverage", "ice", "plumbing", "hotfood"], color: "#2563EB" },
+  { email: "plumbingdayornight@gmail.com", name: "Anytime Plumbing", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida, Inc", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
+  { email: "nik@p1pros.com", name: "Nik", initials: "NK", role: "contractor", company: "Talneglobaltrans, LLC", territory: "Tampa, FL", trades: ["refrigeration", "beverage", "ice", "slurpee"], color: "#2563EB" },
+  { email: "matt@beardsrefrigeration.com", name: "Matt Beard", initials: "MB", role: "contractor", company: "Beards Refrigeration, LLC", territory: "Dallas, TX", trades: ["slurpee"], color: "#DC2626" },
 ];
 
 // Cache the user list once per run — listUsers per row is slow + brittle
