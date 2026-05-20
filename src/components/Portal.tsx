@@ -797,12 +797,13 @@ export default function P1Portal() {
       );
       // Generate + upload PDF so manager + contractor can pull the same bytes later.
       try {
-        const { generateInvoicePDFBlob } = await import("../lib/invoicePdf");
+        const { generateInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
+        const logoDataUrl = await loadLogoDataUrl();
         const blob = generateInvoicePDFBlob({
           num: newInv.num, wot: wo.id, store: wo.store, storeAddr: wo.addr,
           invoiceDate: newInv.invoiceDate, serviceDate: newInv.serviceDate, terms: newInv.terms,
           cme: newInv.cme, lines: mappedLines, subtotal, salesTax: tax, total,
-        });
+        }, logoDataUrl);
         const path = await uploadInvoicePdf(header.id, newInv.num, blob);
         setInvoices(prev => prev.map(i => i.num === newInv.num ? { ...i, id: header.id, pdfStoragePath: path } : i));
       } catch (e: any) {
@@ -828,7 +829,7 @@ export default function P1Portal() {
     if (pdfBusy) return;
     setPdfBusy(true);
     try {
-      const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename } = await import("../lib/invoicePdf");
+      const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename, loadLogoDataUrl } = await import("../lib/invoicePdf");
       const filename = invoiceFilename(inv);
       if (inv.pdfStoragePath) {
         const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
@@ -837,7 +838,8 @@ export default function P1Portal() {
         return;
       }
       // Lazy backfill — covers the seeded invoice + any pre-existing rows.
-      const blob = generateInvoicePDFBlob(inv);
+      const logoDataUrl = await loadLogoDataUrl();
+      const blob = generateInvoicePDFBlob(inv, logoDataUrl);
       if (inv.id) {
         try {
           const path = await uploadInvoicePdf(inv.id, inv.num, blob);
@@ -1015,8 +1017,24 @@ export default function P1Portal() {
         <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle at 1px 1px, rgba(31,30,28,0.04) 1px, transparent 0)", backgroundSize: "28px 28px" }} />
         <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 420 }}>
           <div style={{ textAlign: "center", marginBottom: 36 }}>
-            <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 56, height: 56, borderRadius: 14, background: T.ink, marginBottom: 18, boxShadow: "0 8px 24px rgba(31,30,28,0.12)" }}>
-              <span className="display" style={{ fontSize: 28, color: T.bg, letterSpacing: -1 }}>P1</span>
+            <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "14px 22px", borderRadius: 16, background: "#fff", marginBottom: 18, boxShadow: "0 8px 24px rgba(31,30,28,0.12)", border: `1px solid ${T.borderSoft}` }}>
+              <img
+                src="/p1-pros-logo.jpeg"
+                alt="P1 Pros"
+                style={{ display: "block", height: 60, maxWidth: 180, objectFit: "contain" }}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  const wrap = img.parentElement;
+                  if (wrap) {
+                    wrap.style.background = T.ink;
+                    wrap.style.padding = "0";
+                    wrap.style.width = "56px";
+                    wrap.style.height = "56px";
+                    wrap.style.border = "none";
+                    wrap.innerHTML = `<span style="font-family: 'Instrument Serif', serif; font-size: 28px; color: ${T.bg}; letter-spacing: -1px;">P1</span>`;
+                  }
+                }}
+              />
             </div>
             <div className="display" style={{ fontSize: 34, color: T.ink, lineHeight: 1.1 }}>P1 Service Portal</div>
             <div style={{ fontSize: 14, color: T.muted, marginTop: 8 }}>Operations for 7-Eleven facility services</div>
@@ -1138,8 +1156,23 @@ export default function P1Portal() {
       <div className="desktop-sidebar" style={{ width: 232, background: T.sidebar, color: T.sidebarText, display: "flex", flexDirection: "column", flexShrink: 0, position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30 }}>
         <div style={{ padding: "22px 20px 18px", borderBottom: "1px solid rgba(250,247,242,0.06)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span className="display" style={{ fontSize: 18, color: "#fff", letterSpacing: -0.5 }}>P1</span>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 5, boxSizing: "border-box", flexShrink: 0 }}>
+              <img
+                src="/p1-pros-logo.jpeg"
+                alt="P1 Pros"
+                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  const wrap = img.parentElement;
+                  if (wrap) {
+                    wrap.style.background = T.accent;
+                    wrap.style.padding = "0";
+                    wrap.style.width = "36px";
+                    wrap.style.height = "36px";
+                    wrap.innerHTML = `<span style="font-family: 'Instrument Serif', serif; font-size: 18px; color: #fff; letter-spacing: -0.5px;">P1</span>`;
+                  }
+                }}
+              />
             </div>
             <div>
               <div className="display" style={{ fontSize: 18, color: T.bg, letterSpacing: -0.3, lineHeight: 1 }}>P1 Service</div>

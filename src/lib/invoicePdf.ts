@@ -46,7 +46,26 @@ export type Invoice = {
   total: number;
 };
 
-export function generateInvoicePDF(inv: Invoice): jsPDF {
+// Best-effort logo loader — fetches /p1-pros-logo.jpeg from public/ and
+// converts to a data URL jsPDF can embed. Returns null on any failure so
+// the PDF generator falls back to text-only branding.
+export async function loadLogoDataUrl(path = "/p1-pros-logo.jpeg"): Promise<string | null> {
+  try {
+    const res = await fetch(path);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null): jsPDF {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const W = doc.internal.pageSize.getWidth();
   const M = 40; // margin
@@ -57,24 +76,36 @@ export function generateInvoicePDF(inv: Invoice): jsPDF {
   doc.rect(0, 0, W, 6, "F");
   y += 8;
 
-  // ── Top: Logo block + Invoice title
+  // ── Top: Logo block + Invoice title.
+  // When a logo data URL is provided, paint it top-left and shift the
+  // wordmark right. Falls back to text-only branding so a missing asset
+  // never breaks invoice generation.
+  let textX = M;
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, "JPEG", M, y, 56, 56, undefined, "FAST");
+      textX = M + 68;
+    } catch {
+      textX = M;
+    }
+  }
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
   doc.setTextColor(31, 30, 28);
-  doc.text(P1.dba, M, y + 16);
+  doc.text(P1.dba, textX, y + 16);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(120, 116, 108);
-  doc.text(`(${P1.legalName})`, M, y + 30);
+  doc.text(`(${P1.legalName})`, textX, y + 30);
 
   doc.setFontSize(9);
   doc.setTextColor(60, 58, 54);
-  doc.text(P1.addr1, M, y + 44);
-  doc.text(P1.addr2, M, y + 56);
-  doc.text(P1.email, M, y + 68);
-  doc.text(P1.phone, M, y + 80);
-  doc.text(P1.website, M, y + 92);
+  doc.text(P1.addr1, textX, y + 44);
+  doc.text(P1.addr2, textX, y + 56);
+  doc.text(P1.email, textX, y + 68);
+  doc.text(P1.phone, textX, y + 80);
+  doc.text(P1.website, textX, y + 92);
 
   // Invoice title (right side)
   doc.setFont("helvetica", "bold");
@@ -255,8 +286,8 @@ export function downloadInvoicePDF(inv: Invoice): void {
 
 // Used when we want the raw bytes (e.g. to upload to Supabase Storage)
 // rather than trigger a browser download.
-export function generateInvoicePDFBlob(inv: Invoice): Blob {
-  const doc = generateInvoicePDF(inv);
+export function generateInvoicePDFBlob(inv: Invoice, logoDataUrl?: string | null): Blob {
+  const doc = generateInvoicePDF(inv, logoDataUrl);
   return doc.output("blob") as Blob;
 }
 
