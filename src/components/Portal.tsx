@@ -764,7 +764,11 @@ export default function P1Portal() {
     if (!newInv.cme) { fire("Select a CME code"); return false; }
     const validLines = (newInv.lines || []).filter((l: any) => l.desc && l.qty && l.rate);
     if (validLines.length === 0) { fire("Add at least one line item with description, qty, and rate"); return false; }
-    if (!newInv.hasPdf) { fire("Attach a PDF invoice before submitting"); return false; }
+    // DEMO-SAFE SOFTENING (pending client decision on generate-vs-upload):
+    // the PDF attachment is intentionally NOT blocking submission. The
+    // QuickBooks upload field + labeling stay in place; when no PDF is
+    // attached the post-submit "Download PDF" still offers the generated one.
+    // Restore the hard block once the client confirms the invoice source.
     const subtotal = invSubtotal(validLines);
     const tax = parseFloat(newInv.tax) || 0;
     const total = subtotal + tax;
@@ -1611,7 +1615,9 @@ export default function P1Portal() {
 
                     {/* Actions */}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                      {woData.status === "unassigned" && isManager && contractorsOnly.slice(0, 4).map(c => (
+                      {/* Quick-assign shows the FULL contractor list (same source as
+                          the Create WO dropdown) so no contractor is unreachable. */}
+                      {woData.status === "unassigned" && isManager && contractorsOnly.map(c => (
                         <button key={c.id} onClick={() => doAssign(woData.id, c.id)} className="btn-soft">Assign → {c.name.split(" ")[0]}</button>
                       ))}
                       {isManager && ["assigned", "wip", "parts"].includes(woData.status) && (
@@ -2085,46 +2091,46 @@ export default function P1Portal() {
       {modal === "newWO" && (
         <Modal onClose={() => { setModal(null); resetNewWO(); }} title="Create Work Order" width={520}>
           <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>
-            Only the WOT number is required. Everything else is optional — fill in what you have; the rest takes sensible defaults.
+            Only the WOT number is required — fill in what you have; the rest takes sensible defaults.
           </div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="WOT Number *"><Input value={newWO.wot} onChange={(e: any) => { setNewWO({ ...newWO, wot: e.target.value }); if (createErr) setCreateErr(null); }} placeholder="e.g. FWKD11400123" /></Field>
-              <Field label="Incident ID"><Input value={newWO.incidentId} onChange={(e: any) => setNewWO({ ...newWO, incidentId: e.target.value })} placeholder="optional — e.g. INC24890517" /></Field>
+              <Field label="Incident ID"><Input value={newWO.incidentId} onChange={(e: any) => setNewWO({ ...newWO, incidentId: e.target.value })} placeholder="e.g. INC24890517" /></Field>
             </div>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Store Number"><Input value={newWO.store} onChange={(e: any) => setNewWO({ ...newWO, store: e.target.value })} placeholder="optional — e.g. 33321" /></Field>
-              <Field label="City, State"><Input value={newWO.city} onChange={(e: any) => setNewWO({ ...newWO, city: e.target.value })} placeholder="optional — e.g. Dallas, TX" /></Field>
+              <Field label="Store Number"><Input value={newWO.store} onChange={(e: any) => setNewWO({ ...newWO, store: e.target.value })} placeholder="e.g. 33321" /></Field>
+              <Field label="City, State"><Input value={newWO.city} onChange={(e: any) => setNewWO({ ...newWO, city: e.target.value })} placeholder="e.g. Dallas, TX" /></Field>
             </div>
-            <Field label="Store Address"><Input value={newWO.addr} onChange={(e: any) => setNewWO({ ...newWO, addr: e.target.value })} placeholder="optional — street address" /></Field>
+            <Field label="Store Address"><Input value={newWO.addr} onChange={(e: any) => setNewWO({ ...newWO, addr: e.target.value })} placeholder="street address" /></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="AFM Name"><Input value={newWO.afm} onChange={(e: any) => setNewWO({ ...newWO, afm: e.target.value })} placeholder="optional" /></Field>
-              <Field label="AFM Email"><Input value={newWO.afmEmail} onChange={(e: any) => setNewWO({ ...newWO, afmEmail: e.target.value })} placeholder="optional" /></Field>
+              <Field label="AFM Name"><Input value={newWO.afm} onChange={(e: any) => setNewWO({ ...newWO, afm: e.target.value })} placeholder="" /></Field>
+              <Field label="AFM Email"><Input value={newWO.afmEmail} onChange={(e: any) => setNewWO({ ...newWO, afmEmail: e.target.value })} placeholder="" /></Field>
             </div>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Line of Service"><Input value={newWO.lineOfService} onChange={(e: any) => setNewWO({ ...newWO, lineOfService: e.target.value })} placeholder="optional" /></Field>
+              <Field label="Line of Service"><Input value={newWO.lineOfService} onChange={(e: any) => setNewWO({ ...newWO, lineOfService: e.target.value })} placeholder="" /></Field>
               <Field label="Business Service"><Sel value={newWO.businessService} onChange={(e: any) => setNewWO({ ...newWO, businessService: e.target.value })}>
                 <option value="">Not set</option>
                 {["Refrigeration equipment", "Frozen Beverage - Equipment", "Cold Beverage - Equipment", "HVAC", "Plumbing", "Hot food", "Ice merchandiser", "Walk-in cooler/freezer", "Septic/Grease"].map(c => <option key={c}>{c}</option>)}
               </Sel></Field>
             </div>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Category"><Input value={newWO.category} onChange={(e: any) => setNewWO({ ...newWO, category: e.target.value })} placeholder="optional" /></Field>
-              <Field label="Sub Category"><Input value={newWO.subCategory} onChange={(e: any) => setNewWO({ ...newWO, subCategory: e.target.value })} placeholder="optional" /></Field>
+              <Field label="Category"><Input value={newWO.category} onChange={(e: any) => setNewWO({ ...newWO, category: e.target.value })} placeholder="" /></Field>
+              <Field label="Sub Category"><Input value={newWO.subCategory} onChange={(e: any) => setNewWO({ ...newWO, subCategory: e.target.value })} placeholder="" /></Field>
             </div>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Priority"><Sel value={newWO.priority} onChange={(e: any) => setNewWO({ ...newWO, priority: e.target.value })}>
                 <option value="">P4 Minor (default)</option>
                 {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
               </Sel></Field>
-              <Field label="NTE ($)"><Input type="number" value={newWO.nte} onChange={(e: any) => setNewWO({ ...newWO, nte: e.target.value })} placeholder="optional" /></Field>
+              <Field label="NTE ($)"><Input type="number" value={newWO.nte} onChange={(e: any) => setNewWO({ ...newWO, nte: e.target.value })} placeholder="" /></Field>
             </div>
-            <Field label="Assign to contractor (optional)"><Sel value={newWO.assign} onChange={(e: any) => setNewWO({ ...newWO, assign: e.target.value })}>
+            <Field label="Assign to contractor"><Sel value={newWO.assign} onChange={(e: any) => setNewWO({ ...newWO, assign: e.target.value })}>
               <option value="">Leave unassigned</option>
               {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name}{u.company ? ` — ${u.company}` : ""}</option>)}
             </Sel></Field>
-            <Field label="Short Description"><Input value={newWO.summary} onChange={(e: any) => setNewWO({ ...newWO, summary: e.target.value })} placeholder="optional — one-line summary" /></Field>
-            <Field label="Description"><TA rows={3} value={newWO.description} onChange={(e: any) => setNewWO({ ...newWO, description: e.target.value })} placeholder="optional — full description" /></Field>
+            <Field label="Short Description"><Input value={newWO.summary} onChange={(e: any) => setNewWO({ ...newWO, summary: e.target.value })} placeholder="one-line summary" /></Field>
+            <Field label="Description"><TA rows={3} value={newWO.description} onChange={(e: any) => setNewWO({ ...newWO, description: e.target.value })} placeholder="full description" /></Field>
           </div>
           {createErr && (
             <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, background: T.dangerSoft, border: `1px solid ${T.danger}44`, color: T.danger, fontSize: 12, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
@@ -2502,7 +2508,7 @@ export default function P1Portal() {
             <label style={{ padding: "12px 16px", background: newInv.hasPdf ? T.successSoft : T.accentSoft, borderRadius: 10, border: `1px solid ${newInv.hasPdf ? T.success + "33" : T.accentRing}`, cursor: "pointer", display: "block", marginBottom: 4 }}>
               <div style={{ border: `2px dashed ${newInv.hasPdf ? T.success : T.accent}`, borderRadius: 8, padding: 18, textAlign: "center" }}>
                 <div style={{ fontSize: 13, color: newInv.hasPdf ? T.success : T.accent, fontWeight: 600 }}>{newInv.hasPdf ? "✓ PDF attached" : "Attach the PDF invoice (from QuickBooks)"}</div>
-                <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>Required before submit</div>
+                <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>{newInv.hasPdf ? "Attached" : "A copy is generated on submit if none is attached"}</div>
                 <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={(e: any) => setNewInv({ ...newInv, hasPdf: !!(e.target.files && e.target.files.length) })} />
               </div>
             </label>
