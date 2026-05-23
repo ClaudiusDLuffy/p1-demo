@@ -122,6 +122,9 @@ const mapWO = (w: any) => ({
   afm: w.afm_name,
   afmEmail: w.afm_email,
   nte: parseFloat(w.nte || 0),
+  nteFlagThreshold: w.nte_flag_threshold != null ? parseFloat(w.nte_flag_threshold) : 900,
+  nteFlagged: !!w.nte_flagged,
+  nteFlagAmount: w.nte_flag_amount != null ? parseFloat(w.nte_flag_amount) : null,
   invoiceTotal: w.invoice_total ? parseFloat(w.invoice_total) : undefined,
   eta: w.eta,
   dispatchedAt: w.dispatched_at,
@@ -287,6 +290,9 @@ const WO_FIELD_MAP: Record<string, string> = {
   slaStartedAt: "sla_started_at",
   responseBreachAt: "response_breach_at",
   resolutionBreachAt: "resolution_breach_at",
+  nteFlagThreshold: "nte_flag_threshold",
+  nteFlagged: "nte_flagged",
+  nteFlagAmount: "nte_flag_amount",
 };
 function toDbWoPatch(patch: any) {
   const out: any = {};
