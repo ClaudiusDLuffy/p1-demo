@@ -139,6 +139,7 @@ const mapWO = (w: any) => ({
   source: w.source,
   createdAt: w.created_at,
   updatedAt: w.updated_at,
+  closedAt: w.closed_at,
   slaStartedAt: w.sla_started_at,
   responseBreachAt: w.response_breach_at,
   resolutionBreachAt: w.resolution_breach_at,
@@ -293,6 +294,7 @@ const WO_FIELD_MAP: Record<string, string> = {
   nteFlagThreshold: "nte_flag_threshold",
   nteFlagged: "nte_flagged",
   nteFlagAmount: "nte_flag_amount",
+  closedAt: "closed_at",
 };
 function toDbWoPatch(patch: any) {
   const out: any = {};
