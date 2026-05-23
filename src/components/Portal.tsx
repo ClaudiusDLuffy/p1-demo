@@ -167,6 +167,13 @@ const isOpenState = (state: string) => !["completed", "pending_invoice", "pendin
 const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
 const closingStatuses = ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"];
 
+// A Closed & Paid WO lingers on the active board for 24h after closed_at,
+// then lives only in History. A closed WO with no closed_at is treated as
+// already archived (History only) so the board never lingers on undated rows.
+const CLOSED_LINGER_MS = 24 * 60 * 60 * 1000;
+const isArchivedClosed = (w: any) =>
+  w.status === "closed" && (!w.closedAt || (Date.now() - new Date(w.closedAt).getTime()) > CLOSED_LINGER_MS);
+
 // ═══════════════════════════════════════════════════════════════
 //  SEED WORK ORDERS — real 7-Eleven field shapes
 // ═══════════════════════════════════════════════════════════════
@@ -332,6 +339,12 @@ export default function P1Portal() {
   const [filterP, setFilterP] = useState("all");
   const [nteQueue, setNteQueue] = useState(false); // "NTE Approval Needed" bucket filter
   const [invTab, setInvTab] = useState("all");
+  // History (closed-job archive) filters
+  const [histSearch, setHistSearch] = useState("");
+  const [histContractor, setHistContractor] = useState("all");
+  const [histReso, setHistReso] = useState("all");
+  const [histFrom, setHistFrom] = useState("");
+  const [histTo, setHistTo] = useState("");
   const [toast, setToast] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -528,13 +541,18 @@ export default function P1Portal() {
   const contractorsOnly = USERS.filter(u => u.role === "contractor");
   const myWOs = currentUser?.role === "contractor" ? workOrders.filter(w => w.contractor === currentUser.id) : workOrders;
   const filteredWOs = myWOs.filter(w => {
-    if (nteQueue && !w.nteFlagged) return false;
+    // Archived closed jobs (>24h past close) leave the active board → History only.
+    if (isArchivedClosed(w)) return false;
+    if (nteQueue && (!w.nteFlagged || w.status === "closed")) return false;
     if (search && !w.id.toLowerCase().includes(search.toLowerCase()) && !w.store.includes(search) && !(w.summary || "").toLowerCase().includes(search.toLowerCase())) return false;
     if (filterC !== "all" && w.contractor !== filterC) return false;
     if (filterP !== "all" && w.priority !== filterP) return false;
     return true;
   });
-  const nteFlaggedCount = workOrders.filter(w => w.nteFlagged).length;
+  // Closed jobs never count as "needs approval" (they leave the bucket on close).
+  const nteFlaggedCount = workOrders.filter(w => w.nteFlagged && w.status !== "closed").length;
+  // All Closed & Paid WOs — the History record set (independent of the 24h board linger).
+  const closedWOs = workOrders.filter(w => w.status === "closed");
 
   const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
   const openCount = openWOs.length;
@@ -725,19 +743,38 @@ export default function P1Portal() {
     }, "Approval failed");
   };
 
-  // Owner records payment received → WO is fully closed.
+  // Owner records payment received → WO is fully closed. Stamp closed_at
+  // (drives the 24h board linger + History) and clear any NTE flag so a
+  // closed job leaves the "NTE Approval Needed" bucket.
   const doMarkPaid = async (woId: string) => {
     const inv = invoices.find(i => i.wot === woId);
     const paidAt = new Date().toISOString();
     const text = `Marked paid by ${currentUser.name}. Work order closed.`;
     if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "paid" } : i));
-    patchLocalWO(woId, { status: "closed" }, localActivity(text, "system"));
+    patchLocalWO(woId, { status: "closed", closedAt: paidAt, nteFlagged: false }, localActivity(text, "system"));
     fire("Marked paid — work order closed");
     await dbCall(async () => {
       if (inv) await updateInvoiceState(inv.num, "paid", { paid_at: paidAt });
-      await updateWorkOrder(woId, { status: "closed" });
+      await updateWorkOrder(woId, { status: "closed", closedAt: paidAt, nteFlagged: false });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "Mark paid failed");
+  };
+
+  // Staff-only fail-safe: pull a closed WO back onto the active board. Re-enters
+  // at Pending Payment (the state it closed from) and reverts the invoice from
+  // paid→approved so Mark Paid works again. Clears closed_at so the 24h/History
+  // logic treats it as active.
+  const doReopen = async (woId: string) => {
+    const inv = invoices.find(i => i.wot === woId && i.state === "paid");
+    const text = `Work order reopened by ${currentUser.name}.`;
+    if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "approved" } : i));
+    patchLocalWO(woId, { status: "pending_payment", closedAt: null }, localActivity(text, "system"));
+    fire("Work order reopened — back on the active board");
+    await dbCall(async () => {
+      if (inv) await updateInvoiceState(inv.num, "approved");
+      await updateWorkOrder(woId, { status: "pending_payment", closedAt: null });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "Reopen failed");
   };
 
   // Manager-side NTE override. Soft cap — no hard stop, contractors can still
@@ -1153,13 +1190,14 @@ export default function P1Portal() {
       { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
       { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
+      { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: closedWOs.length || null },
     ]
     : [
       { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: myWOs.filter(w => activeStatuses.includes(w.status)).length },
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: invoices.filter(i => i.contractor === currentUser.id && (i.state === "submitted" || i.state === "revised")).length || null },
     ];
 
-  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", wo_detail: woData?.id || "Work order", capital: "Capital projects" };
+  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
 
   const renderCard = (wo: any) => {
     const pr = PRIORITY[wo.priority];
@@ -1476,7 +1514,7 @@ export default function P1Portal() {
           )}
 
           {/* ═════ WO DETAIL ═════ */}
-          {(page === "work_orders" || page === "wo_detail") && selectedWO && woData && (() => {
+          {(page === "work_orders" || page === "wo_detail" || page === "history") && selectedWO && woData && (() => {
             const storeHistory = workOrders.filter(w => w.store === woData.store && w.id !== woData.id);
             const repeatCount = storeHistory.length;
             const sameCategory = storeHistory.filter(w => w.category === woData.category).length;
@@ -1694,6 +1732,9 @@ export default function P1Portal() {
                       {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
                       {woData.status === "pending_approval" && isManager && <button onClick={() => doApproveInvoice(woData.id)} className="btn-accent">Approve (on behalf of AFM)</button>}
                       {woData.status === "pending_payment" && isManager && <button onClick={() => setModal("markPaid")} className="btn-primary">Mark paid → close</button>}
+                      {/* Closed job: always-available invoice download + staff-only reopen. */}
+                      {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
+                      {woData.status === "closed" && isManager && <button onClick={() => setModal("reopen")} className="btn-soft">Reopen</button>}
                     </div>
 
                     {/* Destructive secondary action — deliberately separated from the
@@ -1704,6 +1745,45 @@ export default function P1Portal() {
                         <button onClick={() => setModal("deleteWO")} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3 }}>Delete work order</button>
                       </div>
                     )}
+
+                    {/* Completion Record — the self-contained closure file. Shown
+                        on completed/closed jobs; identical from the board and History
+                        (same detail component). */}
+                    {(["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) || woData.assetModel || woData.resolutionCode) && (() => {
+                      const closeAct = (woData.activities || []).find((a: any) => /marked paid by /i.test(a.text || ""));
+                      const closedBy = closeAct ? (closeAct.text.match(/marked paid by ([^.]+)/i)?.[1]?.trim() || null) : null;
+                      const rec = [
+                        { l: "Equipment make", v: woData.assetMake || "—" },
+                        { l: "Asset model", v: woData.assetModel || "—" },
+                        { l: "Serial number", v: woData.assetSerial || "—" },
+                        { l: "Resolution code (DSP closure)", v: woData.resolutionCode || "—" },
+                      ];
+                      return (
+                        <div className="card" style={{ padding: 18, marginBottom: 16 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Completion Record</div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            {rec.map((d, i) => (
+                              <div key={i}>
+                                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, marginBottom: 3 }}>{d.l}</div>
+                                <div style={{ fontSize: 13, fontWeight: 500, color: d.v === "—" ? T.subtle : T.ink }}>{d.v}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {woData.resolutionNotes && (
+                            <div style={{ marginTop: 14 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, marginBottom: 3 }}>Disposition notes</div>
+                              <div style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>{woData.resolutionNotes}</div>
+                            </div>
+                          )}
+                          {woData.status === "closed" && (
+                            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, fontSize: 12 }}>
+                              <span style={{ color: T.muted }}>Closed {woData.closedAt ? new Date(woData.closedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—"}</span>
+                              {closedBy && <span style={{ color: T.muted }}>by <span style={{ color: T.ink, fontWeight: 600 }}>{closedBy}</span></span>}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Photos */}
                     <div className="card" style={{ padding: 22, marginBottom: 16 }}>
@@ -2134,6 +2214,75 @@ export default function P1Portal() {
             </div>
           )}
 
+          {/* ═════ HISTORY (closed-job archive) ═════ */}
+          {page === "history" && isManager && !selectedWO && (() => {
+            const resoCodes = ["Nuisance", "Current Asset Repaired", "Current Asset Replaced", "OEM Warranty Related", "Other"];
+            const fromTs = histFrom ? new Date(histFrom + "T00:00:00").getTime() : null;
+            const toTs = histTo ? new Date(histTo + "T23:59:59").getTime() : null;
+            const invTotalFor = (woId: string) => invoices.filter(i => i.wot === woId && i.state !== "draft").reduce((s, i) => s + (i.total || 0), 0);
+            const stateOf = (w: any) => (w.city || "").split(",")[1]?.trim() || "";
+            const q = histSearch.trim().toLowerCase();
+            const rows = closedWOs.filter(w => {
+              if (histContractor !== "all" && w.contractor !== histContractor) return false;
+              if (histReso !== "all" && (w.resolutionCode || "") !== histReso) return false;
+              if (q && !w.id.toLowerCase().includes(q) && !(w.store || "").toLowerCase().includes(q) && !(w.incidentId || "").toLowerCase().includes(q)) return false;
+              if (fromTs || toTs) {
+                const c = w.closedAt ? new Date(w.closedAt).getTime() : null;
+                if (c == null) return false;
+                if (fromTs && c < fromTs) return false;
+                if (toTs && c > toTs) return false;
+              }
+              return true;
+            }).sort((a, b) => new Date(b.closedAt || 0).getTime() - new Date(a.closedAt || 0).getTime());
+            const anyFilter = histSearch || histContractor !== "all" || histReso !== "all" || histFrom || histTo;
+            const inputStyle: any = { padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink };
+            return (
+              <div style={{ animation: "fadeUp 0.3s" }}>
+                <div style={{ fontSize: 12, color: T.muted, marginBottom: 14 }}>Closed &amp; paid work orders. Jobs move here automatically 24 hours after they close.</div>
+                <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+                  <input value={histSearch} onChange={e => setHistSearch(e.target.value)} placeholder="Search WOT / store / INC#..." style={{ ...inputStyle, width: 260 }} />
+                  <select value={histContractor} onChange={e => setHistContractor(e.target.value)} style={inputStyle}>
+                    <option value="all">All contractors</option>
+                    {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                  <select value={histReso} onChange={e => setHistReso(e.target.value)} style={inputStyle}>
+                    <option value="all">All resolution codes</option>
+                    {resoCodes.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <label style={{ fontSize: 12, color: T.muted, display: "flex", alignItems: "center", gap: 6 }}>Closed <input type="date" value={histFrom} onChange={e => setHistFrom(e.target.value)} style={inputStyle} /></label>
+                  <label style={{ fontSize: 12, color: T.muted, display: "flex", alignItems: "center", gap: 6 }}>to <input type="date" value={histTo} onChange={e => setHistTo(e.target.value)} style={inputStyle} /></label>
+                  {anyFilter && <button onClick={() => { setHistSearch(""); setHistContractor("all"); setHistReso("all"); setHistFrom(""); setHistTo(""); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Clear</button>}
+                </div>
+                <div className="card table-scroll" style={{ overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: T.surfaceSoft }}>
+                        {["WOT / FWKD", "Store", "Contractor", "Date Closed", "Invoice Total", "Resolution"].map(h => (
+                          <th key={h} style={{ textAlign: h === "Invoice Total" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((w, i) => (
+                        <tr key={w.id} onClick={() => { setSelectedWO(w.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
+                          <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{w.id}</td>
+                          <td style={{ padding: "12px 14px", fontWeight: 600 }}>{w.store ? `#${w.store}` : "—"}{stateOf(w) ? <span style={{ color: T.subtle, fontWeight: 400 }}> · {stateOf(w)}</span> : ""}</td>
+                          <td style={{ padding: "12px 14px", color: T.muted }}>{w.contractor ? getUser(w.contractor)?.name : "—"}</td>
+                          <td style={{ padding: "12px 14px", color: T.muted }}>{w.closedAt ? new Date(w.closedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</td>
+                          <td className="mono" style={{ padding: "12px 14px", textAlign: "right", fontWeight: 600 }}>{fmt(invTotalFor(w.id))}</td>
+                          <td style={{ padding: "12px 14px", color: T.inkSoft }}>{w.resolutionCode || "—"}</td>
+                        </tr>
+                      ))}
+                      {rows.length === 0 && (
+                        <tr><td colSpan={6} style={{ padding: "28px 14px", textAlign: "center", color: T.subtle, fontSize: 12 }}>{closedWOs.length === 0 ? "No closed work orders yet." : "No work orders match these filters."}</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
         </div>
       </div>
 
@@ -2298,6 +2447,18 @@ export default function P1Portal() {
               onClick={() => { doMarkPaid(woData.id); setModal(null); }}
               className="btn-primary"
             >Mark paid</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "reopen" && woData && (
+        <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board at <span style={{ color: T.ink, fontWeight: 600 }}>Pending Payment</span>, leaves History, and the linked invoice reverts to Approved.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => { doReopen(woData.id); setModal(null); }} className="btn-primary">Reopen</button>
           </div>
         </Modal>
       )}
