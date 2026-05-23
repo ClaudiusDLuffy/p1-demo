@@ -61,9 +61,15 @@ const USERS: Seed[] = [
   { email: "ctanksolutions@gmail.com", name: "Coleman", initials: "CO", role: "contractor", phone: "813-687-4990", company: "Coleman Tank Solutions, Inc.", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
   { email: "buriakmw@gmail.com", name: "Mykola Buriak", initials: "MB", role: "contractor", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
   { email: "plumbingdayornight@gmail.com", name: "Anytime Plumbing", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida, Inc", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
-  { email: "nik@p1pros.com", name: "Nik", initials: "NK", role: "contractor", company: "Talneglobaltrans, LLC", territory: "Tampa, FL", trades: ["refrigeration", "beverage", "ice", "slurpee"], color: "#2563EB" },
   { email: "matt@beardsrefrigeration.com", name: "Matt Beard", initials: "MB", role: "contractor", company: "Beards Refrigeration, LLC", territory: "Dallas, TX", trades: ["slurpee"], color: "#DC2626" },
 ];
+
+// nik@p1pros.com was a duplicate of Mykola Buriak (buriakmw@gmail.com) at
+// Talneglobaltrans — same contractor. We keep Mykola (real email/phone + the
+// seeded Slurpee WO) and remove the Nik placeholder. removeDuplicateNik()
+// below reassigns any references to Mykola, then deletes the dup user.
+const DUP_EMAIL = "nik@p1pros.com";
+const DUP_KEEP_EMAIL = "buriakmw@gmail.com";
 
 // Cache the user list once per run — listUsers per row is slow + brittle
 let userListCache: any[] | null = null;
@@ -116,6 +122,30 @@ async function ensureUser(s: Seed): Promise<string> {
 
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3600 * 1000).toISOString();
 
+// Idempotent removal of the duplicate Talneglobaltrans contractor. Safe to
+// re-run: once Nik is gone it's a no-op. References are reassigned to Mykola
+// first because work_orders/invoices.contractor_id have no ON DELETE rule.
+async function removeDuplicateNik() {
+  const { data: dup } = await sb.from("profiles").select("id").eq("email", DUP_EMAIL).maybeSingle();
+  if (!dup) { console.log("  Duplicate Nik: already removed ✓"); return; }
+  const { data: keep } = await sb.from("profiles").select("id").eq("email", DUP_KEEP_EMAIL).maybeSingle();
+  const dupId = dup.id;
+  if (keep?.id) {
+    await sb.from("work_orders").update({ contractor_id: keep.id }).eq("contractor_id", dupId);
+    await sb.from("invoices").update({ contractor_id: keep.id }).eq("contractor_id", dupId);
+  } else {
+    // No Mykola to inherit — just detach so the FK delete can proceed.
+    await sb.from("work_orders").update({ contractor_id: null, status: "unassigned", functional_status: "New" }).eq("contractor_id", dupId);
+    await sb.from("invoices").update({ contractor_id: null }).eq("contractor_id", dupId);
+  }
+  await sb.from("activities").update({ author_id: null }).eq("author_id", dupId);
+  await sb.from("photos").update({ uploader_id: null }).eq("uploader_id", dupId);
+  // Deleting the auth user cascades to the profile row (profiles.id → auth.users on delete cascade).
+  const { error } = await sb.auth.admin.deleteUser(dupId);
+  if (error) { console.log(`  Duplicate Nik: delete failed — ${error.message}`); return; }
+  console.log("  Duplicate Nik removed (references reassigned to Mykola) ✓");
+}
+
 async function main() {
   console.log("Bootstrapping P1 portal data...\n");
 
@@ -132,6 +162,9 @@ async function main() {
     }
   }
   console.log(`\nUsers: ${Object.keys(ids).length}/${USERS.length}\n`);
+
+  // 1b. Remove the duplicate Talneglobaltrans contractor (Nik → Mykola).
+  await removeDuplicateNik();
 
   // 2. AFMs
   const afms = [
