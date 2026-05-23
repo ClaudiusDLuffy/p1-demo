@@ -198,7 +198,7 @@ const SEVEN_BILL_TO = {
 };
 
 // Line item types matching real P1 invoice (6556)
-const LINE_TYPES = ["Travel", "Labor", "Parts/Hardware", "Shipping", "Other"] as const;
+const LINE_TYPES = ["Truck Charge", "Labor", "Parts/Hardware", "Shipping", "Other"] as const;
 
 // Helper: compute line amount
 const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
@@ -330,6 +330,7 @@ export default function P1Portal() {
   const [search, setSearch] = useState("");
   const [filterC, setFilterC] = useState("all");
   const [filterP, setFilterP] = useState("all");
+  const [nteQueue, setNteQueue] = useState(false); // "NTE Approval Needed" bucket filter
   const [invTab, setInvTab] = useState("all");
   const [toast, setToast] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
@@ -354,7 +355,7 @@ export default function P1Portal() {
   const resetNewWO = () => { setNewWO({ ...BLANK_WO }); setCreateErr(null); };
   // Invoice builder state — line-item based, matches P1's real invoice format (6556)
   const defaultInvLines = () => [
-    { type: "Travel", desc: "Travel to site", qty: 1, rate: P1_BUSINESS.defaultTravelRate, amount: P1_BUSINESS.defaultTravelRate },
+    { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTravelRate, amount: P1_BUSINESS.defaultTravelRate },
     { type: "Labor", desc: "", qty: 1, rate: P1_BUSINESS.defaultLaborRate, amount: P1_BUSINESS.defaultLaborRate },
   ];
   const nextInvNum = () => {
@@ -520,18 +521,20 @@ export default function P1Portal() {
     const unsub = subscribeToChanges(debouncedRefetch);
     return () => { mounted = false; if (refetchTimer) clearTimeout(refetchTimer); unsub(); };
   }, [currentUser?.id]);
-  const nav = (p: string) => { setPage(p); setSelectedWO(null); setAiNote(null); };
+  const nav = (p: string) => { setPage(p); setSelectedWO(null); setAiNote(null); setNteQueue(false); };
 
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const getUser = (id: string) => USERS.find(u => u.id === id);
   const contractorsOnly = USERS.filter(u => u.role === "contractor");
   const myWOs = currentUser?.role === "contractor" ? workOrders.filter(w => w.contractor === currentUser.id) : workOrders;
   const filteredWOs = myWOs.filter(w => {
+    if (nteQueue && !w.nteFlagged) return false;
     if (search && !w.id.toLowerCase().includes(search.toLowerCase()) && !w.store.includes(search) && !(w.summary || "").toLowerCase().includes(search.toLowerCase())) return false;
     if (filterC !== "all" && w.contractor !== filterC) return false;
     if (filterP !== "all" && w.priority !== filterP) return false;
     return true;
   });
+  const nteFlaggedCount = workOrders.filter(w => w.nteFlagged).length;
 
   const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
   const openCount = openWOs.length;
@@ -749,6 +752,22 @@ export default function P1Portal() {
     }, "NTE save failed");
   };
 
+  // Edit the per-WO NTE early-warning threshold (staff only). If the WO is
+  // already flagged and the new threshold is now above current spend, clear
+  // the flag so the review queue stays accurate.
+  const doEditNteFlag = async (woId: string, newThreshold: number, prevThreshold: number) => {
+    const wo = workOrders.find(w => w.id === woId);
+    const spend = invoices.reduce((s, i) => i.wot === woId && i.state !== "draft" ? s + (i.total || 0) : s, 0);
+    const stillFlagged = spend >= newThreshold;
+    const text = `NTE flag threshold updated by ${currentUser.name}: ${fmt(prevThreshold)} → ${fmt(newThreshold)}.`;
+    patchLocalWO(woId, { nteFlagThreshold: newThreshold, nteFlagged: stillFlagged, nteFlagAmount: stillFlagged ? (wo?.nteFlagAmount ?? spend) : null }, localActivity(text, "system"));
+    fire(`NTE flag set to ${fmt(newThreshold)}`);
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { nteFlagThreshold: newThreshold, nteFlagged: stillFlagged, nteFlagAmount: stillFlagged ? (wo?.nteFlagAmount ?? spend) : null });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "NTE flag save failed");
+  };
+
   const doCapitalFlag = async (woId: string) => {
     const text = "Flagged as capital replacement — pending approval.";
     patchLocalWO(woId, { status: "capital", functionalStatus: "Pending Capital Approval", capitalStatus: "Pending approval", isCapital: true }, localActivity(text, "system"));
@@ -761,7 +780,6 @@ export default function P1Portal() {
 
   const doSubmitInvoice = async (wo: any) => {
     if (!newInv.num) { fire("Enter an invoice number"); return false; }
-    if (!newInv.cme) { fire("Select a CME code"); return false; }
     const validLines = (newInv.lines || []).filter((l: any) => l.desc && l.qty && l.rate);
     if (validLines.length === 0) { fire("Add at least one line item with description, qty, and rate"); return false; }
     // DEMO-SAFE SOFTENING (pending client decision on generate-vs-upload):
@@ -773,6 +791,14 @@ export default function P1Portal() {
     const tax = parseFloat(newInv.tax) || 0;
     const total = subtotal + tax;
     const mappedLines = validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) }));
+    // Full service-location for the PDF "ship to". The WO keeps street in
+    // `addr` and city/state in `city`; combine them so the state reaches the
+    // invoice. Avoid duplicating when addr already contains the city/state.
+    const woCity = (wo.city || "").trim();
+    const woAddr = (wo.addr || "").trim();
+    const fullStoreAddr = !woCity || (woAddr && woAddr.includes(woCity))
+      ? woAddr
+      : [woAddr, woCity].filter(Boolean).join(", ");
     // Optimistic local update
     const localInv = {
       num: newInv.num,
@@ -782,7 +808,7 @@ export default function P1Portal() {
       serviceDate: newInv.serviceDate,
       terms: newInv.terms,
       store: wo.store,
-      storeAddr: wo.addr,
+      storeAddr: fullStoreAddr,
       cme: newInv.cme,
       contractor: wo.contractor,
       lines: mappedLines,
@@ -792,20 +818,30 @@ export default function P1Portal() {
       date: (() => { const d = new Date((newInv.invoiceDate || new Date().toISOString().slice(0,10)) + "T00:00:00"); return `${MONTHS[d.getMonth()]} ${d.getDate()}`; })(),
     };
     setInvoices(prev => [localInv, ...prev]);
+    // NTE early-warning flag: if this invoice total reaches the WO's flag
+    // threshold (default $900), flag the WO so it lands in Mandy's "NTE
+    // Approval Needed" queue. Dollar-based, separate from the actual-NTE
+    // overage highlight. Only ever sets the flag on (never auto-clears).
+    const flagThreshold = wo.nteFlagThreshold != null ? wo.nteFlagThreshold : 900;
+    const shouldFlag = total >= flagThreshold;
     const text = `Invoice #${newInv.num} submitted to 7-Eleven. Total: ${fmt(total)} (${validLines.length} line item${validLines.length !== 1 ? "s" : ""}).`;
-    patchLocalWO(wo.id, { status: "pending_approval", invoiceTotal: total }, localActivity(text, "system"));
+    patchLocalWO(wo.id, { status: "pending_approval", invoiceTotal: total, ...(shouldFlag ? { nteFlagged: true, nteFlagAmount: total } : {}) }, localActivity(text, "system"));
     try {
       const header: any = await insertInvoice(
-        { ...newInv, wot: wo.id, store: wo.store, storeAddr: wo.addr, contractor: wo.contractor, state: "submitted" },
+        { ...newInv, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted" },
         validLines,
         currentUser.name,
       );
+      if (shouldFlag) {
+        try { await updateWorkOrder(wo.id, { nteFlagged: true, nteFlagAmount: total }); }
+        catch (e: any) { fire(`NTE flag not saved: ${e.message || e}`); }
+      }
       // Generate + upload PDF so manager + contractor can pull the same bytes later.
       try {
         const { generateInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
         const logoDataUrl = await loadLogoDataUrl();
         const blob = generateInvoicePDFBlob({
-          num: newInv.num, wot: wo.id, store: wo.store, storeAddr: wo.addr,
+          num: newInv.num, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr,
           invoiceDate: newInv.invoiceDate, serviceDate: newInv.serviceDate, terms: newInv.terms,
           cme: newInv.cme, lines: mappedLines, subtotal, salesTax: tax, total,
         }, logoDataUrl);
@@ -1300,7 +1336,7 @@ export default function P1Portal() {
               )}
 
               {/* Hero + stats */}
-              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
+              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
                 <div className="card card-hover stat-hero" style={{ background: `linear-gradient(135deg, ${T.accentSoft} 0%, ${T.warnSoft} 100%)`, padding: "28px 32px", animation: "fadeUp 0.4s both", cursor: "pointer", position: "relative", overflow: "hidden", border: `1px solid ${T.accentRing}` }} onClick={() => nav("work_orders")}>
                   <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: `radial-gradient(circle, ${T.accent}15, transparent 70%)` }} />
                   <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 14 }}>Revenue at risk</div>
@@ -1322,6 +1358,7 @@ export default function P1Portal() {
                   { label: "SLA at risk", value: slaAtRisk, color: T.warn, sub: "Needs status update", bg: T.warnSoft, onClick: () => nav("work_orders") },
                   { label: "Capital", value: capitalCount, color: T.violet, sub: "Pending equipment", bg: T.violetSoft, onClick: () => nav("capital") },
                   { label: "Awaiting Payment", value: awaitingPayment, color: "#0E7C7B", sub: "Approved · unpaid", bg: "#E0F2F1", onClick: () => nav("work_orders") },
+                  { label: "NTE Approval Needed", value: nteFlaggedCount, color: T.warn, sub: "Invoice ≥ flag threshold", bg: T.warnSoft, onClick: () => { nav("work_orders"); setNteQueue(true); } },
                 ].map((s, i) => (
                   <div key={i} className="card card-hover" style={{ background: s.bg, padding: "22px 24px", animation: `fadeUp 0.4s ${(i + 1) * 0.06}s both`, cursor: "pointer" }} onClick={s.onClick}>
                     <div style={{ fontSize: 11, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 12 }}>{s.label}</div>
@@ -1398,7 +1435,8 @@ export default function P1Portal() {
                   <option value="all">All priorities</option>
                   {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
-                {(filterC !== "all" || filterP !== "all" || search) && <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Clear</button>}
+                {nteQueue && <span style={{ fontSize: 11, fontWeight: 700, color: T.warn, background: T.warnSoft, padding: "5px 12px", borderRadius: 20, border: `1px solid ${T.warn}33` }}>NTE Approval Needed</span>}
+                {(filterC !== "all" || filterP !== "all" || search || nteQueue) && <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); setNteQueue(false); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Clear</button>}
               </div>
               <div className="card table-scroll" style={{ overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -1570,10 +1608,12 @@ export default function P1Portal() {
                           { l: "ETA", v: woData.eta || "Not set" },
                           { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
                           { l: "Start time", v: woData.startTime || "Not started" },
-                          { l: "AFM", v: woData.afm || "—" },
+                          // AFM name + email are hidden from contractors so a field tech
+                          // can't contact the AFM directly — staff roles still see them.
+                          ...(isManager ? [{ l: "AFM", v: woData.afm || "—" }] : []),
                           { l: "Asset model", v: woData.assetModel || "Not captured" },
                           { l: "Serial #", v: woData.assetSerial || "Not captured" },
-                          { l: "AFM email", v: woData.afmEmail || "—" },
+                          ...(isManager ? [{ l: "AFM email", v: woData.afmEmail || "—" }] : []),
                         ].map((d, i) => (
                           <div key={i}>
                             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>{d.l}</div>
@@ -1611,6 +1651,16 @@ export default function P1Portal() {
                           {woInvoices.length} invoice{woInvoices.length !== 1 ? "s" : ""} on file
                         </div>
                       )}
+                      {/* NTE early-warning flag threshold ($900 default, editable by
+                          staff). Separate from the actual NTE above. */}
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle }}>NTE flag at</span>
+                          <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt(woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900)}</span>
+                          {woData.nteFlagged && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: T.warn, padding: "2px 8px", borderRadius: 10, letterSpacing: 0.3 }}>NTE APPROVAL NEEDED{woData.nteFlagAmount != null ? ` · ${fmt(woData.nteFlagAmount)}` : ""}</span>}
+                        </div>
+                        {isManager && <button onClick={() => setModal("editNteFlag")} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit flag</button>}
+                      </div>
                     </div>
 
                     {/* Actions */}
@@ -1889,7 +1939,7 @@ export default function P1Portal() {
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
               <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
-                {[{ id: "all", l: "All" }, { id: "submitted", l: "Submitted" }, { id: "rejected", l: "Rejected" }, { id: "approved", l: "Approved" }].map(t => (
+                {[{ id: "all", l: "All" }, { id: "pending", l: "Pending" }, { id: "submitted", l: "Submitted" }, { id: "rejected", l: "Rejected" }, { id: "approved", l: "Approved" }].map(t => (
                   <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>{t.l}</button>
                 ))}
               </div>
@@ -1906,7 +1956,7 @@ export default function P1Portal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(isManager ? invoices : invoices.filter(i => i.contractor === currentUser.id)).filter(i => invTab === "all" || i.state === invTab).map(inv => (
+                    {(isManager ? invoices : invoices.filter(i => i.contractor === currentUser.id)).filter(i => invTab === "all" ? true : invTab === "pending" ? (i.state === "submitted" || i.state === "revised") : i.state === invTab).map(inv => (
                       <tr key={inv.num} onClick={() => setSelectedInvoice(inv.num)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
                         <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
                         <td className="mono" style={{ padding: "13px 14px", fontSize: 11, color: T.muted }}>{inv.wot}</td>
@@ -2088,8 +2138,11 @@ export default function P1Portal() {
       </div>
 
       {/* ═════ MODALS ═════ */}
+      {/* Create WO draft protection: closing/cancelling preserves the in-progress
+          newWO values (a stray keystroke shouldn't wipe the form); the draft is
+          cleared only after a successful create. */}
       {modal === "newWO" && (
-        <Modal onClose={() => { setModal(null); resetNewWO(); }} title="Create Work Order" width={520}>
+        <Modal onClose={() => { setModal(null); setCreateErr(null); }} title="Create Work Order" width={520}>
           <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>
             Only the WOT number is required — fill in what you have; the rest takes sensible defaults.
           </div>
@@ -2111,7 +2164,7 @@ export default function P1Portal() {
               <Field label="Line of Service"><Input value={newWO.lineOfService} onChange={(e: any) => setNewWO({ ...newWO, lineOfService: e.target.value })} placeholder="" /></Field>
               <Field label="Business Service"><Sel value={newWO.businessService} onChange={(e: any) => setNewWO({ ...newWO, businessService: e.target.value })}>
                 <option value="">Not set</option>
-                {["Refrigeration equipment", "Frozen Beverage - Equipment", "Cold Beverage - Equipment", "HVAC", "Plumbing", "Hot food", "Ice merchandiser", "Walk-in cooler/freezer", "Septic/Grease"].map(c => <option key={c}>{c}</option>)}
+                {["Refrigeration equipment", "Frozen Beverage - Equipment", "Cold Beverage - Equipment", "HVAC", "EMS", "Plumbing", "Hot food", "Ice merchandiser", "Walk-in cooler/freezer", "Septic/Grease"].map(c => <option key={c}>{c}</option>)}
               </Sel></Field>
             </div>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -2144,7 +2197,7 @@ export default function P1Portal() {
             </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => { setModal(null); resetNewWO(); }} className="btn-soft">Cancel</button>
+            <button onClick={() => { setModal(null); setCreateErr(null); }} className="btn-soft">Cancel</button>
             <button onClick={async () => { if (await doCreateWO()) setModal(null); }} className="btn-primary">Create</button>
           </div>
         </Modal>
@@ -2288,6 +2341,26 @@ export default function P1Portal() {
         </Modal>
       )}
 
+      {modal === "editNteFlag" && woData && (
+        <Modal onClose={() => setModal(null)} title="Edit NTE flag threshold" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
+            Early-warning threshold for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. When a submitted invoice total reaches this amount, the work order is flagged for NTE approval. Default is {fmt(900)} (a buffer below 7-Eleven's {fmt(1300)} hard cap).
+          </div>
+          <Field label="Flag threshold ($)">
+            <Input id="nte-flag-input" type="number" step="0.01" defaultValue={woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900} placeholder="e.g. 900" />
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const v = parseFloat((document.getElementById("nte-flag-input") as any)?.value);
+              if (!isFinite(v) || v < 0) { fire("Enter a non-negative number"); return; }
+              doEditNteFlag(woData.id, v, woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
+              setModal(null);
+            }} className="btn-primary">Save</button>
+          </div>
+        </Modal>
+      )}
+
       {modal === "startWork" && woData && (
         <Modal onClose={() => setModal(null)} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
@@ -2424,19 +2497,11 @@ export default function P1Portal() {
                 <option>Net 30</option><option>Net 15</option><option>Due on receipt</option>
               </Sel></Field>
             </div>
-            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
+            {/* CME code removed from the standard tech invoice — per Mandy it's
+                only relevant to capital projects, not regular technician invoices. */}
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
               <Field label="Work Order #"><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "'JetBrains Mono', monospace" }}>{woData.id}</div></Field>
               <Field label="Store #"><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>#{woData.store}</div></Field>
-              <Field label="CME #"><Sel value={newInv.cme} onChange={(e: any) => setNewInv({ ...newInv, cme: e.target.value })}>
-                <option value="">Select...</option>
-                <option>CME-001 HVAC</option>
-                <option>CME-002 Beverage</option>
-                <option>CME-003 Electrical</option>
-                <option>CME-004 Refrigeration</option>
-                <option>CME-005 Plumbing</option>
-                <option>CME-006 Hot food</option>
-                <option>CME-007 General</option>
-              </Sel></Field>
             </div>
 
             {/* Line items */}
@@ -2461,7 +2526,7 @@ export default function P1Portal() {
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
               <button onClick={() => addLine("Labor")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Labor</button>
-              <button onClick={() => addLine("Travel")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Travel</button>
+              <button onClick={() => addLine("Truck Charge")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Truck Charge</button>
               <button onClick={() => addLine("Parts/Hardware")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Parts</button>
               <button onClick={() => addLine("Shipping")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Shipping</button>
               <button onClick={() => addLine("Other")} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ Other</button>
@@ -2515,7 +2580,7 @@ export default function P1Portal() {
 
             <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
               <button onClick={() => { setModal(null); resetNewInv(); }} className="btn-soft">Cancel</button>
-              <button onClick={() => doSubmitInvoice(woData)} className="btn-accent">Submit to 7-Eleven</button>
+              <button onClick={() => doSubmitInvoice(woData)} className="btn-accent">Submit</button>
             </div>
           </Modal>
         );
