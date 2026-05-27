@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   signIn, signOut,
-  loadAllProfiles, loadWorkOrders, loadInvoices,
+  loadAllProfiles, loadWorkOrders, loadInvoices, loadTechnicians,
   updateWorkOrder, insertActivity, insertWorkOrder, insertInvoice, updateInvoiceState,
   unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
   findExistingWoId,
@@ -360,6 +360,7 @@ export default function P1Portal() {
   const [noteText, setNoteText] = useState("");
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [technicians, setTechnicians] = useState<any[]>([]);
   const [USERS, setUsers] = useState<any[]>(DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })));
   const [dataLoading, setDataLoading] = useState(true);
   const BLANK_WO = { wot: "", incidentId: "", store: "", addr: "", city: "", afm: "", afmEmail: "", priority: "", lineOfService: "", businessService: "", category: "", subCategory: "", summary: "", description: "", nte: "", assign: "" };
@@ -503,10 +504,11 @@ export default function P1Portal() {
 
     const refetch = async () => {
       try {
-        const [wos, invs] = await Promise.all([loadWorkOrders(), loadInvoices()]);
+        const [wos, invs, techs] = await Promise.all([loadWorkOrders(), loadInvoices(), loadTechnicians()]);
         if (!mounted) return;
         setWorkOrders(wos);
         setInvoices(invs);
+        setTechnicians(techs);
       } catch (err: any) { /* swallow — local state still valid */ }
     };
 
@@ -519,11 +521,12 @@ export default function P1Portal() {
     (async () => {
       setDataLoading(true);
       try {
-        const [profs, wos, invs] = await Promise.all([loadAllProfiles(), loadWorkOrders(), loadInvoices()]);
+        const [profs, wos, invs, techs] = await Promise.all([loadAllProfiles(), loadWorkOrders(), loadInvoices(), loadTechnicians()]);
         if (!mounted) return;
         setUsers(profs);
         setWorkOrders(wos);
         setInvoices(invs);
+        setTechnicians(techs);
       } catch (err: any) {
         fire(`Load error: ${err.message || err}`);
       } finally {
@@ -679,6 +682,14 @@ export default function P1Portal() {
       await updateWorkOrder(woId, { eta });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "ETA save failed");
+  };
+
+  // Contractor records who was on the job (text snapshot). Blank clears it.
+  const doSetTechnician = async (woId: string, name: string) => {
+    patchLocalWO(woId, { technicianOnJob: name || null });
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { technicianOnJob: name || null });
+    }, "Technician save failed");
   };
 
   const doStartWork = async (woId: string, notes: string) => {
@@ -1217,6 +1228,7 @@ export default function P1Portal() {
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{wo.store ? `Store #${wo.store}` : wo.id}</div>
         <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{wo.summary || "—"}</div>
+        {wo.technicianOnJob && <div style={{ fontSize: 10, color: T.subtle, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><Ico d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" size={10} color={T.subtle} />{wo.technicianOnJob}</div>}
         {cardNte > 0 && (
           <div style={{ marginTop: 6 }}>
             <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.4, padding: "2px 7px", borderRadius: 10, background: cardOver ? T.danger : T.borderSoft, color: cardOver ? "#fff" : T.muted, border: cardOver ? "none" : `1px solid ${T.border}` }}>
@@ -1746,6 +1758,31 @@ export default function P1Portal() {
                       </div>
                     )}
 
+                    {/* Technician on Job — contractor picks who was on site (text
+                        snapshot, optional). Staff see it read-only. Locked at closed
+                        (Completion Record carries it then). */}
+                    {woData.status !== "closed" && (() => {
+                      const isOwnContractor = !isManager && woData.contractor === currentUser.id;
+                      const myTechs = technicians.filter((t: any) => t.contractorId === woData.contractor && t.isActive);
+                      return (
+                        <div className="card" style={{ padding: 18, marginBottom: 16 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>Technician on Job</div>
+                          {isOwnContractor ? (
+                            myTechs.length > 0 ? (
+                              <Sel value={woData.technicianOnJob || ""} onChange={(e: any) => doSetTechnician(woData.id, e.target.value)}>
+                                <option value="">— Not set —</option>
+                                {myTechs.map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                              </Sel>
+                            ) : (
+                              <div style={{ fontSize: 13, color: T.subtle, padding: "10px 13px", borderRadius: 10, border: `1px dashed ${T.border}`, background: T.surfaceSoft }}>No technicians on file</div>
+                            )
+                          ) : (
+                            <div style={{ fontSize: 14, fontWeight: 500, color: woData.technicianOnJob ? T.ink : T.subtle }}>{woData.technicianOnJob || "(not set)"}</div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Completion Record — the self-contained closure file. Shown
                         on completed/closed jobs; identical from the board and History
                         (same detail component). */}
@@ -1757,6 +1794,7 @@ export default function P1Portal() {
                         { l: "Asset model", v: woData.assetModel || "—" },
                         { l: "Serial number", v: woData.assetSerial || "—" },
                         { l: "Resolution code (DSP closure)", v: woData.resolutionCode || "—" },
+                        { l: "Technician on Job", v: woData.technicianOnJob || "—" },
                       ];
                       return (
                         <div className="card" style={{ padding: 18, marginBottom: 16 }}>
