@@ -44,6 +44,21 @@ export async function loadAllProfiles() {
   return (data || []).map(mapProfile);
 }
 
+// Contractor technicians — RLS returns all rows to staff, own rows to a
+// contractor. Used to populate the "Technician on Job" dropdown.
+export async function loadTechnicians() {
+  const sb = supabase();
+  const { data, error } = await sb.from("contractor_technicians").select("*").order("name");
+  if (error) throw error;
+  return (data || []).map((t: any) => ({
+    id: t.id,
+    contractorId: t.contractor_id,
+    name: t.name,
+    tier: t.tier,
+    isActive: t.is_active,
+  }));
+}
+
 const mapProfile = (p: any) => ({
   id: p.id,
   name: p.name,
@@ -137,6 +152,7 @@ const mapWO = (w: any) => ({
   partNeeded: w.part_needed,
   partEta: w.part_eta,
   source: w.source,
+  technicianOnJob: w.technician_on_job,
   createdAt: w.created_at,
   updatedAt: w.updated_at,
   closedAt: w.closed_at,
@@ -295,6 +311,7 @@ const WO_FIELD_MAP: Record<string, string> = {
   nteFlagged: "nte_flagged",
   nteFlagAmount: "nte_flag_amount",
   closedAt: "closed_at",
+  technicianOnJob: "technician_on_job",
 };
 function toDbWoPatch(patch: any) {
   const out: any = {};

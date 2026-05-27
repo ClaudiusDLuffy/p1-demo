@@ -56,12 +56,44 @@ const USERS: Seed[] = [
   { email: "scrcdallastexas@gmail.com", name: "Derek Starnes", initials: "DS", role: "contractor", company: "Starnes Commercial Refrigeration", territory: "Dallas, TX", trades: ["hvac", "refrigeration", "beverage", "ice"], color: "#0891B2" },
   { email: "service@archerref.com", name: "Archer Refrigeration", initials: "AR", role: "contractor", company: "Archer Refrigeration, LLC", territory: "Houston, TX", trades: ["hvac", "refrigeration", "ice"], color: "#8B5CF6" },
   { email: "pro.ops.inc@gmail.com", name: "Pro-Ops", initials: "PO", role: "contractor", phone: "757-256-8511", company: "Pro-Ops, Inc", territory: "Virginia Beach, VA", trades: ["hvac", "refrigeration", "ice"], color: "#F59E0B" },
-  { email: "vpdmitry@gmail.com", name: "Demytro Bichukov", initials: "DB", role: "contractor", phone: "323-557-8452", company: "Same Day Repair", territory: "Tampa, FL", trades: ["beverage", "ice"], color: "#10B981" },
-  { email: "shecanfacilitymaintenance@gmail.com", name: "Dave Lecerda", initials: "DL", role: "contractor", company: "Shecan Facility Maintenance", territory: "Dallas, TX", trades: ["hotfood"], color: "#EC4899" },
+  // Same Day Repair + Shecan already existed under a contact-person name —
+  // company strings normalized to Jeremy's rate table (NOT new rows).
+  { email: "vpdmitry@gmail.com", name: "Demytro Bichukov", initials: "DB", role: "contractor", phone: "323-557-8452", company: "Same Day Repair, Inc", territory: "Tampa, FL", trades: ["beverage", "ice"], color: "#10B981" },
+  { email: "shecanfacilitymaintenance@gmail.com", name: "Dave Lecerda", initials: "DL", role: "contractor", company: "Shecan Facility Maintenance LLC", territory: "Dallas, TX", trades: ["hotfood"], color: "#EC4899" },
   { email: "ctanksolutions@gmail.com", name: "Coleman", initials: "CO", role: "contractor", phone: "813-687-4990", company: "Coleman Tank Solutions, Inc.", territory: "Tampa, FL", trades: ["septic", "grease"], color: "#A67C00" },
   { email: "buriakmw@gmail.com", name: "Mykola Buriak", initials: "MB", role: "contractor", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
   { email: "plumbingdayornight@gmail.com", name: "Anytime Plumbing", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida, Inc", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
   { email: "matt@beardsrefrigeration.com", name: "Matt Beard", initials: "MB", role: "contractor", company: "Beards Refrigeration, LLC", territory: "Dallas, TX", trades: ["slurpee"], color: "#DC2626" },
+  // Roster completion from Jeremy's rate table — display name = company
+  // (no known contact person). No quick-access buttons; no tech seed.
+  { email: "craigfassroofing@p1pros.com", name: "Craig Fass Roofing, LLC", initials: "CF", role: "contractor", company: "Craig Fass Roofing, LLC", trades: ["roofing"], color: "#B45309" },
+  { email: "dynamicheatingcooling@p1pros.com", name: "Dynamic Heating & Cooling", initials: "DH", role: "contractor", company: "Dynamic Heating & Cooling", trades: ["hvac"], color: "#0E7490" },
+  { email: "meloair@p1pros.com", name: "Melo Air, Inc", initials: "MA", role: "contractor", company: "Melo Air, Inc", trades: ["hvac"], color: "#7C3AED" },
+  { email: "precisionplumbingsewer@p1pros.com", name: "Precision Plumbing & Sewer, LLC", initials: "PP", role: "contractor", company: "Precision Plumbing & Sewer, LLC", trades: ["plumbing"], color: "#2563EB" },
+  { email: "spikeconstruction@p1pros.com", name: "Spike Construction", initials: "SC", role: "contractor", company: "Spike Construction", trades: ["construction"], color: "#65A30D" },
+  { email: "westcoastcivil@p1pros.com", name: "West Coast Civil, LLC", initials: "WC", role: "contractor", company: "West Coast Civil, LLC", trades: ["construction"], color: "#9333EA" },
+];
+
+// 14 SCRC field technicians for the "Technician on Job" dropdown, linked to
+// Derek Starnes (Starnes Commercial Refrigeration). tier is captured for
+// future Phase 2 use only — nothing in Phase 1 filters/enforces by it.
+// NOTE: Jorge's 5 are technically Mr. Freeze techs (a separate company SCRC
+// dispatches to). Lumped under SCRC for Phase 1 simplicity; may resplit in Phase 2.
+const SCRC_TECHS: { name: string; tier: "direct" | "mr_freeze" | "contracted" }[] = [
+  { name: "Jorge Miranda Jr", tier: "mr_freeze" },
+  { name: "Jorge Miranda Sr", tier: "mr_freeze" },
+  { name: "Allan Morales", tier: "mr_freeze" },
+  { name: "Fabian Cabrera", tier: "mr_freeze" },
+  { name: "David Ramirez", tier: "mr_freeze" },
+  { name: "Nick Gomez", tier: "direct" },
+  { name: "Dylan Anderson", tier: "direct" },
+  { name: "Clifford Yeager", tier: "direct" },
+  { name: "Cole Anderson", tier: "direct" },
+  { name: "Zach Anderson", tier: "contracted" },
+  { name: "Gabe Moxley", tier: "contracted" },
+  { name: "Patrick Petit", tier: "contracted" },
+  { name: "Raymon Rush", tier: "contracted" },
+  { name: "Nate Slayers", tier: "contracted" },
 ];
 
 // nik@p1pros.com was a duplicate of Mykola Buriak (buriakmw@gmail.com) at
@@ -165,6 +197,17 @@ async function main() {
 
   // 1b. Remove the duplicate Talneglobaltrans contractor (Nik → Mykola).
   await removeDuplicateNik();
+
+  // 1c. SCRC field technicians for the "Technician on Job" dropdown.
+  const derekId = ids["scrcdallastexas@gmail.com"];
+  if (derekId) {
+    const techRows = SCRC_TECHS.map(t => ({ contractor_id: derekId, name: t.name, tier: t.tier, is_active: true }));
+    const { error: techErr } = await sb.from("contractor_technicians").upsert(techRows, { onConflict: "contractor_id,name" });
+    if (techErr) console.log(`  SCRC technicians: ✗ ${techErr.message}`);
+    else console.log(`  SCRC technicians: ${techRows.length} seeded ✓`);
+  } else {
+    console.log("  SCRC technicians: ✗ Derek's profile id not found — skipped");
+  }
 
   // 2. AFMs
   const afms = [
