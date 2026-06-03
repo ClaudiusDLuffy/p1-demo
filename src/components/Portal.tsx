@@ -1111,19 +1111,25 @@ export default function P1Portal() {
   const doRemovePhoto = async (woId: string, idx: number) => {
     const wo = workOrders.find(w => w.id === woId);
     const path = wo?.photos?.[idx];
-    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((_: any, i: number) => i !== idx) } : w));
-    fire("Photo removed");
+    let storagePath: string | null = null;
     if (path && !path.startsWith("data:") && !path.startsWith("http")) {
-      // It's a Supabase storage path — call DB to remove it
-      // Note: signed URLs from getPhotoUrl don't preserve the path; we'd need to track paths separately
-      // For now just remove locally — full cleanup happens when v8d adds path tracking to local state
+      storagePath = path;
     } else if (path?.startsWith("http")) {
       // Extract storage path from signed URL if possible
       const match = path.match(/\/photos\/(.+?)\?/);
-      if (match) {
-        await dbCall(() => removePhoto(woId, match[1]), "Photo cleanup failed");
-      }
+      if (match) storagePath = match[1];
     }
+    if (!storagePath) {
+      fire("Photo cleanup failed: storage path not found");
+      return;
+    }
+    const result = await removePhoto(woId, storagePath);
+    if (!result.success) {
+      fire(`Photo cleanup failed: ${(result.error as any)?.message || result.error}`);
+      return;
+    }
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((_: any, i: number) => i !== idx) } : w));
+    fire("Photo removed");
   };
 
   // ═══════════════════════════════════════════════════════════════
