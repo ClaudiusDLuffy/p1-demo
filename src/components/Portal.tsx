@@ -347,6 +347,7 @@ export default function P1Portal() {
   const [histTo, setHistTo] = useState("");
   const [toast, setToast] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [fadeIn, setFadeIn] = useState(false);
@@ -359,6 +360,10 @@ export default function P1Portal() {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [startDateInput, setStartDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [startTimeInput, setStartTimeInput] = useState(new Date().toTimeString().slice(0, 5));
+  const [pauseDateInput, setPauseDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [pauseTimeInput, setPauseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [technicians, setTechnicians] = useState<any[]>([]);
@@ -421,7 +426,7 @@ export default function P1Portal() {
   const currentUserId = currentUser?.id;
 
   // Real Supabase auth — replaces demo button login
-  const doLogin = async (email: string, password: string = DEMO_PASSWORD) => {
+  const doLogin = async (email: string, password: string) => {
     if (loginLoading) return;
     const v = (email || "").trim();
     if (!v) { setLoginError("Enter an email to sign in"); return; }
@@ -708,7 +713,7 @@ export default function P1Portal() {
   };
 
   const doStartWork = async (woId: string, notes: string) => {
-    const startIso = new Date().toISOString();
+    const startIso = startDateInput && startTimeInput ? new Date(`${startDateInput}T${startTimeInput}`).toISOString() : new Date().toISOString();
     const text = notes || `Checked in and started work at ${timeNow()}.`;
     const previousWorkOrders = workOrders;
     patchLocalWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso }, localActivity(text, "note"));
@@ -720,9 +725,10 @@ export default function P1Portal() {
   };
 
   const doPauseWork = async (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
+    const pauseIso = pauseDateInput && pauseTimeInput ? new Date(`${pauseDateInput}T${pauseTimeInput}`).toISOString() : new Date().toISOString();
     const partLabel = partDesc ? `${partDesc}${partNum ? ` (${partNum})` : ""}` : null;
     const text = notes || `Work paused: ${reason}.${partLabel ? ` Part needed: ${partLabel}.` : ""}`;
-    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts" };
+    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts", endTime: pauseIso };
     if (partLabel) updates.partNeeded = partLabel;
     if (partEta) updates.partEta = partEta; // ISO date string from input type=date
     const previousWorkOrders = workOrders;
@@ -1159,16 +1165,22 @@ export default function P1Portal() {
   const doRemovePhoto = async (woId: string, idx: number) => {
     const wo = workOrders.find(w => w.id === woId);
     const path = wo?.photos?.[idx];
-    if (!path) return;
-    if (!path.startsWith("data:")) {
-      let storagePath = path;
-      if (path.startsWith("http")) {
-        const match = path.match(/\/photos\/(.+?)\?/);
-        if (!match) { fire("Photo cleanup failed: storage path could not be resolved"); return; }
-        storagePath = decodeURIComponent(match[1]);
-      }
-      const result = await removePhoto(woId, storagePath);
-      if (!result.success) { fire("Only the uploader or staff can delete this image"); return; }
+    let storagePath: string | null = null;
+    if (path && !path.startsWith("data:") && !path.startsWith("http")) {
+      storagePath = path;
+    } else if (path?.startsWith("http")) {
+      // Extract storage path from signed URL if possible
+      const match = path.match(/\/photos\/(.+?)\?/);
+      if (match) storagePath = decodeURIComponent(match[1]);
+    }
+    if (!storagePath) {
+      fire("Photo cleanup failed: storage path could not be resolved");
+      return;
+    }
+    const result = await removePhoto(woId, storagePath);
+    if (!result.success) {
+      fire(`Photo cleanup failed: ${(result.error as any)?.message || result.error}`);
+      return;
     }
     setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((_: any, i: number) => i !== idx) } : w));
     fire("Photo removed");
@@ -1207,17 +1219,17 @@ export default function P1Portal() {
             </div>
             <div style={{ marginBottom: 18 }}>
               <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 7, display: "block", textTransform: "uppercase", letterSpacing: 0.8 }}>Password</label>
-              <input type="password" defaultValue="••••••••" style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
             </div>
             {loginError && <div style={{ fontSize: 12, color: T.danger, background: T.dangerSoft, border: `1px solid ${T.dangerSoft}`, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>{loginError}</div>}
             {loginLoading ? <div style={{ textAlign: "center", padding: "12px 0" }}><div style={{ width: 22, height: 22, border: `3px solid ${T.borderSoft}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto" }} /></div>
-              : <button onClick={() => doLogin(loginEmail)} style={{ width: "100%", padding: 13, borderRadius: 10, background: T.ink, color: T.bg, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>Sign in</button>}
+              : <button onClick={() => doLogin(loginEmail, loginPassword)} style={{ width: "100%", padding: 13, borderRadius: 10, background: T.ink, color: T.bg, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>Sign in</button>}
           </div>
           <div style={{ marginTop: 24 }}>
             <div style={{ fontSize: 11, fontWeight: 500, color: T.subtle, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Demo — quick access</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {DEMO_ACCOUNTS.map(u => (
-                <button key={u.email} onClick={() => { setLoginEmail(u.email); doLogin(u.email); }} className="card-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                <button key={u.email} onClick={() => { setLoginEmail(u.email); doLogin(u.email, DEMO_PASSWORD); }} className="card-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                   <Avatar initials={u.initials} color={u.color} size={32} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
@@ -2600,8 +2612,8 @@ export default function P1Portal() {
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Arrival date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
-              <Field label="Arrival time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+              <Field label="Arrival date"><Input type="date" value={startDateInput} onChange={(e: any) => setStartDateInput(e.target.value)} /></Field>
+              <Field label="Arrival time"><Input type="time" value={startTimeInput} onChange={(e: any) => setStartTimeInput(e.target.value)} /></Field>
             </div>
             <Field label="Initial notes"><TA id="start-notes" rows={2} placeholder="What are you seeing on site?" /></Field>
           </div>
@@ -2622,8 +2634,8 @@ export default function P1Portal() {
               <option value="Awaiting parts">Awaiting parts — equipment completely down</option>
             </Sel></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Stamp-out date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
-              <Field label="Stamp-out time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+              <Field label="Stamp-out date"><Input type="date" value={pauseDateInput} onChange={(e: any) => setPauseDateInput(e.target.value)} /></Field>
+              <Field label="Stamp-out time"><Input type="time" value={pauseTimeInput} onChange={(e: any) => setPauseTimeInput(e.target.value)} /></Field>
             </div>
             <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts information</div>

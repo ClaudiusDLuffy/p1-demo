@@ -594,7 +594,9 @@ export async function removePhoto(workOrderId: string, storagePath: string): Pro
     .eq("storage_path", storagePath)
     .select("id");
   if (dbError) return { success: false, error: dbError };
-  if (!deletedRows || deletedRows.length === 0) return { success: false, error: new Error("Photo row was not deleted") };
+  if (!deletedRows || deletedRows.length === 0) {
+    return { success: false, error: new Error("Only the uploader or a staff member can delete this image") };
+  }
   // Delete the file from storage
   const { error: storageError } = await sb.storage.from("photos").remove([storagePath]);
   if (storageError) return { success: false, error: storageError };
