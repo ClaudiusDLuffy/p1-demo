@@ -359,6 +359,10 @@ export default function P1Portal() {
   const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [startDateInput, setStartDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [startTimeInput, setStartTimeInput] = useState(new Date().toTimeString().slice(0, 5));
+  const [pauseDateInput, setPauseDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [pauseTimeInput, setPauseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [technicians, setTechnicians] = useState<any[]>([]);
@@ -694,7 +698,7 @@ export default function P1Portal() {
   };
 
   const doStartWork = async (woId: string, notes: string) => {
-    const startIso = new Date().toISOString();
+    const startIso = startDateInput && startTimeInput ? new Date(`${startDateInput}T${startTimeInput}`).toISOString() : new Date().toISOString();
     const text = notes || `Checked in and started work at ${timeNow()}.`;
     patchLocalWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso }, localActivity(text, "note"));
     fire(`Work started · status synced to 7-Eleven`);
@@ -705,9 +709,10 @@ export default function P1Portal() {
   };
 
   const doPauseWork = async (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
+    const pauseIso = pauseDateInput && pauseTimeInput ? new Date(`${pauseDateInput}T${pauseTimeInput}`).toISOString() : new Date().toISOString();
     const partLabel = partDesc ? `${partDesc}${partNum ? ` (${partNum})` : ""}` : null;
     const text = notes || `Work paused: ${reason}.${partLabel ? ` Part needed: ${partLabel}.` : ""}`;
-    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts" };
+    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts", endTime: pauseIso };
     if (partLabel) updates.partNeeded = partLabel;
     if (partEta) updates.partEta = partEta; // ISO date string from input type=date
     patchLocalWO(woId, updates, localActivity(text, "note"));
@@ -2572,8 +2577,8 @@ export default function P1Portal() {
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Arrival date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
-              <Field label="Arrival time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+              <Field label="Arrival date"><Input type="date" value={startDateInput} onChange={(e: any) => setStartDateInput(e.target.value)} /></Field>
+              <Field label="Arrival time"><Input type="time" value={startTimeInput} onChange={(e: any) => setStartTimeInput(e.target.value)} /></Field>
             </div>
             <Field label="Initial notes"><TA id="start-notes" rows={2} placeholder="What are you seeing on site?" /></Field>
           </div>
@@ -2594,8 +2599,8 @@ export default function P1Portal() {
               <option value="Awaiting parts">Awaiting parts — equipment completely down</option>
             </Sel></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Stamp-out date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
-              <Field label="Stamp-out time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+              <Field label="Stamp-out date"><Input type="date" value={pauseDateInput} onChange={(e: any) => setPauseDateInput(e.target.value)} /></Field>
+              <Field label="Stamp-out time"><Input type="time" value={pauseTimeInput} onChange={(e: any) => setPauseTimeInput(e.target.value)} /></Field>
             </div>
             <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts information</div>
