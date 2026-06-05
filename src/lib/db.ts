@@ -571,12 +571,22 @@ export async function uploadPhotos(workOrderId: string, files: FileList | File[]
   return uploaded;
 }
 
-export async function removePhoto(workOrderId: string, storagePath: string) {
+export async function removePhoto(workOrderId: string, storagePath: string): Promise<{ success: boolean; error?: unknown }> {
   const sb = supabase();
   // Delete the row (RLS allows uploader or staff)
-  await sb.from("photos").delete().eq("work_order_id", workOrderId).eq("storage_path", storagePath);
+  const { data: deletedRows, error: dbError } = await sb.from("photos")
+    .delete()
+    .eq("work_order_id", workOrderId)
+    .eq("storage_path", storagePath)
+    .select("id");
+  if (dbError) return { success: false, error: dbError };
+  if (!deletedRows || deletedRows.length === 0) {
+    return { success: false, error: new Error("Only the uploader or a staff member can delete this image") };
+  }
   // Delete the file from storage
-  await sb.storage.from("photos").remove([storagePath]);
+  const { error: storageError } = await sb.storage.from("photos").remove([storagePath]);
+  if (storageError) return { success: false, error: storageError };
+  return { success: true };
 }
 
 // ── REALTIME SUBSCRIPTION ──────────────────────────────────────────────────
