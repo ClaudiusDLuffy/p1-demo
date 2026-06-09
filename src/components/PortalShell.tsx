@@ -56,24 +56,24 @@ const ManageAccountModal = dynamic(
   { ssr: false }
 );
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  THEME â€” Claude-inspired warm palette. Tokens are the source of truth.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
+//  THEME - Claude-inspired warm palette. Tokens are the source of truth.
+// ===============================================================
+// ===============================================================
 //  REAL P1 TEAM + CONTRACTORS (from Jeremy's email, Apr 20 2026)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 // Demo quick-access buttons on the login screen (clicks pre-fill email + sign in).
 // Real user/profile data loads from Supabase after successful auth.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 //  7-ELEVEN PRIORITY ENUM (real format: P1 Critical, P2 Emergency, etc)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 // Internal pipeline state (our kanban)
 
 // 7-Eleven's Functional Status field (what Gustavo's SLA breach hinged on)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 //  TRADE / TERRITORY ROUTING
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Map 7-Eleven's Line of Service / Category â†’ our internal trade tags
+// ===============================================================
+// Map 7-Eleven's Line of Service / Category -> our internal trade tags
 const SERVICE_TO_TRADES = (service: string, category: string) => {
   const s = `${service} ${category}`.toLowerCase();
   const tags: string[] = [];
@@ -89,7 +89,7 @@ const SERVICE_TO_TRADES = (service: string, category: string) => {
   return tags.length ? tags : ["refrigeration"]; // fallback
 };
 
-// City â†’ (state normalized) for territory matching
+// City -> (state normalized) for territory matching
 const normalizeCity = (loc: string) => (loc || "").toLowerCase().split(",")[0].trim();
 // Pick best contractor for a ticket: must match at least one trade AND territory
 const contractorFor = (city: string, tradeTags: string[], contractors: any[]) => {
@@ -106,9 +106,9 @@ const contractorFor = (city: string, tradeTags: string[], contractors: any[]) =>
   return scored[0]?.id || null;
 };
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 //  DATE + SLA HELPERS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 const timeNow = () => { const d = new Date(), h = d.getHours(), m = d.getMinutes(), ap = h >= 12 ? "PM" : "AM"; return `${h > 12 ? h - 12 : h || 12}:${m < 10 ? "0" + m : m} ${ap}`; };
 const dateShort = (d = new Date()) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 const dateNow = () => `${dateShort()}, ${timeNow()}`;
@@ -141,17 +141,17 @@ const CLOSED_LINGER_MS = 24 * 60 * 60 * 1000;
 const isArchivedClosed = (w: any) =>
   w.status === "closed" && (!w.closedAt || (Date.now() - new Date(w.closedAt).getTime()) > CLOSED_LINGER_MS);
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  SEED WORK ORDERS â€” real 7-Eleven field shapes
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Helper: hours ago â†’ ISO
+// ===============================================================
+//  SEED WORK ORDERS - real 7-Eleven field shapes
+// ===============================================================
+// Helper: hours ago -> ISO
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3600 * 1000).toISOString();
 
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 //  P1 BUSINESS INFO (from invoice 6556)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// 7-Eleven corporate AP â€” where all invoices are billed
+// ===============================================================
+// 7-Eleven corporate AP - where all invoices are billed
 
 // Line item types matching real P1 invoice (6556)
 
@@ -160,13 +160,13 @@ const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) ||
 const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
 const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  INITIAL INVOICES â€” including the REAL Invoice 6556
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
+//  INITIAL INVOICES - including the REAL Invoice 6556
+// ===============================================================
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  US CITY COORDS â€” expanded beyond Florida
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
+//  US CITY COORDS - expanded beyond Florida
+// ===============================================================
 const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
   dallas: { lat: 32.7767, lng: -96.797 },
   plano: { lat: 33.0198, lng: -96.6989 },
@@ -195,9 +195,9 @@ const coordsForCity = (city: string) => {
 // Simplified US outline (approximate, for styling)
 const US_PATH = "M 104 132 L 170 122 L 236 110 L 292 106 L 356 108 L 418 114 L 478 118 L 540 120 L 592 126 L 634 138 L 664 158 L 682 184 L 688 212 L 684 236 L 670 256 L 652 268 L 634 274 L 614 272 L 600 282 L 608 300 L 628 316 L 638 340 L 624 362 L 598 378 L 566 388 L 528 390 L 484 380 L 438 368 L 392 358 L 344 350 L 296 342 L 248 332 L 202 320 L 158 304 L 122 282 L 96 256 L 80 226 L 76 196 L 84 168 Z";
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 //  TINY UI PRIMITIVES
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 const fmt = (n: number) => "$" + (n || 0).toLocaleString();
 
 const CSS = `
@@ -246,9 +246,9 @@ const CSS = `
 `;
 
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 //  MAIN
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ===============================================================
 export default function PortalShell() {
   const [page, setPage] = useState("dashboard");
   const [selectedWO, setSelectedWO] = useState(null);
@@ -294,10 +294,10 @@ export default function PortalShell() {
   const [assetYearInput, setAssetYearInput] = useState("");
   const [resolutionInput, setResolutionInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
-  const { currentUser, setCurrentUser, loginEmail, setLoginEmail,
+  const { currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, loginLoading, loginError,
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
-  const isAuthenticated = !!currentUser;
+  const isAuthenticated = hasSession || !!currentUser;
   const qc = useQueryClient();
   const { data: workOrdersData, isLoading: woLoading } = useWorkOrdersQuery(isAuthenticated);
   const { data: profilesData } = useProfilesQuery(isAuthenticated);
@@ -316,7 +316,7 @@ export default function PortalShell() {
     doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto } = useWorkOrders({
-      currentUser, USERS, invoices, setInvoices, fire,
+      currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
       isManager: currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office",
@@ -352,7 +352,7 @@ export default function PortalShell() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("demo") !== "true") return;
-    const t1 = setTimeout(() => setToast("New call from FSM â€” Store #33089, Dallas. Roller grill down."), 6000);
+    const t1 = setTimeout(() => setToast("New call from FSM - Store #33089, Dallas. Roller grill down."), 6000);
     const t2 = setTimeout(() => setToast(null), 9000);
     const t3 = setTimeout(() => setToast("Chris checked in at Store #35551"), 48000);
     const t4 = setTimeout(() => setToast(null), 51000);
@@ -393,10 +393,6 @@ export default function PortalShell() {
       setResolutionInput("");
     }
   }, [modal, woData]);
-
-  useEffect(() => {
-    if (workOrdersData) setWorkOrders(workOrdersData);
-  }, [workOrdersData, setWorkOrders]);
 
   useEffect(() => {
     if (invoicesData) setInvoices(invoicesData);
@@ -482,7 +478,7 @@ export default function PortalShell() {
 
   const doCreateWO = async (newWO: any) => {
     // WOT# is the ONLY required field. Everything else is optional with
-    // sensible defaults â€” manual intake must never be blocked on data we
+    // sensible defaults - manual intake must never be blocked on data we
     // don't have yet.
     const wot = (newWO.wot || "").trim();
     if (!wot) { return { ok: false, error: { msg: "WOT number is required." } }; }
@@ -494,7 +490,7 @@ export default function PortalShell() {
     const wotLc = wot.toLowerCase();
     const localDup = workOrders.find(w => w.id?.toLowerCase() === wotLc);
     if (localDup) {
-      return { ok: false, error: { msg: `${localDup.id} already exists â€” open it instead?`, openWoId: localDup.id } };
+      return { ok: false, error: { msg: `${localDup.id} already exists - open it instead?`, openWoId: localDup.id } };
     }
     try {
       const dbDup = await findExistingWoId(wot);
@@ -507,7 +503,7 @@ export default function PortalShell() {
     } catch (e: any) {
       return { ok: false, error: { msg: `Dedup check failed: ${e?.message || e}` } };
     }
-    // Assign-on-create: blank â†’ Unassigned; a contractor id â†’ Assigned.
+    // Assign-on-create: blank -> Unassigned; a contractor id -> Assigned.
     const contractor = newWO.assign || null;
     const status = contractor ? "assigned" : "unassigned";
     const contractorName = contractor ? getUser(contractor)?.name : null;
@@ -554,7 +550,7 @@ export default function PortalShell() {
       return true;
     } catch (e: any) {
       // Roll back the optimistic card so no phantom WO lingers, and surface
-      // the failure inline in the modal â€” never a silent failure.
+      // the failure inline in the modal - never a silent failure.
       setWorkOrders(prev => prev.filter(w => w.id !== wo.id));
       const msg = String(e?.message || e);
       // The async DB dedup above usually catches this, but a race between
@@ -570,7 +566,7 @@ export default function PortalShell() {
               : { msg: `${existing.id} already exists — open it instead?`, openWoId: existing.id }
             : { msg: "That WOT number already exists — try a different one." } };
         } catch {
-          return { ok: false, error: { msg: "That WOT number already exists â€” try a different one." } };
+          return { ok: false, error: { msg: "That WOT number already exists - try a different one." } };
         }
       } else {
         return { ok: false, error: { msg: `Save failed: ${msg}` } };
@@ -620,19 +616,19 @@ export default function PortalShell() {
     [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorInvoiceBadge, currentUser?.contractorTier]
   );
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ===============================================================
   //  LOGIN
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ===============================================================
   if (!currentUser) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} loginLoading={loginLoading} loginError={loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ===============================================================
   //  APP SHELL
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ===============================================================
   const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
 
-  // â•â•â•â•â•  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // =====  // ===============================================================
   //  LAYOUT
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ===============================================================
   return (
     <div style={{ display: "flex", minHeight: "100vh", fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
       <style>{CSS}</style>
@@ -733,6 +729,30 @@ export default function PortalShell() {
         <div className="content-pad" style={{ flex: 1, overflow: "auto", padding: 28, paddingBottom: 80 }}>
           <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={workOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} />
 
+          <WorkOrderList
+            page={page}
+            selectedWO={selectedWO}
+            search={search}
+            setSearch={setSearch}
+            isManager={isManager}
+            filterC={filterC}
+            setFilterC={setFilterC}
+            contractorsOnly={contractorsOnly}
+            filterP={filterP}
+            setFilterP={setFilterP}
+            nteQueue={nteQueue}
+            setNteQueue={setNteQueue}
+            filteredWOs={filteredWOs}
+            slaLabel={slaLabel}
+            setSelectedWO={setSelectedWO}
+            setAiNote={setAiNote}
+            setPage={setPage}
+            getUser={getUser}
+            fmt={fmt}
+            invoices={invoices}
+            USERS={USERS}
+          />
+
           <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} />
@@ -753,7 +773,7 @@ export default function PortalShell() {
       </div>
 
 
-      {/* â•â•â•â•â• MODALS â•â•â•â•â• */}
+      {/* ===== MODALS ===== */}
       {modal === "newWO" && (
         <WorkOrderCreateForm
           onClose={() => setModal(null)}
@@ -799,14 +819,14 @@ export default function PortalShell() {
       {modal === "reassign" && woData && (
         <Modal onClose={() => setModal(null)} title="Reassign work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
-            Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "â€”") : "Unassigned"}</span>. Pick a new contractor â€” the original SLA deadline is preserved.
+            Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "-") : "Unassigned"}</span>. Pick a new contractor - the original SLA deadline is preserved.
           </div>
           <Field label="New contractor">
             <Sel value={reassignTarget} onChange={(e: any) => setReassignTarget(e.target.value)}>
               <option value="">Select...</option>
               {contractorsOnly.map(c => (
                 <option key={c.id} value={c.id} disabled={c.id === woData.contractor}>
-                  {c.name}{c.territory ? ` â€” ${c.territory}` : ""}{c.id === woData.contractor ? " (current)" : ""}
+                  {c.name}{c.territory ? ` - ${c.territory}` : ""}{c.id === woData.contractor ? " (current)" : ""}
                 </option>
               ))}
             </Sel>
@@ -905,7 +925,7 @@ export default function PortalShell() {
       {modal === "editNte" && woData && (
         <Modal onClose={() => setModal(null)} title={woData.nte > 0 ? "Edit NTE" : "Add NTE"} width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
-            Update the Not-To-Exceed cap for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Contractors can still submit invoices over NTE â€” the system flags overage but won't block.
+            Update the Not-To-Exceed cap for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Contractors can still submit invoices over NTE - the system flags overage but won't block.
           </div>
           <Field label="NTE ($)">
             <Input type="number" step="0.01" value={nteInputValue} onChange={(e: any) => setNteInputValue(e.target.value)} placeholder="e.g. 1500" />
@@ -965,8 +985,8 @@ export default function PortalShell() {
           <div style={{ display: "grid", gap: 14 }}>
             <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => setPauseReasonInput(e.target.value)}>
               <option value="">Select...</option>
-              <option value="Temporary fix">Temporary fix â€” equipment partially working</option>
-              <option value="Awaiting parts">Awaiting parts â€” equipment completely down</option>
+              <option value="Temporary fix">Temporary fix - equipment partially working</option>
+              <option value="Awaiting parts">Awaiting parts - equipment completely down</option>
             </Sel></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Stamp-out date"><Input type="date" value={pauseDateInput} onChange={(e: any) => setPauseDateInput(e.target.value)} /></Field>
@@ -1053,7 +1073,7 @@ export default function PortalShell() {
                 style={{ display: "flex", alignItems: "center", gap: 6, opacity: (pdfBusy || !inv) ? 0.6 : 1, cursor: (pdfBusy || !inv) ? "default" : "pointer" }}
               >
                 <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
-                {pdfBusy ? "Preparingâ€¦" : "Download PDF"}
+                {pdfBusy ? "Preparing..." : "Download PDF"}
               </button>
             </div>
           </Modal>

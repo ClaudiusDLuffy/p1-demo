@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { signIn, signOut } from "../../lib/db";
 import { supabase } from "../../lib/supabase/client";
 import { DEMO_ACCOUNTS } from "../../lib/constants";
@@ -28,10 +28,41 @@ export default function useAuth({
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [fadeIn, setFadeIn] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
+  const lastLoadedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => { const t = setTimeout(() => setFadeIn(true), 50); return () => clearTimeout(t); }, []);
 
-  // Real Supabase auth â€” replaces demo button login
+  const hydrateProfile = useCallback(async (userId: string) => {
+    try {
+      const sb = supabase();
+      const { data: prof, error } = await sb
+        .from("profiles").select("*").eq("id", userId).single();
+      if (error) throw error;
+      if (!prof) throw new Error("Profile not found for this account");
+      if (lastLoadedUserIdRef.current === prof.id) return;
+      lastLoadedUserIdRef.current = prof.id;
+      setCurrentUser({
+        id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
+        title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
+        trades: prof.trades || [], color: prof.color,
+        isDemo: DEMO_ACCOUNTS.some(d => d.email === prof.email),
+        contractorTier: prof.contractor_tier || null,
+        dispatcherId: prof.dispatcher_id || null,
+        defaultLaborRate: prof.default_labor_rate ?? 110,
+        defaultTruckRate: prof.default_truck_rate ?? 110,
+      });
+      setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
+    } catch (err: any) {
+      setLoginError(err?.message || "Could not load your profile");
+      if (fire) fire(err?.message || "Could not load your profile");
+      throw err;
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [fire, setPage]);
+
+  // Real Supabase auth - replaces demo button login
   const doLogin = async (email: string, password: string) => {
     if (loginLoading) return;
     const v = (email || "").trim();
@@ -39,12 +70,16 @@ export default function useAuth({
     setLoginError(null);
     setLoginLoading(true);
     try {
-      // Clear any stale session before signing in fresh â€” guards against
+      // Clear any stale session before signing in fresh - guards against
       // wedged refresh tokens left over from a previous demo run.
       await signOut().catch(() => {});
-      await signIn(v, password);
-      // currentUser will populate via the auth listener effect below.
-      // loginLoading will be cleared there once the profile resolves (or fails).
+      const data = await signIn(v, password);
+      if (data?.user?.id) {
+        setHasSession(true);
+        await hydrateProfile(data.user.id);
+      } else {
+        setLoginLoading(false);
+      }
     } catch (err: any) {
       setLoginError(err.message || "Sign in failed");
       setLoginLoading(false);
@@ -52,6 +87,7 @@ export default function useAuth({
   };
   const logout = async () => {
     await signOut();
+    setHasSession(false);
     setCurrentUser(null);
     setPage("dashboard");
     setSelectedWO(null);
@@ -61,42 +97,22 @@ export default function useAuth({
     if (setInvoices) setInvoices([]);
   };
 
-  // â”€â”€ DATA LOADERS â€” fire when auth session is available â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- DATA LOADERS - fire when auth session is available ---------------
   // Single listener handles mount (INITIAL_SESSION), fresh logins (SIGNED_IN),
   // and logout (SIGNED_OUT). Profile fetch is deferred via setTimeout to
-  // release the GoTrue internal lock â€” calling supabase-js methods directly
+  // release the GoTrue internal lock - calling supabase-js methods directly
   // inside onAuthStateChange can deadlock and cause the spinner to hang.
   useEffect(() => {
     let mounted = true;
-    let lastLoadedUserId: string | null = null;
 
     const hydrate = (userId: string) => {
       setTimeout(async () => {
         if (!mounted) return;
         try {
-          const sb = supabase();
-          const { data: prof, error } = await sb
-            .from("profiles").select("*").eq("id", userId).single();
-          if (!mounted) return;
-          if (error) throw error;
-          if (!prof) throw new Error("Profile not found for this account");
-          if (lastLoadedUserId === prof.id) return; // dedupe rapid events
-          lastLoadedUserId = prof.id;
-          setCurrentUser({
-            id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
-            title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
-            trades: prof.trades || [], color: prof.color,
-            isDemo: DEMO_ACCOUNTS.some(d => d.email === prof.email),
-            contractorTier: prof.contractor_tier || null,
-            dispatcherId: prof.dispatcher_id || null,
-            defaultLaborRate: prof.default_labor_rate ?? 110,
-            defaultTruckRate: prof.default_truck_rate ?? 110,
-          });
-          setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
+          await hydrateProfile(userId);
         } catch (err: any) {
           if (!mounted) return;
-          setLoginError(err?.message || "Could not load your profile");
-          if (fire) fire(err?.message || "Could not load your profile");
+          // hydrateProfile already surfaced the error.
         } finally {
           if (mounted) setLoginLoading(false);
         }
@@ -107,21 +123,24 @@ export default function useAuth({
     const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
       if ((event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session?.user) {
+        setHasSession(true);
         hydrate(session.user.id);
       } else if (event === "INITIAL_SESSION" && !session) {
-        // No session on mount â€” make sure the spinner isn't left on.
+        // No session on mount - make sure the spinner isn't left on.
+        setHasSession(false);
         setLoginLoading(false);
       } else if (event === "SIGNED_OUT") {
-        lastLoadedUserId = null;
+        setHasSession(false);
+        lastLoadedUserIdRef.current = null;
         setCurrentUser(null);
         setLoginLoading(false);
       }
     });
     return () => { mounted = false; subscription.unsubscribe(); };
-  }, [fire, setPage]);
+  }, [hydrateProfile]);
 
   return {
-    currentUser, setCurrentUser, loginEmail, setLoginEmail,
+    currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, loginLoading, loginError,
     fadeIn, doLogin, logout
   };

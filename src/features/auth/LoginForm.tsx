@@ -48,7 +48,7 @@ export default function LoginForm({
             : <button onClick={() => doLogin(loginEmail, loginPassword)} style={{ width: "100%", padding: 13, borderRadius: 10, background: T.ink, color: T.bg, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>Sign in</button>}
         </div>
         <div style={{ marginTop: 24 }}>
-          <div style={{ fontSize: 11, fontWeight: 500, color: T.subtle, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Demo â€” quick access</div>
+          <div style={{ fontSize: 11, fontWeight: 500, color: T.subtle, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Demo - quick access</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {DEMO_ACCOUNTS.map(u => (
               <button key={u.email} onClick={() => { setLoginEmail(u.email); doLogin(u.email, DEMO_PASSWORD); }} className="card-hover" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>

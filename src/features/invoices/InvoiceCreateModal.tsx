@@ -59,12 +59,16 @@ export default function InvoiceCreateModal(props: any) {
     });
   }, [modal, reset, defaultLaborRate, defaultTruckRate]);
 
+  const priorSpend = useMemo(
+    () => {
+      if (!woData) return 0;
+      return invoices.reduce((s, i) => i.wot === woData.id && i.state !== "draft" ? s + (i.total || 0) : s, 0);
+    },
+    [invoices, woData]
+  );
+
   if (modal !== "createInvoice" || !woData) return null;
 
-  const priorSpend = useMemo(
-    () => invoices.reduce((s, i) => i.wot === woData.id && i.state !== "draft" ? s + (i.total || 0) : s, 0),
-    [invoices, woData.id]
-  );
   const projectedSpend = priorSpend + total;
   const over = (woData.nte || 0) > 0 && projectedSpend > woData.nte;
   const close = () => { setModal(null); resetNewInv(); };
