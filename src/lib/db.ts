@@ -72,6 +72,11 @@ const mapProfile = (p: any) => ({
   territory: p.territory,
   trades: p.trades || [],
   color: p.color,
+  contractorTier: p.contractor_tier || null,
+  dispatcherId: p.dispatcher_id || null,
+  defaultLaborRate: p.default_labor_rate ?? 110,
+  defaultTruckRate: p.default_truck_rate ?? 110,
+  defaultPartsMarkup: p.default_parts_markup ?? 0,
 });
 
 // ── WORK ORDERS ─────────────────────────────────────────────────────────────
@@ -97,34 +102,24 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     (photosByWo[p.work_order_id] ||= []).push(p);
   }
 
-  // The photos bucket is private, so a raw storage path is not loadable by
-  // <img src>. Batch-resolve every path to a short-lived signed URL here.
-  // Paths whose object is missing return no URL and are dropped, so an
-  // orphaned photo row renders as "no photo" instead of a broken thumbnail.
-  const allPaths = (photoRes.data || []).map(p => p.storage_path).filter(Boolean);
-  const urlByPath: Record<string, string> = {};
-  if (allPaths.length > 0) {
-    const { data: signed } = await sb.storage.from("photos").createSignedUrls(allPaths, 3600);
-    for (const s of signed || []) {
-      if (s.signedUrl && s.path) urlByPath[s.path] = s.signedUrl;
-    }
-  }
-
   const mapped = (woRes.data || []).map(wo => ({
     ...mapWO(wo),
     activities: actsByWo[wo.id] || [],
     photos: (photosByWo[wo.id] || [])
-      .map(p => urlByPath[p.storage_path])
+      .map(p => p.storage_path)
       .filter(Boolean),
   }));
   for (const wo of woRes.data || []) {
     WorkOrderSchema.safeParse({
       id: wo.id,
-      title: wo.summary || wo.description || wo.id,
       status: wo.status,
+      priority: wo.priority,
       contractor_id: wo.contractor_id,
       nte: wo.nte == null ? null : Number(wo.nte),
       created_at: wo.created_at,
+      store_number: wo.store_number,
+      city: wo.city,
+      functional_status: wo.functional_status,
     });
   }
   return mapped as unknown as WorkOrder[];
@@ -159,6 +154,10 @@ const mapWO = (w: any) => ({
   assetMake: w.asset_make,
   assetModel: w.asset_model,
   assetSerial: w.asset_serial,
+  assetYear: w.asset_year || null,
+  repairQuote: w.repair_quote ? parseFloat(w.repair_quote) : null,
+  installQuote: w.install_quote ? parseFloat(w.install_quote) : null,
+  capitalNotes: w.capital_notes || null,
   isCapital: w.is_capital,
   capitalStatus: w.capital_status,
   partNeeded: w.part_needed,
@@ -309,6 +308,10 @@ const WO_FIELD_MAP: Record<string, string> = {
   assetMake: "asset_make",
   assetModel: "asset_model",
   assetSerial: "asset_serial",
+  assetYear: "asset_year",
+  repairQuote: "repair_quote",
+  installQuote: "install_quote",
+  capitalNotes: "capital_notes",
   capitalStatus: "capital_status",
   partNeeded: "part_needed",
   partEta: "part_eta",
@@ -424,20 +427,37 @@ export async function reassignWorkOrder(
 // have landed from another session since the local cache was loaded.
 // Returns the canonical existing id (or null) so the caller can render
 // an "open it instead?" affordance with the actual stored casing.
-export async function findExistingWoId(wot: string): Promise<string | null> {
+export async function findExistingWoId(
+  wot: string
+): Promise<{ id: string; deleted: boolean } | null> {
   const trimmed = (wot || "").trim();
   if (!trimmed) return null;
   const sb = supabase();
-  // Escape ilike wildcards so a WOT containing % or _ doesn't broaden the match.
   const escaped = trimmed.replace(/[\\%_]/g, m => "\\" + m);
-  const { data, error } = await sb
+
+  // Check active first.
+  const { data: active, error: activeError } = await sb
     .from("work_orders")
     .select("id")
     .ilike("id", escaped)
+    .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
-  return data?.id || null;
+  if (activeError) throw activeError;
+  if (active) return { id: active.id, deleted: false };
+
+  // Check soft deleted.
+  const { data: deleted, error: deletedError } = await sb
+    .from("work_orders")
+    .select("id")
+    .ilike("id", escaped)
+    .not("deleted_at", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (deletedError) throw deletedError;
+  if (deleted) return { id: deleted.id, deleted: true };
+
+  return null;
 }
 
 // Atomically generate the next FWKD work order ID via a Postgres sequence
@@ -555,6 +575,39 @@ export async function updateInvoiceState(num: string, state: string, extra: Reco
   const sb = supabase();
   const { error } = await sb.from("invoices").update({ state: state as any, ...extra }).eq("num", num);
   if (error) throw error;
+}
+
+export async function insertWorkReport(
+  report: any
+): Promise<{ success: boolean; error?: unknown }> {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from("work_reports").insert({
+    work_order_id: report.workOrderId,
+    contractor_id: user?.id || null,
+    technician_name: report.technicianName || null,
+    arrival_time: report.arrivalTime || null,
+    departure_time: report.departureTime || null,
+    work_performed: report.workPerformed || null,
+    parts_used: report.partsUsed || [],
+    resolution_code: report.resolutionCode || null,
+    resolution_notes: report.resolutionNotes || null,
+  });
+  if (error) return { success: false, error };
+  return { success: true };
+}
+
+export async function loadWorkReports(
+  workOrderId: string
+): Promise<any[]> {
+  const sb = supabase();
+  const { data, error } = await sb
+    .from("work_reports")
+    .select("*")
+    .eq("work_order_id", workOrderId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
 }
 
 // ── PHOTO STORAGE ─────────────────────────────────────────────────────────

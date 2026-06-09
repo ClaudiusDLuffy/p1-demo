@@ -1,0 +1,1073 @@
+﻿"use client";
+// @ts-nocheck
+import { useState, useEffect, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
+import Image from "next/image";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  insertActivity, insertWorkOrder, findExistingWoId, subscribeToChanges,
+} from "../lib/db";
+import { computeSlaState } from "../lib/slaConfig";
+import { Modal } from "./ui/Modal";
+import { Input } from "./ui/Input";
+import { Sel } from "./ui/Sel";
+import { TA } from "./ui/TA";
+import { Avatar } from "./ui/Avatar";
+import { Field } from "./ui/Field";
+import { Ico } from "./ui/Ico";
+import LoginForm from "../features/auth/LoginForm";
+import useAuth from "../features/auth/useAuth";
+import useWorkOrders from "../features/work-orders/useWorkOrders";
+import KanbanBoard from "../features/work-orders/KanbanBoard";
+import WorkOrderList from "../features/work-orders/WorkOrderList";
+import WorkOrderDetail from "../features/work-orders/WorkOrderDetail";
+import HistoryView from "../features/work-orders/HistoryView";
+import MyJobs from "../features/work-orders/MyJobs";
+import CapitalProjects from "../features/work-orders/CapitalProjects";
+import {
+  WORK_ORDERS_KEY,
+  useProfilesQuery,
+  useTechniciansQuery,
+  useWorkOrdersQuery,
+} from "../features/work-orders/queries";
+import InvoiceList from "../features/invoices/InvoiceList";
+import InvoiceDetail from "../features/invoices/InvoiceDetail";
+import useInvoices from "../features/invoices/useInvoices";
+import { INVOICES_KEY, useInvoicesQuery } from "../features/invoices/queries";
+import ContractorList from "../features/contractors/ContractorList";
+import SubDispatchView from "../features/contractors/SubDispatchView";
+import Dashboard from "../features/dashboard/Dashboard";
+import {
+  T, DEMO_ACCOUNTS, PRIORITY, MONTHS, WEEKDAYS,
+} from "../lib/constants";
+
+const InvoiceCreateModal = dynamic(
+  () => import("../features/invoices/InvoiceCreateModal"),
+  { ssr: false }
+);
+
+const WorkOrderCreateForm = dynamic(
+  () => import("../features/work-orders/WorkOrderCreateForm"),
+  { ssr: false }
+);
+
+const ManageAccountModal = dynamic(
+  () => import("../features/auth/ManageAccountModal"),
+  { ssr: false }
+);
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  THEME â€” Claude-inspired warm palette. Tokens are the source of truth.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  REAL P1 TEAM + CONTRACTORS (from Jeremy's email, Apr 20 2026)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Demo quick-access buttons on the login screen (clicks pre-fill email + sign in).
+// Real user/profile data loads from Supabase after successful auth.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  7-ELEVEN PRIORITY ENUM (real format: P1 Critical, P2 Emergency, etc)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Internal pipeline state (our kanban)
+
+// 7-Eleven's Functional Status field (what Gustavo's SLA breach hinged on)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  TRADE / TERRITORY ROUTING
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Map 7-Eleven's Line of Service / Category â†’ our internal trade tags
+const SERVICE_TO_TRADES = (service: string, category: string) => {
+  const s = `${service} ${category}`.toLowerCase();
+  const tags: string[] = [];
+  if (/slurp/.test(s)) tags.push("slurpee");
+  if (/frozen beverage|slurp/.test(s)) tags.push("slurpee");
+  if (/fountain|cold beverage|beverage/.test(s)) tags.push("beverage");
+  if (/ice merchandiser|ice /.test(s)) tags.push("ice");
+  if (/refriger|freezer|cooler/.test(s)) tags.push("refrigeration");
+  if (/hvac|heating|air cond/.test(s)) tags.push("hvac");
+  if (/plumb|drain/.test(s)) tags.push("plumbing");
+  if (/grease trap|septic/.test(s)) tags.push("grease");
+  if (/hot food|oven|grill/.test(s)) tags.push("hotfood");
+  return tags.length ? tags : ["refrigeration"]; // fallback
+};
+
+// City â†’ (state normalized) for territory matching
+const normalizeCity = (loc: string) => (loc || "").toLowerCase().split(",")[0].trim();
+// Pick best contractor for a ticket: must match at least one trade AND territory
+const contractorFor = (city: string, tradeTags: string[], contractors: any[]) => {
+  const c = normalizeCity(city);
+  const scored = contractors
+    .filter(u => u.role === "contractor")
+    .map(u => {
+      const terrMatch = u.territory?.toLowerCase().split(",")[0].trim() === c || u.territory?.toLowerCase().includes(c);
+      const tradeMatch = (u.trades || []).some((t: string) => tradeTags.includes(t));
+      return { id: u.id, score: (terrMatch ? 10 : 0) + (tradeMatch ? 5 : 0) + ((u.trades || []).filter((t: string) => tradeTags.includes(t)).length), terrMatch, tradeMatch };
+    })
+    .filter(s => s.terrMatch && s.tradeMatch)
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.id || null;
+};
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  DATE + SLA HELPERS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+const timeNow = () => { const d = new Date(), h = d.getHours(), m = d.getMinutes(), ap = h >= 12 ? "PM" : "AM"; return `${h > 12 ? h - 12 : h || 12}:${m < 10 ? "0" + m : m} ${ap}`; };
+const dateShort = (d = new Date()) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+const dateNow = () => `${dateShort()}, ${timeNow()}`;
+const dateLong = (d = new Date()) => `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+const hoursBetween = (aIso: string, bIso: string) => (new Date(bIso).getTime() - new Date(aIso).getTime()) / 3600000;
+const slaRemaining = (wo: any) => {
+  if (!wo.dispatchedAt || !PRIORITY[wo.priority]) return null;
+  const slaH = PRIORITY[wo.priority].slaHours;
+  const elapsed = hoursBetween(wo.dispatchedAt, new Date().toISOString());
+  return { remainingHours: slaH - elapsed, elapsedHours: elapsed, slaHours: slaH, percent: Math.min(100, (elapsed / slaH) * 100) };
+};
+const slaLabel = (wo: any) => {
+  const s = slaRemaining(wo);
+  if (!s) return null;
+  if (s.remainingHours <= 0) return { text: `${Math.floor(-s.remainingHours)}h past SLA`, color: T.danger, bg: T.dangerSoft, severity: "breach" };
+  if (s.remainingHours < 1) return { text: `${Math.round(s.remainingHours * 60)}m to breach`, color: T.danger, bg: T.dangerSoft, severity: "critical" };
+  if (s.percent >= 75) return { text: `${Math.floor(s.remainingHours)}h left`, color: T.accent, bg: T.accentSoft, severity: "warn" };
+  if (s.percent >= 50) return { text: `${Math.floor(s.remainingHours)}h left`, color: T.warn, bg: T.warnSoft, severity: "ok" };
+  return { text: `${Math.floor(s.remainingHours)}h left`, color: T.success, bg: T.successSoft, severity: "safe" };
+};
+
+const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "pending_payment", "closed", "capital"].includes(state);
+const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
+const closingStatuses = ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"];
+
+// A Closed & Paid WO lingers on the active board for 24h after closed_at,
+// then lives only in History. A closed WO with no closed_at is treated as
+// already archived (History only) so the board never lingers on undated rows.
+const CLOSED_LINGER_MS = 24 * 60 * 60 * 1000;
+const isArchivedClosed = (w: any) =>
+  w.status === "closed" && (!w.closedAt || (Date.now() - new Date(w.closedAt).getTime()) > CLOSED_LINGER_MS);
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SEED WORK ORDERS â€” real 7-Eleven field shapes
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Helper: hours ago â†’ ISO
+const hoursAgo = (n: number) => new Date(Date.now() - n * 3600 * 1000).toISOString();
+
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  P1 BUSINESS INFO (from invoice 6556)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 7-Eleven corporate AP â€” where all invoices are billed
+
+// Line item types matching real P1 invoice (6556)
+
+// Helper: compute line amount
+const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
+const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  INITIAL INVOICES â€” including the REAL Invoice 6556
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  US CITY COORDS â€” expanded beyond Florida
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  dallas: { lat: 32.7767, lng: -96.797 },
+  plano: { lat: 33.0198, lng: -96.6989 },
+  houston: { lat: 29.7604, lng: -95.3698 },
+  yorktown: { lat: 37.2388, lng: -76.5097 },
+  "virginia beach": { lat: 36.8529, lng: -75.978 },
+  tampa: { lat: 27.9506, lng: -82.4572 },
+  orlando: { lat: 28.5383, lng: -81.3792 },
+  kissimmee: { lat: 28.292, lng: -81.4076 },
+  melbourne: { lat: 28.0836, lng: -80.6081 },
+  "daytona beach": { lat: 29.2108, lng: -81.0228 },
+  miami: { lat: 25.7617, lng: -80.1918 },
+};
+// US bbox (contiguous): lng -125 to -66, lat 24 to 50
+const geoToSvg = (lat: number, lng: number, w = 800, h = 460) => {
+  const x = ((lng + 125) / 59) * w;
+  const y = ((50 - lat) / 26) * h;
+  return { x, y };
+};
+const coordsForCity = (city: string) => {
+  const key = normalizeCity(city);
+  const c = CITY_COORDS[key];
+  return c ? geoToSvg(c.lat, c.lng) : null;
+};
+
+// Simplified US outline (approximate, for styling)
+const US_PATH = "M 104 132 L 170 122 L 236 110 L 292 106 L 356 108 L 418 114 L 478 118 L 540 120 L 592 126 L 634 138 L 664 158 L 682 184 L 688 212 L 684 236 L 670 256 L 652 268 L 634 274 L 614 272 L 600 282 L 608 300 L 628 316 L 638 340 L 624 362 L 598 378 L 566 388 L 528 390 L 484 380 L 438 368 L 392 358 L 344 350 L 296 342 L 248 332 L 202 320 L 158 304 L 122 282 L 96 256 L 80 226 L 76 196 L 84 168 Z";
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  TINY UI PRIMITIVES
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+const fmt = (n: number) => "$" + (n || 0).toLocaleString();
+
+const CSS = `
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.85 } }
+.display { font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; letter-spacing: -0.5px; }
+.mono { font-family: var(--font-jetbrains-mono), ui-monospace, monospace; }
+.kcard { background: ${T.surface}; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
+.kcard:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(31,30,28,0.07); border-color: ${T.border}; }
+.kcol { border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.02); overflow: hidden; }
+.card { background: ${T.surface}; border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); }
+.card-hover { transition: box-shadow 140ms ease, transform 140ms ease; }
+.card-hover:hover { box-shadow: 0 8px 24px rgba(31,30,28,0.06); transform: translateY(-1px); }
+.btn-primary { padding: 10px 18px; border-radius: 10px; background: ${T.ink}; color: ${T.bg}; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: background 140ms; }
+.btn-primary:hover { background: #000; }
+.btn-accent { padding: 10px 18px; border-radius: 10px; background: ${T.accent}; color: #fff; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: filter 140ms; }
+.btn-accent:hover { filter: brightness(1.08); }
+.btn-soft { padding: 10px 18px; border-radius: 10px; background: ${T.surface}; color: ${T.ink}; border: 1px solid ${T.border}; cursor: pointer; font-weight: 500; font-size: 12px; font-family: inherit; transition: background 140ms; }
+.btn-soft:hover { background: ${T.bgWarm}; }
+.side-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: none; background: transparent; color: ${T.sidebarText}; cursor: pointer; font-size: 13px; font-family: inherit; margin-bottom: 2px; transition: background 140ms, color 140ms; }
+.side-btn:hover { background: rgba(250,247,242,0.06); color: ${T.sidebarActive}; }
+.side-btn.active { background: rgba(250,247,242,0.08); color: ${T.sidebarActive}; font-weight: 600; }
+.sla-bar { height: 3px; border-radius: 2px; background: ${T.borderSoft}; overflow: hidden; }
+.sla-fill { height: 100%; transition: width 300ms ease; }
+@media(max-width: 768px) {
+  .desktop-sidebar { display: none !important; }
+  .mobile-bottom-nav { display: flex !important; }
+  .main-wrap { margin-left: 0 !important; }
+  .stats-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
+  .kanban-active { grid-template-columns: 1fr 1fr !important; }
+  .kanban-closing { grid-template-columns: 1fr !important; }
+  .detail-two-col { grid-template-columns: 1fr !important; }
+  .detail-fields { grid-template-columns: 1fr 1fr !important; }
+  .contractors-grid { grid-template-columns: 1fr !important; }
+  .capital-grid { grid-template-columns: 1fr !important; }
+  .table-scroll { overflow-x: auto; }
+  .topbar-title { font-size: 22px !important; }
+  .content-pad { padding: 16px !important; }
+  .modal-inner { width: 95% !important; padding: 20px !important; max-height: 85vh !important; }
+  .modal-form-row { grid-template-columns: 1fr !important; }
+  .stat-value { font-size: 28px !important; }
+  .stats-grid .stat-hero { grid-column: 1 / -1 !important; }
+}
+@media(min-width: 769px) { .mobile-bottom-nav { display: none !important; } }
+`;
+
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  MAIN
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+export default function PortalShell() {
+  const [page, setPage] = useState("dashboard");
+  const [selectedWO, setSelectedWO] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterC, setFilterC] = useState("all");
+  const [filterP, setFilterP] = useState("all");
+  const [nteQueue, setNteQueue] = useState(false); // "NTE Approval Needed" bucket filter
+  const [invTab, setInvTab] = useState("all");
+  // History (closed-job archive) filters
+  const [histSearch, setHistSearch] = useState("");
+  const [histContractor, setHistContractor] = useState("all");
+  const [histReso, setHistReso] = useState("all");
+  const [histFrom, setHistFrom] = useState("");
+  const [histTo, setHistTo] = useState("");
+  const [toast, setToast] = useState(null);
+  const fire = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2800); }, []);
+  const [aiEnhancing, setAiEnhancing] = useState(false);
+  const [aiNote, setAiNote] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [reassignTarget, setReassignTarget] = useState<string>("");
+  const [activityMenuId, setActivityMenuId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [startDateInput, setStartDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [startTimeInput, setStartTimeInput] = useState(new Date().toTimeString().slice(0, 5));
+  const [pauseDateInput, setPauseDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [pauseTimeInput, setPauseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
+  const [etaDateInput, setEtaDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [etaTimeInput, setEtaTimeInput] = useState("14:00");
+  const [nteInputValue, setNteInputValue] = useState("");
+  const [nteFlagInputValue, setNteFlagInputValue] = useState("");
+  const [startNotesInput, setStartNotesInput] = useState("");
+  const [pauseReasonInput, setPauseReasonInput] = useState("");
+  const [partDescInput, setPartDescInput] = useState("");
+  const [partNumInput, setPartNumInput] = useState("");
+  const [partEtaInput, setPartEtaInput] = useState("");
+  const [pauseNotesInput, setPauseNotesInput] = useState("");
+  const [assetMakeInput, setAssetMakeInput] = useState("");
+  const [assetModelInput, setAssetModelInput] = useState("");
+  const [assetSerialInput, setAssetSerialInput] = useState("");
+  const [assetYearInput, setAssetYearInput] = useState("");
+  const [resolutionInput, setResolutionInput] = useState("");
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const { currentUser, setCurrentUser, loginEmail, setLoginEmail,
+    loginPassword, setLoginPassword, loginLoading, loginError,
+    fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
+  const isAuthenticated = !!currentUser;
+  const qc = useQueryClient();
+  const { data: workOrdersData, isLoading: woLoading } = useWorkOrdersQuery(isAuthenticated);
+  const { data: profilesData } = useProfilesQuery(isAuthenticated);
+  const { data: invoicesData } = useInvoicesQuery(isAuthenticated);
+  const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
+  const USERS = useMemo(
+    () => profilesData ?? DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })),
+    [profilesData]
+  );
+  const technicians = useMemo(() => techniciansData ?? [], [techniciansData]);
+  const { workOrders, setWorkOrders,
+    patchLocalWO, localActivity, dbCall,
+    doAssign, doUnassign, doDeleteWO, doReassign,
+    doStartWork, doPauseWork, doCloseComplete,
+    doMoveToInvoice, doApproveInvoice, doMarkPaid, doReopen,
+    doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
+    doAddPhotos, doRemovePhoto } = useWorkOrders({
+      currentUser, USERS, invoices, setInvoices, fire,
+      startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
+      setSelectedWO, setAiNote, setPage,
+      isManager: currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office",
+      noteText, setNoteText, SERVICE_TO_TRADES, contractorFor,
+      getUser: (id: string) => USERS.find(u => u.id === id),
+      dateNow, timeNow, fmt,
+    });
+  const logout = async () => { await authLogout(); setWorkOrders([]); };
+  const dataLoading = woLoading;
+  const {
+    newInv, setNewInv,
+    selectedInvoice, setSelectedInvoice,
+    submittedInvoiceNum, setSubmittedInvoiceNum,
+    pdfBusy,
+    nextInvNum, resetNewInv,
+    doSubmitInvoice: submitInvoice,
+    doDownloadInvoice,
+    lineAmount, invSubtotal,
+  } = useInvoices({ currentUser, fire });
+  const doSubmitInvoice = async (wo: any, data?: any) => {
+    const ok = await submitInvoice(wo, data);
+    if (ok) setModal("invoiceSubmitted");
+    return ok;
+  };  // Tick every 60s so SLA countdowns update live
+  const [, forceTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => forceTick(x => x + 1), 60000); return () => clearInterval(i); }, []);
+
+  const isDemoManager = currentUser?.role === "manager" && currentUser?.isDemo === true;
+  useEffect(() => {
+    if (!isDemoManager) return;
+    // Demo-only simulated notifications. Off by default. Append ?demo=true to URL to enable
+    // for a dramatic moment in a presentation (then real notifications come in v9 via Resend).
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") !== "true") return;
+    const t1 = setTimeout(() => setToast("New call from FSM â€” Store #33089, Dallas. Roller grill down."), 6000);
+    const t2 = setTimeout(() => setToast(null), 9000);
+    const t3 = setTimeout(() => setToast("Chris checked in at Store #35551"), 48000);
+    const t4 = setTimeout(() => setToast(null), 51000);
+    return () => { [t1, t2, t3, t4].forEach(clearTimeout); };
+  }, [isDemoManager]);
+
+  useEffect(() => {
+    if (modal !== "createInvoice") return;
+    setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
+  }, [modal, nextInvNum]);
+
+  const woData = useMemo(
+    () => selectedWO ? workOrders.find(w => w.id === selectedWO) : null,
+    [workOrders, selectedWO]
+  );
+
+  useEffect(() => {
+    if (!woData) return;
+    if (modal === "setEta") {
+      setEtaDateInput(new Date().toISOString().slice(0, 10));
+      setEtaTimeInput("14:00");
+    }
+    if (modal === "editNte") setNteInputValue(woData.nte || "");
+    if (modal === "editNteFlag") setNteFlagInputValue(woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
+    if (modal === "startWork") setStartNotesInput("");
+    if (modal === "pauseWork") {
+      setPauseReasonInput("");
+      setPartDescInput("");
+      setPartNumInput("");
+      setPartEtaInput("");
+      setPauseNotesInput("");
+    }
+    if (modal === "closeComplete") {
+      setAssetMakeInput(woData.assetMake || "");
+      setAssetModelInput(woData.assetModel || "");
+      setAssetSerialInput(woData.assetSerial || "");
+      setAssetYearInput(woData.assetYear || "");
+      setResolutionInput("");
+    }
+  }, [modal, woData]);
+
+  useEffect(() => {
+    if (workOrdersData) setWorkOrders(workOrdersData);
+  }, [workOrdersData, setWorkOrders]);
+
+  useEffect(() => {
+    if (invoicesData) setInvoices(invoicesData);
+  }, [invoicesData]);
+
+  // Subscribe to realtime so changes from other clients propagate.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const unsub = subscribeToChanges(() => {
+      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+    });
+    return () => { unsub(); };
+  }, [currentUser?.id, qc]);
+  const nav = useCallback((p: string) => {
+    setPage(p);
+    setSelectedWO(null);
+    setAiNote(null);
+    setNteQueue(false);
+  }, []);
+
+  const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
+  const getUser = (id: string) => USERS.find(u => u.id === id);
+  const contractorsOnly = useMemo(
+    () => USERS.filter(u => u.role === "contractor"),
+    [USERS]
+  );
+  const myWOs = useMemo(
+    () => currentUser?.role === "contractor"
+      ? workOrders.filter(w => w.contractor === currentUser.id)
+      : workOrders,
+    [workOrders, currentUser]
+  );
+  const filteredWOs = useMemo(
+    () => myWOs.filter(w => {
+      // Archived closed jobs (>24h past close) leave the active board -> History only.
+      if (isArchivedClosed(w)) return false;
+      if (nteQueue && (!w.nteFlagged || w.status === "closed")) return false;
+      if (search && !w.id.toLowerCase().includes(search.toLowerCase()) && !w.store.includes(search) && !(w.summary || "").toLowerCase().includes(search.toLowerCase())) return false;
+      if (filterC !== "all" && w.contractor !== filterC) return false;
+      if (filterP !== "all" && w.priority !== filterP) return false;
+      return true;
+    }),
+    [myWOs, nteQueue, search, filterC, filterP]
+  );
+  const statusCounts = useMemo(() => {
+    const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
+    return {
+      openWOs,
+      openCount: openWOs.length,
+      openValue: openWOs.reduce((s, w) => s + (w.nte || 0), 0),
+      p1Count: workOrders.filter(w => w.priority === "p1" && activeStatuses.includes(w.status)).length,
+      p1Unassigned: workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length,
+      capitalCount: workOrders.filter(w => w.status === "capital").length,
+      completedCount: workOrders.filter(w => w.status === "completed").length,
+      pendAppr: workOrders.filter(w => w.status === "pending_approval").length,
+      awaitingPayment: workOrders.filter(w => w.status === "pending_payment").length,
+      nteFlaggedCount: workOrders.filter(w => w.nteFlagged && w.status !== "closed").length,
+      closedWOs: workOrders.filter(w => w.status === "closed"),
+      slaAtRisk: workOrders.filter(w => {
+        if (!activeStatuses.includes(w.status)) return false;
+        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt);
+        if (s2) return !s2.responseBreached && !s2.resolutionBreached
+          && (s2.responseRemainingHours < 2 || s2.resolutionRemainingHours < 2);
+        const s = slaRemaining(w);
+        return s && s.remainingHours < 2 && s.remainingHours > 0;
+      }).length,
+      slaBreached: workOrders.filter(w => {
+        if (!activeStatuses.includes(w.status)) return false;
+        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt);
+        if (s2) return s2.responseBreached || s2.resolutionBreached;
+        const s = slaRemaining(w);
+        return s && s.remainingHours <= 0;
+      }).length,
+    };
+  }, [workOrders]);
+  const {
+    openWOs, openCount, openValue, p1Count, p1Unassigned, capitalCount,
+    completedCount, pendAppr, awaitingPayment, nteFlaggedCount,
+    closedWOs, slaAtRisk, slaBreached
+  } = statusCounts;
+  // Realtime subscription propagates the same change to other clients within ~200ms.
+
+  const doCreateWO = async (newWO: any) => {
+    // WOT# is the ONLY required field. Everything else is optional with
+    // sensible defaults â€” manual intake must never be blocked on data we
+    // don't have yet.
+    const wot = (newWO.wot || "").trim();
+    if (!wot) { return { ok: false, error: { msg: "WOT number is required." } }; }
+    // Dedup: case-insensitive, trimmed. Local cache catches most duplicates
+    // (incl. ones I just created); DB lookup catches duplicates that
+    // landed from another session since this page loaded. Same WOT/FWKD
+    // means double-dispatch risk (Jeremy's Nuance B), so we surface the
+    // existing WO by name with an "open it" affordance, not a generic error.
+    const wotLc = wot.toLowerCase();
+    const localDup = workOrders.find(w => w.id?.toLowerCase() === wotLc);
+    if (localDup) {
+      return { ok: false, error: { msg: `${localDup.id} already exists â€” open it instead?`, openWoId: localDup.id } };
+    }
+    try {
+      const dbDup = await findExistingWoId(wot);
+      if (dbDup) {
+        if (dbDup.deleted) {
+          return { ok: false, error: { msg: `${dbDup.id} was previously deleted — contact a manager to restore it` } };
+        }
+        return { ok: false, error: { msg: `${dbDup.id} already exists — open it instead?`, openWoId: dbDup.id } };
+      }
+    } catch (e: any) {
+      return { ok: false, error: { msg: `Dedup check failed: ${e?.message || e}` } };
+    }
+    // Assign-on-create: blank â†’ Unassigned; a contractor id â†’ Assigned.
+    const contractor = newWO.assign || null;
+    const status = contractor ? "assigned" : "unassigned";
+    const contractorName = contractor ? getUser(contractor)?.name : null;
+    const dispatchedAt = contractor ? new Date().toISOString() : null;
+    // Priority defaults to P4 (standard) when left blank. Text fields default
+    // to "" so the UI renders cleanly; incidentId stays null when blank
+    // because incident_id carries a UNIQUE constraint ('' would collide).
+    const priority = newWO.priority || "p4";
+    const incidentId = (newWO.incidentId || "").trim() || null;
+    const wo = {
+      id: wot,
+      incidentId,
+      store: (newWO.store || "").trim(),
+      city: (newWO.city || "").trim(),
+      addr: (newWO.addr || "").trim(),
+      lineOfService: (newWO.lineOfService || "").trim(),
+      businessService: (newWO.businessService || "").trim(),
+      category: (newWO.category || "").trim(),
+      subCategory: (newWO.subCategory || "").trim(),
+      summary: (newWO.summary || "").trim(),
+      description: (newWO.description || "").trim(),
+      priority,
+      status,
+      contractor,
+      afm: (newWO.afm || "").trim(),
+      afmEmail: (newWO.afmEmail || "").trim(),
+      functionalStatus: contractor ? "Dispatched" : "New",
+      nte: parseFloat(newWO.nte) || 0,
+      dispatchedAt,
+      source: "manual",
+    };
+    const createdText = `Work order created manually by ${currentUser.name}.`;
+    const assignedText = contractor ? `Assigned to ${contractorName} by ${currentUser.name}.` : null;
+    // Optimistic local insert (with both activity entries).
+    const optimisticActivities = [localActivity(createdText, "system")];
+    if (assignedText) optimisticActivities.unshift(localActivity(assignedText, "system"));
+    setWorkOrders(prev => [{ ...wo, age: "now", activities: optimisticActivities, photos: [] }, ...prev]);
+    try {
+      await insertWorkOrder(wo, createdText, "System");
+      if (assignedText) await insertActivity(wot, "System", assignedText, "system");
+      fire(contractor
+        ? `Work order ${wot} created. Assigned to ${contractorName}.`
+        : `Work order ${wot} created. Added to Unassigned.`);
+      return true;
+    } catch (e: any) {
+      // Roll back the optimistic card so no phantom WO lingers, and surface
+      // the failure inline in the modal â€” never a silent failure.
+      setWorkOrders(prev => prev.filter(w => w.id !== wo.id));
+      const msg = String(e?.message || e);
+      // The async DB dedup above usually catches this, but a race between
+      // the pre-check and the insert can still trip the unique constraint.
+      // When that happens we don't know the existing id from the error
+      // alone, so look it up before showing the open affordance.
+      if (/duplicate|unique/i.test(msg)) {
+        try {
+          const existing = await findExistingWoId(wot);
+          return { ok: false, error: existing
+            ? existing.deleted
+              ? { msg: `${existing.id} was previously deleted — contact a manager to restore it` }
+              : { msg: `${existing.id} already exists — open it instead?`, openWoId: existing.id }
+            : { msg: "That WOT number already exists — try a different one." } };
+        } catch {
+          return { ok: false, error: { msg: "That WOT number already exists â€” try a different one." } };
+        }
+      } else {
+        return { ok: false, error: { msg: `Save failed: ${msg}` } };
+      }
+      return false;
+    }
+  };
+
+  const doAiEnhance = () => {
+    setAiEnhancing(true);
+    setTimeout(() => {
+      // Placeholder. Wired to Claude API in v9 (right before handover).
+      // The generic message lets us show the feature exists without faking output that could be challenged in a demo.
+      setAiNote("__PREVIEW__");
+      setAiEnhancing(false);
+    }, 800);
+  };
+
+  const contractorActiveBadge = useMemo(
+    () => myWOs.filter(w => activeStatuses.includes(w.status)).length,
+    [myWOs]
+  );
+  const contractorInvoiceBadge = useMemo(
+    () => invoices.filter(i => i.contractor === currentUser?.id && (i.state === "submitted" || i.state === "revised")).length || null,
+    [invoices, currentUser?.id]
+  );
+  const submittedInvoice = useMemo(
+    () => invoices.find(i => i.num === submittedInvoiceNum),
+    [invoices, submittedInvoiceNum]
+  );
+  const sideItems = useMemo(() => isManager
+    ? [
+      { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
+      { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
+      { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
+      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
+      { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
+      { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: closedWOs.length || null },
+    ]
+    : [
+      { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge },
+      ...(currentUser?.contractorTier === "mr_freeze" ? [
+        { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
+      ] : []),
+      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
+    ],
+    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorInvoiceBadge, currentUser?.contractorTier]
+  );
+
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  LOGIN
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  if (!currentUser) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} loginLoading={loginLoading} loginError={loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
+
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  APP SHELL
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
+
+  // â•â•â•â•â•  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  //  LAYOUT
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
+      <style>{CSS}</style>
+
+      {/* Sidebar */}
+      <div className="desktop-sidebar" style={{ width: 232, background: T.sidebar, color: T.sidebarText, display: "flex", flexDirection: "column", flexShrink: 0, position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30 }}>
+        <div style={{ padding: "22px 20px 18px", borderBottom: "1px solid rgba(250,247,242,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 5, boxSizing: "border-box", flexShrink: 0 }}>
+              {imageErrors.sidebarLogo ? (
+                <div style={{ width: 36, height: 36, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-instrument-serif), serif", fontSize: 18, letterSpacing: -0.5 }}>P1</div>
+              ) : (
+                <Image
+                  src="/p1-pros-logo.jpeg"
+                  alt="P1 Pros"
+                  width={36}
+                  height={36}
+                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
+                  onError={() => setImageErrors(prev => ({ ...prev, sidebarLogo: true }))}
+                />
+              )}
+            </div>
+            <div>
+              <div className="display" style={{ fontSize: 18, color: T.bg, letterSpacing: -0.3, lineHeight: 1 }}>P1 Service</div>
+              <div style={{ fontSize: 10, color: T.sidebarText, letterSpacing: 0.8, textTransform: "uppercase", marginTop: 3 }}>{currentUser.role === "manager" ? "Operations" : currentUser.role === "dispatcher" ? "Dispatch" : currentUser.role === "back_office" ? "Back office" : "Contractor"}</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "14px 12px", flex: 1 }}>
+          {sideItems.map(item => (
+            <button key={item.id} onClick={() => nav(item.id)} className={`side-btn ${page === item.id ? "active" : ""}`}>
+              <Ico d={item.icon} size={16} color={page === item.id ? T.accent : T.sidebarText} />
+              <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
+              {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
+            </button>
+          ))}
+        </div>
+        <div style={{ padding: 16, borderTop: "1px solid rgba(250,247,242,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <Avatar initials={currentUser.initials} color={currentUser.color} size={32} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: T.bg, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUser.name}</div>
+              <div style={{ fontSize: 10, color: T.sidebarText }}>{currentUser.title || currentUser.company}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => setModal("manageAccount")}
+            style={{
+              width: "100%",
+              padding: 8,
+              borderRadius: 8,
+              border: `1px solid rgba(250,247,242,0.1)`,
+              background: "transparent",
+              color: T.sidebarText,
+              fontSize: 11,
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              marginBottom: 6,
+            }}
+          >
+            Manage Account
+          </button>
+          <button onClick={logout} style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid rgba(250,247,242,0.1)", background: "transparent", color: T.sidebarText, fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Sign out</button>
+        </div>
+      </div>
+
+      {/* Mobile bottom nav */}
+      <div className="mobile-bottom-nav" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebar, zIndex: 40, borderTop: "1px solid rgba(250,247,242,0.08)", justifyContent: "space-around", padding: "6px 0 env(safe-area-inset-bottom, 6px)" }}>
+        {sideItems.slice(0, 4).map(item => (
+          <button key={item.id} onClick={() => nav(item.id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: "pointer", padding: "6px 8px", fontFamily: "inherit" }}>
+            <Ico d={item.icon} size={20} color={page === item.id ? T.accent : T.sidebarText} />
+            <span style={{ fontSize: 8, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.bg : T.sidebarText }}>{item.label.split(" ")[0]}</span>
+          </button>
+        ))}
+        <button onClick={logout} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: "pointer", padding: "6px 8px", fontFamily: "inherit" }}>
+          <Ico d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" size={20} color={T.sidebarText} />
+          <span style={{ fontSize: 8, color: T.sidebarText }}>Out</span>
+        </button>
+      </div>
+
+      {/* Main */}
+      <div className="main-wrap" style={{ flex: 1, marginLeft: 232, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        {/* Topbar */}
+        <div style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
+          <div>
+            <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
+          </div>
+          {isManager && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
+              <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
+            </div>
+          )}
+        </div>
+
+        <div className="content-pad" style={{ flex: 1, overflow: "auto", padding: 28, paddingBottom: 80 }}>
+          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={workOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} />
+
+          <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
+
+          <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} />
+
+          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} getUser={getUser} />
+
+          <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
+
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} fmt={fmt} />
+
+          <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
+
+          <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
+
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} />
+
+        </div>
+      </div>
+
+
+      {/* â•â•â•â•â• MODALS â•â•â•â•â• */}
+      {modal === "newWO" && (
+        <WorkOrderCreateForm
+          onClose={() => setModal(null)}
+          doCreateWO={doCreateWO}
+          contractorsOnly={contractorsOnly}
+          setSelectedWO={setSelectedWO}
+          setPage={setPage}
+          setAiNote={setAiNote}
+          isManager={isManager}
+        />
+      )}
+      {modal === "manageAccount" && currentUser && (
+        <ManageAccountModal
+          currentUser={currentUser}
+          onClose={() => setModal(null)}
+          fire={fire}
+        />
+      )}
+      {modal === "setEta" && woData && (
+        <Modal onClose={() => setModal(null)} title="Set ETA" width={400}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>When will you arrive at Store #{woData.store}?</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Date"><Input type="date" value={etaDateInput} onChange={(e: any) => setEtaDateInput(e.target.value)} /></Field>
+              <Field label="Time"><Input type="time" value={etaTimeInput} onChange={(e: any) => setEtaTimeInput(e.target.value)} /></Field>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const dv = etaDateInput || new Date().toISOString().slice(0, 10);
+              const t = etaTimeInput || "14:00";
+              const h = parseInt(t); const m = t.split(":")[1];
+              const ap = h >= 12 ? "PM" : "AM";
+              const d = new Date(dv + "T00:00:00");
+              const eta = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${h > 12 ? h - 12 : h || 12}:${m} ${ap}`;
+              doSetEta(woData.id, eta); setModal(null);
+            }} className="btn-primary">Set ETA</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "reassign" && woData && (
+        <Modal onClose={() => setModal(null)} title="Reassign work order" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+            Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "â€”") : "Unassigned"}</span>. Pick a new contractor â€” the original SLA deadline is preserved.
+          </div>
+          <Field label="New contractor">
+            <Sel value={reassignTarget} onChange={(e: any) => setReassignTarget(e.target.value)}>
+              <option value="">Select...</option>
+              {contractorsOnly.map(c => (
+                <option key={c.id} value={c.id} disabled={c.id === woData.contractor}>
+                  {c.name}{c.territory ? ` â€” ${c.territory}` : ""}{c.id === woData.contractor ? " (current)" : ""}
+                </option>
+              ))}
+            </Sel>
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => {
+                if (!reassignTarget || reassignTarget === woData.contractor) return;
+                doReassign(woData.id, reassignTarget);
+                setModal(null);
+                setReassignTarget("");
+              }}
+              className="btn-primary"
+            >Reassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "unassign" && woData && (
+        <Modal onClose={() => setModal(null)} title="Unassign work order" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Unassign this work order? This will move it back to <span style={{ color: T.ink, fontWeight: 600 }}>Unassigned</span> and clear the contractor.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => { doUnassign(woData.id); setModal(null); }}
+              className="btn-primary"
+            >Unassign</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "deleteWO" && woData && (
+        <Modal onClose={() => setModal(null)} title="Delete work order?" width={440}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            This will remove WOT <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{woData.id}</span> from all views. This action can be undone by an admin via the database.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => { doDeleteWO(woData.id); setModal(null); }}
+              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+            >Delete</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "markPaid" && woData && (
+        <Modal onClose={() => setModal(null)} title="Mark paid" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Confirm payment received for this work order? It will move to <span style={{ color: T.ink, fontWeight: 600 }}>Closed</span> and the linked invoice will be marked paid.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => { doMarkPaid(woData.id); setModal(null); }}
+              className="btn-primary"
+            >Mark paid</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "reopen" && woData && (
+        <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board at <span style={{ color: T.ink, fontWeight: 600 }}>Pending Payment</span>, leaves History, and the linked invoice reverts to Approved.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => { doReopen(woData.id); setModal(null); }} className="btn-primary">Reopen</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "deleteActivity" && pendingDelete && (
+        <Modal onClose={() => { setModal(null); setPendingDelete(null); }} title="Delete comment" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Delete this comment? This cannot be undone.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => { setModal(null); setPendingDelete(null); }} className="btn-soft">Cancel</button>
+            <button
+              onClick={() => {
+                if (pendingDelete) doDeleteActivity(pendingDelete.woId, pendingDelete.activityId);
+                setModal(null);
+                setPendingDelete(null);
+              }}
+              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+            >Delete</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "editNte" && woData && (
+        <Modal onClose={() => setModal(null)} title={woData.nte > 0 ? "Edit NTE" : "Add NTE"} width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
+            Update the Not-To-Exceed cap for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Contractors can still submit invoices over NTE â€” the system flags overage but won't block.
+          </div>
+          <Field label="NTE ($)">
+            <Input type="number" step="0.01" value={nteInputValue} onChange={(e: any) => setNteInputValue(e.target.value)} placeholder="e.g. 1500" />
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const v = parseFloat(nteInputValue);
+              if (!isFinite(v) || v < 0) { fire("Enter a non-negative number"); return; }
+              doEditNte(woData.id, v, woData.nte || 0);
+              setModal(null);
+            }} className="btn-primary">Save</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "editNteFlag" && woData && (
+        <Modal onClose={() => setModal(null)} title="Edit NTE flag threshold" width={420}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
+            Early-warning threshold for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. When a submitted invoice total reaches this amount, the work order is flagged for NTE approval. Default is {fmt(900)} (a buffer below 7-Eleven's {fmt(1300)} hard cap).
+          </div>
+          <Field label="Flag threshold ($)">
+            <Input type="number" step="0.01" value={nteFlagInputValue} onChange={(e: any) => setNteFlagInputValue(e.target.value)} placeholder="e.g. 900" />
+          </Field>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const v = parseFloat(nteFlagInputValue);
+              if (!isFinite(v) || v < 0) { fire("Enter a non-negative number"); return; }
+              doEditNteFlag(woData.id, v, woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
+              setModal(null);
+            }} className="btn-primary">Save</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "startWork" && woData && (
+        <Modal onClose={() => setModal(null)} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Arrival date"><Input type="date" value={startDateInput} onChange={(e: any) => setStartDateInput(e.target.value)} /></Field>
+              <Field label="Arrival time"><Input type="time" value={startTimeInput} onChange={(e: any) => setStartTimeInput(e.target.value)} /></Field>
+            </div>
+            <Field label="Initial notes"><TA rows={2} value={startNotesInput} onChange={(e: any) => setStartNotesInput(e.target.value)} placeholder="What are you seeing on site?" /></Field>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => { doStartWork(woData.id, startNotesInput); setModal(null); }} className="btn-accent">{woData.status === "parts" ? "Resume" : "Start work"}</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "pauseWork" && woData && (
+        <Modal onClose={() => setModal(null)} title="Pause work" width={500}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Why can't the job be completed this trip?</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => setPauseReasonInput(e.target.value)}>
+              <option value="">Select...</option>
+              <option value="Temporary fix">Temporary fix â€” equipment partially working</option>
+              <option value="Awaiting parts">Awaiting parts â€” equipment completely down</option>
+            </Sel></Field>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Stamp-out date"><Input type="date" value={pauseDateInput} onChange={(e: any) => setPauseDateInput(e.target.value)} /></Field>
+              <Field label="Stamp-out time"><Input type="time" value={pauseTimeInput} onChange={(e: any) => setPauseTimeInput(e.target.value)} /></Field>
+            </div>
+            <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts information</div>
+              <div style={{ display: "grid", gap: 10 }}>
+                <Field label="Part description (generic)"><Input value={partDescInput} onChange={(e: any) => setPartDescInput(e.target.value)} placeholder="e.g. Evaporator coil, blower motor..." /></Field>
+                <Field label="Specific part number"><Input value={partNumInput} onChange={(e: any) => setPartNumInput(e.target.value)} placeholder="e.g. Heatcraft BHL136BE" /></Field>
+                <Field label="Expected return date"><Input value={partEtaInput} onChange={(e: any) => setPartEtaInput(e.target.value)} type="date" /></Field>
+              </div>
+            </div>
+            <Field label="Notes"><TA rows={2} value={pauseNotesInput} onChange={(e: any) => setPauseNotesInput(e.target.value)} placeholder="Explain what was done so far..." /></Field>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => { doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput); setModal(null); }} className="btn-accent">Pause work</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "closeComplete" && woData && (
+        <Modal onClose={() => setModal(null)} title="Close complete" width={540}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Complete the job for Store #{woData.store}. Asset info is required.</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Asset information (required)</div>
+              <Field label="Equipment make"><Input value={assetMakeInput} onChange={(e: any) => setAssetMakeInput(e.target.value)} placeholder="e.g. Taylor" /></Field>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <Field label="Asset model"><Input value={assetModelInput} onChange={(e: any) => setAssetModelInput(e.target.value)} placeholder="e.g. Taylor 340" /></Field>
+                <Field label="Serial number"><Input value={assetSerialInput} onChange={(e: any) => setAssetSerialInput(e.target.value)} placeholder="e.g. TY-2022-81402" /></Field>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Field label="Equipment year *"><Input type="number" value={assetYearInput} onChange={(e: any) => setAssetYearInput(e.target.value)} placeholder="e.g. 2019" /></Field>
+              </div>
+            </div>
+            <div style={{ padding: "14px 16px", background: T.successSoft, borderRadius: 10, border: `1px solid ${T.success}33` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.success, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>DSP closure</div>
+              <Field label="Resolution code"><Sel value={resolutionInput} onChange={(e: any) => setResolutionInput(e.target.value)}>
+                <option value="">Select...</option>
+                <option>Nuisance</option>
+                <option>Current Asset Repaired</option>
+                <option>Current Asset Replaced</option>
+                <option>OEM Warranty Related</option>
+                <option>Other</option>
+              </Sel></Field>
+            </div>
+            <Field label="Resolution details"><TA id="resolution-notes" rows={3} placeholder="Brief summary of what was found and done..." /></Field>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="End date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+              <Field label="End time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => {
+              const mk = assetMakeInput.trim();
+              const m = assetModelInput.trim();
+              const s = assetSerialInput.trim();
+              const y = parseInt(assetYearInput, 10);
+              if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
+              doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null); setModal(null);
+            }} className="btn-primary">Close complete</button>
+          </div>
+        </Modal>
+      )}
+
+      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={setModal} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} />
+
+      {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
+        const inv = submittedInvoice;
+        return (
+          <Modal onClose={() => { setModal(null); setSubmittedInvoiceNum(null); }} title={`Invoice #${submittedInvoiceNum} submitted`} width={440}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 22, lineHeight: 1.55 }}>
+              Submitted to AFM for approval. You can find a copy in your Invoices tab anytime.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { fire(`Invoice #${submittedInvoiceNum} saved`); setModal(null); setSubmittedInvoiceNum(null); }} className="btn-soft">Done</button>
+              <button
+                onClick={async () => { if (inv) await doDownloadInvoice(inv); }}
+                disabled={pdfBusy || !inv}
+                className="btn-primary"
+                style={{ display: "flex", alignItems: "center", gap: 6, opacity: (pdfBusy || !inv) ? 0.6 : 1, cursor: (pdfBusy || !inv) ? "default" : "pointer" }}
+              >
+                <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
+                {pdfBusy ? "Preparingâ€¦" : "Download PDF"}
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, background: "rgba(31,30,28,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 20, cursor: "zoom-out" }}>
+          <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} />
+          <button onClick={e => { e.stopPropagation(); setLightbox(null); }} style={{ position: "absolute", top: 20, right: 20, width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>Ã—</button>
+        </div>
+      )}
+
+      {toast && <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", background: T.ink, color: T.bg, padding: "12px 22px", borderRadius: 12, fontSize: 13, fontWeight: 500, animation: "fadeUp 0.25s", zIndex: 60, boxShadow: "0 8px 32px rgba(31,30,28,0.3)", whiteSpace: "nowrap", border: `1px solid rgba(250,247,242,0.1)` }}>{toast}</div>}
+    </div>
+  );
+}
