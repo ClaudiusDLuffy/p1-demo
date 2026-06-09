@@ -1,5 +1,5 @@
-import Portal from "@/components/Portal";
+import PortalShell from "@/components/PortalShell";
 
 export default function Home() {
-  return <Portal />;
+  return <PortalShell />;
 }

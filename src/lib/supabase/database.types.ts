@@ -1,4 +1,9 @@
-﻿export type Json =
+// TODO: re-run supabase gen types after applying migrations:
+// 0013_profiles_contractor_fields.sql
+// 0014_work_orders_capital_fields.sql
+// 0015_work_reports.sql
+
+export type Json =
   | string
   | number
   | boolean
@@ -321,7 +326,12 @@ export type Database = {
           active: boolean | null
           color: string | null
           company: string | null
+          contractor_tier: "direct" | "mr_freeze" | "contracted" | null
           created_at: string | null
+          default_labor_rate: number | null
+          default_parts_markup: number | null
+          default_truck_rate: number | null
+          dispatcher_id: string | null
           email: string
           id: string
           initials: string | null
@@ -337,7 +347,12 @@ export type Database = {
           active?: boolean | null
           color?: string | null
           company?: string | null
+          contractor_tier?: "direct" | "mr_freeze" | "contracted" | null
           created_at?: string | null
+          default_labor_rate?: number | null
+          default_parts_markup?: number | null
+          default_truck_rate?: number | null
+          dispatcher_id?: string | null
           email: string
           id: string
           initials?: string | null
@@ -353,7 +368,12 @@ export type Database = {
           active?: boolean | null
           color?: string | null
           company?: string | null
+          contractor_tier?: "direct" | "mr_freeze" | "contracted" | null
           created_at?: string | null
+          default_labor_rate?: number | null
+          default_parts_markup?: number | null
+          default_truck_rate?: number | null
+          dispatcher_id?: string | null
           email?: string
           id?: string
           initials?: string | null
@@ -365,7 +385,15 @@ export type Database = {
           trades?: string[] | null
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_dispatcher_id_fkey"
+            columns: ["dispatcher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       qbo_tokens: {
         Row: {
@@ -490,6 +518,66 @@ export type Database = {
           },
         ]
       }
+      work_reports: {
+        Row: {
+          arrival_time: string | null
+          contractor_id: string | null
+          created_at: string | null
+          departure_time: string | null
+          id: string
+          parts_used: Json | null
+          resolution_code: string | null
+          resolution_notes: string | null
+          submitted_at: string | null
+          technician_name: string | null
+          work_order_id: string
+          work_performed: string | null
+        }
+        Insert: {
+          arrival_time?: string | null
+          contractor_id?: string | null
+          created_at?: string | null
+          departure_time?: string | null
+          id?: string
+          parts_used?: Json | null
+          resolution_code?: string | null
+          resolution_notes?: string | null
+          submitted_at?: string | null
+          technician_name?: string | null
+          work_order_id: string
+          work_performed?: string | null
+        }
+        Update: {
+          arrival_time?: string | null
+          contractor_id?: string | null
+          created_at?: string | null
+          departure_time?: string | null
+          id?: string
+          parts_used?: Json | null
+          resolution_code?: string | null
+          resolution_notes?: string | null
+          submitted_at?: string | null
+          technician_name?: string | null
+          work_order_id?: string
+          work_performed?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_reports_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_reports_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_orders: {
         Row: {
           address: string | null
@@ -499,8 +587,10 @@ export type Database = {
           asset_make: string | null
           asset_model: string | null
           asset_serial: string | null
+          asset_year: number | null
           business_service: string | null
           capital_status: Database["public"]["Enums"]["capital_status"] | null
+          capital_notes: string | null
           category: string | null
           city: string | null
           closed_at: string | null
@@ -518,6 +608,7 @@ export type Database = {
             | null
           id: string
           incident_id: string | null
+          install_quote: number | null
           invoice_total: number | null
           is_capital: boolean | null
           line_of_service: string | null
@@ -528,6 +619,7 @@ export type Database = {
           part_eta: string | null
           part_needed: string | null
           priority: Database["public"]["Enums"]["wo_priority"]
+          repair_quote: number | null
           resolution_breach_at: string | null
           resolution_code: string | null
           resolution_notes: string | null
@@ -553,8 +645,10 @@ export type Database = {
           asset_make?: string | null
           asset_model?: string | null
           asset_serial?: string | null
+          asset_year?: number | null
           business_service?: string | null
           capital_status?: Database["public"]["Enums"]["capital_status"] | null
+          capital_notes?: string | null
           category?: string | null
           city?: string | null
           closed_at?: string | null
@@ -572,6 +666,7 @@ export type Database = {
             | null
           id: string
           incident_id?: string | null
+          install_quote?: number | null
           invoice_total?: number | null
           is_capital?: boolean | null
           line_of_service?: string | null
@@ -582,6 +677,7 @@ export type Database = {
           part_eta?: string | null
           part_needed?: string | null
           priority?: Database["public"]["Enums"]["wo_priority"]
+          repair_quote?: number | null
           resolution_breach_at?: string | null
           resolution_code?: string | null
           resolution_notes?: string | null
@@ -607,8 +703,10 @@ export type Database = {
           asset_make?: string | null
           asset_model?: string | null
           asset_serial?: string | null
+          asset_year?: number | null
           business_service?: string | null
           capital_status?: Database["public"]["Enums"]["capital_status"] | null
+          capital_notes?: string | null
           category?: string | null
           city?: string | null
           closed_at?: string | null
@@ -626,6 +724,7 @@ export type Database = {
             | null
           id?: string
           incident_id?: string | null
+          install_quote?: number | null
           invoice_total?: number | null
           is_capital?: boolean | null
           line_of_service?: string | null
@@ -636,6 +735,7 @@ export type Database = {
           part_eta?: string | null
           part_needed?: string | null
           priority?: Database["public"]["Enums"]["wo_priority"]
+          repair_quote?: number | null
           resolution_breach_at?: string | null
           resolution_code?: string | null
           resolution_notes?: string | null
