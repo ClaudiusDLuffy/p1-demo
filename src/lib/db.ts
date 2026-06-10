@@ -38,6 +38,7 @@ export async function loadCurrentProfile(): Promise<any | null> {
 
 // ── PROFILES (all users) ────────────────────────────────────────────────────
 
+// profiles_read: staff see all, contractors see contractors
 export async function loadAllProfiles(): Promise<any[]> {
   const sb = supabase();
   const { data, error } = await sb.from("profiles").select("*").order("name");

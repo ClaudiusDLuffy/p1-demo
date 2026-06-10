@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   updateWorkOrder, insertActivity, updateInvoiceState,
@@ -13,14 +13,18 @@ import { WORK_ORDERS_KEY } from "./queries";
 import { INVOICES_KEY } from "../invoices/queries";
 
 export default function useWorkOrders({
-  currentUser, USERS, invoices, setInvoices, fire,
+  currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
   startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
   setSelectedWO, setAiNote, setPage, isManager,
   noteText, setNoteText, SERVICE_TO_TRADES, contractorFor,
   getUser, dateNow, timeNow, fmt,
 }: any) {
   const qc = useQueryClient();
-  const [workOrders, setWorkOrders] = useState<any[]>([]);
+  const [workOrders, setWorkOrders] = useState<any[]>(workOrdersData ?? []);
+
+  useEffect(() => {
+    if (workOrdersData) setWorkOrders(workOrdersData);
+  }, [workOrdersData]);
 
   const restoreWorkOrders = (snapshot: any) => {
     qc.setQueryData(WORK_ORDERS_KEY, snapshot);
@@ -335,7 +339,7 @@ export default function useWorkOrders({
     };
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "system"));
-    fire("Capital declined â€” returned to dispatched");
+    fire("Capital declined - returned to dispatched");
     await dbCall(async () => {
       await updateWorkOrder(woId, patch);
       await insertActivity(woId, currentUser.name, text, "system");

@@ -258,7 +258,7 @@ export default function WorkOrderDetail(props: any) {
                           <button onClick={() => setModal("closeComplete")} className="btn-primary">Close complete</button>
                         </>
                       )}
-                      {woData.status === "capital" && isManager && <button onClick={() => doCapitalDecline(woData.id)} className="btn-soft">Capital declined â€” return to dispatched</button>}
+                      {woData.status === "capital" && isManager && <button onClick={() => doCapitalDecline(woData.id)} className="btn-soft">Capital declined - return to dispatched</button>}
                       {woData.status === "parts" && !isManager && <button onClick={() => setModal("startWork")} className="btn-accent">Resume work</button>}
                       {woData.status === "completed" && isManager && <button onClick={() => doMoveToInvoice(woData.id)} className="btn-accent">Portal updated → pending invoice</button>}
                       {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && canInvoice && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
@@ -299,7 +299,7 @@ export default function WorkOrderDetail(props: any) {
                           ) : isDispatchTier ? (
                             dispatchTechs.length > 0 ? (
                               <Sel value={woData.technicianOnJob || ""} onChange={(e: any) => doSetTechnician(woData.id, e.target.value)}>
-                                <option value="">â€” Not set â€”</option>
+                                <option value="">- Not set -</option>
                                 {dispatchTechs.map((u: any) => <option key={u.id} value={u.name}>{u.name}</option>)}
                               </Sel>
                             ) : (

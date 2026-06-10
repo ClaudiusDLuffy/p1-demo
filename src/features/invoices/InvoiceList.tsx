@@ -7,10 +7,11 @@ import { useMemo } from "react";
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt } = props;
+  const currentUserId = currentUser?.id ?? null;
   const visibleInvoices = useMemo(
-    () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUser.id))
+    () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))
       .filter(i => invTab === "all" ? true : invTab === "pending" ? (i.state === "submitted" || i.state === "revised") : i.state === invTab),
-    [isManager, invoices, currentUser?.id, invTab]
+    [isManager, invoices, currentUserId, invTab]
   );
   return (
     <>
