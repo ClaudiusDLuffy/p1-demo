@@ -3,9 +3,10 @@
 // which works correctly in a client-only Next.js setup.
 
 import { createClient as createSb } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 
 export function createClient() {
-  return createSb(
+  return createSb<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
     {

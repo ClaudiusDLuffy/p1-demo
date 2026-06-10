@@ -1,32 +1,33 @@
-// @ts-nocheck
 // Supabase data layer for the P1 portal.
 // Maps DB rows (snake_case) → portal shape (camelCase) so existing components
 // don't need to change. Keep this thin — heavy logic stays in components.
 
 import { supabase } from "./supabase/client";
 import { computeSlaBreaches } from "./slaConfig";
+import { WorkOrderSchema } from "./schemas";
+import type { Invoice, WorkOrder } from "./schemas";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
-export async function signIn(email: string, password: string) {
+export async function signIn(email: string, password: string): Promise<any> {
   const sb = supabase();
   const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw error;
   return data;
 }
 
-export async function signOut() {
+export async function signOut(): Promise<void> {
   const sb = supabase();
   await sb.auth.signOut();
 }
 
-export async function getSession() {
+export async function getSession(): Promise<any> {
   const sb = supabase();
   const { data } = await sb.auth.getSession();
   return data.session;
 }
 
-export async function loadCurrentProfile() {
+export async function loadCurrentProfile(): Promise<any | null> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return null;
@@ -37,7 +38,8 @@ export async function loadCurrentProfile() {
 
 // ── PROFILES (all users) ────────────────────────────────────────────────────
 
-export async function loadAllProfiles() {
+// profiles_read: staff see all, contractors see contractors
+export async function loadAllProfiles(): Promise<any[]> {
   const sb = supabase();
   const { data, error } = await sb.from("profiles").select("*").order("name");
   if (error) throw error;
@@ -46,7 +48,7 @@ export async function loadAllProfiles() {
 
 // Contractor technicians — RLS returns all rows to staff, own rows to a
 // contractor. Used to populate the "Technician on Job" dropdown.
-export async function loadTechnicians() {
+export async function loadTechnicians(): Promise<any[]> {
   const sb = supabase();
   const { data, error } = await sb.from("contractor_technicians").select("*").order("name");
   if (error) throw error;
@@ -71,11 +73,16 @@ const mapProfile = (p: any) => ({
   territory: p.territory,
   trades: p.trades || [],
   color: p.color,
+  contractorTier: p.contractor_tier || null,
+  dispatcherId: p.dispatcher_id || null,
+  defaultLaborRate: p.default_labor_rate ?? 110,
+  defaultTruckRate: p.default_truck_rate ?? 110,
+  defaultPartsMarkup: p.default_parts_markup ?? 0,
 });
 
 // ── WORK ORDERS ─────────────────────────────────────────────────────────────
 
-export async function loadWorkOrders() {
+export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
   // Pull WOs + activities + photos in 3 queries, stitch together
   const [woRes, actRes, photoRes] = await Promise.all([
@@ -96,26 +103,27 @@ export async function loadWorkOrders() {
     (photosByWo[p.work_order_id] ||= []).push(p);
   }
 
-  // The photos bucket is private, so a raw storage path is not loadable by
-  // <img src>. Batch-resolve every path to a short-lived signed URL here.
-  // Paths whose object is missing return no URL and are dropped, so an
-  // orphaned photo row renders as "no photo" instead of a broken thumbnail.
-  const allPaths = (photoRes.data || []).map(p => p.storage_path).filter(Boolean);
-  const urlByPath: Record<string, string> = {};
-  if (allPaths.length > 0) {
-    const { data: signed } = await sb.storage.from("photos").createSignedUrls(allPaths, 3600);
-    for (const s of signed || []) {
-      if (s.signedUrl && s.path) urlByPath[s.path] = s.signedUrl;
-    }
-  }
-
-  return (woRes.data || []).map(wo => ({
+  const mapped = (woRes.data || []).map(wo => ({
     ...mapWO(wo),
     activities: actsByWo[wo.id] || [],
     photos: (photosByWo[wo.id] || [])
-      .map(p => urlByPath[p.storage_path])
+      .map(p => p.storage_path)
       .filter(Boolean),
   }));
+  for (const wo of woRes.data || []) {
+    WorkOrderSchema.safeParse({
+      id: wo.id,
+      status: wo.status,
+      priority: wo.priority,
+      contractor_id: wo.contractor_id,
+      nte: wo.nte == null ? null : Number(wo.nte),
+      created_at: wo.created_at,
+      store_number: wo.store_number,
+      city: wo.city,
+      functional_status: wo.functional_status,
+    });
+  }
+  return mapped as unknown as WorkOrder[];
 }
 
 const mapWO = (w: any) => ({
@@ -147,6 +155,10 @@ const mapWO = (w: any) => ({
   assetMake: w.asset_make,
   assetModel: w.asset_model,
   assetSerial: w.asset_serial,
+  assetYear: w.asset_year || null,
+  repairQuote: w.repair_quote ? parseFloat(w.repair_quote) : null,
+  installQuote: w.install_quote ? parseFloat(w.install_quote) : null,
+  capitalNotes: w.capital_notes || null,
   isCapital: w.is_capital,
   capitalStatus: w.capital_status,
   partNeeded: w.part_needed,
@@ -187,7 +199,7 @@ function ageString(createdAt: string, dispatchedAt?: string): string {
 
 // ── INVOICES ────────────────────────────────────────────────────────────────
 
-export async function loadInvoices() {
+export async function loadInvoices(): Promise<Invoice[]> {
   const sb = supabase();
   const [invRes, lineRes] = await Promise.all([
     sb.from("invoices").select("*").order("invoice_date", { ascending: false }),
@@ -204,7 +216,7 @@ export async function loadInvoices() {
   return (invRes.data || []).map(i => ({
     ...mapInvoice(i),
     lines: linesByInv[i.id] || [],
-  }));
+  })) as unknown as Invoice[];
 }
 
 const mapInvoice = (i: any) => ({
@@ -261,12 +273,12 @@ const mapInvoiceLine = (l: any) => ({
   amount: parseFloat(l.amount),
 });
 
-function formatDate(d: string | null) {
+function formatDate(d: string | null): string | null {
   if (!d) return null;
   const [y, m, day] = d.split("-");
   return `${m}/${day}/${y}`;
 }
-function shortMonthDay(d: string | null) {
+function shortMonthDay(d: string | null): string {
   if (!d) return "";
   const date = new Date(d + "T00:00:00");
   return date.toLocaleString("en-US", { month: "short", day: "numeric" });
@@ -297,6 +309,10 @@ const WO_FIELD_MAP: Record<string, string> = {
   assetMake: "asset_make",
   assetModel: "asset_model",
   assetSerial: "asset_serial",
+  assetYear: "asset_year",
+  repairQuote: "repair_quote",
+  installQuote: "install_quote",
+  capitalNotes: "capital_notes",
   capitalStatus: "capital_status",
   partNeeded: "part_needed",
   partEta: "part_eta",
@@ -313,7 +329,7 @@ const WO_FIELD_MAP: Record<string, string> = {
   closedAt: "closed_at",
   technicianOnJob: "technician_on_job",
 };
-function toDbWoPatch(patch: any) {
+function toDbWoPatch(patch: any): Record<string, any> {
   const out: any = {};
   for (const k of Object.keys(patch)) {
     out[WO_FIELD_MAP[k] || k] = patch[k];
@@ -321,14 +337,14 @@ function toDbWoPatch(patch: any) {
   return out;
 }
 
-export async function updateWorkOrder(id: string, patch: any) {
+export async function updateWorkOrder(id: string, patch: any): Promise<any> {
   const sb = supabase();
-  const { data, error } = await sb.from("work_orders").update(toDbWoPatch(patch)).eq("id", id).select().single();
+  const { data, error } = await (sb.from("work_orders") as any).update(toDbWoPatch(patch)).eq("id", id).select().single();
   if (error) throw error;
   return data;
 }
 
-export async function insertActivity(workOrderId: string, authorName: string, text: string, type: "note" | "system" | "ai" = "note") {
+export async function insertActivity(workOrderId: string, authorName: string, text: string, type: "note" | "system" | "ai" = "note"): Promise<void> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   const { error } = await sb.from("activities").insert({
@@ -344,7 +360,7 @@ export async function insertActivity(workOrderId: string, authorName: string, te
 // Soft delete — the row stays in the DB but loadWorkOrders filters it out.
 // RLS allows the author to update their own row, and managers/dispatchers/
 // back-office (is_staff) to update any row.
-export async function deleteActivity(activityId: string) {
+export async function deleteActivity(activityId: string): Promise<void> {
   const sb = supabase();
   const { error } = await sb.from("activities")
     .update({ deleted_at: new Date().toISOString() })
@@ -356,7 +372,7 @@ export async function deleteActivity(activityId: string) {
 // Related invoices / photos / activities are intentionally left intact so
 // the row can be restored via SQL. Writes a system activity entry as the
 // audit trail for this destructive (but recoverable) action.
-export async function deleteWorkOrder(workOrderId: string, authorName: string) {
+export async function deleteWorkOrder(workOrderId: string, authorName: string): Promise<void> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   const { error } = await sb.from("work_orders").update({
@@ -369,7 +385,7 @@ export async function deleteWorkOrder(workOrderId: string, authorName: string) {
 
 // Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,
 // and writes a system activity entry.
-export async function unassignWorkOrder(workOrderId: string, authorName: string) {
+export async function unassignWorkOrder(workOrderId: string, authorName: string): Promise<void> {
   const sb = supabase();
   const { error } = await sb.from("work_orders").update({
     contractor_id: null,
@@ -391,7 +407,7 @@ export async function reassignWorkOrder(
   oldContractorName: string,
   newContractorName: string,
   authorName: string,
-) {
+): Promise<void> {
   const sb = supabase();
   const { error } = await sb.from("work_orders").update({
     contractor_id: newContractorId,
@@ -412,32 +428,49 @@ export async function reassignWorkOrder(
 // have landed from another session since the local cache was loaded.
 // Returns the canonical existing id (or null) so the caller can render
 // an "open it instead?" affordance with the actual stored casing.
-export async function findExistingWoId(wot: string): Promise<string | null> {
+export async function findExistingWoId(
+  wot: string
+): Promise<{ id: string; deleted: boolean } | null> {
   const trimmed = (wot || "").trim();
   if (!trimmed) return null;
   const sb = supabase();
-  // Escape ilike wildcards so a WOT containing % or _ doesn't broaden the match.
   const escaped = trimmed.replace(/[\\%_]/g, m => "\\" + m);
-  const { data, error } = await sb
+
+  // Check active first.
+  const { data: active, error: activeError } = await sb
     .from("work_orders")
     .select("id")
     .ilike("id", escaped)
+    .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
-  return data?.id || null;
+  if (activeError) throw activeError;
+  if (active) return { id: active.id, deleted: false };
+
+  // Check soft deleted.
+  const { data: deleted, error: deletedError } = await sb
+    .from("work_orders")
+    .select("id")
+    .ilike("id", escaped)
+    .not("deleted_at", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (deletedError) throw deletedError;
+  if (deleted) return { id: deleted.id, deleted: true };
+
+  return null;
 }
 
 // Atomically generate the next FWKD work order ID via a Postgres sequence
 export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
   const sb = supabase();
-  const { data, error } = await sb.rpc("next_wo_id");
+  const { data, error } = await (sb as any).rpc("next_wo_id");
   if (error) throw error;
   // Returns shape { wo: 'FWKD11400001', inc: 'INC24000001' }
   return data;
 }
 
-export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string) {
+export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string): Promise<WorkOrder> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   // SLA clock starts at intake (creation), NOT at assignment. For email-
@@ -489,10 +522,10 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
   if (activityText && authorName) {
     await insertActivity(wo.id, authorName, activityText, "system");
   }
-  return data;
+  return data as unknown as WorkOrder;
 }
 
-export async function insertInvoice(inv: any, lines: any[], authorName: string) {
+export async function insertInvoice(inv: any, lines: any[], authorName: string): Promise<Invoice> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   // Insert header
@@ -534,15 +567,48 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string) 
   // Mark WO as pending approval and stamp invoice total
   await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
   await insertActivity(inv.wot, authorName, `Invoice ${inv.num} submitted. Total: $${total.toFixed(2)}.`, "system");
-  return { ...header, total };
+  return { ...header, total } as unknown as Invoice;
 }
 
 // Patch an invoice's state (and optionally paid_at). Used by the Owner
 // approve / mark-paid actions that carry a WO from pending_approval → closed.
-export async function updateInvoiceState(num: string, state: string, extra: Record<string, any> = {}) {
+export async function updateInvoiceState(num: string, state: string, extra: Record<string, any> = {}): Promise<void> {
   const sb = supabase();
-  const { error } = await sb.from("invoices").update({ state, ...extra }).eq("num", num);
+  const { error } = await sb.from("invoices").update({ state: state as any, ...extra }).eq("num", num);
   if (error) throw error;
+}
+
+export async function insertWorkReport(
+  report: any
+): Promise<{ success: boolean; error?: unknown }> {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from("work_reports").insert({
+    work_order_id: report.workOrderId,
+    contractor_id: user?.id || null,
+    technician_name: report.technicianName || null,
+    arrival_time: report.arrivalTime || null,
+    departure_time: report.departureTime || null,
+    work_performed: report.workPerformed || null,
+    parts_used: report.partsUsed || [],
+    resolution_code: report.resolutionCode || null,
+    resolution_notes: report.resolutionNotes || null,
+  });
+  if (error) return { success: false, error };
+  return { success: true };
+}
+
+export async function loadWorkReports(
+  workOrderId: string
+): Promise<any[]> {
+  const sb = supabase();
+  const { data, error } = await sb
+    .from("work_reports")
+    .select("*")
+    .eq("work_order_id", workOrderId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
 }
 
 // ── PHOTO STORAGE ─────────────────────────────────────────────────────────
@@ -553,7 +619,8 @@ export async function uploadPhotos(workOrderId: string, files: FileList | File[]
   const arr = Array.from(files);
   for (const file of arr) {
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `wo/${workOrderId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const filename = `${Date.now()}_${crypto.randomUUID()}`;
+    const path = `wo/${workOrderId}/${filename}.${ext}`;
     const { error: upErr } = await sb.storage.from("photos").upload(path, file, { contentType: file.type, upsert: false });
     if (upErr) throw upErr;
     const { error: rowErr } = await sb.from("photos").insert({
@@ -571,12 +638,23 @@ export async function uploadPhotos(workOrderId: string, files: FileList | File[]
   return uploaded;
 }
 
-export async function removePhoto(workOrderId: string, storagePath: string) {
+export async function removePhoto(workOrderId: string, storagePath: string): Promise<{ success: boolean; error?: unknown }> {
   const sb = supabase();
   // Delete the row (RLS allows uploader or staff)
-  await sb.from("photos").delete().eq("work_order_id", workOrderId).eq("storage_path", storagePath);
+  const { data: deletedRows, error: dbError } = await sb
+    .from("photos")
+    .delete()
+    .eq("work_order_id", workOrderId)
+    .eq("storage_path", storagePath)
+    .select("id");
+  if (dbError) return { success: false, error: dbError };
+  if (!deletedRows || deletedRows.length === 0) {
+    return { success: false, error: new Error("Only the uploader or a staff member can delete this image") };
+  }
   // Delete the file from storage
-  await sb.storage.from("photos").remove([storagePath]);
+  const { error: storageError } = await sb.storage.from("photos").remove([storagePath]);
+  if (storageError) return { success: false, error: storageError };
+  return { success: true };
 }
 
 // ── REALTIME SUBSCRIPTION ──────────────────────────────────────────────────
