@@ -25,22 +25,19 @@ export const T = {
   violetSoft: "#EDE9F5",
 };
 
-export const DEMO_ACCOUNTS = [
-  { email: "claytonetchison@gmail.com", name: "Clay Etchison", initials: "CE", color: "#1F1E1C", subtitle: "Owner" },
-  // Jeremy's demo auth user is the gustavo@ mailbox (Gustavo runs the demo and
-  // owns that inbox for confirmations) — must match bootstrap.ts so the
-  // quick-access button signs into a real auth user with the demo password.
-  { email: "gustavo@myamzteam.com", name: "Jeremy Barry", initials: "JB", color: "#C15F3C", subtitle: "Owner" },
-  { email: "landryd@phospitality.com", name: "Landry Dillinger", initials: "LD", color: "#A67C00", subtitle: "Dispatcher" },
-  { email: "scrcdallastexas@gmail.com", name: "Derek Starnes", initials: "DS", color: "#0891B2", subtitle: "Contractor — Dallas" },
-];
-export const DEMO_PASSWORD = "p1demo2026!";
+export const DEMO_ACCOUNTS: {
+  email: string
+  name: string
+  initials: string
+  color: string
+  subtitle: string
+}[] = [];
 
 export const PRIORITY = {
-  p1: { label: "P1 Critical", short: "P1", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC", icon: "⚡", slaHours: 8 },
-  p2: { label: "P2 Emergency", short: "P2", color: T.accent, bg: T.accentSoft, ring: T.accentRing, icon: "◆", slaHours: 24 },
-  p3: { label: "P3 Standard", short: "P3", color: T.warn, bg: T.warnSoft, ring: "#EED9A6", icon: "●", slaHours: 72 },
-  p4: { label: "P4 Minor", short: "P4", color: T.muted, bg: T.borderSoft, ring: T.border, icon: "○", slaHours: 168 },
+  p1: { label: "P1 Critical", short: "P1", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC", icon: "âš¡", slaHours: 8 },
+  p2: { label: "P2 Emergency", short: "P2", color: T.accent, bg: T.accentSoft, ring: T.accentRing, icon: "â—†", slaHours: 24 },
+  p3: { label: "P3 Standard", short: "P3", color: T.warn, bg: T.warnSoft, ring: "#EED9A6", icon: "â—", slaHours: 72 },
+  p4: { label: "P4 Minor", short: "P4", color: T.muted, bg: T.borderSoft, ring: T.border, icon: "â—‹", slaHours: 168 },
 };
 
 export const STATUS = {
@@ -83,7 +80,7 @@ export const P1_BUSINESS = {
   email: "eddie@phospitality.com",
   phone: "+1 (561) 421-1281",
   website: "www.p1pros.com",
-  defaultLaborRate: 110, // placeholder — pending Jeremy confirmation per contractor
+  defaultLaborRate: 110, // placeholder â€” pending Jeremy confirmation per contractor
   defaultTravelRate: 110,
   defaultTerms: "Net 30",
 };
