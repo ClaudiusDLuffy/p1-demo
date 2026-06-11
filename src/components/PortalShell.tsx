@@ -15,6 +15,7 @@ import { TA } from "./ui/TA";
 import { Avatar } from "./ui/Avatar";
 import { Field } from "./ui/Field";
 import { Ico } from "./ui/Ico";
+import { BtnSpinner, BtnSpinnerDark } from "./ui/BtnSpinner";
 import LoginForm from "../features/auth/LoginForm";
 import useAuth from "../features/auth/useAuth";
 import useWorkOrders from "../features/work-orders/useWorkOrders";
@@ -268,6 +269,8 @@ export default function PortalShell() {
   const [aiEnhancing, setAiEnhancing] = useState(false);
   const [aiNote, setAiNote] = useState(null);
   const [modal, setModal] = useState(null);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const [activityMenuId, setActivityMenuId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
@@ -309,6 +312,7 @@ export default function PortalShell() {
   );
   const technicians = useMemo(() => techniciansData ?? [], [techniciansData]);
   const { workOrders, setWorkOrders,
+    loadingStates,
     patchLocalWO, localActivity, dbCall,
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
@@ -325,6 +329,21 @@ export default function PortalShell() {
       dateNow, timeNow, fmt,
     });
   const logout = async () => { await authLogout(); setWorkOrders([]); };
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    try {
+      await logout();
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
+  const modalActionStyle = {
+    opacity: modalLoading ? 0.7 : 1,
+    cursor: modalLoading ? "default" : "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  };
   const dataLoading = woLoading;
   const {
     newInv, setNewInv,
@@ -406,6 +425,14 @@ export default function PortalShell() {
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
     });
     return () => { unsub(); };
+  }, [currentUser?.id, qc]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    qc.resetQueries({ queryKey: WORK_ORDERS_KEY });
+    qc.resetQueries({ queryKey: INVOICES_KEY });
+    qc.resetQueries({ queryKey: ["profiles"] });
+    qc.resetQueries({ queryKey: ["technicians"] });
   }, [currentUser?.id, qc]);
   const nav = useCallback((p: string) => {
     setPage(p);
@@ -692,7 +719,31 @@ export default function PortalShell() {
           >
             Manage Account
           </button>
-          <button onClick={logout} style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid rgba(250,247,242,0.1)", background: "transparent", color: T.sidebarText, fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Sign out</button>
+          <button
+            onClick={handleLogout}
+            disabled={logoutLoading}
+            style={{
+              width: "100%",
+              padding: 8,
+              borderRadius: 8,
+              border: "1px solid rgba(250,247,242,0.1)",
+              background: "transparent",
+              color: T.sidebarText,
+              fontSize: 11,
+              fontWeight: 500,
+              cursor: logoutLoading ? "default" : "pointer",
+              fontFamily: "inherit",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+            }}
+          >
+            {logoutLoading
+              ? <><BtnSpinnerDark />Signing out...</>
+              : "Sign out"
+            }
+          </button>
         </div>
       </div>
 
@@ -704,7 +755,7 @@ export default function PortalShell() {
             <span style={{ fontSize: 8, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.bg : T.sidebarText }}>{item.label.split(" ")[0]}</span>
           </button>
         ))}
-        <button onClick={logout} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: "pointer", padding: "6px 8px", fontFamily: "inherit" }}>
+        <button onClick={handleLogout} disabled={logoutLoading} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: logoutLoading ? "default" : "pointer", padding: "6px 8px", fontFamily: "inherit", opacity: logoutLoading ? 0.7 : 1 }}>
           <Ico d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" size={20} color={T.sidebarText} />
           <span style={{ fontSize: 8, color: T.sidebarText }}>Out</span>
         </button>
@@ -757,17 +808,17 @@ export default function PortalShell() {
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} />
 
-          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} getUser={getUser} />
+          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} getUser={getUser} loadingStates={loadingStates} />
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} fmt={fmt} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
 
         </div>
       </div>
@@ -803,15 +854,25 @@ export default function PortalShell() {
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => {
+            <button
+              onClick={async () => {
+              setModalLoading(true);
+              try {
               const dv = etaDateInput || new Date().toISOString().slice(0, 10);
               const t = etaTimeInput || "14:00";
               const h = parseInt(t); const m = t.split(":")[1];
               const ap = h >= 12 ? "PM" : "AM";
               const d = new Date(dv + "T00:00:00");
               const eta = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${h > 12 ? h - 12 : h || 12}:${m} ${ap}`;
-              doSetEta(woData.id, eta); setModal(null);
-            }} className="btn-primary">Set ETA</button>
+              await doSetEta(woData.id, eta); setModal(null);
+              } finally {
+                setModalLoading(false);
+              }
+            }}
+              disabled={modalLoading}
+              className="btn-primary"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Setting...</> : "Set ETA"}</button>
           </div>
         </Modal>
       )}
@@ -834,14 +895,21 @@ export default function PortalShell() {
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (!reassignTarget || reassignTarget === woData.contractor) return;
-                doReassign(woData.id, reassignTarget);
-                setModal(null);
-                setReassignTarget("");
+                setModalLoading(true);
+                try {
+                  await doReassign(woData.id, reassignTarget);
+                  setModal(null);
+                  setReassignTarget("");
+                } finally {
+                  setModalLoading(false);
+                }
               }}
+              disabled={modalLoading}
               className="btn-primary"
-            >Reassign</button>
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Reassigning...</> : "Reassign"}</button>
           </div>
         </Modal>
       )}
@@ -854,9 +922,19 @@ export default function PortalShell() {
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
-              onClick={() => { doUnassign(woData.id); setModal(null); }}
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  await doUnassign(woData.id);
+                  setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
               className="btn-primary"
-            >Unassign</button>
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Unassigning...</> : "Unassign"}</button>
           </div>
         </Modal>
       )}
@@ -869,9 +947,18 @@ export default function PortalShell() {
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
-              onClick={() => { doDeleteWO(woData.id); setModal(null); }}
-              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
-            >Delete</button>
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  await doDeleteWO(woData.id);
+                  setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
+              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: modalLoading ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: modalLoading ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}
+            >{modalLoading ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
           </div>
         </Modal>
       )}
@@ -884,9 +971,19 @@ export default function PortalShell() {
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
-              onClick={() => { doMarkPaid(woData.id); setModal(null); }}
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  await doMarkPaid(woData.id);
+                  setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
               className="btn-primary"
-            >Mark paid</button>
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Processing...</> : "Mark paid"}</button>
           </div>
         </Modal>
       )}
@@ -898,7 +995,20 @@ export default function PortalShell() {
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => { doReopen(woData.id); setModal(null); }} className="btn-primary">Reopen</button>
+            <button
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  await doReopen(woData.id);
+                  setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
+              className="btn-primary"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Reopening...</> : "Reopen"}</button>
           </div>
         </Modal>
       )}
@@ -911,13 +1021,19 @@ export default function PortalShell() {
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => { setModal(null); setPendingDelete(null); }} className="btn-soft">Cancel</button>
             <button
-              onClick={() => {
-                if (pendingDelete) doDeleteActivity(pendingDelete.woId, pendingDelete.activityId);
-                setModal(null);
-                setPendingDelete(null);
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  if (pendingDelete) await doDeleteActivity(pendingDelete.woId, pendingDelete.activityId);
+                  setModal(null);
+                  setPendingDelete(null);
+                } finally {
+                  setModalLoading(false);
+                }
               }}
-              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
-            >Delete</button>
+              disabled={modalLoading}
+              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: modalLoading ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: modalLoading ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}
+            >{modalLoading ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
           </div>
         </Modal>
       )}
@@ -974,7 +1090,20 @@ export default function PortalShell() {
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => { doStartWork(woData.id, startNotesInput); setModal(null); }} className="btn-accent">{woData.status === "parts" ? "Resume" : "Start work"}</button>
+            <button
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  await doStartWork(woData.id, startNotesInput);
+                  setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
+              className="btn-accent"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />{woData.status === "parts" ? "Resuming..." : "Starting..."}</> : (woData.status === "parts" ? "Resume" : "Start work")}</button>
           </div>
         </Modal>
       )}
@@ -1004,7 +1133,20 @@ export default function PortalShell() {
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => { doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput); setModal(null); }} className="btn-accent">Pause work</button>
+            <button
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput);
+                  setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
+              className="btn-accent"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Pausing...</> : "Pause work"}</button>
           </div>
         </Modal>
       )}
@@ -1043,14 +1185,24 @@ export default function PortalShell() {
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => {
+            <button
+              onClick={async () => {
+              setModalLoading(true);
+              try {
               const mk = assetMakeInput.trim();
               const m = assetModelInput.trim();
               const s = assetSerialInput.trim();
               const y = parseInt(assetYearInput, 10);
               if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
-              doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null); setModal(null);
-            }} className="btn-primary">Close complete</button>
+              await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null); setModal(null);
+              } finally {
+                setModalLoading(false);
+              }
+            }}
+              disabled={modalLoading}
+              className="btn-primary"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Closing...</> : "Close complete"}</button>
           </div>
         </Modal>
       )}

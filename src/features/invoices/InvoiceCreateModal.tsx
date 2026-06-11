@@ -1,17 +1,19 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateInvoiceSchema, CreateInvoiceForm } from "../../lib/schemas";
 import { Modal } from "../../components/ui/Modal";
+import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T, LINE_TYPES, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 
 export default function InvoiceCreateModal(props: any) {
   const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice } = props;
+  const [submitting, setSubmitting] = useState(false);
   const defaultLaborRate = currentUser?.defaultLaborRate ?? 110;
   const defaultTruckRate = currentUser?.defaultTruckRate ?? 110;
   const {
@@ -73,8 +75,13 @@ export default function InvoiceCreateModal(props: any) {
   const over = (woData.nte || 0) > 0 && projectedSpend > woData.nte;
   const close = () => { setModal(null); resetNewInv(); };
   const onSubmit = async (data: CreateInvoiceForm) => {
+    setSubmitting(true);
+    try {
     const ok = await doSubmitInvoice(woData, data);
     if (ok) reset();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -169,7 +176,23 @@ export default function InvoiceCreateModal(props: any) {
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
           <button type="button" onClick={close} className="btn-soft">Cancel</button>
-          <button type="submit" className="btn-accent">Submit</button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn-accent"
+            style={{
+              opacity: submitting ? 0.7 : 1,
+              cursor: submitting ? "default" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {submitting
+              ? <><BtnSpinner />Submitting...</>
+              : "Submit"
+            }
+          </button>
         </div>
       </form>
     </Modal>

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { T } from "../../lib/constants";
+import { BtnSpinner } from "../../components/ui/BtnSpinner";
 
 export default function LoginForm({
   loginEmail, setLoginEmail, loginPassword, setLoginPassword,
@@ -43,8 +44,30 @@ export default function LoginForm({
             <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
           </div>
           {loginError && <div style={{ fontSize: 12, color: T.danger, background: T.dangerSoft, border: `1px solid ${T.dangerSoft}`, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>{loginError}</div>}
-          {loginLoading ? <div style={{ textAlign: "center", padding: "12px 0" }}><div style={{ width: 22, height: 22, border: `3px solid ${T.borderSoft}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto" }} /></div>
-            : <button onClick={() => doLogin(loginEmail, loginPassword)} style={{ width: "100%", padding: 13, borderRadius: 10, background: T.ink, color: T.bg, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>Sign in</button>}
+          <button
+            onClick={() => doLogin(loginEmail, loginPassword)}
+            disabled={loginLoading}
+            style={{
+              width: "100%",
+              padding: 13,
+              borderRadius: 10,
+              background: loginLoading ? "#555" : T.ink,
+              color: T.bg,
+              border: "none",
+              cursor: loginLoading ? "default" : "pointer",
+              fontWeight: 600,
+              fontSize: 14,
+              fontFamily: "inherit",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {loginLoading
+              ? <><BtnSpinner />Signing in...</>
+              : "Sign in"
+            }
+          </button>
         </div>
       </div>
     </div>

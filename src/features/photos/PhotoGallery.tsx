@@ -3,13 +3,16 @@
 
 import { useState, useEffect } from "react";
 import { Ico } from "../../components/ui/Ico";
+import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
 import { getPhotoUrl } from "../../lib/db";
 
-export default function PhotoGallery({ woId, photos = [], imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto }: any) {
+export default function PhotoGallery({ woId, photos = [], imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, loadingStates = {} }: any) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const adding = !!loadingStates["addPhotos_" + woId];
+  const removing = !!loadingStates["removePhoto_" + woId];
 
   useEffect(() => {
     if (!expanded || photos.length === 0) return;
@@ -46,10 +49,10 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
                     <div className="card" style={{ padding: 22, marginBottom: 16 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos{(photos?.length || 0) > 0 ? ` (${photos.length})` : ""}</div>
-                        <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "8px 14px" }}>
+                        <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 14px", opacity: adding ? 0.7 : 1 }}>
                           <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
-                          Add photos
-                          <input type="file" accept="image/*" multiple capture="environment" style={{ display: "none" }} onChange={e => { doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
+                          {adding ? <><BtnSpinnerDark />Uploading...</> : "Add photos"}
+                          <input type="file" accept="image/*" multiple capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
                         </label>
                       </div>
                       {(photos || []).length === 0
@@ -67,7 +70,7 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
                                       {url
                                         ? <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={() => setImageErrors((prev: any) => ({ ...prev, [path]: true }))} />
                                         : <div style={{ width: "100%", height: "100%", background: T.surfaceSoft, color: T.subtle, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 8 }}>Photo unavailable</div>}
-                                      <button onClick={e => { e.stopPropagation(); doRemovePhoto(woId, path); }} style={{ position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: "50%", background: "rgba(31,30,28,0.8)", border: "none", color: "#fff", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>x</button>
+                                      <button disabled={removing} onClick={e => { e.stopPropagation(); doRemovePhoto(woId, path); }} style={{ position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: "50%", background: "rgba(31,30,28,0.8)", border: "none", color: "#fff", fontSize: 12, cursor: removing ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: removing ? 0.7 : 1 }}>{removing ? "..." : "x"}</button>
                                     </div>
                                   );
                                 })}

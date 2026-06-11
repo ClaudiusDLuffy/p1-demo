@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { signIn, signOut } from "../../lib/db";
 import { supabase } from "../../lib/supabase/client";
 import { DEMO_ACCOUNTS } from "../../lib/constants";
@@ -22,6 +23,7 @@ export default function useAuth({
   setWorkOrders,
   setInvoices,
 }: any) {
+  const qc = useQueryClient();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -87,14 +89,13 @@ export default function useAuth({
   };
   const logout = async () => {
     await signOut();
+    qc.clear();
     setHasSession(false);
     setCurrentUser(null);
     setPage("dashboard");
     setSelectedWO(null);
     setLoginEmail("");
     setAiNote(null);
-    if (setWorkOrders) setWorkOrders([]);
-    if (setInvoices) setInvoices([]);
   };
 
   // -- DATA LOADERS - fire when auth session is available ---------------
@@ -130,14 +131,15 @@ export default function useAuth({
         setHasSession(false);
         setLoginLoading(false);
       } else if (event === "SIGNED_OUT") {
-        setHasSession(false);
+        qc.clear();
         lastLoadedUserIdRef.current = null;
+        setHasSession(false);
         setCurrentUser(null);
         setLoginLoading(false);
       }
     });
     return () => { mounted = false; subscription.unsubscribe(); };
-  }, [hydrateProfile]);
+  }, [hydrateProfile, qc]);
 
   return {
     currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
