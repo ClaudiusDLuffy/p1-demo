@@ -12,6 +12,7 @@ set allowed_mime_types = array[
   'image/webp',
   'image/gif',
   'image/bmp',
-  'image/tiff'
+  'image/tiff',
+  'application/octet-stream'
 ]
 where id = 'photos';
