@@ -10,6 +10,7 @@ import { Field } from "../../components/ui/Field";
 import { Input } from "../../components/ui/Input";
 import { Sel } from "../../components/ui/Sel";
 import { TA } from "../../components/ui/TA";
+import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T, PRIORITY } from "../../lib/constants";
 
 export default function WorkOrderCreateForm(props: any) {
@@ -18,6 +19,7 @@ export default function WorkOrderCreateForm(props: any) {
     setSelectedWO, setPage, setAiNote, isManager,
   } = props;
   const [createErr, setCreateErr] = useState<{ msg: string; openWoId?: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const {
     register,
     handleSubmit,
@@ -34,6 +36,8 @@ export default function WorkOrderCreateForm(props: any) {
   });
 
   const onSubmit = async (data: CreateWorkOrderForm) => {
+    setSubmitting(true);
+    try {
     setCreateErr(null);
     const result = await doCreateWO(data);
     if (result === true || result?.ok) {
@@ -42,6 +46,9 @@ export default function WorkOrderCreateForm(props: any) {
       return;
     }
     if (result?.error) setCreateErr(result.error);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -117,7 +124,23 @@ export default function WorkOrderCreateForm(props: any) {
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
           <button type="button" onClick={onClose} className="btn-soft">Cancel</button>
-          <button type="submit" className="btn-primary">Create</button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn-primary"
+            style={{
+              opacity: submitting ? 0.7 : 1,
+              cursor: submitting ? "default" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {submitting
+              ? <><BtnSpinner />Creating...</>
+              : "Create"
+            }
+          </button>
         </div>
       </form>
     </Modal>

@@ -21,6 +21,9 @@ export default function useWorkOrders({
 }: any) {
   const qc = useQueryClient();
   const [workOrders, setWorkOrders] = useState<any[]>(workOrdersData ?? []);
+  const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
+  const setLoading = (key: string, val: boolean) =>
+    setLoadingStates(prev => ({ ...prev, [key]: val }));
 
   useEffect(() => {
     if (workOrdersData) setWorkOrders(workOrdersData);
@@ -67,6 +70,8 @@ export default function useWorkOrders({
   const doAssign = async (woId: string, contractorId: string) => {
     const c = getUser(contractorId);
     if (!c) { fire("Contractor not found"); return; }
+    setLoading("assign_" + woId, true);
+    try {
     const dispatchedAt = new Date().toISOString();
     const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -76,9 +81,14 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" });
       await insertActivity(woId, "System", text, "system");
     }, "Dispatch failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("assign_" + woId, false);
+    }
   };
 
   const doUnassign = async (woId: string) => {
+    setLoading("unassign_" + woId, true);
+    try {
     const wo = workOrders.find(w => w.id === woId);
     const text = `Work order unassigned by ${currentUser.name}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -87,6 +97,9 @@ export default function useWorkOrders({
     await dbCall(async () => {
       await unassignWorkOrder(woId, currentUser.name);
     }, "Unassign failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("unassign_" + woId, false);
+    }
   };
 
   // Soft delete. Optimistically pull the card from every view, drop the
@@ -95,6 +108,8 @@ export default function useWorkOrders({
   const doDeleteWO = async (woId: string) => {
     const wo = workOrders.find(w => w.id === woId);
     if (!wo) return;
+    setLoading("deleteWO_" + woId, true);
+    try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     setWorkOrders(prev => prev.filter(w => w.id !== woId));
     setSelectedWO(null);
@@ -105,6 +120,9 @@ export default function useWorkOrders({
     }, "Delete failed", () => restoreWorkOrders(snapshot));
     if (ok) fire(`Work order ${woId} deleted.`);
     else setWorkOrders(prev => prev.some(w => w.id === woId) ? prev : [wo, ...prev]);
+    } finally {
+      setLoading("deleteWO_" + woId, false);
+    }
   };
 
   const doReassign = async (woId: string, newContractorId: string) => {
@@ -113,6 +131,8 @@ export default function useWorkOrders({
     const newC = getUser(newContractorId);
     if (!newC) { fire("Contractor not found"); return; }
     if (wo?.contractor === newContractorId) { fire("Already assigned to that contractor"); return; }
+    setLoading("reassign_" + woId, true);
+    try {
     const text = `Reassigned from ${oldName} to ${newC.name} by ${currentUser.name}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { contractor: newContractorId, status: "assigned", functionalStatus: "Dispatched" }, localActivity(text, "system"));
@@ -120,6 +140,9 @@ export default function useWorkOrders({
     await dbCall(async () => {
       await reassignWorkOrder(woId, newContractorId, oldName, newC.name, currentUser.name);
     }, "Reassign failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("reassign_" + woId, false);
+    }
   };
 
   const doDeleteActivity = async (woId: string, activityId: string) => {
@@ -134,6 +157,8 @@ export default function useWorkOrders({
   };
 
   const doSetEta = async (woId: string, eta: string) => {
+    setLoading("setEta_" + woId, true);
+    try {
     const text = `ETA set: ${eta}`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { eta }, localActivity(text, "system"));
@@ -142,6 +167,9 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, { eta });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "ETA save failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("setEta_" + woId, false);
+    }
   };
 
   // Contractor records who was on the job (text snapshot). Blank clears it.
@@ -154,6 +182,8 @@ export default function useWorkOrders({
   };
 
   const doStartWork = async (woId: string, notes: string) => {
+    setLoading("startWork_" + woId, true);
+    try {
     const startIso = startDateInput && startTimeInput ? new Date(`${startDateInput}T${startTimeInput}`).toISOString() : new Date().toISOString();
     const text = notes || `Checked in and started work at ${timeNow()}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -163,9 +193,14 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso });
       await insertActivity(woId, currentUser.name, text, "note");
     }, "Start work failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("startWork_" + woId, false);
+    }
   };
 
   const doPauseWork = async (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
+    setLoading("pauseWork_" + woId, true);
+    try {
     const pauseIso = pauseDateInput && pauseTimeInput ? new Date(`${pauseDateInput}T${pauseTimeInput}`).toISOString() : new Date().toISOString();
     const partLabel = partDesc ? `${partDesc}${partNum ? ` (${partNum})` : ""}` : null;
     const text = notes || `Work paused: ${reason}.${partLabel ? ` Part needed: ${partLabel}.` : ""}`;
@@ -179,9 +214,14 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, updates);
       await insertActivity(woId, currentUser.name, text, "note");
     }, "Pause failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("pauseWork_" + woId, false);
+    }
   };
 
   const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null) => {
+    setLoading("closeComplete_" + woId, true);
+    try {
     const endIso = new Date().toISOString();
     const text = `Job completed. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.`;
     const patch: any = { status: "completed", functionalStatus: "Completed", assetMake: make, assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null };
@@ -193,9 +233,14 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, patch);
       await insertActivity(woId, currentUser.name, text, "note");
     }, "Close failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("closeComplete_" + woId, false);
+    }
   };
 
   const doMoveToInvoice = async (woId: string) => {
+    setLoading("moveToInvoice_" + woId, true);
+    try {
     const text = "7-Eleven portal updated. Moved to pending invoice.";
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { status: "pending_invoice" }, localActivity(text, "system"));
@@ -204,11 +249,16 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, { status: "pending_invoice" });
       await insertActivity(woId, "System", text, "system");
     }, "Update failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("moveToInvoice_" + woId, false);
+    }
   };
 
   // Owner approves on behalf of AFM (Phase 1 has no AFM role). Clears the
   // submitted invoice for payment and carries the WO to Pending Payment.
   const doApproveInvoice = async (woId: string) => {
+    setLoading("approveInvoice_" + woId, true);
+    try {
     const inv = invoices.find(i => i.wot === woId && (i.state === "submitted" || i.state === "revised"));
     const text = `Approved on behalf of AFM by ${currentUser.name}.${inv ? ` Invoice #${inv.num} cleared for payment.` : ""}`;
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -224,12 +274,17 @@ export default function useWorkOrders({
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
+    } finally {
+      setLoading("approveInvoice_" + woId, false);
+    }
   };
 
   // Owner records payment received → WO is fully closed. Stamp closed_at
   // (drives the 24h board linger + History) and clear any NTE flag so a
   // closed job leaves the "NTE Approval Needed" bucket.
   const doMarkPaid = async (woId: string) => {
+    setLoading("markPaid_" + woId, true);
+    try {
     const inv = invoices.find(i => i.wot === woId);
     const paidAt = new Date().toISOString();
     const text = `Marked paid by ${currentUser.name}. Work order closed.`;
@@ -246,6 +301,9 @@ export default function useWorkOrders({
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
+    } finally {
+      setLoading("markPaid_" + woId, false);
+    }
   };
 
   // Staff-only fail-safe: pull a closed WO back onto the active board. Re-enters
@@ -253,6 +311,8 @@ export default function useWorkOrders({
   // paid→approved so Mark Paid works again. Clears closed_at so the 24h/History
   // logic treats it as active.
   const doReopen = async (woId: string) => {
+    setLoading("reopen_" + woId, true);
+    try {
     const inv = invoices.find(i => i.wot === woId && i.state === "paid");
     const text = `Work order reopened by ${currentUser.name}.`;
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -268,6 +328,9 @@ export default function useWorkOrders({
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
+    } finally {
+      setLoading("reopen_" + woId, false);
+    }
   };
 
   // Manager-side NTE override. Soft cap — no hard stop, contractors can still
@@ -309,6 +372,8 @@ export default function useWorkOrders({
       capitalNotes?: string
     }
   ) => {
+    setLoading("capitalFlag_" + woId, true);
+    try {
     const text = "Flagged as capital replacement — pending approval.";
     const patch = {
       status: "capital",
@@ -327,9 +392,14 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, patch);
       await insertActivity(woId, "System", text, "system");
     }, "Capital flag failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("capitalFlag_" + woId, false);
+    }
   };
 
   const doCapitalDecline = async (woId: string) => {
+    setLoading("capitalDecline_" + woId, true);
+    try {
     const text = `Capital replacement declined by ${currentUser.name}. Work order returned to dispatched.`;
     const patch = {
       status: "assigned",
@@ -344,6 +414,9 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, patch);
       await insertActivity(woId, currentUser.name, text, "system");
     }, "Capital decline failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("capitalDecline_" + woId, false);
+    }
   };
 
 
@@ -380,6 +453,8 @@ export default function useWorkOrders({
   const doPostNote = async (woId: string) => {
     const text = noteText.trim();
     if (!text) return;
+    setLoading("postNote_" + woId, true);
+    try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     setNoteText("");
     setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note" }, ...w.activities] } : w));
@@ -387,11 +462,15 @@ export default function useWorkOrders({
     await dbCall(async () => {
       await insertActivity(woId, currentUser.name, text, "note");
     }, "Note save failed", () => restoreWorkOrders(snapshot));
+    } finally {
+      setLoading("postNote_" + woId, false);
+    }
   };
 
 
   const doAddPhotos = async (woId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
+    setLoading("addPhotos_" + woId, true);
     const limited = Array.from(files).slice(0, 8);
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     fire(`Uploading ${limited.length} photo${limited.length > 1 ? "s" : ""}...`);
@@ -414,10 +493,13 @@ export default function useWorkOrders({
       fire(`Photo upload failed: ${e.message || e}`);
     } finally {
       invalidateBoth();
+      setLoading("addPhotos_" + woId, false);
     }
   };
 
   const doRemovePhoto = async (woId: string, photo: number | string) => {
+    setLoading("removePhoto_" + woId, true);
+    try {
     const wo = workOrders.find(w => w.id === woId);
     const path = typeof photo === "number" ? wo?.photos?.[photo] : photo;
     let storagePath: string | null = null;
@@ -448,12 +530,16 @@ export default function useWorkOrders({
     setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((p: string, i: number) => typeof photo === "number" ? i !== photo : p !== photo) } : w));
     invalidateBoth();
     fire("Photo removed");
+    } finally {
+      setLoading("removePhoto_" + woId, false);
+    }
   };
 
 
 
   return {
     workOrders, setWorkOrders,
+    loadingStates,
     patchLocalWO, localActivity, dbCall,
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,

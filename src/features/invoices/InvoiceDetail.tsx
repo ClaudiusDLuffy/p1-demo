@@ -3,11 +3,12 @@
 
 import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
+import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/constants";
 import { useMemo } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, fmt } = props;
+  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, fmt, loadingStates = {} } = props;
   const inv = useMemo(
     () => invoices.find(i => i.num === selectedInvoice),
     [invoices, selectedInvoice]
@@ -30,7 +31,14 @@ export default function InvoiceDetail(props: any) {
                       {pdfBusy ? "Preparing…" : "Download PDF"}
                     </button>
                     {isManager && (inv.state === "submitted" || inv.state === "revised") && (
-                      <button onClick={() => { doApproveInvoice(inv.wot); setSelectedInvoice(null); }} className="btn-primary">Approve (on behalf of AFM)</button>
+                      <button
+                        onClick={async () => { await doApproveInvoice(inv.wot); setSelectedInvoice(null); }}
+                        disabled={loadingStates["approveInvoice_" + inv.wot]}
+                        className="btn-primary"
+                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["approveInvoice_" + inv.wot] ? 0.7 : 1, cursor: loadingStates["approveInvoice_" + inv.wot] ? "default" : "pointer" }}
+                      >
+                        {loadingStates["approveInvoice_" + inv.wot] ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
+                      </button>
                     )}
                   </div>
                 </div>

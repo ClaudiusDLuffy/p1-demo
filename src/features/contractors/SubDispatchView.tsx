@@ -3,10 +3,11 @@
 
 import { useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
+import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { T, STATUS } from "../../lib/constants";
 
 export default function SubDispatchView(props: any) {
-  const { page, currentUser, USERS, workOrders, setSelectedWO, setPage, setAiNote, doAssign, doReassign, getUser } = props;
+  const { page, currentUser, USERS, workOrders, setSelectedWO, setPage, setAiNote, doAssign, doReassign, getUser, loadingStates = {} } = props;
   const [targets, setTargets] = useState<Record<string, string>>({});
 
   const team = useMemo(
@@ -42,6 +43,8 @@ export default function SubDispatchView(props: any) {
               {myTeamWOs.map((wo: any) => {
                 const target = targets[wo.id] || "";
                 const assigned = getUser(wo.contractor)?.name || wo.technicianOnJob || "Unassigned";
+                const actionKey = wo.contractor ? "reassign_" + wo.id : "assign_" + wo.id;
+                const actionLoading = !!loadingStates[actionKey];
                 return (
                   <tr key={wo.id} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
                     <td style={{ padding: "14px 16px" }}>
@@ -77,10 +80,11 @@ export default function SubDispatchView(props: any) {
                             if (wo.contractor) doReassign(wo.id, target);
                             else doAssign(wo.id, target);
                           }}
+                          disabled={actionLoading}
                           className="btn-soft"
-                          style={{ padding: "8px 12px", fontSize: 11 }}
+                          style={{ padding: "8px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 6, opacity: actionLoading ? 0.7 : 1, cursor: actionLoading ? "default" : "pointer" }}
                         >
-                          {wo.contractor ? "Reassign" : "Assign"}
+                          {actionLoading ? <><BtnSpinnerDark />{wo.contractor ? "Reassigning..." : "Assigning..."}</> : (wo.contractor ? "Reassign" : "Assign")}
                         </button>
                       </div>
                     </td>

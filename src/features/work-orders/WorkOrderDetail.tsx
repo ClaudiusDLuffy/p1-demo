@@ -11,6 +11,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Avatar } from "../../components/ui/Avatar";
 import { Field } from "../../components/ui/Field";
 import { Ico } from "../../components/ui/Ico";
+import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import { computeSlaState } from "../../lib/slaConfig";
@@ -26,7 +27,7 @@ const CapitalFlagModal = dynamic(
 );
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput } = props;
+  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
   const storeHistory = useMemo(
     () => woData ? workOrders.filter(w => w.store === woData.store && w.id !== woData.id) : [],
     [workOrders, woData]
@@ -46,6 +47,14 @@ export default function WorkOrderDetail(props: any) {
   const canInvoice = isManager
     ? false
     : currentUser?.contractorTier === "direct" || currentUser?.contractorTier === null;
+  const isLoading = (key: string) => !!loadingStates[key];
+  const loadingStyle = (key: string) => ({
+    opacity: isLoading(key) ? 0.7 : 1,
+    cursor: isLoading(key) ? "default" : "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  });
   return (
     <>
           {/* ═════ WO DETAIL ═════ */}
@@ -237,45 +246,85 @@ export default function WorkOrderDetail(props: any) {
                       {/* Quick-assign shows the FULL contractor list (same source as
                           the Create WO dropdown) so no contractor is unreachable. */}
                       {woData.status === "unassigned" && isManager && contractorsOnly.map(c => (
-                        <button key={c.id} onClick={() => doAssign(woData.id, c.id)} className="btn-soft">Assign → {c.name.split(" ")[0]}</button>
+                        <button key={c.id} onClick={() => doAssign(woData.id, c.id)} disabled={isLoading("assign_" + woData.id)} className="btn-soft" style={loadingStyle("assign_" + woData.id)}>
+                          {isLoading("assign_" + woData.id) ? <><BtnSpinnerDark />Assigning...</> : <>Assign &rarr; {c.name.split(" ")[0]}</>}
+                        </button>
                       ))}
                       {isManager && ["assigned", "wip", "parts"].includes(woData.status) && (
                         <>
-                          <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} className="btn-soft">Reassign</button>
-                          <button onClick={() => setModal("unassign")} className="btn-soft">Unassign</button>
+                          <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} disabled={isLoading("reassign_" + woData.id)} className="btn-soft" style={loadingStyle("reassign_" + woData.id)}>
+                            {isLoading("reassign_" + woData.id) ? <><BtnSpinnerDark />Reassigning...</> : "Reassign"}
+                          </button>
+                          <button onClick={() => setModal("unassign")} disabled={isLoading("unassign_" + woData.id)} className="btn-soft" style={loadingStyle("unassign_" + woData.id)}>
+                            {isLoading("unassign_" + woData.id) ? <><BtnSpinnerDark />Unassigning...</> : "Unassign"}
+                          </button>
                         </>
                       )}
                       {woData.status === "assigned" && !isManager && (
                         <>
-                          <button onClick={() => setModal("setEta")} className="btn-soft">Set ETA</button>
-                          <button onClick={() => setModal("startWork")} className="btn-accent">Start work</button>
+                          <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
+                            {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
+                          </button>
+                          <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
+                            {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Starting...</> : "Start work"}
+                          </button>
                         </>
                       )}
                       {woData.status === "wip" && (
                         <>
-                          <button onClick={() => setModal("pauseWork")} className="btn-soft">Pause (parts)</button>
-                          {isManager && <button onClick={() => setModal("capitalFlag")} className="btn-soft">Flag capital</button>}
-                          <button onClick={() => setModal("closeComplete")} className="btn-primary">Close complete</button>
+                          <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
+                            {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
+                          </button>
+                          {isManager && <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>}
+                          <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
+                            {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Closing...</> : "Close complete"}
+                          </button>
                         </>
                       )}
-                      {woData.status === "capital" && isManager && <button onClick={() => doCapitalDecline(woData.id)} className="btn-soft">Capital declined - return to dispatched</button>}
-                      {woData.status === "parts" && !isManager && <button onClick={() => setModal("startWork")} className="btn-accent">Resume work</button>}
-                      {woData.status === "completed" && isManager && <button onClick={() => doMoveToInvoice(woData.id)} className="btn-accent">Portal updated → pending invoice</button>}
+                      {woData.status === "capital" && isManager && (
+                        <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
+                          {isLoading("capitalDecline_" + woData.id) ? <><BtnSpinnerDark />Returning...</> : "Capital declined - return to dispatched"}
+                        </button>
+                      )}
+                      {woData.status === "parts" && !isManager && (
+                        <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
+                          {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : "Resume work"}
+                        </button>
+                      )}
+                      {woData.status === "completed" && isManager && (
+                        <button onClick={() => doMoveToInvoice(woData.id)} disabled={isLoading("moveToInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("moveToInvoice_" + woData.id)}>
+                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated &rarr; pending invoice"}
+                        </button>
+                      )}
                       {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && canInvoice && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
                       {!isManager && ["wip", "parts", "completed"].includes(woData.status) && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
-                      {woData.status === "pending_approval" && isManager && <button onClick={() => doApproveInvoice(woData.id)} className="btn-accent">Approve (on behalf of AFM)</button>}
-                      {woData.status === "pending_payment" && isManager && <button onClick={() => setModal("markPaid")} className="btn-primary">Mark paid → close</button>}
+                      {woData.status === "pending_approval" && isManager && (
+                        <button onClick={() => doApproveInvoice(woData.id)} disabled={isLoading("approveInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("approveInvoice_" + woData.id)}>
+                          {isLoading("approveInvoice_" + woData.id) ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
+                        </button>
+                      )}
+                      {woData.status === "pending_payment" && isManager && (
+                        <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
+                          {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid &rarr; close"}
+                        </button>
+                      )}
                       {/* Closed job: always-available invoice download + staff-only reopen. */}
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
-                      {woData.status === "closed" && isManager && <button onClick={() => setModal("reopen")} className="btn-soft">Reopen</button>}
-                    </div>
+                      {woData.status === "closed" && isManager && (
+                        <button onClick={() => setModal("reopen")} disabled={isLoading("reopen_" + woData.id)} className="btn-soft" style={loadingStyle("reopen_" + woData.id)}>
+                          {isLoading("reopen_" + woData.id) ? <><BtnSpinnerDark />Reopening...</> : "Reopen"}
+                        </button>
+                      )}
 
+                    </div>
                     {/* Destructive secondary action — deliberately separated from the
                         primary action zone above. Soft delete, manager/dispatcher/
                         back-office only (never contractor). */}
                     {isManager && (
                       <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}` }}>
-                        <button onClick={() => setModal("deleteWO")} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3 }}>Delete work order</button>
+                        <button onClick={() => setModal("deleteWO")} disabled={isLoading("deleteWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: isLoading("deleteWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("deleteWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                          {isLoading("deleteWO_" + woData.id) ? <><BtnSpinnerDark />Deleting...</> : "Delete work order"}
+                        </button>
                       </div>
                     )}
 
@@ -363,7 +412,7 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    <PhotoGallery woId={woData.id} photos={woData.photos || []} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} />
+                    <PhotoGallery woId={woData.id} photos={woData.photos || []} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} loadingStates={loadingStates} />
 
                     {/* Activity */}
                     <div className="card" style={{ padding: 22 }}>
@@ -373,7 +422,14 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
                         <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id); }} placeholder="Add a note..." style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
-                        <button onClick={() => doPostNote(woData.id)} className="btn-primary" style={{ padding: "10px 18px" }}>Post</button>
+                        <button
+                          onClick={() => doPostNote(woData.id)}
+                          disabled={isLoading("postNote_" + woData.id)}
+                          className="btn-primary"
+                          style={{ padding: "10px 18px", opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          {isLoading("postNote_" + woData.id) ? <><BtnSpinner />Posting...</> : "Post"}
+                        </button>
                       </div>
                       {aiNote && (
                         <div style={{ background: T.surfaceSoft, border: `1px dashed ${T.accent}`, borderRadius: 12, padding: 18, marginBottom: 16, animation: "fadeUp 0.3s" }}>
