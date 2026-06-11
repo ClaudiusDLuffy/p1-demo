@@ -238,10 +238,31 @@ const CSS = `
   .table-scroll { overflow-x: auto; }
   .topbar-title { font-size: 22px !important; }
   .content-pad { padding: 16px !important; }
-  .modal-inner { width: 95% !important; padding: 20px !important; max-height: 85vh !important; }
+  .modal-inner { width: 100% !important; padding: 18px !important; max-height: 85vh !important; max-height: calc(100dvh - 24px) !important; }
   .modal-form-row { grid-template-columns: 1fr !important; }
   .stat-value { font-size: 28px !important; }
   .stats-grid .stat-hero { grid-column: 1 / -1 !important; }
+  /* ── Mobile form usability (375px baseline) ──────────────────────────
+     16px font on every field kills iOS focus auto-zoom (the layout jump
+     that reads as "taps don't register"); 44px min targets per HIG. */
+  input, select, textarea { font-size: 16px !important; }
+  .modal-overlay { align-items: flex-start !important; padding: 12px !important; }
+  .modal-inner input:not([type="file"]), .modal-inner select { min-height: 44px; }
+  .modal-inner textarea { min-height: 48px; }
+  .modal-close { width: 44px !important; height: 44px !important; }
+  /* Invoice line items: the desktop 7-column row can't fit at 375px —
+     re-flow each line as a stacked card. Desktop grid is untouched. */
+  .inv-line-head { display: none !important; }
+  .inv-line-row { grid-template-columns: repeat(6, 1fr) !important; gap: 8px !important; padding: 14px 12px !important; }
+  .inv-line-row .inv-num { grid-column: 1; align-self: center; padding-top: 0 !important; }
+  .inv-line-row select { grid-column: 2 / 6; }
+  .inv-line-row .inv-line-remove { grid-row: 1; grid-column: 6; justify-self: end; align-self: center; width: 44px !important; height: 44px !important; font-size: 22px !important; padding: 0 !important; }
+  .inv-line-row textarea { grid-column: 1 / -1; min-height: 64px; }
+  .inv-line-row .inv-mlabel { display: block !important; grid-column: span 2; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #9A958D; margin-bottom: -4px; align-self: end; }
+  .inv-line-row input { grid-column: span 2; }
+  .inv-line-row .inv-amount { grid-column: span 2; text-align: right; padding-top: 0 !important; align-self: center; font-size: 14px !important; }
+  .inv-totals-row { grid-template-columns: 1fr !important; }
+  .inv-add-btns button { min-height: 44px; padding: 10px 14px !important; font-size: 13px !important; }
 }
 @media(min-width: 769px) { .mobile-bottom-nav { display: none !important; } }
 `;
@@ -352,7 +373,7 @@ export default function PortalShell() {
     pdfBusy,
     nextInvNum, resetNewInv,
     doSubmitInvoice: submitInvoice,
-    doDownloadInvoice,
+    doDownloadInvoice, doDeleteInvoice,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, fire });
   const doSubmitInvoice = async (wo: any, data?: any) => {
@@ -812,7 +833,7 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
 

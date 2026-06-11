@@ -51,8 +51,10 @@ export default function useAuth({
         isDemo: DEMO_ACCOUNTS.some(d => d.email === prof.email),
         contractorTier: prof.contractor_tier || null,
         dispatcherId: prof.dispatcher_id || null,
-        defaultLaborRate: prof.default_labor_rate ?? 110,
-        defaultTruckRate: prof.default_truck_rate ?? 110,
+        // Reserved for Phase 2 per-contractor rates — the invoice form no
+        // longer reads these (rates start empty, Truck Charge defaults 60).
+        defaultLaborRate: prof.default_labor_rate ?? null,
+        defaultTruckRate: prof.default_truck_rate ?? null,
       });
       setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
     } catch (err: any) {
