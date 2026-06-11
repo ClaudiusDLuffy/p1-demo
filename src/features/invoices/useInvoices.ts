@@ -8,6 +8,7 @@ import {
   updateWorkOrder,
   uploadInvoicePdf,
   downloadInvoicePdfBlob,
+  deleteInvoice,
 } from "../../lib/db";
 import { P1_BUSINESS, SEVEN_BILL_TO, LINE_TYPES, MONTHS } from "../../lib/constants";
 import { WORK_ORDERS_KEY } from "../work-orders/queries";
@@ -23,9 +24,11 @@ export default function useInvoices({ currentUser, fire }: any) {
   const [submittedInvoiceNum, setSubmittedInvoiceNum] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
 
+  // Rates start empty (contractor enters their own); Truck Charge is the one
+  // exception — editable default of 60.
   const defaultInvLines = () => [
-    { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTravelRate, amount: P1_BUSINESS.defaultTravelRate },
-    { type: "Labor", desc: "", qty: 1, rate: P1_BUSINESS.defaultLaborRate, amount: P1_BUSINESS.defaultLaborRate },
+    { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTruckCharge, amount: P1_BUSINESS.defaultTruckCharge },
+    { type: "Labor", desc: "", qty: 1, rate: "", amount: 0 },
   ];
   const nextInvNum = useCallback(() => {
     const invoices = (qc.getQueryData(INVOICES_KEY) as any[]) ?? [];
@@ -145,13 +148,29 @@ export default function useInvoices({ currentUser, fire }: any) {
     }
   };
 
+  // Staff-only soft delete (the UI gates visibility; RLS backs it up).
+  // Deleted invoices vanish from every list/stat because loadInvoices
+  // filters deleted_at at the source.
+  const doDeleteInvoice = async (inv: any) => {
+    try {
+      await deleteInvoice(inv.id, inv.num, inv.wot || null, currentUser.name);
+      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+      fire(`Invoice #${inv.num} deleted`);
+      return true;
+    } catch (e: any) {
+      fire(`Delete failed: ${e.message || e}`);
+      return false;
+    }
+  };
+
   return {
     newInv, setNewInv,
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doDownloadInvoice,
+    doSubmitInvoice, doDownloadInvoice, doDeleteInvoice,
     lineAmount, invSubtotal, invTotal,
   };
 }

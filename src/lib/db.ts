@@ -75,8 +75,10 @@ const mapProfile = (p: any) => ({
   color: p.color,
   contractorTier: p.contractor_tier || null,
   dispatcherId: p.dispatcher_id || null,
-  defaultLaborRate: p.default_labor_rate ?? 110,
-  defaultTruckRate: p.default_truck_rate ?? 110,
+  // Per-contractor rate columns are reserved for the Phase 2 rate work —
+  // the invoice form no longer reads them (rates start empty, truck = 60).
+  defaultLaborRate: p.default_labor_rate ?? null,
+  defaultTruckRate: p.default_truck_rate ?? null,
   defaultPartsMarkup: p.default_parts_markup ?? 0,
 });
 
@@ -201,8 +203,10 @@ function ageString(createdAt: string, dispatchedAt?: string): string {
 
 export async function loadInvoices(): Promise<Invoice[]> {
   const sb = supabase();
+  // Soft-deleted invoices are excluded at the source — every list, badge,
+  // stat, and spend calc consumes this array, so one filter covers all.
   const [invRes, lineRes] = await Promise.all([
-    sb.from("invoices").select("*").order("invoice_date", { ascending: false }),
+    sb.from("invoices").select("*").is("deleted_at", null).order("invoice_date", { ascending: false }),
     sb.from("invoice_lines").select("*").order("position"),
   ]);
   if (invRes.error) throw invRes.error;
@@ -381,6 +385,24 @@ export async function deleteWorkOrder(workOrderId: string, authorName: string): 
   }).eq("id", workOrderId);
   if (error) throw error;
   await insertActivity(workOrderId, "System", `Work order deleted by ${authorName}.`, "system");
+}
+
+// Invoice soft delete — same pattern as deleteWorkOrder: deleted_at +
+// deleted_by, never a hard delete (row stays restorable via SQL). Staff-only
+// (gated in the UI; inv_update RLS already restricts who can update).
+// Writes the audit activity on the parent work order. Does NOT touch the
+// work order's status — staff move the WO manually if needed.
+export async function deleteInvoice(invoiceId: string, invoiceNum: string, workOrderId: string | null, authorName: string): Promise<void> {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from("invoices").update({
+    deleted_at: new Date().toISOString(),
+    deleted_by: user?.id || null,
+  }).eq("id", invoiceId);
+  if (error) throw error;
+  if (workOrderId) {
+    await insertActivity(workOrderId, "System", `Invoice #${invoiceNum} deleted by ${authorName}.`, "system");
+  }
 }
 
 // Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,

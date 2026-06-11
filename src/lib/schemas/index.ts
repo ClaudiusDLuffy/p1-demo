@@ -100,7 +100,10 @@ export const CreateInvoiceLineSchema = z.object({
   type: z.string().min(1),
   desc: z.string().min(1, "Description is required"),
   qty: z.number().positive("Must be greater than 0"),
-  rate: z.number().nonnegative("Must be 0 or greater"),
+  // Rate fields start EMPTY (contractor enters their own number); an empty
+  // number input arrives as NaN via valueAsNumber, which z.number() rejects
+  // as an invalid type — surface that as a friendly "Enter a rate".
+  rate: z.number({ error: "Enter a rate" }).nonnegative("Must be 0 or greater"),
 })
 
 export const CreateInvoiceSchema = z.object({

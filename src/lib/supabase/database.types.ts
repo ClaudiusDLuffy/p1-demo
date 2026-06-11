@@ -182,6 +182,8 @@ export type Database = {
           contractor_id: string | null
           created_at: string | null
           created_by: string | null
+          deleted_at: string | null
+          deleted_by: string | null
           due_date: string | null
           id: string
           invoice_date: string
@@ -207,6 +209,8 @@ export type Database = {
           contractor_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           due_date?: string | null
           id?: string
           invoice_date: string
@@ -232,6 +236,8 @@ export type Database = {
           contractor_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           due_date?: string | null
           id?: string
           invoice_date?: string

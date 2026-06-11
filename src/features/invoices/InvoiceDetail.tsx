@@ -4,11 +4,14 @@
 import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
+import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/constants";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doDownloadInvoice, doDeleteInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const inv = useMemo(
     () => invoices.find(i => i.num === selectedInvoice),
     [invoices, selectedInvoice]
@@ -40,8 +43,33 @@ export default function InvoiceDetail(props: any) {
                         {loadingStates["approveInvoice_" + inv.wot] ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
                       </button>
                     )}
+                    {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
+                    {isManager && (
+                      <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
+                    )}
                   </div>
                 </div>
+                {confirmDelete && (
+                  <Modal onClose={() => setConfirmDelete(false)} title="Delete invoice" width={420}>
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                      Delete this invoice? This cannot be undone from the portal.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button onClick={() => setConfirmDelete(false)} className="btn-soft">Cancel</button>
+                      <button
+                        onClick={async () => {
+                          setDeleting(true);
+                          const ok = await doDeleteInvoice(inv);
+                          setDeleting(false);
+                          setConfirmDelete(false);
+                          if (ok) setSelectedInvoice(null);
+                        }}
+                        disabled={deleting}
+                        style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: deleting ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: deleting ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}
+                      >{deleting ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
+                    </div>
+                  </Modal>
+                )}
                 <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
                   {/* Invoice header */}
                   <div style={{ padding: "28px 32px", borderBottom: `1px solid ${T.borderSoft}` }}>

@@ -80,8 +80,9 @@ export const P1_BUSINESS = {
   email: "eddie@phospitality.com",
   phone: "+1 (561) 421-1281",
   website: "www.p1pros.com",
-  defaultLaborRate: 110, // placeholder â€” pending Jeremy confirmation per contractor
-  defaultTravelRate: 110,
+  // Rate fields start empty — the contractor enters their own number.
+  // Truck Charge is the one exception: editable default of 60.
+  defaultTruckCharge: 60,
   defaultTerms: "Net 30",
 };
 

@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # P1 Service Portal — Project Context
 
 ## This is LIVE PRODUCTION

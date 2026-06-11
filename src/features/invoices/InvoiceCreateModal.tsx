@@ -11,11 +11,17 @@ import { T, LINE_TYPES, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 
+// Rates start EMPTY so the contractor enters their own number; Truck Charge
+// is the one exception — editable default of 60. (Per-contractor profile
+// rates are reserved for Phase 2 and intentionally not read here.)
+const initialLines = () => [
+  { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTruckCharge },
+  { type: "Labor", desc: "", qty: 1, rate: undefined },
+];
+
 export default function InvoiceCreateModal(props: any) {
   const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice } = props;
   const [submitting, setSubmitting] = useState(false);
-  const defaultLaborRate = currentUser?.defaultLaborRate ?? 110;
-  const defaultTruckRate = currentUser?.defaultTruckRate ?? 110;
   const {
     register,
     handleSubmit,
@@ -32,10 +38,7 @@ export default function InvoiceCreateModal(props: any) {
       terms: "Net 30",
       tax: "",
       cme: "",
-      lines: [
-        { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: defaultTruckRate },
-        { type: "Labor", desc: "", qty: 1, rate: defaultLaborRate },
-      ],
+      lines: initialLines(),
     },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "lines" });
@@ -54,12 +57,9 @@ export default function InvoiceCreateModal(props: any) {
       terms: "Net 30",
       tax: "",
       cme: "",
-      lines: [
-        { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: defaultTruckRate },
-        { type: "Labor", desc: "", qty: 1, rate: defaultLaborRate },
-      ],
+      lines: initialLines(),
     });
-  }, [modal, reset, defaultLaborRate, defaultTruckRate]);
+  }, [modal, reset]);
 
   const priorSpend = useMemo(
     () => {
@@ -89,7 +89,7 @@ export default function InvoiceCreateModal(props: any) {
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>P1 Pros invoice to 7-Eleven - Work Order {woData.id}</div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14, padding: "14px 16px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginBottom: 18 }}>
+        <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14, padding: "14px 16px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginBottom: 18 }}>
           <div>
             <div className="display" style={{ fontSize: 16, color: T.ink, lineHeight: 1.1 }}>{P1_BUSINESS.dba}</div>
             <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
@@ -120,31 +120,42 @@ export default function InvoiceCreateModal(props: any) {
 
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
+          <div className="inv-line-head" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
             <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div><div></div>
           </div>
           {fields.map((field, i) => {
             const line = watchedLines[i] || field;
+            const lineErr = errors.lines?.[i];
             return (
-              <div key={field.id} style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
-                <div className="mono" style={{ fontSize: 12, color: T.subtle, paddingTop: 10 }}>{i + 1}</div>
+              <div key={field.id} className="inv-line-row" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
+                <div className="mono inv-num" style={{ fontSize: 12, color: T.subtle, paddingTop: 10 }}>{i + 1}</div>
                 <select {...register(`lines.${i}.type` as const)} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, outline: "none" }}>{LINE_TYPES.map(t => <option key={t}>{t}</option>)}</select>
-                <textarea {...register(`lines.${i}.desc` as const)} placeholder={line.type === "Labor" ? "What was done on site..." : line.type === "Parts/Hardware" ? "Part description" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
-                <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }} />
-                <input type="number" step="0.01" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
-                <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
-                <button type="button" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
+                <textarea {...register(`lines.${i}.desc` as const)} placeholder={line.type === "Labor" ? "What was done on site..." : line.type === "Parts/Hardware" ? "Part description" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
+                {/* Mobile-only field labels — hidden inline so the desktop grid
+                    (direct-children columns) is untouched; CSS reveals them. */}
+                <span className="inv-mlabel" style={{ display: "none" }}>Qty</span>
+                <span className="inv-mlabel" style={{ display: "none" }}>Rate</span>
+                <span className="inv-mlabel" style={{ display: "none" }}>Amount</span>
+                <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }} />
+                <input type="number" step="0.01" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+                <div className="mono inv-amount" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
+                <button type="button" className="inv-line-remove" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
               </div>
             );
           })}
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+        {errors.lines && (
+          <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
+            Check the highlighted line items — each line needs a description, a qty, and a rate (remove lines you don't need).
+          </div>
+        )}
+        <div className="inv-add-btns" style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
           {["Labor", "Truck Charge", "Parts/Hardware", "Shipping", "Other"].map(type => (
-            <button key={type} type="button" onClick={() => append({ type, desc: "", qty: 1, rate: type === "Parts/Hardware" ? 0 : type === "Truck Charge" ? defaultTruckRate : defaultLaborRate })} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ {type === "Parts/Hardware" ? "Parts" : type}</button>
+            <button key={type} type="button" onClick={() => append({ type, desc: "", qty: 1, rate: type === "Truck Charge" ? P1_BUSINESS.defaultTruckCharge : undefined })} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ {type === "Parts/Hardware" ? "Parts" : type}</button>
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 14, marginBottom: 18, alignItems: "start" }}>
+        <div className="inv-totals-row" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 14, marginBottom: 18, alignItems: "start" }}>
           <div />
           <div style={{ background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, padding: "14px 16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13 }}><span style={{ color: T.muted }}>Subtotal</span><span className="mono" style={{ fontWeight: 600, color: T.ink }}>{fmt(Math.round(sub * 100) / 100)}</span></div>
