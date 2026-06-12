@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
+import { Sel } from "../../components/ui/Sel";
 import { T, STATUS } from "../../lib/constants";
 
 export default function SubDispatchView(props: any) {
@@ -66,14 +67,14 @@ export default function SubDispatchView(props: any) {
                     </td>
                     <td style={{ padding: "14px 16px" }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <select
+                        <Sel
                           value={target}
                           onChange={(e: any) => setTargets((prev: any) => ({ ...prev, [wo.id]: e.target.value }))}
-                          style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, fontFamily: "inherit" }}
+                          style={{ width: 190, padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, fontFamily: "inherit" }}
                         >
                           <option value="">Select team member</option>
                           {team.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </select>
+                        </Sel>
                         <button
                           onClick={() => {
                             if (!target) return;

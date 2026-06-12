@@ -10,6 +10,7 @@ import {
 import { computeSlaState } from "../lib/slaConfig";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
+import { DatePickerField, TimePickerField } from "./ui/DateTimePicker";
 import { Sel } from "./ui/Sel";
 import { TA } from "./ui/TA";
 import { Avatar } from "./ui/Avatar";
@@ -205,37 +206,351 @@ const CSS = `
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
 @keyframes spin { to { transform: rotate(360deg) } }
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.85 } }
+html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .display { font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; letter-spacing: -0.5px; }
 .mono { font-family: var(--font-jetbrains-mono), ui-monospace, monospace; }
+.app-root { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
+.main-wrap { flex: 0 0 calc(100% - 232px) !important; min-width: 0; width: calc(100% - 232px); max-width: calc(100% - 232px); overflow-x: hidden; }
+.content-pad { min-width: 0; overflow-x: hidden; box-sizing: border-box; }
 .kcard { background: ${T.surface}; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
 .kcard:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(31,30,28,0.07); border-color: ${T.border}; }
 .kcol { border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.02); overflow: hidden; }
 .card { background: ${T.surface}; border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); }
 .card-hover { transition: box-shadow 140ms ease, transform 140ms ease; }
 .card-hover:hover { box-shadow: 0 8px 24px rgba(31,30,28,0.06); transform: translateY(-1px); }
-.btn-primary { padding: 10px 18px; border-radius: 10px; background: ${T.ink}; color: ${T.bg}; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: background 140ms; }
+.btn-primary { padding: 12px 18px; min-height: 44px; border-radius: 10px; background: ${T.ink}; color: ${T.bg}; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: background 140ms; }
 .btn-primary:hover { background: #000; }
-.btn-accent { padding: 10px 18px; border-radius: 10px; background: ${T.accent}; color: #fff; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: filter 140ms; }
+.btn-accent { padding: 12px 18px; min-height: 44px; border-radius: 10px; background: ${T.accent}; color: #fff; border: none; cursor: pointer; font-weight: 600; font-size: 12px; font-family: inherit; transition: filter 140ms; }
 .btn-accent:hover { filter: brightness(1.08); }
-.btn-soft { padding: 10px 18px; border-radius: 10px; background: ${T.surface}; color: ${T.ink}; border: 1px solid ${T.border}; cursor: pointer; font-weight: 500; font-size: 12px; font-family: inherit; transition: background 140ms; }
+.btn-soft { padding: 12px 18px; min-height: 44px; border-radius: 10px; background: ${T.surface}; color: ${T.ink}; border: 1px solid ${T.border}; cursor: pointer; font-weight: 500; font-size: 12px; font-family: inherit; transition: background 140ms; }
 .btn-soft:hover { background: ${T.bgWarm}; }
 .side-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: none; background: transparent; color: ${T.sidebarText}; cursor: pointer; font-size: 13px; font-family: inherit; margin-bottom: 2px; transition: background 140ms, color 140ms; }
 .side-btn:hover { background: rgba(250,247,242,0.06); color: ${T.sidebarActive}; }
 .side-btn.active { background: rgba(250,247,242,0.08); color: ${T.sidebarActive}; font-weight: 600; }
 .sla-bar { height: 3px; border-radius: 2px; background: ${T.borderSoft}; overflow: hidden; }
 .sla-fill { height: 100%; transition: width 300ms ease; }
+.desktop-only-table { display: block; }
+.mobile-only-cards { display: none; }
+.desktop-only-header { display: block; }
+.mobile-only-header { display: none; }
+.desktop-only-activity-action { display: flex; }
+.mobile-only-activity-actions { display: none; }
+.app-toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100% - 32px));
+  background: ${T.ink};
+  color: ${T.bg};
+  padding: 12px 22px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  animation: fadeUp 0.25s;
+  z-index: 60;
+  box-shadow: 0 8px 32px rgba(31,30,28,0.3);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  border: 1px solid rgba(250,247,242,0.1);
+  box-sizing: border-box;
+}
+.reassign-picker,
+.reassign-search-wrap,
+.reassign-options,
+.reassign-option,
+.reassign-option-row,
+.reassign-option-main {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.reassign-picker {
+  overflow-x: hidden;
+}
+.reassign-search-wrap {
+  position: relative;
+  margin-bottom: 10px;
+}
+.reassign-search {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.reassign-options {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+.reassign-option {
+  width: 100%;
+  text-align: left;
+}
+.reassign-option-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.reassign-option-main {
+  flex: 1;
+}
 @media(max-width: 768px) {
+  :root {
+    --mobile-bottom-nav-space: calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+  html,
+  body {
+    overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100%;
+  }
   .desktop-sidebar { display: none !important; }
   .mobile-bottom-nav { display: flex !important; }
-  .main-wrap { margin-left: 0 !important; }
-  .stats-grid { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
-  .kanban-active { grid-template-columns: 1fr 1fr !important; }
-  .kanban-closing { grid-template-columns: 1fr !important; }
+  .app-toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--mobile-bottom-nav-space) - 24px);
+    transform: none;
+    width: auto;
+    max-width: none;
+    padding: 12px 14px;
+    border-radius: 14px;
+    font-size: 12px;
+    text-align: left;
+  }
+  .main-wrap {
+    flex: 0 0 100% !important;
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+  .topbar-shell { padding: 0 !important; display: block !important; }
+  .desktop-only-header { display: none !important; }
+  .mobile-only-header { display: block !important; }
+  .mobile-header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px 0 16px;
+  }
+  .mobile-header-title {
+    flex: 1;
+    text-align: center;
+  }
+  .mobile-header-actions {
+    display: flex;
+    gap: 10px;
+    padding: 10px 16px 12px 16px;
+  }
+  .mobile-header-actions button {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    border-radius: 10px;
+  }
+  .mobile-drawer-panel { display: flex !important; }
+  .content-pad {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+    padding-bottom: var(--mobile-bottom-nav-space) !important;
+    box-sizing: border-box !important;
+  }
+  .mobile-footer-spacer {
+    display: block !important;
+    height: var(--mobile-bottom-nav-space);
+    flex-shrink: 0;
+  }
+  .card,
+  .kcard,
+  .kcol {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 10px !important; width: 100% !important; max-width: 100% !important; }
+  .kanban-active { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; max-width: 100% !important; overflow-x: hidden !important; }
+  .kanban-closing { grid-template-columns: minmax(0, 1fr) !important; max-width: 100% !important; overflow-x: hidden !important; }
   .detail-two-col { grid-template-columns: 1fr !important; }
-  .detail-fields { grid-template-columns: 1fr 1fr !important; }
+  .detail-two-col,
+  .detail-two-col > *,
+  .detail-two-col .card {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .detail-fields { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .detail-fields > * {
+    min-width: 0 !important;
+  }
+  .detail-fields div {
+    overflow-wrap: anywhere;
+  }
   .contractors-grid { grid-template-columns: 1fr !important; }
   .capital-grid { grid-template-columns: 1fr !important; }
   .table-scroll { overflow-x: auto; }
+  .desktop-only-table { display: none !important; }
+  .mobile-only-cards { display: block !important; }
+  .mobile-only-cards.mobile-drawer-panel { display: flex !important; }
+  .invoice-header-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+  .invoice-detail-container {
+    padding: 14px !important;
+    border-radius: 12px !important;
+  }
+  .invoice-top-header {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 0 !important;
+  }
+  .invoice-top-header-left {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+  }
+  .invoice-top-header-right {
+    flex: 1 !important;
+    text-align: right !important;
+    font-size: 10px !important;
+    line-height: 1.5 !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+  }
+  .invoice-title-text {
+    font-size: 28px !important;
+  }
+  .invoice-top-header-right .invoice-company-name {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+  }
+  .invoice-top-header-right .invoice-company-legal,
+  .invoice-top-header-right .invoice-company-details {
+    font-size: 10px !important;
+    color: ${T.muted} !important;
+  }
+  .invoice-meta-grid {
+    display: grid !important;
+    grid-template-columns: auto 1fr !important;
+    gap: 6px 16px !important;
+    font-size: 12px !important;
+  }
+  .invoice-action-bar {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 12px 16px !important;
+  }
+  .invoice-action-bar button,
+  .invoice-action-bar a {
+    flex: 1 !important;
+    min-width: 120px !important;
+    justify-content: center !important;
+    min-height: 44px !important;
+  }
+  .invoice-totals-section {
+    margin-top: 16px !important;
+    padding-top: 16px !important;
+    border-top: 2px solid ${T.borderSoft} !important;
+  }
+  .filter-bar {
+    flex-direction: column;
+  }
+  .filter-bar input,
+  .filter-bar select,
+  .filter-bar .pretty-select,
+  .filter-bar .filter-date-field {
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+  .mobile-tabs {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .mobile-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-tabs button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 10px 14px !important;
+    white-space: nowrap;
+  }
+  .mobile-alert {
+    align-items: flex-start !important;
+    padding: 12px 14px !important;
+    gap: 10px !important;
+  }
+  .mobile-alert-icon {
+    width: 36px !important;
+    height: 36px !important;
+    flex-shrink: 0;
+  }
+  .mobile-alert-body {
+    min-width: 0;
+    flex: 1;
+  }
+  .mobile-card {
+    padding: 14px !important;
+    border-radius: 12px !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .mobile-card-top {
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .mobile-card-badges {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+  .mobile-card-title,
+  .mobile-card-meta {
+    overflow-wrap: anywhere;
+  }
+  .mobile-card-summary {
+    white-space: normal !important;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .mobile-card-footer {
+    gap: 8px !important;
+  }
+  .mobile-card-grid-2 {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .desktop-only-activity-action { display: none !important; }
+  .mobile-only-activity-actions {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    width: 100%;
+  }
+  .mobile-only-activity-actions button {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+  }
   .topbar-title { font-size: 22px !important; }
   .content-pad { padding: 16px !important; }
   .modal-inner { width: 100% !important; padding: 18px !important; max-height: 85vh !important; max-height: calc(100dvh - 24px) !important; }
@@ -246,16 +561,52 @@ const CSS = `
      16px font on every field kills iOS focus auto-zoom (the layout jump
      that reads as "taps don't register"); 44px min targets per HIG. */
   input, select, textarea { font-size: 16px !important; }
-  .modal-overlay { align-items: flex-start !important; padding: 12px !important; }
+  .modal-overlay { align-items: center !important; justify-content: center !important; padding: 12px !important; }
   .modal-inner input:not([type="file"]), .modal-inner select { min-height: 44px; }
   .modal-inner textarea { min-height: 48px; }
   .modal-close { width: 44px !important; height: 44px !important; }
+  .reassign-copy {
+    line-height: 1.55 !important;
+  }
+  .reassign-picker,
+  .reassign-search-wrap,
+  .reassign-options,
+  .reassign-option {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+  .reassign-search {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    font-size: 16px !important;
+  }
+  .reassign-option-row {
+    gap: 8px !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+  .reassign-option-main {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+  }
+  .reassign-actions {
+    justify-content: stretch !important;
+  }
+  .reassign-actions button {
+    flex: 1;
+    justify-content: center;
+  }
   /* Invoice line items: the desktop 7-column row can't fit at 375px —
      re-flow each line as a stacked card. Desktop grid is untouched. */
   .inv-line-head { display: none !important; }
   .inv-line-row { grid-template-columns: repeat(6, 1fr) !important; gap: 8px !important; padding: 14px 12px !important; }
   .inv-line-row .inv-num { grid-column: 1; align-self: center; padding-top: 0 !important; }
-  .inv-line-row select { grid-column: 2 / 6; }
+  .inv-line-row select,
+  .inv-line-row .pretty-select { grid-column: 2 / 6; }
   .inv-line-row .inv-line-remove { grid-row: 1; grid-column: 6; justify-self: end; align-self: center; width: 44px !important; height: 44px !important; font-size: 22px !important; padding: 0 !important; }
   .inv-line-row textarea { grid-column: 1 / -1; min-height: 64px; }
   .inv-line-row .inv-mlabel { display: block !important; grid-column: span 2; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #9A958D; margin-bottom: -4px; align-self: end; }
@@ -263,6 +614,119 @@ const CSS = `
   .inv-line-row .inv-amount { grid-column: span 2; text-align: right; padding-top: 0 !important; align-self: center; font-size: 14px !important; }
   .inv-totals-row { grid-template-columns: 1fr !important; }
   .inv-add-btns button { min-height: 44px; padding: 10px 14px !important; font-size: 13px !important; }
+}
+@media(max-width: 480px) {
+  .kanban-active {
+    grid-template-columns: 1fr !important;
+  }
+  .kanban-closing {
+    grid-template-columns: 1fr !important;
+  }
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .modal-inner {
+    width: 100% !important;
+    padding: 16px !important;
+    max-height: 92vh !important;
+    border-radius: 16px !important;
+  }
+}
+@media(max-width: 360px) {
+  :root {
+    --mobile-bottom-nav-space: calc(112px + env(safe-area-inset-bottom, 0px));
+  }
+  .content-pad {
+    padding: 12px !important;
+  }
+  .mobile-header-top {
+    padding: 10px 12px 0 12px;
+  }
+  .mobile-header-title .display {
+    font-size: 19px !important;
+  }
+  .mobile-header-title div:last-child {
+    font-size: 10px !important;
+  }
+  .mobile-header-actions {
+    padding: 10px 12px 12px 12px;
+    gap: 8px;
+  }
+  .mobile-header-actions button {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    font-size: 11px !important;
+  }
+  .stats-grid,
+  .detail-fields,
+  .mobile-card-grid-2 {
+    grid-template-columns: 1fr !important;
+  }
+  .mobile-card {
+    padding: 12px !important;
+  }
+  .mobile-card-top,
+  .mobile-card-footer {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  .mobile-card-badges {
+    justify-content: flex-start;
+  }
+  .mobile-bottom-nav {
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+  }
+  .mobile-bottom-nav button {
+    min-width: 0;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  .mobile-bottom-nav span {
+    font-size: 8px !important;
+  }
+  .app-toast {
+    left: 10px;
+    right: 10px;
+    bottom: calc(var(--mobile-bottom-nav-space) - 18px);
+    padding: 11px 12px;
+    font-size: 11px;
+  }
+  .mobile-only-activity-actions {
+    gap: 6px !important;
+  }
+  .mobile-only-activity-actions button {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    font-size: 11px !important;
+  }
+  .mobile-tabs {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    overflow-x: hidden !important;
+    gap: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .mobile-tabs button {
+    min-width: 0 !important;
+    width: 100% !important;
+    padding: 9px 2px !important;
+    font-size: 10px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .reassign-option {
+    padding: 11px 12px !important;
+  }
+  .reassign-actions {
+    gap: 6px !important;
+  }
+  .reassign-actions button {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
 }
 @media(min-width: 769px) { .mobile-bottom-nav { display: none !important; } }
 `;
@@ -293,15 +757,19 @@ export default function PortalShell() {
   const [modalLoading, setModalLoading] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [reassignTarget, setReassignTarget] = useState<string>("");
+  const [reassignSearch, setReassignSearch] = useState("");
   const [activityMenuId, setActivityMenuId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [startDateInput, setStartDateInput] = useState(new Date().toISOString().slice(0, 10));
   const [startTimeInput, setStartTimeInput] = useState(new Date().toTimeString().slice(0, 5));
   const [pauseDateInput, setPauseDateInput] = useState(new Date().toISOString().slice(0, 10));
   const [pauseTimeInput, setPauseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
+  const [closeDateInput, setCloseDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [closeTimeInput, setCloseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
   const [etaDateInput, setEtaDateInput] = useState(new Date().toISOString().slice(0, 10));
   const [etaTimeInput, setEtaTimeInput] = useState("14:00");
   const [nteInputValue, setNteInputValue] = useState("");
@@ -417,8 +885,15 @@ export default function PortalShell() {
     }
     if (modal === "editNte") setNteInputValue(woData.nte || "");
     if (modal === "editNteFlag") setNteFlagInputValue(woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
+    if (modal === "reassign") {
+      setReassignTarget("");
+      setReassignSearch("");
+    }
     if (modal === "startWork") setStartNotesInput("");
     if (modal === "pauseWork") {
+      const now = new Date();
+      setPauseDateInput(now.toISOString().slice(0, 10));
+      setPauseTimeInput(now.toTimeString().slice(0, 5));
       setPauseReasonInput("");
       setPartDescInput("");
       setPartNumInput("");
@@ -426,6 +901,9 @@ export default function PortalShell() {
       setPauseNotesInput("");
     }
     if (modal === "closeComplete") {
+      const now = new Date();
+      setCloseDateInput(now.toISOString().slice(0, 10));
+      setCloseTimeInput(now.toTimeString().slice(0, 5));
       setAssetMakeInput(woData.assetMake || "");
       setAssetModelInput(woData.assetModel || "");
       setAssetSerialInput(woData.assetSerial || "");
@@ -468,6 +946,17 @@ export default function PortalShell() {
     () => USERS.filter(u => u.role === "contractor"),
     [USERS]
   );
+  const reassignContractorOptions = useMemo(() => {
+    const q = reassignSearch.trim().toLowerCase();
+    if (!q) return contractorsOnly;
+    return contractorsOnly.filter((c: any) =>
+      [c.name, c.company, c.territory, ...(c.trades || [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [contractorsOnly, reassignSearch]);
   const myWOs = useMemo(
     () => currentUser?.role === "contractor"
       ? workOrders.filter(w => w.contractor === currentUser.id)
@@ -663,6 +1152,13 @@ export default function PortalShell() {
     ],
     [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorInvoiceBadge, currentUser?.contractorTier]
   );
+  const bottomNavItems = useMemo(() => {
+    const preferred = ["dashboard", "work_orders", "capital", "invoices"];
+    const items = preferred
+      .map(id => sideItems.find(item => item.id === id))
+      .filter(Boolean);
+    return items.length ? items : sideItems.slice(0, 4);
+  }, [sideItems]);
 
   // ===============================================================
   //  LOGIN
@@ -678,8 +1174,182 @@ export default function PortalShell() {
   //  LAYOUT
   // ===============================================================
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
+    <div className="app-root" style={{ display: "flex", minHeight: "100vh", fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
       <style>{CSS}</style>
+
+      <div
+        className="mobile-only-cards"
+        onClick={() => setDrawerOpen(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(31,30,28,0.45)",
+          zIndex: 200,
+          opacity: drawerOpen ? 1 : 0,
+          pointerEvents: drawerOpen ? "all" : "none",
+          transition: "opacity 0.3s ease",
+        }}
+      />
+
+      <div
+        className="mobile-only-cards mobile-drawer-panel"
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: "72vw",
+          maxWidth: 280,
+          background: T.sidebar,
+          zIndex: 201,
+          transform: drawerOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.35s cubic-bezier(0.4,0,0.2,1)",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "4px 0 24px rgba(31,30,28,0.18)",
+          borderRadius: "0 20px 20px 0",
+        }}
+      >
+        <button
+          onClick={() => setDrawerOpen(false)}
+          aria-label="Close menu"
+          style={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "rgba(250,247,242,0.08)",
+            border: "none",
+            color: T.sidebarText,
+            fontSize: 18,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ×
+        </button>
+        <div style={{ padding: "22px 20px 18px", borderBottom: "1px solid rgba(250,247,242,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingRight: 34 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 5, boxSizing: "border-box", flexShrink: 0 }}>
+              {imageErrors.sidebarLogo ? (
+                <div style={{ width: 36, height: 36, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-instrument-serif), serif", fontSize: 18, letterSpacing: -0.5 }}>P1</div>
+              ) : (
+                <Image
+                  src="/p1-pros-logo.jpeg"
+                  alt="P1 Pros"
+                  width={36}
+                  height={36}
+                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
+                  onError={() => setImageErrors(prev => ({ ...prev, sidebarLogo: true }))}
+                />
+              )}
+            </div>
+            <div>
+              <div className="display" style={{ fontSize: 18, color: T.bg, letterSpacing: -0.3, lineHeight: 1 }}>P1 Service</div>
+              <div style={{ fontSize: 10, color: T.sidebarText, letterSpacing: 0.8, textTransform: "uppercase", marginTop: 3 }}>Operations</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "14px 0", flex: 1 }}>
+          {sideItems.map(item => {
+            const active = page === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  nav(item.id);
+                  setDrawerOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  width: "calc(100% - 20px)",
+                  padding: "12px 20px",
+                  cursor: "pointer",
+                  borderRadius: 10,
+                  margin: "2px 10px",
+                  background: active ? `${T.accent}1F` : "transparent",
+                  color: active ? T.accent : T.sidebarText,
+                  fontWeight: active ? 600 : 400,
+                  fontSize: 14,
+                  transition: "background 0.15s ease",
+                  border: "none",
+                  fontFamily: "inherit",
+                }}
+              >
+                <Ico d={item.icon} size={17} color={active ? T.accent : T.sidebarText} />
+                <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
+                {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ borderTop: "1px solid rgba(250,247,242,0.06)", padding: "14px 0 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px 12px" }}>
+            <Avatar initials={currentUser.initials} color={currentUser.color} size={34} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: T.bg, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUser.name}</div>
+              <div style={{ fontSize: 10, color: T.sidebarText }}>{currentUser.title || currentUser.company}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setModal("manageAccount");
+              setDrawerOpen(false);
+            }}
+            style={{
+              width: "calc(100% - 20px)",
+              margin: "0 10px 8px 10px",
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid rgba(250,247,242,0.12)",
+              background: "transparent",
+              color: T.sidebarText,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Manage Account
+          </button>
+          <button
+            onClick={async () => {
+              setDrawerOpen(false);
+              await handleLogout();
+            }}
+            disabled={logoutLoading}
+            style={{
+              width: "calc(100% - 20px)",
+              margin: "0 10px 10px 10px",
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid rgba(250,247,242,0.12)",
+              background: "transparent",
+              color: T.sidebarText,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: logoutLoading ? "default" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              fontFamily: "inherit",
+              opacity: logoutLoading ? 0.7 : 1,
+            }}
+          >
+            {logoutLoading
+              ? <><BtnSpinnerDark />Signing out...</>
+              : <><Ico d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" size={15} color={T.sidebarText} />Sign out</>
+            }
+          </button>
+        </div>
+      </div>
 
       {/* Sidebar */}
       <div className="desktop-sidebar" style={{ width: 232, background: T.sidebar, color: T.sidebarText, display: "flex", flexDirection: "column", flexShrink: 0, position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30 }}>
@@ -769,36 +1439,71 @@ export default function PortalShell() {
       </div>
 
       {/* Mobile bottom nav */}
-      <div className="mobile-bottom-nav" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebar, zIndex: 40, borderTop: "1px solid rgba(250,247,242,0.08)", justifyContent: "space-around", padding: "6px 0 env(safe-area-inset-bottom, 6px)" }}>
-        {sideItems.slice(0, 4).map(item => (
-          <button key={item.id} onClick={() => nav(item.id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: "pointer", padding: "6px 8px", fontFamily: "inherit" }}>
-            <Ico d={item.icon} size={20} color={page === item.id ? T.accent : T.sidebarText} />
-            <span style={{ fontSize: 8, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.bg : T.sidebarText }}>{item.label.split(" ")[0]}</span>
+      <div className="mobile-bottom-nav" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebar, zIndex: 40, borderTop: "1px solid rgba(250,247,242,0.08)", padding: "6px 8px env(safe-area-inset-bottom, 8px)" }}>
+        {bottomNavItems.map(item => (
+          <button key={item.id} onClick={() => nav(item.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "8px 0", gap: 3, cursor: "pointer", color: page === item.id ? T.accent : T.sidebarText, background: "none", border: "none", fontFamily: "inherit" }}>
+            <div style={{ width: 4, height: 4, borderRadius: "50%", background: page === item.id ? T.accent : "transparent", marginBottom: 2 }} />
+            <Ico d={item.icon} size={22} color={page === item.id ? T.accent : T.sidebarText} />
+            <span style={{ fontSize: 9, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.accent : T.sidebarText }}>{item.label.split(" ")[0]}</span>
           </button>
         ))}
-        <button onClick={handleLogout} disabled={logoutLoading} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "none", border: "none", cursor: logoutLoading ? "default" : "pointer", padding: "6px 8px", fontFamily: "inherit", opacity: logoutLoading ? 0.7 : 1 }}>
-          <Ico d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" size={20} color={T.sidebarText} />
-          <span style={{ fontSize: 8, color: T.sidebarText }}>Out</span>
-        </button>
       </div>
 
       {/* Main */}
-      <div className="main-wrap" style={{ flex: 1, marginLeft: 232, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <div className="main-wrap" style={{ flex: "0 0 calc(100% - 232px)", marginLeft: 232, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
         {/* Topbar */}
-        <div style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
-          <div>
-            <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
-          </div>
-          {isManager && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
-              <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
+        <div className="topbar-shell" style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
+          <div className="desktop-only-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <div>
+              <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
+              <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
             </div>
-          )}
+            {isManager && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
+                <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
+              </div>
+            )}
+          </div>
+          <div className="mobile-only-header">
+            <div className="mobile-header-top">
+              <button
+                onClick={() => setDrawerOpen(true)}
+                aria-label="Open menu"
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  background: T.bgWarm,
+                  border: `1px solid ${T.border}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+                  <rect x="0" y="3" width="18" height="2" rx="1" fill={T.ink} />
+                  <rect x="0" y="8" width="18" height="2" rx="1" fill={T.ink} />
+                  <rect x="0" y="13" width="18" height="2" rx="1" fill={T.ink} />
+                </svg>
+              </button>
+              <div className="mobile-header-title">
+                <div className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
+              </div>
+              <div style={{ width: 40, height: 40 }} />
+            </div>
+            {isManager && (
+              <div className="mobile-header-actions">
+                <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
+                <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="content-pad" style={{ flex: 1, overflow: "auto", padding: 28, paddingBottom: 80 }}>
+        <div className="content-pad" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}>
           <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={workOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} />
 
           <WorkOrderList
@@ -841,6 +1546,7 @@ export default function PortalShell() {
 
           <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
 
+          <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
       </div>
 
@@ -869,8 +1575,8 @@ export default function PortalShell() {
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>When will you arrive at Store #{woData.store}?</div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Date"><Input type="date" value={etaDateInput} onChange={(e: any) => setEtaDateInput(e.target.value)} /></Field>
-              <Field label="Time"><Input type="time" value={etaTimeInput} onChange={(e: any) => setEtaTimeInput(e.target.value)} /></Field>
+              <Field label="Date"><DatePickerField value={etaDateInput} onChange={setEtaDateInput} /></Field>
+              <Field label="Time"><TimePickerField value={etaTimeInput} onChange={setEtaTimeInput} /></Field>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
@@ -900,20 +1606,116 @@ export default function PortalShell() {
 
       {modal === "reassign" && woData && (
         <Modal onClose={() => setModal(null)} title="Reassign work order" width={420}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+          <div className="reassign-copy" style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
             Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "-") : "Unassigned"}</span>. Pick a new contractor - the original SLA deadline is preserved.
           </div>
-          <Field label="New contractor">
-            <Sel value={reassignTarget} onChange={(e: any) => setReassignTarget(e.target.value)}>
-              <option value="">Select...</option>
-              {contractorsOnly.map(c => (
-                <option key={c.id} value={c.id} disabled={c.id === woData.contractor}>
-                  {c.name}{c.territory ? ` - ${c.territory}` : ""}{c.id === woData.contractor ? " (current)" : ""}
-                </option>
-              ))}
-            </Sel>
-          </Field>
-          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+          <div className="reassign-picker">
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>New contractor</div>
+            {contractorsOnly.length >= 10 && (
+              <div className="reassign-search-wrap" style={{ position: "relative", marginBottom: 10 }}>
+                <input
+                  className="reassign-search"
+                  value={reassignSearch}
+                  onChange={(e: any) => setReassignSearch(e.target.value)}
+                  placeholder="Search contractor, company, territory..."
+                  autoComplete="off"
+                  style={{
+                    width: "100%",
+                    padding: "11px 36px 11px 13px",
+                    borderRadius: 12,
+                    border: `1px solid ${T.border}`,
+                    background: T.surfaceSoft,
+                    color: T.ink,
+                    fontSize: 13,
+                    fontFamily: "inherit",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {reassignSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setReassignSearch("")}
+                    aria-label="Clear contractor search"
+                    style={{
+                      position: "absolute",
+                      right: 8,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      border: "none",
+                      background: T.bgWarm,
+                      color: T.muted,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                    }}
+                  >
+                    x
+                  </button>
+                )}
+              </div>
+              )}
+            <div className="reassign-options" style={{ display: "grid", gap: 8, maxHeight: 280, overflowY: "auto", overflowX: "hidden", paddingRight: 2 }}>
+              {reassignContractorOptions.map(c => {
+                const selected = reassignTarget === c.id;
+                const current = c.id === woData.contractor;
+                return (
+                  <button
+                    className="reassign-option"
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      if (!current) setReassignTarget(c.id);
+                    }}
+                    disabled={current}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: `1px solid ${selected ? T.accent : T.borderSoft}`,
+                      background: selected ? T.accentSoft : current ? T.bgWarm : T.surface,
+                      cursor: current ? "default" : "pointer",
+                      opacity: current ? 0.62 : 1,
+                      fontFamily: "inherit",
+                      boxShadow: selected ? `0 0 0 2px ${T.accent}18` : "0 1px 2px rgba(31,30,28,0.03)",
+                    }}
+                  >
+                    <div className="reassign-option-row" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                      <div className="reassign-option-main" style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: current ? T.subtle : T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {[c.company, c.territory].filter(Boolean).join(" · ") || "Contractor"}
+                        </div>
+                      </div>
+                      <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "3px 8px", color: current ? T.subtle : selected ? "#fff" : T.accent, background: current ? T.borderSoft : selected ? T.accent : T.accentSoft }}>
+                        {current ? "Current" : selected ? "Selected" : "Choose"}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+              {reassignContractorOptions.length === 0 && (
+                <div style={{
+                  padding: "18px 14px",
+                  borderRadius: 12,
+                  border: `1px dashed ${T.border}`,
+                  background: T.surfaceSoft,
+                  color: T.subtle,
+                  fontSize: 12,
+                  textAlign: "center",
+                }}>
+                  No contractors match your search
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="reassign-actions" style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
@@ -1104,8 +1906,8 @@ export default function PortalShell() {
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Arrival date"><Input type="date" value={startDateInput} onChange={(e: any) => setStartDateInput(e.target.value)} /></Field>
-              <Field label="Arrival time"><Input type="time" value={startTimeInput} onChange={(e: any) => setStartTimeInput(e.target.value)} /></Field>
+              <Field label="Arrival date"><DatePickerField value={startDateInput} onChange={setStartDateInput} /></Field>
+              <Field label="Arrival time"><TimePickerField value={startTimeInput} onChange={setStartTimeInput} /></Field>
             </div>
             <Field label="Initial notes"><TA rows={2} value={startNotesInput} onChange={(e: any) => setStartNotesInput(e.target.value)} placeholder="What are you seeing on site?" /></Field>
           </div>
@@ -1139,15 +1941,15 @@ export default function PortalShell() {
               <option value="Awaiting parts">Awaiting parts - equipment completely down</option>
             </Sel></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Stamp-out date"><Input type="date" value={pauseDateInput} onChange={(e: any) => setPauseDateInput(e.target.value)} /></Field>
-              <Field label="Stamp-out time"><Input type="time" value={pauseTimeInput} onChange={(e: any) => setPauseTimeInput(e.target.value)} /></Field>
+              <Field label="Stamp-out date"><DatePickerField value={pauseDateInput} onChange={setPauseDateInput} /></Field>
+              <Field label="Stamp-out time"><TimePickerField value={pauseTimeInput} onChange={setPauseTimeInput} /></Field>
             </div>
             <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts information</div>
               <div style={{ display: "grid", gap: 10 }}>
                 <Field label="Part description (generic)"><Input value={partDescInput} onChange={(e: any) => setPartDescInput(e.target.value)} placeholder="e.g. Evaporator coil, blower motor..." /></Field>
                 <Field label="Specific part number"><Input value={partNumInput} onChange={(e: any) => setPartNumInput(e.target.value)} placeholder="e.g. Heatcraft BHL136BE" /></Field>
-                <Field label="Expected return date"><Input value={partEtaInput} onChange={(e: any) => setPartEtaInput(e.target.value)} type="date" /></Field>
+                <Field label="Expected return date"><DatePickerField value={partEtaInput} onChange={setPartEtaInput} placeholder="Select return date" placement="right" mobileYOffset={-44} desktopYOffset={-72} avoidDesktopBottomCut /></Field>
               </div>
             </div>
             <Field label="Notes"><TA rows={2} value={pauseNotesInput} onChange={(e: any) => setPauseNotesInput(e.target.value)} placeholder="Explain what was done so far..." /></Field>
@@ -1200,8 +2002,8 @@ export default function PortalShell() {
             </div>
             <Field label="Resolution details"><TA id="resolution-notes" rows={3} placeholder="Brief summary of what was found and done..." /></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="End date"><Input type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
-              <Field label="End time"><Input type="time" defaultValue={new Date().toTimeString().slice(0, 5)} /></Field>
+              <Field label="End date"><DatePickerField value={closeDateInput} onChange={setCloseDateInput} /></Field>
+              <Field label="End time"><TimePickerField value={closeTimeInput} onChange={setCloseTimeInput} /></Field>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
@@ -1215,7 +2017,8 @@ export default function PortalShell() {
               const s = assetSerialInput.trim();
               const y = parseInt(assetYearInput, 10);
               if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
-              await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null); setModal(null);
+              const completedAt = closeDateInput && closeTimeInput ? new Date(`${closeDateInput}T${closeTimeInput}`).toISOString() : new Date().toISOString();
+              await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt); setModal(null);
               } finally {
                 setModalLoading(false);
               }
@@ -1260,7 +2063,7 @@ export default function PortalShell() {
         </div>
       )}
 
-      {toast && <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", background: T.ink, color: T.bg, padding: "12px 22px", borderRadius: 12, fontSize: 13, fontWeight: 500, animation: "fadeUp 0.25s", zIndex: 60, boxShadow: "0 8px 32px rgba(31,30,28,0.3)", whiteSpace: "nowrap", border: `1px solid rgba(250,247,242,0.1)` }}>{toast}</div>}
+      {toast && <div className="app-toast">{toast}</div>}
     </div>
   );
 }

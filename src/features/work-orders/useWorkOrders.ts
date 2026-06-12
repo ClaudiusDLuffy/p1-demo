@@ -219,10 +219,10 @@ export default function useWorkOrders({
     }
   };
 
-  const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null) => {
+  const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null, completedAt?: string) => {
     setLoading("closeComplete_" + woId, true);
     try {
-    const endIso = new Date().toISOString();
+    const endIso = completedAt || new Date().toISOString();
     const text = `Job completed. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.`;
     const patch: any = { status: "completed", functionalStatus: "Completed", assetMake: make, assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null };
     if (assetYear) patch.assetYear = assetYear;

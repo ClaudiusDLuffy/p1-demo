@@ -18,11 +18,12 @@ export default function InvoiceList(props: any) {
           {/* ═════ INVOICES ═════ */}
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
-              <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
-                {[{ id: "all", l: "All" }, { id: "pending", l: "Pending" }, { id: "submitted", l: "Submitted" }, { id: "rejected", l: "Rejected" }, { id: "approved", l: "Approved" }].map(t => (
+              <div className="mobile-tabs" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
+                {[{ id: "all", l: "All", m: "All" }, { id: "pending", l: "Pending", m: "Pend" }, { id: "submitted", l: "Submitted", m: "Sub" }, { id: "rejected", l: "Rejected", m: "Rej" }, { id: "approved", l: "Approved", m: "Appr" }].map(t => (
                   <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>{t.l}</button>
                 ))}
               </div>
+              <div className="desktop-only-table">
               <div className="card table-scroll" style={{ overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
@@ -50,6 +51,54 @@ export default function InvoiceList(props: any) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              </div>
+              <div className="mobile-only-cards">
+                {visibleInvoices.map((inv: any) => (
+                  <div
+                    className="mobile-card"
+                    key={inv.num}
+                    onClick={() => setSelectedInvoice(inv.num)}
+                    style={{
+                      background: "#fff",
+                      borderRadius: 12,
+                      border: `1px solid ${T.borderSoft}`,
+                      padding: "14px 16px",
+                      marginBottom: 10,
+                      cursor: "pointer",
+                      boxShadow: "0 1px 3px rgba(31,30,28,0.06)",
+                    }}
+                  >
+                    <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: T.accent }}>#{inv.num}</span>
+                      <Badge conf={INV_STATE[inv.state]} small />
+                    </div>
+                    <div className="mobile-card-title" style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 4 }}>
+                      Store #{inv.store}
+                      {inv.date
+                        ? <span style={{ fontWeight: 400, color: T.muted, fontSize: 11, marginLeft: 8 }}>{inv.date}</span>
+                        : null}
+                    </div>
+                    {isManager && (
+                      <div className="mobile-card-meta" style={{ fontSize: 12, color: T.muted, marginBottom: 6 }}>
+                        {getUser(inv.contractor)?.name || "Unknown"}
+                      </div>
+                    )}
+                    <div className="mobile-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}` }}>
+                      <span style={{ fontSize: 11, color: T.muted }}>
+                        WO: <span style={{ fontFamily: "monospace", color: T.accent }}>{inv.wot}</span>
+                      </span>
+                      <span style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: T.ink }}>
+                        {fmt(Math.round(inv.total))}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {visibleInvoices.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
+                    No invoices found
+                  </div>
+                )}
               </div>
             </div>
           )}
