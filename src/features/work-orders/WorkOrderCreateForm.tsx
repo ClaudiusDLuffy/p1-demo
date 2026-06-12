@@ -105,7 +105,7 @@ export default function WorkOrderCreateForm(props: any) {
           </div>
           <Field label="Assign to contractor"><Sel {...register("assign")}>
             <option value="">Leave unassigned</option>
-            {contractorsOnly.map(u => <option key={u.id} value={u.id}>{u.name}{u.company ? ` - ${u.company}` : ""}</option>)}
+            {contractorsOnly.map(u => <option key={u.id} value={u.id} data-sub={u.company || ""} data-search={`${u.name || ""} ${u.company || ""}`}>{u.name}</option>)}
           </Sel></Field>
           <Field label="Short Description"><Input {...register("summary")} placeholder="one-line summary" /></Field>
           <Field label="Description"><TA rows={3} {...register("description")} placeholder="full description" /></Field>

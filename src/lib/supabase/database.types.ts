@@ -1,8 +1,3 @@
-// TODO: re-run supabase gen types after applying migrations:
-// 0013_profiles_contractor_fields.sql
-// 0014_work_orders_capital_fields.sql
-// 0015_work_reports.sql
-
 export type Json =
   | string
   | number

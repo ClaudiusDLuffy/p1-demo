@@ -26,7 +26,7 @@ export default function InvoiceDetail(props: any) {
             if (!inv) return null;
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
+                <div className="invoice-action-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
                   <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
@@ -70,18 +70,18 @@ export default function InvoiceDetail(props: any) {
                     </div>
                   </Modal>
                 )}
-                <div className="card" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
+                <div className="card invoice-detail-container" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
                   {/* Invoice header */}
                   <div style={{ padding: "28px 32px", borderBottom: `1px solid ${T.borderSoft}` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
-                      <div>
-                        <div className="display" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>Invoice</div>
+                    <div className="invoice-top-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+                      <div className="invoice-top-header-left">
+                        <div className="display invoice-title-text" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>Invoice</div>
                         <div className="mono" style={{ fontSize: 16, color: T.accent, marginTop: 8, fontWeight: 600 }}>#{inv.num}</div>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div className="display" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
-                        <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
-                        <div style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
+                      <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
+                        <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
+                        <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
+                        <div className="invoice-company-details" style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
                           {P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.email}<br />{P1_BUSINESS.phone}<br />{P1_BUSINESS.website}
                         </div>
                       </div>
@@ -89,7 +89,7 @@ export default function InvoiceDetail(props: any) {
                   </div>
 
                   {/* Bill-to / Ship-to / Metadata */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: `1px solid ${T.borderSoft}` }}>
+                  <div className="invoice-header-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: `1px solid ${T.borderSoft}` }}>
                     <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Bill to</div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{SEVEN_BILL_TO.name}</div>
@@ -102,7 +102,7 @@ export default function InvoiceDetail(props: any) {
                     </div>
                     <div style={{ padding: "20px 32px" }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Invoice details</div>
-                      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "3px 12px", fontSize: 11 }}>
+                      <div className="invoice-meta-grid" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "3px 12px", fontSize: 11 }}>
                         <span style={{ color: T.muted }}>Invoice date</span><span className="mono" style={{ color: T.ink }}>{inv.invoiceDate}</span>
                         <span style={{ color: T.muted }}>Service date</span><span className="mono" style={{ color: T.ink }}>{inv.serviceDate}</span>
                         <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{inv.terms || "Net 30"}</span>
@@ -115,23 +115,79 @@ export default function InvoiceDetail(props: any) {
 
                   {/* Line items */}
                   <div>
-                    <div style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "12px 32px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
-                      <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div>
-                    </div>
-                    {(inv.lines || []).map((l: any, i: number) => (
-                      <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
-                        <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
-                        <div style={{ color: T.inkSoft, fontWeight: 500 }}>{l.type}</div>
-                        <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>{l.desc}</div>
-                        <div className="mono" style={{ textAlign: "right", color: T.muted }}>{l.qty}</div>
-                        <div className="mono" style={{ textAlign: "right", color: T.muted }}>{fmt(l.rate)}</div>
-                        <div className="mono" style={{ textAlign: "right", fontWeight: 600, color: T.ink }}>{fmt(Math.round(l.amount * 100) / 100)}</div>
+                    <div className="desktop-only-table">
+                      <div style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "12px 32px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
+                        <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div>
                       </div>
-                    ))}
+                      {(inv.lines || []).map((l: any, i: number) => (
+                        <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
+                          <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
+                          <div style={{ color: T.inkSoft, fontWeight: 500 }}>{l.type}</div>
+                          <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>{l.desc}</div>
+                          <div className="mono" style={{ textAlign: "right", color: T.muted }}>{l.qty}</div>
+                          <div className="mono" style={{ textAlign: "right", color: T.muted }}>{fmt(l.rate)}</div>
+                          <div className="mono" style={{ textAlign: "right", fontWeight: 600, color: T.ink }}>{fmt(Math.round(l.amount * 100) / 100)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mobile-only-cards">
+                      {(inv.lines || []).map((line: any, i: number) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: "14px 0",
+                            borderBottom: `1px solid ${T.borderSoft}`,
+                          }}
+                        >
+                          <div style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            marginBottom: 6,
+                          }}>
+                            <div>
+                              <div style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: T.ink,
+                                marginBottom: 2,
+                              }}>
+                                {i + 1}. {line.lineType || line.type}
+                              </div>
+                              <div style={{
+                                fontSize: 12,
+                                color: T.muted,
+                              }}>
+                                {line.description || line.desc}
+                              </div>
+                            </div>
+                            <div style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: T.ink,
+                              textAlign: "right",
+                              flexShrink: 0,
+                              marginLeft: 12,
+                            }}>
+                              {fmt(Math.round(((line.qty || 1) * (line.rate || 0)) * 100) / 100)}
+                            </div>
+                          </div>
+                          <div style={{
+                            display: "flex",
+                            gap: 16,
+                            fontSize: 11,
+                            color: T.muted,
+                          }}>
+                            <span>Qty: {line.qty || 1}</span>
+                            <span>Rate: {fmt(line.rate || 0)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Totals */}
-                  <div style={{ padding: "22px 32px", display: "flex", justifyContent: "flex-end" }}>
+                  <div className="invoice-totals-section" style={{ padding: "22px 32px", display: "flex", justifyContent: "flex-end" }}>
                     <div style={{ width: 300 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0" }}>
                         <span style={{ color: T.muted }}>Subtotal</span>

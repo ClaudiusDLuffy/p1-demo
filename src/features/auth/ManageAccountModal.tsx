@@ -92,7 +92,7 @@ export default function ManageAccountModal(props: any) {
                 </Field>
               </div>
               {submitError && <div style={{ fontSize: 12, color: T.danger, marginTop: 14 }}>{submitError}</div>}
-              <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "center" }}>
                 <button type="button" onClick={() => { reset(); setSubmitError(null); setShowPasswordForm(false); }} className="btn-soft">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="btn-primary" style={{ opacity: isSubmitting ? 0.6 : 1 }}>{isSubmitting ? "Saving..." : "Save"}</button>
               </div>

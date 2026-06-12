@@ -247,7 +247,7 @@ export default function WorkOrderDetail(props: any) {
                           the Create WO dropdown) so no contractor is unreachable. */}
                       {woData.status === "unassigned" && isManager && contractorsOnly.map(c => (
                         <button key={c.id} onClick={() => doAssign(woData.id, c.id)} disabled={isLoading("assign_" + woData.id)} className="btn-soft" style={loadingStyle("assign_" + woData.id)}>
-                          {isLoading("assign_" + woData.id) ? <><BtnSpinnerDark />Assigning...</> : <>Assign &rarr; {c.name.split(" ")[0]}</>}
+                          {isLoading("assign_" + woData.id) ? <><BtnSpinnerDark />Assigning...</> : <>Assign to {c.name.split(" ")[0]}</>}
                         </button>
                       ))}
                       {isManager && ["assigned", "wip", "parts"].includes(woData.status) && (
@@ -293,7 +293,7 @@ export default function WorkOrderDetail(props: any) {
                       )}
                       {woData.status === "completed" && isManager && (
                         <button onClick={() => doMoveToInvoice(woData.id)} disabled={isLoading("moveToInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("moveToInvoice_" + woData.id)}>
-                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated &rarr; pending invoice"}
+                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated to pending invoice"}
                         </button>
                       )}
                       {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && canInvoice && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
@@ -305,7 +305,7 @@ export default function WorkOrderDetail(props: any) {
                       )}
                       {woData.status === "pending_payment" && isManager && (
                         <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
-                          {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid &rarr; close"}
+                          {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}
                         </button>
                       )}
                       {/* Closed job: always-available invoice download + staff-only reopen. */}
@@ -416,17 +416,39 @@ export default function WorkOrderDetail(props: any) {
 
                     {/* Activity */}
                     <div className="card" style={{ padding: 22 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activities?.length || 0}</div>
-                        {isManager && <button onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loading…</> : <>✨ AI enhance notes <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4 }}>PREVIEW</span></>}</button>}
+                        {isManager && <button className="desktop-only-activity-action" onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loadingâ€¦</> : <>AI enhance notes <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4 }}>PREVIEW</span></>}</button>}
                       </div>
-                      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+                      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                         <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id); }} placeholder="Add a note..." style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
                         <button
                           onClick={() => doPostNote(woData.id)}
                           disabled={isLoading("postNote_" + woData.id)}
+                          className="btn-primary desktop-only-activity-action"
+                          style={{ opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", alignItems: "center", gap: 6 }}
+                        >
+                          {isLoading("postNote_" + woData.id) ? <><BtnSpinner />Posting...</> : "Post"}
+                        </button>
+                      </div>
+                      <div className="mobile-only-activity-actions" style={{ display: "none", gap: 8, marginBottom: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        {isManager && (
+                          <button
+                            onClick={doAiEnhance}
+                            disabled={aiEnhancing}
+                            className="btn-primary"
+                            style={{ opacity: aiEnhancing ? 0.7 : 1, cursor: aiEnhancing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                          >
+                            {aiEnhancing
+                              ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loading…</>
+                              : <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, lineHeight: 1.05 }}><span style={{ whiteSpace: "nowrap" }}>AI enhance notes</span><span style={{ fontSize: 8, fontWeight: 700, padding: "0 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4, lineHeight: 1.4 }}>PREVIEW</span></span>}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => doPostNote(woData.id)}
+                          disabled={isLoading("postNote_" + woData.id)}
                           className="btn-primary"
-                          style={{ padding: "10px 18px", opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                          style={{ opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
                         >
                           {isLoading("postNote_" + woData.id) ? <><BtnSpinner />Posting...</> : "Post"}
                         </button>
@@ -465,7 +487,7 @@ export default function WorkOrderDetail(props: any) {
                                 <button
                                   onClick={() => setActivityMenuId(menuOpen ? null : e.id)}
                                   aria-label="Activity actions"
-                                  style={{ width: 24, height: 24, padding: 0, borderRadius: 6, border: "none", background: menuOpen ? T.bgWarm : "transparent", color: T.subtle, cursor: "pointer", fontSize: 16, lineHeight: 1, fontFamily: "inherit" }}
+                                  style={{ width: 36, height: 36, padding: 0, borderRadius: 6, border: "none", background: menuOpen ? T.bgWarm : "transparent", color: T.subtle, cursor: "pointer", fontSize: 16, lineHeight: 1, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" }}
                                 >…</button>
                                 {menuOpen && (
                                   <>
