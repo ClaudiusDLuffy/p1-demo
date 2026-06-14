@@ -26,6 +26,17 @@ const CapitalFlagModal = dynamic(
   { ssr: false }
 );
 
+// ETA is stored as an ISO timestamp (timestamptz). Render it in the user's
+// locale. Falls through to the raw string for any legacy non-ISO value so
+// historic rows still display.
+const formatEta = (v: any): string => {
+  if (!v) return "";
+  const s = String(v);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+};
+
 export default function WorkOrderDetail(props: any) {
   const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
   const storeHistory = useMemo(
@@ -183,7 +194,7 @@ export default function WorkOrderDetail(props: any) {
                         {[
                           { l: "Line of Service", v: woData.lineOfService || "Not set" },
                           { l: "NTE", v: fmt(woData.nte) },
-                          { l: "ETA", v: woData.eta || "Not set" },
+                          { l: "ETA", v: formatEta(woData.eta) || "Not set" },
                           { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
                           { l: "Start time", v: woData.startTime || "Not started" },
                           // AFM name + email are hidden from contractors so a field tech
@@ -569,7 +580,7 @@ export default function WorkOrderDetail(props: any) {
                     {woData.eta && (
                       <div className="card" style={{ padding: 18, marginBottom: 14, background: T.warnSoft, borderColor: `${T.warn}33` }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn, marginBottom: 6 }}>ETA</div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: "#73560C" }}>{woData.eta}</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#73560C" }}>{formatEta(woData.eta)}</div>
                         <div style={{ fontSize: 10, color: T.warn, marginTop: 4 }}>Auto-notify if not checked in</div>
                       </div>
                     )}

@@ -156,10 +156,16 @@ export default function useWorkOrders({
     }, "Delete failed", () => restoreWorkOrders(snapshot));
   };
 
+  // `eta` arrives as an ISO timestamp (timestamptz column). Persist the ISO
+  // value but render a human-friendly version into the activity log.
   const doSetEta = async (woId: string, eta: string) => {
     setLoading("setEta_" + woId, true);
     try {
-    const text = `ETA set: ${eta}`;
+    const d = new Date(eta);
+    const etaForLog = Number.isNaN(d.getTime())
+      ? eta
+      : d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+    const text = `ETA set: ${etaForLog}`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { eta }, localActivity(text, "system"));
     fire("ETA set");
