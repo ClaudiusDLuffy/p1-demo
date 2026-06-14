@@ -1585,12 +1585,12 @@ export default function PortalShell() {
               onClick={async () => {
               setModalLoading(true);
               try {
+              // Save a real ISO timestamp (column is timestamptz) using the
+              // exact date + time the user picked — same pattern as Start
+              // Work. The display layer formats this for humans on read.
               const dv = etaDateInput || new Date().toISOString().slice(0, 10);
               const t = etaTimeInput || "14:00";
-              const h = parseInt(t); const m = t.split(":")[1];
-              const ap = h >= 12 ? "PM" : "AM";
-              const d = new Date(dv + "T00:00:00");
-              const eta = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${h > 12 ? h - 12 : h || 12}:${m} ${ap}`;
+              const eta = new Date(`${dv}T${t}`).toISOString();
               await doSetEta(woData.id, eta); setModal(null);
               } finally {
                 setModalLoading(false);
