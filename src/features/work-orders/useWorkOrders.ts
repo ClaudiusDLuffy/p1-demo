@@ -260,75 +260,113 @@ export default function useWorkOrders({
     }
   };
 
-  // Owner approves on behalf of AFM (Phase 1 has no AFM role). Clears the
-  // submitted invoice for payment and carries the WO to Pending Payment.
-  const doApproveInvoice = async (woId: string) => {
-    setLoading("approveInvoice_" + woId, true);
+  // Multi-invoice rule (billing team's directive): a WO advances to
+  // pending_payment ONLY when every non-draft, non-rejected invoice on it is
+  // approved or paid; it closes ONLY when every such invoice is paid. Drafts
+  // and rejected invoices don't count as "open work" for billing. This helper
+  // computes the right WO status given the current invoice mix so every
+  // per-invoice action (approve / mark paid / reject / delete) can call it.
+  const computeWoStatusFromInvoices = (woId: string, override?: any[]) => {
+    const list = (override ?? invoices).filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
+    if (list.length === 0) return null;                     // nothing live → leave WO untouched
+    if (list.every((i: any) => i.state === "paid")) return "closed";
+    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_payment";
+    return "pending_approval";
+  };
+
+  // Per-invoice approve. Flips one invoice to 'approved' and then recomputes
+  // the WO status across siblings. WO does NOT advance until ALL non-draft,
+  // non-rejected invoices are approved/paid (billing team's expectation).
+  const doApproveInvoice = async (invoiceId: string) => {
+    setLoading("approveInvoice_" + invoiceId, true);
     try {
-    const inv = invoices.find(i => i.wot === woId && (i.state === "submitted" || i.state === "revised"));
-    const text = `Approved on behalf of AFM by ${currentUser.name}.${inv ? ` Invoice #${inv.num} cleared for payment.` : ""}`;
+    const inv = invoices.find((i: any) => i.id === invoiceId);
+    if (!inv) { fire("Invoice not found"); return; }
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
-    if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "approved" } : i));
-    patchLocalWO(woId, { status: "pending_payment" }, localActivity(text, "system"));
-    fire("Approved — moved to Pending Payment");
+    const nextInvoices = invoices.map((i: any) => i.id === invoiceId ? { ...i, state: "approved" } : i);
+    const nextWoStatus = computeWoStatusFromInvoices(inv.wot, nextInvoices);
+    const woText = nextWoStatus === "pending_payment"
+      ? `All invoices on this work order are approved — moved to Pending Payment.`
+      : null;
+    setInvoices(nextInvoices);
+    const localUpdates: any = {};
+    if (nextWoStatus && nextWoStatus !== "closed") localUpdates.status = nextWoStatus;
+    patchLocalWO(inv.wot, localUpdates, localActivity(`Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system"));
+    if (woText) patchLocalWO(inv.wot, {}, localActivity(woText, "system"));
+    fire(nextWoStatus === "pending_payment" ? "All invoices approved — Pending Payment" : `Invoice #${inv.num} approved`);
     await dbCall(async () => {
-      if (inv) await updateInvoiceState(inv.num, "approved");
-      await updateWorkOrder(woId, { status: "pending_payment" });
-      await insertActivity(woId, currentUser.name, text, "system");
+      await updateInvoiceState(inv.num, "approved");
+      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system");
+      if (nextWoStatus && nextWoStatus !== "closed") {
+        await updateWorkOrder(inv.wot, { status: nextWoStatus });
+        if (woText) await insertActivity(inv.wot, "System", woText, "system");
+      }
     }, "Approval failed", () => {
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
     } finally {
-      setLoading("approveInvoice_" + woId, false);
+      setLoading("approveInvoice_" + invoiceId, false);
     }
   };
 
-  // Owner records payment received → WO is fully closed. Stamp closed_at
-  // (drives the 24h board linger + History) and clear any NTE flag so a
-  // closed job leaves the "NTE Approval Needed" bucket.
-  const doMarkPaid = async (woId: string) => {
-    setLoading("markPaid_" + woId, true);
+  // Per-invoice mark paid. Closes the WO only when EVERY non-draft,
+  // non-rejected invoice on it is paid. Stamps closed_at + clears the NTE
+  // flag only at that transition.
+  const doMarkPaid = async (invoiceId: string) => {
+    setLoading("markPaid_" + invoiceId, true);
     try {
-    const inv = invoices.find(i => i.wot === woId);
+    const inv = invoices.find((i: any) => i.id === invoiceId);
+    if (!inv) { fire("Invoice not found"); return; }
     const paidAt = new Date().toISOString();
-    const text = `Marked paid by ${currentUser.name}. Work order closed.`;
+    const nextInvoices = invoices.map((i: any) => i.id === invoiceId ? { ...i, state: "paid" } : i);
+    const nextWoStatus = computeWoStatusFromInvoices(inv.wot, nextInvoices);
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
-    if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "paid" } : i));
-    patchLocalWO(woId, { status: "closed", closedAt: paidAt, nteFlagged: false }, localActivity(text, "system"));
-    fire("Marked paid — work order closed");
+    setInvoices(nextInvoices);
+    const closing = nextWoStatus === "closed";
+    const localPatch: any = {};
+    if (nextWoStatus) localPatch.status = nextWoStatus;
+    if (closing) { localPatch.closedAt = paidAt; localPatch.nteFlagged = false; }
+    patchLocalWO(inv.wot, localPatch, localActivity(`Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system"));
+    if (closing) patchLocalWO(inv.wot, {}, localActivity(`All invoices paid — work order closed by ${currentUser.name}.`, "system"));
+    fire(closing ? "All invoices paid — work order closed" : `Invoice #${inv.num} marked paid`);
     await dbCall(async () => {
-      if (inv) await updateInvoiceState(inv.num, "paid", { paid_at: paidAt });
-      await updateWorkOrder(woId, { status: "closed", closedAt: paidAt, nteFlagged: false });
-      await insertActivity(woId, currentUser.name, text, "system");
+      await updateInvoiceState(inv.num, "paid", { paid_at: paidAt });
+      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system");
+      if (nextWoStatus) {
+        const woPatch: any = { status: nextWoStatus };
+        if (closing) { woPatch.closedAt = paidAt; woPatch.nteFlagged = false; }
+        await updateWorkOrder(inv.wot, woPatch);
+        if (closing) await insertActivity(inv.wot, "System", `All invoices paid — work order closed by ${currentUser.name}.`, "system");
+      }
     }, "Mark paid failed", () => {
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
     } finally {
-      setLoading("markPaid_" + woId, false);
+      setLoading("markPaid_" + invoiceId, false);
     }
   };
 
-  // Staff-only fail-safe: pull a closed WO back onto the active board. Re-enters
-  // at Pending Payment (the state it closed from) and reverts the invoice from
-  // paid→approved so Mark Paid works again. Clears closed_at so the 24h/History
-  // logic treats it as active.
+  // Staff-only fail-safe: pull a closed WO back onto the active board by
+  // reverting all PAID invoices to approved, then recomputing status.
   const doReopen = async (woId: string) => {
     setLoading("reopen_" + woId, true);
     try {
-    const inv = invoices.find(i => i.wot === woId && i.state === "paid");
-    const text = `Work order reopened by ${currentUser.name}.`;
+    const paid = invoices.filter((i: any) => i.wot === woId && i.state === "paid");
+    const nextInvoices = invoices.map((i: any) => paid.find(p => p.id === i.id) ? { ...i, state: "approved" } : i);
+    const nextWoStatus = computeWoStatusFromInvoices(woId, nextInvoices) || "pending_payment";
+    const text = `Work order reopened by ${currentUser.name}.${paid.length ? ` ${paid.length} invoice${paid.length === 1 ? "" : "s"} reverted to approved.` : ""}`;
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
-    if (inv) setInvoices(prev => prev.map(i => i.num === inv.num ? { ...i, state: "approved" } : i));
-    patchLocalWO(woId, { status: "pending_payment", closedAt: null }, localActivity(text, "system"));
+    setInvoices(nextInvoices);
+    patchLocalWO(woId, { status: nextWoStatus, closedAt: null }, localActivity(text, "system"));
     fire("Work order reopened — back on the active board");
     await dbCall(async () => {
-      if (inv) await updateInvoiceState(inv.num, "approved");
-      await updateWorkOrder(woId, { status: "pending_payment", closedAt: null });
+      for (const p of paid) await updateInvoiceState(p.num, "approved");
+      await updateWorkOrder(woId, { status: nextWoStatus, closedAt: null });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "Reopen failed", () => {
       restoreWorkOrders(woSnapshot);

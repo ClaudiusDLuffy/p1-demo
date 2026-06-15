@@ -586,10 +586,82 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     const { error: lErr } = await sb.from("invoice_lines").insert(lineRows);
     if (lErr) throw lErr;
   }
-  // Mark WO as pending approval and stamp invoice total
-  await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
-  await insertActivity(inv.wot, authorName, `Invoice ${inv.num} submitted. Total: $${total.toFixed(2)}.`, "system");
+  // Drafts must NOT touch the parent WO — saving a draft mid-visit can't
+  // advance the WO into pending_approval and can't write an audit entry that
+  // claims it was submitted. Only the submit path moves the WO forward.
+  const isDraft = (inv.state || "submitted") === "draft";
+  if (!isDraft) {
+    await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
+    await insertActivity(inv.wot, authorName, `Invoice ${inv.num} submitted. Total: $${total.toFixed(2)}.`, "system");
+  } else {
+    await insertActivity(inv.wot, authorName, `Invoice ${inv.num} draft saved.`, "system");
+  }
   return { ...header, total } as unknown as Invoice;
+}
+
+// Update an existing invoice's lines (full replace) + recompute totals.
+// Used to resume an existing draft and either re-save or submit it. Does
+// NOT touch WO status — the caller decides via updateInvoiceState whether
+// this is still a draft or a real submission.
+export async function updateInvoiceWithLines(
+  invoiceId: string,
+  patch: { num?: string; cme?: string | null; invoiceDate?: string; serviceDate?: string | null; terms?: string; storeAddr?: string | null; state?: string; salesTax?: number },
+  lines: any[],
+): Promise<{ id: string; subtotal: number; salesTax: number; total: number }> {
+  const sb = supabase();
+  const subtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
+  const salesTax = parseFloat(patch.salesTax as any) || 0;
+  const total = subtotal + salesTax;
+  const update: any = {
+    subtotal, sales_tax: salesTax, total,
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.num != null) update.num = patch.num;
+  if (patch.cme !== undefined) update.cme = patch.cme || null;
+  if (patch.invoiceDate) update.invoice_date = patch.invoiceDate;
+  if (patch.serviceDate !== undefined) update.service_date = patch.serviceDate || null;
+  if (patch.terms) update.terms = patch.terms;
+  if (patch.storeAddr !== undefined) update.store_address = patch.storeAddr || null;
+  if (patch.state) update.state = patch.state;
+  const { error: uErr } = await sb.from("invoices").update(update).eq("id", invoiceId);
+  if (uErr) throw uErr;
+  // Replace lines: simpler + safer than diffing while editing a draft. The
+  // table has on-delete-cascade so this is a single round trip per side.
+  const { error: dErr } = await sb.from("invoice_lines").delete().eq("invoice_id", invoiceId);
+  if (dErr) throw dErr;
+  if (lines.length > 0) {
+    const rows = lines.map((l, i) => ({
+      invoice_id: invoiceId,
+      position: i + 1,
+      type: l.type,
+      description: l.desc || l.description || "",
+      qty: parseFloat(l.qty) || 1,
+      rate: parseFloat(l.rate) || 0,
+    }));
+    const { error: lErr } = await sb.from("invoice_lines").insert(rows);
+    if (lErr) throw lErr;
+  }
+  return { id: invoiceId, subtotal, salesTax, total };
+}
+
+// Reject an invoice with a reason. Staff-only at the UI layer; inv_update
+// RLS already restricts who can write. Writes an audit activity on the WO.
+export async function rejectInvoice(
+  invoiceId: string,
+  invoiceNum: string,
+  workOrderId: string | null,
+  reason: string,
+  authorName: string,
+): Promise<void> {
+  const sb = supabase();
+  const { error } = await sb.from("invoices").update({
+    state: "rejected",
+    rejection_reason: reason,
+  }).eq("id", invoiceId);
+  if (error) throw error;
+  if (workOrderId) {
+    await insertActivity(workOrderId, "System", `Invoice #${invoiceNum} rejected by ${authorName}: ${reason}`, "system");
+  }
 }
 
 // Patch an invoice's state (and optionally paid_at). Used by the Owner

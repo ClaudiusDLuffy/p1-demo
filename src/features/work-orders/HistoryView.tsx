@@ -22,16 +22,16 @@ export default function HistoryView(props: any) {
     return true;
   });
 
-  const totalClosedValue = filteredClosedWOs.reduce((sum: number, w: any) => {
-    const invoiceTotal = invoices?.find((i: any) => i.wot === w.id)?.total;
-    return sum + (invoiceTotal || w.invoiceTotal || 0);
-  }, 0);
+  // Multi-invoice safe: sum every non-draft, non-rejected invoice on the WO.
+  // The legacy work_orders.invoice_total column (w.invoiceTotal) was the
+  // "most recently submitted invoice's total" — wrong shape for multi-invoice,
+  // so the dynamic sum is the source of truth here.
+  const sumInvoicesFor = (woId: string) => (invoices ?? [])
+    .filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected")
+    .reduce((s: number, i: any) => s + (i.total || 0), 0);
 
-  const invTotalFor = (woId: string) => {
-    const w = filteredClosedWOs.find((wo: any) => wo.id === woId);
-    const invoiceTotal = invoices?.find((i: any) => i.wot === woId)?.total;
-    return invoiceTotal || w?.invoiceTotal || 0;
-  };
+  const totalClosedValue = filteredClosedWOs.reduce((sum: number, w: any) => sum + sumInvoicesFor(w.id), 0);
+  const invTotalFor = (woId: string) => sumInvoicesFor(woId);
 
   const stateOf = (w: any) => {
     const city = String(w.city || "");
@@ -86,7 +86,8 @@ export default function HistoryView(props: any) {
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
               {filteredClosedWOs.map((w: any) => {
-                const inv = invoices?.find((i: any) => i.wot === w.id);
+                const woTotal = sumInvoicesFor(w.id);
+                const woInvCount = (invoices ?? []).filter((i: any) => i.wot === w.id && i.state !== "draft" && i.state !== "rejected").length;
                 return (
                   <button
                     key={w.id}
@@ -105,7 +106,7 @@ export default function HistoryView(props: any) {
                       <div>Store <strong style={{ color: T.ink }}>{w.store || "-"}</strong></div>
                       <div>Contractor <strong style={{ color: T.ink }}>{w.contractor ? (getUser(w.contractor)?.name || "Unknown") : "Unassigned"}</strong></div>
                       <div>Closed <strong style={{ color: T.ink }}>{w.closedAt ? new Date(w.closedAt).toLocaleDateString() : "-"}</strong></div>
-                      <div>Total <strong style={{ color: T.ink }}>{fmt(inv?.total || w.invoiceTotal || 0)}</strong></div>
+                      <div>Total <strong style={{ color: T.ink }}>{fmt(woTotal)}</strong>{woInvCount > 1 ? <span style={{ color: T.subtle, fontWeight: 400 }}> · {woInvCount} invoices</span> : null}</div>
                     </div>
                   </button>
                 );

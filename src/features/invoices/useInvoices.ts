@@ -5,10 +5,14 @@ import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   insertInvoice,
+  updateInvoiceWithLines,
+  updateInvoiceState,
   updateWorkOrder,
   uploadInvoicePdf,
   downloadInvoicePdfBlob,
   deleteInvoice,
+  rejectInvoice,
+  insertActivity,
 } from "../../lib/db";
 import { P1_BUSINESS, SEVEN_BILL_TO, LINE_TYPES, MONTHS } from "../../lib/constants";
 import { WORK_ORDERS_KEY } from "../work-orders/queries";
@@ -48,7 +52,96 @@ export default function useInvoices({ currentUser, fire }: any) {
   const [newInv, setNewInv] = useState<any>(blankNewInv());
   const resetNewInv = () => setNewInv(blankNewInv());
 
-  const doSubmitInvoice = async (wo: any, formData?: any) => {
+  // Shared status-recompute used after delete (and as a backstop after
+  // submit-existing of a previously-rejected revision). Same rule as the WO
+  // hook: WO advances only when ALL non-draft, non-rejected invoices are
+  // approved/paid; closes only when all are paid. Returns the new status
+  // (or null to leave the WO alone).
+  const computeWoStatusFromInvoices = (woId: string, all: any[]) => {
+    const list = all.filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
+    if (list.length === 0) return null;
+    if (list.every((i: any) => i.state === "paid")) return "closed";
+    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_payment";
+    return "pending_approval";
+  };
+
+  // Persist + upload the system-generated PDF. Shared by submit-new and
+  // submit-existing-draft so both paths produce the same artifact in storage.
+  const generateAndUploadPdf = async (header: any, draft: any, wo: any, mappedLines: any[], subtotal: number, tax: number, total: number, fullStoreAddr: string) => {
+    try {
+      const { generateInvoicePDFBlob, loadLogoDataUrl } = await import("../../lib/invoicePdf");
+      const logoDataUrl = await loadLogoDataUrl();
+      const blob = generateInvoicePDFBlob({
+        num: draft.num, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr,
+        invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate, terms: draft.terms,
+        cme: draft.cme, lines: mappedLines, subtotal, salesTax: tax, total,
+      }, logoDataUrl);
+      await uploadInvoicePdf(header.id, draft.num, blob);
+    } catch (e: any) {
+      // Non-fatal — PDF regenerates on first download via the same path.
+      fire(`PDF upload skipped: ${e.message || e}`);
+    }
+  };
+
+  // Validates + assembles the submit payload. Returns null when the form
+  // can't be persisted; the caller surfaced the user-facing error.
+  const buildInvoicePayload = (wo: any, draft: any, requireFullLines = true) => {
+    if (!draft.num) { fire("Enter an invoice number"); return null; }
+    const validLines = requireFullLines
+      ? (draft.lines || []).filter((l: any) => l.desc && l.qty && l.rate)
+      : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
+    if (requireFullLines && validLines.length === 0) {
+      fire("Add at least one line item with description, qty, and rate"); return null;
+    }
+    const subtotal = invSubtotal(validLines);
+    const tax = parseFloat(draft.tax) || 0;
+    const total = subtotal + tax;
+    const mappedLines = validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) }));
+    const woCity = (wo.city || "").trim();
+    const woAddr = (wo.addr || "").trim();
+    const fullStoreAddr = !woCity || (woAddr && woAddr.includes(woCity))
+      ? woAddr
+      : [woAddr, woCity].filter(Boolean).join(", ");
+    return { validLines, subtotal, tax, total, mappedLines, fullStoreAddr };
+  };
+
+  // Save (or re-save) an invoice as a DRAFT — does NOT advance the WO, skips
+  // PDF upload + NTE flag. Resuming a draft and saving again hits the same
+  // path with `existingInvoiceId` set so we update in place.
+  const doSaveDraftInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null) => {
+    const draft = formData ?? newInv;
+    const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ false);
+    if (!payload) return false;
+    const { validLines, subtotal, tax, total, fullStoreAddr } = payload;
+    try {
+      if (existingInvoiceId) {
+        await updateInvoiceWithLines(
+          existingInvoiceId,
+          { num: draft.num, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "draft", salesTax: tax },
+          validLines,
+        );
+        await insertActivity(wo.id, currentUser.name, `Invoice #${draft.num} draft updated.`, "system");
+      } else {
+        await insertInvoice(
+          { ...draft, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "draft" },
+          validLines,
+          currentUser.name,
+        );
+      }
+      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      fire(`Invoice #${draft.num} draft saved`);
+      resetNewInv();
+      return true;
+    } catch (e: any) {
+      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      fire(`Draft save failed: ${e.message || e}`);
+      return false;
+    }
+  };
+
+  const doSubmitInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null) => {
     const draft = formData ?? newInv;
     if (!draft.num) { fire("Enter an invoice number"); return false; }
     const validLines = (draft.lines || []).filter((l: any) => l.desc && l.qty && l.rate);
@@ -77,29 +170,31 @@ export default function useInvoices({ currentUser, fire }: any) {
     const flagThreshold = wo.nteFlagThreshold != null ? wo.nteFlagThreshold : 900;
     const shouldFlag = total >= flagThreshold;
     try {
-      const header: any = await insertInvoice(
-        { ...draft, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted" },
-        validLines,
-        currentUser.name,
-      );
+      let header: any;
+      if (existingInvoiceId) {
+        // Promote an existing draft to a real submission. Lines are replaced
+        // wholesale; state flips to 'submitted'. WO is then nudged into
+        // pending_approval (matches the brand-new submit path below).
+        const res = await updateInvoiceWithLines(
+          existingInvoiceId,
+          { num: draft.num, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "submitted", salesTax: tax },
+          validLines,
+        );
+        header = { id: res.id };
+        await updateWorkOrder(wo.id, { status: "pending_approval", invoiceTotal: total });
+        await insertActivity(wo.id, currentUser.name, `Invoice ${draft.num} submitted. Total: $${total.toFixed(2)}.`, "system");
+      } else {
+        header = await insertInvoice(
+          { ...draft, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted" },
+          validLines,
+          currentUser.name,
+        );
+      }
       if (shouldFlag) {
         try { await updateWorkOrder(wo.id, { nteFlagged: true, nteFlagAmount: total }); }
         catch (e: any) { fire(`NTE flag not saved: ${e.message || e}`); }
       }
-      // Generate + upload PDF so manager + contractor can pull the same bytes later.
-      try {
-        const { generateInvoicePDFBlob, loadLogoDataUrl } = await import("../../lib/invoicePdf");
-        const logoDataUrl = await loadLogoDataUrl();
-        const blob = generateInvoicePDFBlob({
-          num: draft.num, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr,
-          invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate, terms: draft.terms,
-          cme: draft.cme, lines: mappedLines, subtotal, salesTax: tax, total,
-        }, logoDataUrl);
-        await uploadInvoicePdf(header.id, draft.num, blob);
-      } catch (e: any) {
-        // Non-fatal - PDF can be (re)generated on first download via the same path.
-        fire(`PDF upload skipped: ${e.message || e}`);
-      }
+      await generateAndUploadPdf(header, draft, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       setSubmittedInvoiceNum(draft.num);
@@ -150,16 +245,45 @@ export default function useInvoices({ currentUser, fire }: any) {
 
   // Staff-only soft delete (the UI gates visibility; RLS backs it up).
   // Deleted invoices vanish from every list/stat because loadInvoices
-  // filters deleted_at at the source.
+  // filters deleted_at at the source. Per Gustavo's call, we do NOT
+  // auto-revert WO status — if deleting the last non-draft invoice leaves
+  // the WO stuck, surface a toast prompting staff to move it manually.
   const doDeleteInvoice = async (inv: any) => {
     try {
       await deleteInvoice(inv.id, inv.num, inv.wot || null, currentUser.name);
+      // After delete: check whether the WO has any non-draft, non-rejected
+      // siblings left at all. If not, surface the manual-move prompt.
+      const all = ((qc.getQueryData(INVOICES_KEY) as any[]) ?? []);
+      const remaining = all.filter((i: any) => i.id !== inv.id && i.wot === inv.wot && i.state !== "draft" && i.state !== "rejected");
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      fire(`Invoice #${inv.num} deleted`);
+      if (remaining.length === 0 && inv.wot) {
+        fire(`Invoice #${inv.num} deleted — no live invoices left on ${inv.wot}; move the WO manually if needed.`);
+      } else {
+        fire(`Invoice #${inv.num} deleted`);
+      }
       return true;
     } catch (e: any) {
       fire(`Delete failed: ${e.message || e}`);
+      return false;
+    }
+  };
+
+  // Staff-only reject with a reason. Same gating pattern as delete. Does
+  // NOT advance the WO — rejected invoices are simply excluded from the
+  // "is everything approved?" check, which means a WO with one rejected +
+  // one approved invoice will sit at pending_payment (per the billing rule).
+  const doRejectInvoice = async (inv: any, reason: string) => {
+    const trimmed = (reason || "").trim();
+    if (!trimmed) { fire("Enter a rejection reason"); return false; }
+    try {
+      await rejectInvoice(inv.id, inv.num, inv.wot || null, trimmed, currentUser.name);
+      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+      fire(`Invoice #${inv.num} rejected`);
+      return true;
+    } catch (e: any) {
+      fire(`Reject failed: ${e.message || e}`);
       return false;
     }
   };
@@ -170,7 +294,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doDownloadInvoice, doDeleteInvoice,
+    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice,
     lineAmount, invSubtotal, invTotal,
   };
 }

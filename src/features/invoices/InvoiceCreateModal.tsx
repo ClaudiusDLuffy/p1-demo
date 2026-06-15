@@ -21,8 +21,10 @@ const initialLines = () => [
 ];
 
 export default function InvoiceCreateModal(props: any) {
-  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice } = props;
+  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft } = props;
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const existingInvoiceId = resumeDraft?.id || null;
   const {
     register,
     handleSubmit,
@@ -51,16 +53,32 @@ export default function InvoiceCreateModal(props: any) {
 
   useEffect(() => {
     if (modal !== "createInvoice") return;
-    reset({
-      num: "",
-      invoiceDate: new Date().toISOString().slice(0, 10),
-      serviceDate: new Date().toISOString().slice(0, 10),
-      terms: "Net 30",
-      tax: "",
-      cme: "",
-      lines: initialLines(),
-    });
-  }, [modal, reset]);
+    // Resuming an existing draft → hydrate the form from its stored fields.
+    // Otherwise start with the standard blank invoice.
+    if (resumeDraft) {
+      reset({
+        num: resumeDraft.num || "",
+        invoiceDate: resumeDraft.invoiceDate || new Date().toISOString().slice(0, 10),
+        serviceDate: resumeDraft.serviceDate || new Date().toISOString().slice(0, 10),
+        terms: resumeDraft.terms || "Net 30",
+        tax: resumeDraft.salesTax != null ? String(resumeDraft.salesTax) : "",
+        cme: resumeDraft.cme || "",
+        lines: (resumeDraft.lines || []).length
+          ? resumeDraft.lines.map((l: any) => ({ type: l.type, desc: l.desc || l.description || "", qty: Number(l.qty) || 1, rate: Number(l.rate) }))
+          : initialLines(),
+      });
+    } else {
+      reset({
+        num: "",
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        serviceDate: new Date().toISOString().slice(0, 10),
+        terms: "Net 30",
+        tax: "",
+        cme: "",
+        lines: initialLines(),
+      });
+    }
+  }, [modal, reset, resumeDraft]);
 
   const priorSpend = useMemo(
     () => {
@@ -78,7 +96,7 @@ export default function InvoiceCreateModal(props: any) {
   const onSubmit = async (data: CreateInvoiceForm) => {
     setSubmitting(true);
     try {
-    const ok = await doSubmitInvoice(woData, data);
+    const ok = await doSubmitInvoice(woData, data, existingInvoiceId);
     if (ok) reset();
     } finally {
       setSubmitting(false);
@@ -186,11 +204,40 @@ export default function InvoiceCreateModal(props: any) {
           </div>
         </label>
 
-        <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button type="button" onClick={close} className="btn-soft">Cancel</button>
+          {/* Save draft bypasses the lines-complete validation — a draft can
+              be partially filled. Resumes by passing the existing invoice id
+              so we update in place instead of inserting a duplicate. */}
+          {doSaveDraftInvoice && (
+            <button
+              type="button"
+              disabled={savingDraft || submitting}
+              onClick={async () => {
+                setSavingDraft(true);
+                try {
+                  const data: any = {
+                    num: watch("num"),
+                    invoiceDate: watch("invoiceDate"),
+                    serviceDate: watch("serviceDate"),
+                    terms: watch("terms"),
+                    tax: watch("tax"),
+                    cme: watch("cme"),
+                    lines: watch("lines"),
+                  };
+                  const ok = await doSaveDraftInvoice(woData, data, existingInvoiceId);
+                  if (ok) { setModal(null); resetNewInv(); }
+                } finally { setSavingDraft(false); }
+              }}
+              className="btn-soft"
+              style={{ opacity: savingDraft ? 0.7 : 1, cursor: savingDraft ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              {savingDraft ? <><BtnSpinner />Saving...</> : (existingInvoiceId ? "Save draft" : "Save as draft")}
+            </button>
+          )}
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || savingDraft}
             className="btn-accent"
             style={{
               opacity: submitting ? 0.7 : 1,
@@ -202,7 +249,7 @@ export default function InvoiceCreateModal(props: any) {
           >
             {submitting
               ? <><BtnSpinner />Submitting...</>
-              : "Submit"
+              : (existingInvoiceId ? "Submit draft" : "Submit")
             }
           </button>
         </div>
