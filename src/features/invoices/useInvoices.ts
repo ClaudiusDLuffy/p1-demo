@@ -13,6 +13,7 @@ import {
   deleteInvoice,
   rejectInvoice,
   insertActivity,
+  nextInvoiceNumFromDb,
 } from "../../lib/db";
 import { P1_BUSINESS, SEVEN_BILL_TO, LINE_TYPES, MONTHS } from "../../lib/constants";
 import { WORK_ORDERS_KEY } from "../work-orders/queries";
@@ -34,11 +35,22 @@ export default function useInvoices({ currentUser, fire }: any) {
     { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTruckCharge, amount: P1_BUSINESS.defaultTruckCharge },
     { type: "Labor", desc: "", qty: 1, rate: "", amount: 0 },
   ];
+  // Cache-derived "best guess" for prefilling the form instantly when the
+  // modal opens. NOT trusted at write time — that's what nextInvoiceNumFromDb
+  // + the retry loop in insertInvoice are for. Two clients prefilling the
+  // same number is fine: whichever inserts first wins; the loser retries.
   const nextInvNum = useCallback(() => {
     const invoices = (qc.getQueryData(INVOICES_KEY) as any[]) ?? [];
     const maxNum = invoices.reduce((m, i) => { const n = parseInt(i.num) || 0; return n > m ? n : m; }, 6500);
     return String(maxNum + 1);
   }, [qc]);
+  // Authoritative version — reads from the DB. Use this to hydrate the
+  // editable field when the modal opens so the prefill matches what's
+  // actually in the table at this instant.
+  const nextInvNumFromDb = useCallback(async () => {
+    try { return await nextInvoiceNumFromDb(); }
+    catch { return nextInvNum(); }
+  }, [nextInvNum]);
   const blankNewInv = () => ({
     num: "",
     cme: "",
@@ -108,35 +120,54 @@ export default function useInvoices({ currentUser, fire }: any) {
   // Save (or re-save) an invoice as a DRAFT — does NOT advance the WO, skips
   // PDF upload + NTE flag. Resuming a draft and saving again hits the same
   // path with `existingInvoiceId` set so we update in place.
+  // Collision-aware toast. `result` is what the db layer returned, which
+  // carries the resolved num and (if the user typed a colliding one) the
+  // number they tried to use. Falls through to the original num cleanly.
+  const announceSavedNum = (verb: string, result: any, attemptedNum: string | null) => {
+    const finalNum = result?.num || attemptedNum || "?";
+    const collidedFrom = result?._collidedFrom || result?.collidedFrom || null;
+    if (collidedFrom && collidedFrom !== finalNum) {
+      fire(`Invoice #${collidedFrom} already exists — saved as #${finalNum} instead.`);
+    } else {
+      fire(`Invoice #${finalNum} ${verb}`);
+    }
+  };
+
   const doSaveDraftInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null) => {
     const draft = formData ?? newInv;
     const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ false);
     if (!payload) return false;
     const { validLines, subtotal, tax, total, fullStoreAddr } = payload;
+    const userTypedNum = !!draft.num;
     try {
+      let result: any;
       if (existingInvoiceId) {
-        await updateInvoiceWithLines(
+        result = await updateInvoiceWithLines(
           existingInvoiceId,
-          { num: draft.num, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "draft", salesTax: tax },
+          { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "draft", salesTax: tax },
           validLines,
         );
-        await insertActivity(wo.id, currentUser.name, `Invoice #${draft.num} draft updated.`, "system");
+        await insertActivity(wo.id, currentUser.name, `Invoice #${result.num} draft updated.`, "system");
       } else {
-        await insertInvoice(
-          { ...draft, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "draft" },
+        result = await insertInvoice(
+          { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "draft" },
           validLines,
           currentUser.name,
         );
       }
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      fire(`Invoice #${draft.num} draft saved`);
+      announceSavedNum("draft saved", result, draft.num || null);
       resetNewInv();
       return true;
     } catch (e: any) {
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      fire(`Draft save failed: ${e.message || e}`);
+      if (e?.code === "INVOICE_NUM_CONFLICT") {
+        fire("Couldn't allocate an unused invoice number. Try again.");
+      } else {
+        fire(`Draft save failed: ${e.message || e}`);
+      }
       return false;
     }
   };
@@ -169,41 +200,59 @@ export default function useInvoices({ currentUser, fire }: any) {
     // overage highlight. Only ever sets the flag on (never auto-clears).
     const flagThreshold = wo.nteFlagThreshold != null ? wo.nteFlagThreshold : 900;
     const shouldFlag = total >= flagThreshold;
+    const userTypedNum = !!draft.num;
     try {
       let header: any;
+      let finalNum: string = draft.num || "";
+      let collidedFrom: string | null = null;
       if (existingInvoiceId) {
         // Promote an existing draft to a real submission. Lines are replaced
         // wholesale; state flips to 'submitted'. WO is then nudged into
         // pending_approval (matches the brand-new submit path below).
         const res = await updateInvoiceWithLines(
           existingInvoiceId,
-          { num: draft.num, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "submitted", salesTax: tax },
+          { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "submitted", salesTax: tax },
           validLines,
         );
         header = { id: res.id };
+        finalNum = res.num || finalNum;
+        collidedFrom = res.collidedFrom;
         await updateWorkOrder(wo.id, { status: "pending_approval", invoiceTotal: total });
-        await insertActivity(wo.id, currentUser.name, `Invoice ${draft.num} submitted. Total: $${total.toFixed(2)}.`, "system");
+        await insertActivity(wo.id, currentUser.name, `Invoice ${finalNum} submitted. Total: $${total.toFixed(2)}.`, "system");
       } else {
         header = await insertInvoice(
-          { ...draft, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted" },
+          { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted" },
           validLines,
           currentUser.name,
         );
+        finalNum = header.num || finalNum;
+        collidedFrom = header._collidedFrom || null;
       }
       if (shouldFlag) {
         try { await updateWorkOrder(wo.id, { nteFlagged: true, nteFlagAmount: total }); }
         catch (e: any) { fire(`NTE flag not saved: ${e.message || e}`); }
       }
-      await generateAndUploadPdf(header, draft, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
+      // Use the RESOLVED number for the PDF too — otherwise the stored bytes
+      // would label the file with the colliding number the user originally
+      // typed, which would be wrong on download.
+      const draftForPdf = { ...draft, num: finalNum };
+      await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      setSubmittedInvoiceNum(draft.num);
+      setSubmittedInvoiceNum(finalNum);
+      if (collidedFrom && collidedFrom !== finalNum) {
+        fire(`Invoice #${collidedFrom} already exists — saved as #${finalNum} instead.`);
+      }
       resetNewInv();
       return true;
     } catch (e: any) {
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      fire(`Invoice save failed: ${e.message || e}`);
+      if (e?.code === "INVOICE_NUM_CONFLICT") {
+        fire("Couldn't allocate an unused invoice number after several attempts. Please try again.");
+      } else {
+        fire(`Invoice save failed: ${e.message || e}`);
+      }
       return false;
     }
   };
@@ -293,7 +342,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
-    nextInvNum, defaultInvLines, blankNewInv, resetNewInv,
+    nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
     doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice,
     lineAmount, invSubtotal, invTotal,
   };

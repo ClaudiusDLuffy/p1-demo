@@ -839,7 +839,7 @@ export default function PortalShell() {
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy,
-    nextInvNum, resetNewInv,
+    nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
     doDownloadInvoice, doDeleteInvoice, doRejectInvoice,
@@ -877,6 +877,10 @@ export default function PortalShell() {
     return () => { [t1, t2, t3, t4].forEach(clearTimeout); };
   }, [isDemoManager]);
 
+  // Pre-fill the legacy `newInv` mirror used by the modal's other consumers.
+  // The actual editable Invoice # field in InvoiceCreateModal hydrates itself
+  // against nextInvNumFromDb (authoritative); this line just keeps any
+  // downstream readers in sync with our best cache-derived guess.
   useEffect(() => {
     if (modal !== "createInvoice") return;
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
@@ -2051,7 +2055,7 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} />
+      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} />
 
       {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
         const inv = submittedInvoice;

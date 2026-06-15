@@ -21,10 +21,14 @@ const initialLines = () => [
 ];
 
 export default function InvoiceCreateModal(props: any) {
-  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft } = props;
+  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb } = props;
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const existingInvoiceId = resumeDraft?.id || null;
+  // Tracks whether the user has touched the # field — if so we trust their
+  // value (and surface a friendly toast if it collides). If untouched, the
+  // hook can replace it with a freshly-resolved DB number on submit.
+  const [numTouched, setNumTouched] = useState(false);
   const {
     register,
     handleSubmit,
@@ -53,8 +57,12 @@ export default function InvoiceCreateModal(props: any) {
 
   useEffect(() => {
     if (modal !== "createInvoice") return;
-    // Resuming an existing draft → hydrate the form from its stored fields.
-    // Otherwise start with the standard blank invoice.
+    let cancelled = false;
+    setNumTouched(false);
+    // Resuming an existing draft → hydrate the form from its stored fields
+    // (keep its existing number untouched). Otherwise pull the authoritative
+    // next-number from the DB so the user sees a non-colliding suggestion
+    // immediately; falls back to blank if the lookup fails.
     if (resumeDraft) {
       reset({
         num: resumeDraft.num || "",
@@ -68,17 +76,36 @@ export default function InvoiceCreateModal(props: any) {
           : initialLines(),
       });
     } else {
+      const today = new Date().toISOString().slice(0, 10);
       reset({
         num: "",
-        invoiceDate: new Date().toISOString().slice(0, 10),
-        serviceDate: new Date().toISOString().slice(0, 10),
+        invoiceDate: today,
+        serviceDate: today,
         terms: "Net 30",
         tax: "",
         cme: "",
         lines: initialLines(),
       });
+      // Async hydrate the suggested invoice number. If the user is already
+      // typing by the time it returns, we don't clobber their input.
+      if (typeof nextInvNumFromDb === "function") {
+        (async () => {
+          try {
+            const suggested = await nextInvNumFromDb();
+            if (cancelled) return;
+            // setValue is part of RHF; pull it from the hook indirectly via reset.
+            // The simplest non-invasive approach: only set if user hasn't touched.
+            // (Closure check via ref-like flag.)
+            if (!numTouched) {
+              // Use reset to write only `num`, preserving the rest.
+              reset((cur: any) => ({ ...cur, num: suggested }));
+            }
+          } catch { /* keep blank — submit-side retry still saves us */ }
+        })();
+      }
     }
-  }, [modal, reset, resumeDraft]);
+    return () => { cancelled = true; };
+  }, [modal, reset, resumeDraft, nextInvNumFromDb]);
 
   const priorSpend = useMemo(
     () => {
@@ -96,7 +123,7 @@ export default function InvoiceCreateModal(props: any) {
   const onSubmit = async (data: CreateInvoiceForm) => {
     setSubmitting(true);
     try {
-    const ok = await doSubmitInvoice(woData, data, existingInvoiceId);
+    const ok = await doSubmitInvoice(woData, { ...data, userTypedNum: numTouched }, existingInvoiceId);
     if (ok) reset();
     } finally {
       setSubmitting(false);
@@ -126,7 +153,7 @@ export default function InvoiceCreateModal(props: any) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num")} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => setNumTouched(true) })} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
@@ -224,6 +251,7 @@ export default function InvoiceCreateModal(props: any) {
                     tax: watch("tax"),
                     cme: watch("cme"),
                     lines: watch("lines"),
+                    userTypedNum: numTouched,
                   };
                   const ok = await doSaveDraftInvoice(woData, data, existingInvoiceId);
                   if (ok) { setModal(null); resetNewInv(); }

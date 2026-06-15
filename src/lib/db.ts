@@ -547,6 +547,65 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
   return data as unknown as WorkOrder;
 }
 
+// Source-of-truth invoice numbering: read the current max from the DB, not
+// from a cached React-Query list. The 6500 floor matches the legacy seed.
+// Called both as the "what number should we pre-fill?" suggester AND as the
+// retry-on-collision recalculator. Soft-deleted invoices KEEP their numbers
+// (the unique index is on `num` without a partial predicate), so we can't
+// recycle them — bumping past max is the safe move.
+export async function nextInvoiceNumFromDb(): Promise<string> {
+  const sb = supabase();
+  // ORDER BY num::int can't use a regular index, but the table is small and
+  // num is short text. Simpler + correct: pull the whole list and parse.
+  // If perf ever matters, swap to an RPC that runs `MAX((num)::int)`.
+  const { data, error } = await sb.from("invoices").select("num");
+  if (error) throw error;
+  const maxNum = (data || []).reduce((m: number, r: any) => {
+    const n = parseInt(r.num) || 0;
+    return n > m ? n : m;
+  }, 6500);
+  return String(maxNum + 1);
+}
+
+// Postgres unique-violation. We need to distinguish "number collided" from
+// other errors so the caller can retry or surface a friendly message.
+const isInvoiceNumCollision = (err: any): boolean => {
+  if (!err) return false;
+  if (err.code === "23505") return true;                            // canonical
+  const msg = String(err.message || err.details || "").toLowerCase();
+  return msg.includes("invoices_num_key") || (msg.includes("duplicate") && msg.includes("num"));
+};
+
+// Retry wrapper around the insert. If the user typed a specific number we
+// throw with `attemptedNum` set so the UI can show "X already exists, using
+// Y instead"; if it was auto-suggested we just resolve a fresh number and
+// retry transparently. Bounded to a small attempt count.
+async function insertInvoiceWithRetry(
+  baseRow: any,
+  desiredNum: string,
+  userTyped: boolean,
+): Promise<{ header: any; finalNum: string; collidedFrom: string | null }> {
+  const sb = supabase();
+  let tryNum = desiredNum;
+  let collidedFrom: string | null = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await sb.from("invoices").insert({ ...baseRow, num: tryNum }).select().single();
+    if (!error) return { header: data, finalNum: tryNum, collidedFrom };
+    if (!isInvoiceNumCollision(error)) throw error;
+    // First collision: if the user typed this number specifically, surface
+    // it once with the collided-from value so the toast can name it; then
+    // proceed to retry on a DB-derived number.
+    if (attempt === 0 && userTyped) collidedFrom = tryNum;
+    tryNum = await nextInvoiceNumFromDb();
+    // Guard against the absurd "DB says next is the same one that just
+    // collided" case (shouldn't happen, but if it does bump explicitly).
+    if (tryNum === collidedFrom || tryNum === baseRow.num) {
+      tryNum = String((parseInt(tryNum) || 6500) + 1);
+    }
+  }
+  throw new Error("Could not allocate an unused invoice number after several attempts. Please try again.");
+}
+
 export async function insertInvoice(inv: any, lines: any[], authorName: string): Promise<Invoice> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
@@ -555,8 +614,14 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
   const salesTax = parseFloat(inv.salesTax) || 0;
   const total = subtotal + salesTax;
   const todayIso = new Date().toISOString().slice(0, 10);
-  const { data: header, error: hErr } = await sb.from("invoices").insert({
-    num: inv.num,
+  // Resolve the number at insert time. If the caller passed a number, prefer
+  // it (the user may have typed one); otherwise pull a fresh one from the DB
+  // so we don't trust stale React-Query cache.
+  const userTyped = !!inv.userTypedNum;
+  const baseNum = inv.num && String(inv.num).trim()
+    ? String(inv.num).trim()
+    : await nextInvoiceNumFromDb();
+  const baseRow = {
     work_order_id: inv.wot,
     store_number: inv.store,
     store_address: inv.storeAddr || null,
@@ -571,8 +636,24 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     sales_tax: salesTax,
     total,
     created_by: user?.id || null,
-  }).select().single();
-  if (hErr) throw hErr;
+  };
+  let header: any;
+  let finalNum: string;
+  let collidedFrom: string | null = null;
+  try {
+    const res = await insertInvoiceWithRetry(baseRow, baseNum, userTyped);
+    header = res.header;
+    finalNum = res.finalNum;
+    collidedFrom = res.collidedFrom;
+  } catch (e: any) {
+    // Bubble a tagged error so the hook can shape the toast.
+    if (isInvoiceNumCollision(e)) {
+      const err: any = new Error(e.message || "Invoice number conflict");
+      err.code = "INVOICE_NUM_CONFLICT";
+      throw err;
+    }
+    throw e;
+  }
   // Insert lines (1:N)
   if (lines.length > 0) {
     const lineRows = lines.map((l, i) => ({
@@ -592,11 +673,13 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
   const isDraft = (inv.state || "submitted") === "draft";
   if (!isDraft) {
     await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
-    await insertActivity(inv.wot, authorName, `Invoice ${inv.num} submitted. Total: $${total.toFixed(2)}.`, "system");
+    await insertActivity(inv.wot, authorName, `Invoice ${finalNum} submitted. Total: $${total.toFixed(2)}.`, "system");
   } else {
-    await insertActivity(inv.wot, authorName, `Invoice ${inv.num} draft saved.`, "system");
+    await insertActivity(inv.wot, authorName, `Invoice ${finalNum} draft saved.`, "system");
   }
-  return { ...header, total } as unknown as Invoice;
+  // Surface the resolved number + the collided-from number so the caller can
+  // show "X already exists, using Y instead" without parsing the row again.
+  return { ...header, num: finalNum, total, _collidedFrom: collidedFrom } as unknown as Invoice;
 }
 
 // Update an existing invoice's lines (full replace) + recompute totals.
@@ -605,9 +688,9 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
 // this is still a draft or a real submission.
 export async function updateInvoiceWithLines(
   invoiceId: string,
-  patch: { num?: string; cme?: string | null; invoiceDate?: string; serviceDate?: string | null; terms?: string; storeAddr?: string | null; state?: string; salesTax?: number },
+  patch: { num?: string; userTypedNum?: boolean; cme?: string | null; invoiceDate?: string; serviceDate?: string | null; terms?: string; storeAddr?: string | null; state?: string; salesTax?: number },
   lines: any[],
-): Promise<{ id: string; subtotal: number; salesTax: number; total: number }> {
+): Promise<{ id: string; num: string; subtotal: number; salesTax: number; total: number; collidedFrom: string | null }> {
   const sb = supabase();
   const subtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
   const salesTax = parseFloat(patch.salesTax as any) || 0;
@@ -616,15 +699,39 @@ export async function updateInvoiceWithLines(
     subtotal, sales_tax: salesTax, total,
     updated_at: new Date().toISOString(),
   };
-  if (patch.num != null) update.num = patch.num;
   if (patch.cme !== undefined) update.cme = patch.cme || null;
   if (patch.invoiceDate) update.invoice_date = patch.invoiceDate;
   if (patch.serviceDate !== undefined) update.service_date = patch.serviceDate || null;
   if (patch.terms) update.terms = patch.terms;
   if (patch.storeAddr !== undefined) update.store_address = patch.storeAddr || null;
   if (patch.state) update.state = patch.state;
-  const { error: uErr } = await sb.from("invoices").update(update).eq("id", invoiceId);
-  if (uErr) throw uErr;
+  // Number is treated specially: if it's changing AND would collide, we
+  // retry against the DB max + 1. Same shape as insertInvoiceWithRetry.
+  let finalNum: string | null = patch.num != null ? String(patch.num).trim() : null;
+  let collidedFrom: string | null = null;
+  const userTyped = !!patch.userTypedNum;
+  // Pre-flight: read the current invoice's num so we know whether the user
+  // is actually changing it. If they're keeping it the same, no collision is
+  // possible (it's their own row).
+  let originalNum: string | null = null;
+  if (finalNum != null) {
+    const { data: cur } = await sb.from("invoices").select("num").eq("id", invoiceId).maybeSingle();
+    originalNum = cur?.num ?? null;
+  }
+  // Try the update. If num collides, regenerate and retry; otherwise leave
+  // num out of the update payload and just write the rest.
+  let attempts = 0;
+  while (true) {
+    const writeNum = finalNum != null && finalNum !== originalNum;
+    const payload = writeNum ? { ...update, num: finalNum } : update;
+    const { error: uErr } = await sb.from("invoices").update(payload).eq("id", invoiceId);
+    if (!uErr) break;
+    if (!isInvoiceNumCollision(uErr) || attempts >= 5 || finalNum == null) throw uErr;
+    if (attempts === 0 && userTyped) collidedFrom = finalNum;
+    finalNum = await nextInvoiceNumFromDb();
+    if (finalNum === collidedFrom) finalNum = String((parseInt(finalNum) || 6500) + 1);
+    attempts++;
+  }
   // Replace lines: simpler + safer than diffing while editing a draft. The
   // table has on-delete-cascade so this is a single round trip per side.
   const { error: dErr } = await sb.from("invoice_lines").delete().eq("invoice_id", invoiceId);
@@ -641,7 +748,7 @@ export async function updateInvoiceWithLines(
     const { error: lErr } = await sb.from("invoice_lines").insert(rows);
     if (lErr) throw lErr;
   }
-  return { id: invoiceId, subtotal, salesTax, total };
+  return { id: invoiceId, num: (finalNum ?? originalNum ?? "") as string, subtotal, salesTax, total, collidedFrom };
 }
 
 // Reject an invoice with a reason. Staff-only at the UI layer; inv_update
