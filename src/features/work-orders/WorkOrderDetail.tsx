@@ -38,7 +38,7 @@ const formatEta = (v: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
+  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // The single-invoice "Approve (on behalf of AFM)" button on the WO actions
   // row is gone — multi-invoice approvals happen per-row in the invoice
@@ -332,6 +332,15 @@ export default function WorkOrderDetail(props: any) {
                       {woData.status === "pending_payment" && isManager && (
                         <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
                           {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}
+                        </button>
+                      )}
+                      {/* Manual close — staff judgement decides when the job is done.
+                          Paying invoices no longer auto-closes the WO (capital jobs
+                          run for weeks while invoices land). Closing stamps closed_at,
+                          clears the NTE flag, and starts the 24h linger to History. */}
+                      {isManager && woData.status !== "closed" && (
+                        <button onClick={() => setModal("closeWO")} disabled={isLoading("closeWO_" + woData.id)} className="btn-primary" style={loadingStyle("closeWO_" + woData.id)}>
+                          {isLoading("closeWO_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close work order"}
                         </button>
                       )}
                       {/* Closed job: always-available invoice download + staff-only reopen. */}

@@ -805,7 +805,7 @@ export default function PortalShell() {
     patchLocalWO, localActivity, dbCall,
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doReopen,
+    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto } = useWorkOrders({
@@ -1558,7 +1558,7 @@ export default function PortalShell() {
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
@@ -1835,10 +1835,38 @@ export default function PortalShell() {
         );
       })()}
 
+      {modal === "closeWO" && woData && (() => {
+        const unpaid = invoices.filter((i: any) => i.wot === woData.id && (i.state === "submitted" || i.state === "revised" || i.state === "approved")).length;
+        return (
+          <Modal onClose={() => setModal(null)} title="Close work order" width={460}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It moves to History after the 24h linger, the NTE flag clears, and contractors can no longer add invoices.{unpaid > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{unpaid} invoice{unpaid === 1 ? " is" : "s are"} still unpaid.</strong> Closing won't pay them — you can still mark them paid after the WO is closed, or Reopen if needed.</> : null}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+              <button
+                onClick={async () => {
+                  setModalLoading(true);
+                  try {
+                    await doCloseWO(woData.id);
+                    setModal(null);
+                  } finally {
+                    setModalLoading(false);
+                  }
+                }}
+                disabled={modalLoading}
+                className="btn-primary"
+                style={modalActionStyle}
+              >{modalLoading ? <><BtnSpinner />Closing...</> : "Close work order"}</button>
+            </div>
+          </Modal>
+        );
+      })()}
+
       {modal === "reopen" && woData && (
         <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board at <span style={{ color: T.ink, fontWeight: 600 }}>Pending Payment</span>, leaves History, and the linked invoice reverts to Approved.
+            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board, leaves History, and the NTE-flag bucket recovers it if applicable. Invoice states are untouched — staff can resume Mark paid or add more invoices.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>

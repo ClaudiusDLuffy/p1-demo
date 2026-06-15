@@ -65,14 +65,13 @@ export default function useInvoices({ currentUser, fire }: any) {
   const resetNewInv = () => setNewInv(blankNewInv());
 
   // Shared status-recompute used after delete (and as a backstop after
-  // submit-existing of a previously-rejected revision). Same rule as the WO
-  // hook: WO advances only when ALL non-draft, non-rejected invoices are
-  // approved/paid; closes only when all are paid. Returns the new status
-  // (or null to leave the WO alone).
+  // submit-existing of a previously-rejected revision). Mirrors the rule in
+  // useWorkOrders: WO advances when all non-draft, non-rejected invoices
+  // are approved/paid. Never returns "closed" — closing is an explicit
+  // staff decision (doCloseWO), not an invoice-state side effect.
   const computeWoStatusFromInvoices = (woId: string, all: any[]) => {
     const list = all.filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
     if (list.length === 0) return null;
-    if (list.every((i: any) => i.state === "paid")) return "closed";
     if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_payment";
     return "pending_approval";
   };

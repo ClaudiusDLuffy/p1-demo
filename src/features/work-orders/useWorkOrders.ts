@@ -260,23 +260,26 @@ export default function useWorkOrders({
     }
   };
 
-  // Multi-invoice rule (billing team's directive): a WO advances to
-  // pending_payment ONLY when every non-draft, non-rejected invoice on it is
-  // approved or paid; it closes ONLY when every such invoice is paid. Drafts
-  // and rejected invoices don't count as "open work" for billing. This helper
-  // computes the right WO status given the current invoice mix so every
-  // per-invoice action (approve / mark paid / reject / delete) can call it.
+  // Multi-invoice rule (billing team, revised 2026-06-15):
+  // - WO advances to pending_payment when every non-draft, non-rejected
+  //   invoice is approved or paid (drafts + rejected ignored).
+  // - Paying invoices NEVER closes the WO. Capital jobs run for weeks with
+  //   the contractor sending more invoices as work continues; a person
+  //   decides when the job is actually done (manual "Close work order"
+  //   button below). This helper therefore never returns "closed".
+  // - When no live invoices exist, returns null so the WO is left alone.
   const computeWoStatusFromInvoices = (woId: string, override?: any[]) => {
     const list = (override ?? invoices).filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
-    if (list.length === 0) return null;                     // nothing live → leave WO untouched
-    if (list.every((i: any) => i.state === "paid")) return "closed";
+    if (list.length === 0) return null;
     if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_payment";
     return "pending_approval";
   };
 
   // Per-invoice approve. Flips one invoice to 'approved' and then recomputes
-  // the WO status across siblings. WO does NOT advance until ALL non-draft,
+  // the WO status across siblings. WO does not advance until ALL non-draft,
   // non-rejected invoices are approved/paid (billing team's expectation).
+  // computeWoStatusFromInvoices never returns "closed" (capital-job rule),
+  // so the closing branches are gone.
   const doApproveInvoice = async (invoiceId: string) => {
     setLoading("approveInvoice_" + invoiceId, true);
     try {
@@ -291,14 +294,14 @@ export default function useWorkOrders({
       : null;
     setInvoices(nextInvoices);
     const localUpdates: any = {};
-    if (nextWoStatus && nextWoStatus !== "closed") localUpdates.status = nextWoStatus;
+    if (nextWoStatus) localUpdates.status = nextWoStatus;
     patchLocalWO(inv.wot, localUpdates, localActivity(`Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system"));
     if (woText) patchLocalWO(inv.wot, {}, localActivity(woText, "system"));
     fire(nextWoStatus === "pending_payment" ? "All invoices approved — Pending Payment" : `Invoice #${inv.num} approved`);
     await dbCall(async () => {
       await updateInvoiceState(inv.num, "approved");
       await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system");
-      if (nextWoStatus && nextWoStatus !== "closed") {
+      if (nextWoStatus) {
         await updateWorkOrder(inv.wot, { status: nextWoStatus });
         if (woText) await insertActivity(inv.wot, "System", woText, "system");
       }
@@ -311,9 +314,10 @@ export default function useWorkOrders({
     }
   };
 
-  // Per-invoice mark paid. Closes the WO only when EVERY non-draft,
-  // non-rejected invoice on it is paid. Stamps closed_at + clears the NTE
-  // flag only at that transition.
+  // Per-invoice mark paid. Flips the one invoice to 'paid' and recomputes WO
+  // status. The WO is NEVER auto-closed here — capital jobs receive
+  // additional invoices for weeks after payments start landing, so closing
+  // is an explicit staff decision via doCloseWO below.
   const doMarkPaid = async (invoiceId: string) => {
     setLoading("markPaid_" + invoiceId, true);
     try {
@@ -325,21 +329,15 @@ export default function useWorkOrders({
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
     setInvoices(nextInvoices);
-    const closing = nextWoStatus === "closed";
     const localPatch: any = {};
     if (nextWoStatus) localPatch.status = nextWoStatus;
-    if (closing) { localPatch.closedAt = paidAt; localPatch.nteFlagged = false; }
     patchLocalWO(inv.wot, localPatch, localActivity(`Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system"));
-    if (closing) patchLocalWO(inv.wot, {}, localActivity(`All invoices paid — work order closed by ${currentUser.name}.`, "system"));
-    fire(closing ? "All invoices paid — work order closed" : `Invoice #${inv.num} marked paid`);
+    fire(`Invoice #${inv.num} marked paid`);
     await dbCall(async () => {
       await updateInvoiceState(inv.num, "paid", { paid_at: paidAt });
       await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system");
       if (nextWoStatus) {
-        const woPatch: any = { status: nextWoStatus };
-        if (closing) { woPatch.closedAt = paidAt; woPatch.nteFlagged = false; }
-        await updateWorkOrder(inv.wot, woPatch);
-        if (closing) await insertActivity(inv.wot, "System", `All invoices paid — work order closed by ${currentUser.name}.`, "system");
+        await updateWorkOrder(inv.wot, { status: nextWoStatus });
       }
     }, "Mark paid failed", () => {
       restoreWorkOrders(woSnapshot);
@@ -350,28 +348,46 @@ export default function useWorkOrders({
     }
   };
 
+  // Staff-only: explicit "this job is done" decision. Stamps closed_at,
+  // clears the NTE flag, drops the WO into the 24h linger / History
+  // bucket. Independent of invoice payment state — capital jobs can be
+  // closed with unpaid invoices and vice versa; staff judgement decides.
+  const doCloseWO = async (woId: string) => {
+    setLoading("closeWO_" + woId, true);
+    try {
+    const closedAt = new Date().toISOString();
+    const text = `Work order closed by ${currentUser.name}.`;
+    const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    patchLocalWO(woId, { status: "closed", closedAt, nteFlagged: false }, localActivity(text, "system"));
+    fire("Work order closed");
+    await dbCall(async () => {
+      await updateWorkOrder(woId, { status: "closed", closedAt, nteFlagged: false });
+      await insertActivity(woId, currentUser.name, text, "system");
+    }, "Close failed", () => restoreWorkOrders(woSnapshot));
+    } finally {
+      setLoading("closeWO_" + woId, false);
+    }
+  };
+
   // Staff-only fail-safe: pull a closed WO back onto the active board by
-  // reverting all PAID invoices to approved, then recomputing status.
+  // pulling it back onto the active board. Now that closing is a manual
+  // staff decision (not "all invoices paid"), reopening does NOT touch
+  // invoice states — a closed WO can have any mix (paid, approved,
+  // submitted, none). We just clear closed_at and recompute WO status from
+  // whatever invoices currently exist; defaults to pending_payment when
+  // there are none, matching the pre-close convention.
   const doReopen = async (woId: string) => {
     setLoading("reopen_" + woId, true);
     try {
-    const paid = invoices.filter((i: any) => i.wot === woId && i.state === "paid");
-    const nextInvoices = invoices.map((i: any) => paid.find(p => p.id === i.id) ? { ...i, state: "approved" } : i);
-    const nextWoStatus = computeWoStatusFromInvoices(woId, nextInvoices) || "pending_payment";
-    const text = `Work order reopened by ${currentUser.name}.${paid.length ? ` ${paid.length} invoice${paid.length === 1 ? "" : "s"} reverted to approved.` : ""}`;
+    const nextWoStatus = computeWoStatusFromInvoices(woId, invoices) || "pending_payment";
+    const text = `Work order reopened by ${currentUser.name}.`;
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    const invSnapshot = qc.getQueryData(INVOICES_KEY);
-    setInvoices(nextInvoices);
     patchLocalWO(woId, { status: nextWoStatus, closedAt: null }, localActivity(text, "system"));
     fire("Work order reopened — back on the active board");
     await dbCall(async () => {
-      for (const p of paid) await updateInvoiceState(p.num, "approved");
       await updateWorkOrder(woId, { status: nextWoStatus, closedAt: null });
       await insertActivity(woId, currentUser.name, text, "system");
-    }, "Reopen failed", () => {
-      restoreWorkOrders(woSnapshot);
-      restoreInvoices(invSnapshot);
-    });
+    }, "Reopen failed", () => restoreWorkOrders(woSnapshot));
     } finally {
       setLoading("reopen_" + woId, false);
     }
@@ -587,7 +603,7 @@ export default function useWorkOrders({
     patchLocalWO, localActivity, dbCall,
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doReopen,
+    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
