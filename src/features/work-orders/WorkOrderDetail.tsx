@@ -737,17 +737,33 @@ export default function WorkOrderDetail(props: any) {
                     )}
                     <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Progress</div>
-                      {[
-                        { label: "Created", done: true },
-                        { label: "Dispatched + ETA", done: ["assigned", "wip", "parts", "capital", "completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
-                        { label: "Work started", done: ["wip", "parts", "capital", "completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
-                        { label: "Asset captured", done: !!woData.assetModel },
-                        { label: "Completed", done: ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
-                        { label: "7-Eleven updated", done: ["pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) },
-                        { label: "Invoiced", done: ["pending_approval", "pending_payment", "closed"].includes(woData.status) },
-                        { label: "Approved (AFM)", done: ["pending_payment", "closed"].includes(woData.status) },
-                        { label: "Paid + closed", done: woData.status === "closed" },
-                      ].map((s, i, a) => (
+                      {/* Job-progress only. Invoicing is multi-step and ongoing — the
+                          invoice panel below shows each invoice's state, so it isn't
+                          repeated here. Each step keys off the actual WO data field
+                          that proves the milestone happened, AND is gated by every
+                          prior step also being done so steps can't light up out of
+                          order (the bug you saw: Completed green while Asset
+                          captured was empty). */}
+                      {(() => {
+                        const reachedCompleted = ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status);
+                        const reachedPortalUpdated = ["pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status);
+                        const assetCaptured = !!(woData.assetMake && woData.assetModel && woData.assetSerial);
+                        const rawSteps = [
+                          { label: "Created", cond: true },
+                          { label: "Dispatched + ETA", cond: !!woData.dispatchedAt && !!woData.eta },
+                          { label: "Work started", cond: !!woData.startTime },
+                          { label: "Asset captured", cond: assetCaptured },
+                          { label: "Completed", cond: reachedCompleted && assetCaptured },
+                          { label: "7-Eleven updated", cond: reachedPortalUpdated },
+                          { label: "Closed", cond: !!woData.closedAt },
+                        ];
+                        let prevDone = true;
+                        return rawSteps.map((s) => {
+                          const done = !!s.cond && prevDone;
+                          if (!done) prevDone = false;
+                          return { label: s.label, done };
+                        });
+                      })().map((s, i, a) => (
                         <div key={i} style={{ display: "flex", gap: 12, position: "relative" }}>
                           {i < a.length - 1 && <div style={{ position: "absolute", left: 9, top: 20, width: 2, height: 20, background: s.done && a[i + 1]?.done ? T.success : T.borderSoft }} />}
                           <div style={{ width: 20, height: 20, borderRadius: "50%", border: s.done ? "none" : `2px solid ${T.border}`, background: s.done ? T.success : T.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
