@@ -393,6 +393,44 @@ export default function useWorkOrders({
     }
   };
 
+  // Staff-only edit of WO header fields. Patches only the fields that
+  // actually changed (caller computes the diff). Each change writes its own
+  // human-readable activity-log entry (one entry per changed field) so the
+  // audit trail is scannable. Priority changes also recompute response +
+  // resolution breach timestamps via computeSlaBreaches — otherwise the SLA
+  // badge keeps showing the old deadline against the new priority.
+  const doEditWorkOrder = async (
+    woId: string,
+    patch: Record<string, any>,
+    activityEntries: string[],
+  ) => {
+    if (Object.keys(patch).length === 0) return true;
+    setLoading("editWO_" + woId, true);
+    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    try {
+      // Optimistically patch the local copy + write a single grouped activity
+      // entry per field. The grouped local entries match what we'll write to
+      // the DB so the user sees the audit trail immediately.
+      const compoundLocal = activityEntries.map((t: string) => localActivity(t, "system"));
+      // patchLocalWO appends ONE activity per call — fold in sequence.
+      compoundLocal.forEach((act, i) => {
+        // Only the first call carries the patch; subsequent calls just append
+        // their activity entries.
+        patchLocalWO(woId, i === 0 ? patch : {}, act);
+      });
+      fire(activityEntries.length === 1 ? activityEntries[0] : `Work order updated (${activityEntries.length} changes)`);
+      const ok = await dbCall(async () => {
+        await updateWorkOrder(woId, patch);
+        for (const t of activityEntries) {
+          await insertActivity(woId, currentUser.name, t, "system");
+        }
+      }, "Edit failed", () => restoreWorkOrders(snapshot));
+      return !!ok;
+    } finally {
+      setLoading("editWO_" + woId, false);
+    }
+  };
+
   // Manager-side NTE override. Soft cap — no hard stop, contractors can still
   // submit invoices that exceed it (per Jeremy's May 1 directive).
   const doEditNte = async (woId: string, newNte: number, prevNte: number) => {
@@ -604,7 +642,7 @@ export default function useWorkOrders({
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
-    doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
   };

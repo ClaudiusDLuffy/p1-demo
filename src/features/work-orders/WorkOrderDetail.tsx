@@ -479,11 +479,17 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    {/* Destructive secondary action — deliberately separated from the
-                        primary action zone above. Soft delete, manager/dispatcher/
-                        back-office only (never contractor). */}
+                    {/* Staff-only secondary actions, separated from primary
+                        action zone. Edit work order opens a header-fields form;
+                        Delete is the existing soft-delete. Contractors never see
+                        either. Lifecycle-driven fields (status, assignment,
+                        timestamps, WOT id, capital flags) are intentionally NOT
+                        editable here — they have their own dedicated actions. */}
                     {isManager && (
-                      <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}` }}>
+                      <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}`, display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                        <button onClick={() => setModal("editWO")} disabled={isLoading("editWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.ink, fontSize: 12, fontWeight: 600, cursor: isLoading("editWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("editWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                          {isLoading("editWO_" + woData.id) ? <><BtnSpinnerDark />Saving...</> : "Edit work order"}
+                        </button>
                         <button onClick={() => setModal("deleteWO")} disabled={isLoading("deleteWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: isLoading("deleteWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("deleteWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
                           {isLoading("deleteWO_" + woData.id) ? <><BtnSpinnerDark />Deleting...</> : "Delete work order"}
                         </button>

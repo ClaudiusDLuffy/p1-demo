@@ -8,7 +8,7 @@ import { CreateInvoiceSchema, CreateInvoiceForm } from "../../lib/schemas";
 import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { Sel } from "../../components/ui/Sel";
-import { T, LINE_TYPES, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
+import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 
@@ -133,21 +133,25 @@ export default function InvoiceCreateModal(props: any) {
   return (
     <Modal onClose={close} title="Create invoice" width={820}>
       <form onSubmit={handleSubmit(onSubmit)}>
-        <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>P1 Pros invoice to 7-Eleven - Work Order {woData.id}</div>
+        <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {woData.id}</div>
 
+        {/* Contractor invoice direction: FROM the contractor, BILL TO P1 Pros.
+            Contractors have no direct 7-Eleven access — P1 reviews + posts to
+            7-Eleven after approval. Staff-side detail/PDF keep the 7-Eleven
+            framing (the document P1 ultimately sends). */}
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14, padding: "14px 16px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginBottom: 18 }}>
           <div>
-            <div className="display" style={{ fontSize: 16, color: T.ink, lineHeight: 1.1 }}>{P1_BUSINESS.dba}</div>
-            <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.5 }}>{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.phone}</div>
+            <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>From</div>
+            <div className="display" style={{ fontSize: 16, color: T.ink, lineHeight: 1.1 }}>{currentUser?.company || currentUser?.name || "Your company"}</div>
+            {currentUser?.company && currentUser?.name && <div style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{currentUser.name}</div>}
           </div>
           <div>
             <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Bill to</div>
-            <div style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}>{SEVEN_BILL_TO.name}</div>
-            <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>{SEVEN_BILL_TO.addr1}<br />{SEVEN_BILL_TO.addr2}</div>
+            <div style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}>{P1_BUSINESS.dba}</div>
+            <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>({P1_BUSINESS.legalName})<br />{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
           </div>
           <div>
-            <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Ship to - Store #{woData.store}</div>
+            <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Reference - Store #{woData.store}</div>
             <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>{woData.addr || "-"}</div>
           </div>
         </div>

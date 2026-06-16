@@ -65,7 +65,14 @@ export async function loadLogoDataUrl(path = "/p1-pros-logo.jpeg"): Promise<stri
   }
 }
 
-export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null): jsPDF {
+// opts.perspective: "staff" (default) keeps the P1 Pros → 7-Eleven framing
+// (the document P1 posts after review). "contractor" flips it to
+// FROM = contractor (opts.fromName) → BILL TO = P1 Pros, since contractors
+// have no 7-Eleven access.
+type InvoicePdfOpts = { perspective?: "staff" | "contractor"; fromName?: string };
+export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): jsPDF {
+  const isContractor = opts.perspective === "contractor";
+  const fromName = opts.fromName || "Contractor";
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const W = doc.internal.pageSize.getWidth();
   const M = 40; // margin
@@ -92,20 +99,24 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null): j
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
   doc.setTextColor(31, 30, 28);
-  doc.text(P1.dba, textX, y + 16);
+  // Seller wordmark: contractor invoices are FROM the contractor.
+  doc.text(isContractor ? fromName : P1.dba, textX, y + 16);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(120, 116, 108);
-  doc.text(`(${P1.legalName})`, textX, y + 30);
-
-  doc.setFontSize(9);
-  doc.setTextColor(60, 58, 54);
-  doc.text(P1.addr1, textX, y + 44);
-  doc.text(P1.addr2, textX, y + 56);
-  doc.text(P1.email, textX, y + 68);
-  doc.text(P1.phone, textX, y + 80);
-  doc.text(P1.website, textX, y + 92);
+  if (isContractor) {
+    doc.text("Invoice to P1 Pros", textX, y + 30);
+  } else {
+    doc.text(`(${P1.legalName})`, textX, y + 30);
+    doc.setFontSize(9);
+    doc.setTextColor(60, 58, 54);
+    doc.text(P1.addr1, textX, y + 44);
+    doc.text(P1.addr2, textX, y + 56);
+    doc.text(P1.email, textX, y + 68);
+    doc.text(P1.phone, textX, y + 80);
+    doc.text(P1.website, textX, y + 92);
+  }
 
   // Invoice title (right side)
   doc.setFont("helvetica", "bold");
@@ -140,14 +151,20 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null): j
   doc.setFontSize(8);
   doc.setTextColor(120, 116, 108);
   doc.text("BILL TO", M, y);
-  doc.text("SHIP TO", M + 240, y);
+  doc.text(isContractor ? "REFERENCE" : "SHIP TO", M + 240, y);
   doc.text("WORK ORDER", W - M - 130, y);
 
   y += 14;
   doc.setFontSize(10);
   doc.setTextColor(31, 30, 28);
-  doc.text(SEVEN.name, M, y);
-  doc.text(`${SEVEN.name}`, M + 240, y);
+  if (isContractor) {
+    // Contractor invoice: bill to P1 Pros; middle column is store reference.
+    doc.text(P1.dba, M, y);
+    doc.text(`Store #${inv.store}`, M + 240, y);
+  } else {
+    doc.text(SEVEN.name, M, y);
+    doc.text(`${SEVEN.name}`, M + 240, y);
+  }
   doc.setFont("helvetica", "bold");
   doc.text(inv.wot, W - M - 130, y);
 
@@ -155,18 +172,30 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null): j
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(60, 58, 54);
-  doc.text(`7-ELEVEN STORE - ${inv.store}`, M, y);
-  doc.text(`7-ELEVEN STORE - ${inv.store}`, M + 240, y);
+  if (isContractor) {
+    doc.text(`(${P1.legalName})`, M, y);
+    if (inv.storeAddr) doc.text(inv.storeAddr.split(",")[0] || "", M + 240, y);
+  } else {
+    doc.text(`7-ELEVEN STORE - ${inv.store}`, M, y);
+    doc.text(`7-ELEVEN STORE - ${inv.store}`, M + 240, y);
+  }
   doc.text(`Store #${inv.store}`, W - M - 130, y);
 
   y += 12;
-  doc.text(SEVEN.apAddr1, M, y);
-  if (inv.storeAddr) doc.text(inv.storeAddr.split(",")[0] || "", M + 240, y);
+  doc.text(isContractor ? P1.addr1 : SEVEN.apAddr1, M, y);
+  if (isContractor) {
+    if (inv.storeAddr) {
+      const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
+      if (rest) doc.text(rest, M + 240, y);
+    }
+  } else if (inv.storeAddr) {
+    doc.text(inv.storeAddr.split(",")[0] || "", M + 240, y);
+  }
   if (inv.cme) doc.text(inv.cme, W - M - 130, y);
 
   y += 12;
-  doc.text(SEVEN.apAddr2, M, y);
-  if (inv.storeAddr) {
+  doc.text(isContractor ? P1.addr2 : SEVEN.apAddr2, M, y);
+  if (!isContractor && inv.storeAddr) {
     const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
     if (rest) doc.text(rest, M + 240, y);
   }
@@ -286,8 +315,8 @@ export function downloadInvoicePDF(inv: Invoice): void {
 
 // Used when we want the raw bytes (e.g. to upload to Supabase Storage)
 // rather than trigger a browser download.
-export function generateInvoicePDFBlob(inv: Invoice, logoDataUrl?: string | null): Blob {
-  const doc = generateInvoicePDF(inv, logoDataUrl);
+export function generateInvoicePDFBlob(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): Blob {
+  const doc = generateInvoicePDF(inv, logoDataUrl, opts);
   return doc.output("blob") as Blob;
 }
 

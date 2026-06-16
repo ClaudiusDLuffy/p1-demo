@@ -9,7 +9,12 @@ import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/cons
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, workOrders, isManager, currentUser, setSelectedInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  // Contractor perspective flips the invoice framing to FROM = their company,
+  // BILL TO = P1 Pros (they have no 7-Eleven access). Staff keep the
+  // 7-Eleven framing — that's the document P1 posts after review.
+  const contractorView = !isManager;
+  const contractorName = currentUser?.company || currentUser?.name || "Your company";
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -118,13 +123,21 @@ export default function InvoiceDetail(props: any) {
                         <div className="display invoice-title-text" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>Invoice</div>
                         <div className="mono" style={{ fontSize: 16, color: T.accent, marginTop: 8, fontWeight: 600 }}>#{inv.num}</div>
                       </div>
-                      <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
-                        <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
-                        <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
-                        <div className="invoice-company-details" style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
-                          {P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.email}<br />{P1_BUSINESS.phone}<br />{P1_BUSINESS.website}
+                      {contractorView ? (
+                        <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 2 }}>From</div>
+                          <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{contractorName}</div>
+                          {currentUser?.company && currentUser?.name && <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{currentUser.name}</div>}
                         </div>
-                      </div>
+                      ) : (
+                        <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
+                          <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
+                          <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
+                          <div className="invoice-company-details" style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
+                            {P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.email}<br />{P1_BUSINESS.phone}<br />{P1_BUSINESS.website}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -132,12 +145,21 @@ export default function InvoiceDetail(props: any) {
                   <div className="invoice-header-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: `1px solid ${T.borderSoft}` }}>
                     <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Bill to</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{SEVEN_BILL_TO.name}</div>
-                      <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>7-ELEVEN STORE - {inv.store}<br />{SEVEN_BILL_TO.addr1}<br />{SEVEN_BILL_TO.addr2}</div>
+                      {contractorView ? (
+                        <>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{P1_BUSINESS.dba}</div>
+                          <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>({P1_BUSINESS.legalName})<br />{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{SEVEN_BILL_TO.name}</div>
+                          <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>7-ELEVEN STORE - {inv.store}<br />{SEVEN_BILL_TO.addr1}<br />{SEVEN_BILL_TO.addr2}</div>
+                        </>
+                      )}
                     </div>
                     <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Ship to</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>7-ELEVEN STORE - {inv.store}</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>{contractorView ? "Reference" : "Ship to"}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{contractorView ? `Store #${inv.store}` : `7-ELEVEN STORE - ${inv.store}`}</div>
                       <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>{inv.storeAddr || wo?.addr || "—"}</div>
                     </div>
                     <div style={{ padding: "20px 32px" }}>
