@@ -132,7 +132,6 @@ export default function InvoiceDetail(props: any) {
                       ) : (
                         <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
                           <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
-                          <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>({P1_BUSINESS.legalName})</div>
                           <div className="invoice-company-details" style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
                             {P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.email}<br />{P1_BUSINESS.phone}<br />{P1_BUSINESS.website}
                           </div>
@@ -148,7 +147,7 @@ export default function InvoiceDetail(props: any) {
                       {contractorView ? (
                         <>
                           <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{P1_BUSINESS.dba}</div>
-                          <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>({P1_BUSINESS.legalName})<br />{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
+                          <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
                         </>
                       ) : (
                         <>

@@ -4,16 +4,11 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { P1_BUSINESS } from "./constants";
 
-const P1 = {
-  legalName: "P Hospitality Repairs LLC",
-  dba: "P1 Pros",
-  addr1: "10181 Sample Rd #204",
-  addr2: "Coral Springs, FL 33065",
-  email: "eddie@phospitality.com",
-  phone: "+1 (561) 421-1281",
-  website: "www.p1pros.com",
-};
+// Single source of truth lives in constants.ts; aliased to P1 here so the
+// existing PDF layout code reads the same. DO NOT reintroduce a local copy.
+const P1 = P1_BUSINESS as typeof P1_BUSINESS & { legalName?: string };
 
 const SEVEN = {
   name: "7-ELEVEN INC",
@@ -109,14 +104,15 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   if (isContractor) {
     doc.text("Invoice to P1 Pros", textX, y + 30);
   } else {
-    doc.text(`(${P1.legalName})`, textX, y + 30);
+    // Legal-name parenthetical removed (Lindsay 2026-06-16). Contact rows
+    // shift up to fill the line previously occupied by "(P Hospitality...)".
     doc.setFontSize(9);
     doc.setTextColor(60, 58, 54);
-    doc.text(P1.addr1, textX, y + 44);
-    doc.text(P1.addr2, textX, y + 56);
-    doc.text(P1.email, textX, y + 68);
-    doc.text(P1.phone, textX, y + 80);
-    doc.text(P1.website, textX, y + 92);
+    doc.text(P1.addr1, textX, y + 32);
+    doc.text(P1.addr2, textX, y + 44);
+    doc.text(P1.email, textX, y + 56);
+    doc.text(P1.phone, textX, y + 68);
+    doc.text(P1.website, textX, y + 80);
   }
 
   // Invoice title (right side)
@@ -173,8 +169,10 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(60, 58, 54);
+  // Legal-name parenthetical removed under Bill To (Lindsay 2026-06-16) —
+  // P1 Pros address now starts on this row in the contractor perspective.
   if (isContractor) {
-    doc.text(`(${P1.legalName})`, M, y);
+    doc.text(P1.addr1, M, y);
     if (inv.storeAddr) doc.text(inv.storeAddr.split(",")[0] || "", M + 240, y);
   } else {
     doc.text(`7-ELEVEN STORE - ${inv.store}`, M, y);
@@ -183,7 +181,7 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   doc.text(`Store #${inv.store}`, W - M - 130, y);
 
   y += 12;
-  doc.text(isContractor ? P1.addr1 : SEVEN.apAddr1, M, y);
+  doc.text(isContractor ? P1.addr2 : SEVEN.apAddr1, M, y);
   if (isContractor) {
     if (inv.storeAddr) {
       const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
@@ -195,10 +193,12 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   if (inv.cme) doc.text(inv.cme, W - M - 130, y);
 
   y += 12;
-  doc.text(isContractor ? P1.addr2 : SEVEN.apAddr2, M, y);
-  if (!isContractor && inv.storeAddr) {
-    const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
-    if (rest) doc.text(rest, M + 240, y);
+  if (!isContractor) {
+    doc.text(SEVEN.apAddr2, M, y);
+    if (inv.storeAddr) {
+      const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
+      if (rest) doc.text(rest, M + 240, y);
+    }
   }
 
   y += 24;

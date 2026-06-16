@@ -148,7 +148,7 @@ export default function InvoiceCreateModal(props: any) {
           <div>
             <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Bill to</div>
             <div style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}>{P1_BUSINESS.dba}</div>
-            <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>({P1_BUSINESS.legalName})<br />{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
+            <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
           </div>
           <div>
             <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>Reference - Store #{woData.store}</div>
