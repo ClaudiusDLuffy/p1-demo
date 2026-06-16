@@ -38,7 +38,16 @@ const formatEta = (v: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doDownloadInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
+  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
+  const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
+  // The single-invoice "Approve (on behalf of AFM)" button on the WO actions
+  // row is gone — multi-invoice approvals happen per-row in the invoice
+  // group below. Keep a noop fallback for any callsite that still expects
+  // the prop.
+  const [rejectingInv, setRejectingInv] = useState<any>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [deletingInvId, setDeletingInvId] = useState<string | null>(null);
+  const [busyInvId, setBusyInvId] = useState<string | null>(null);
   const storeHistory = useMemo(
     () => woData ? workOrders.filter(w => w.store === woData.store && w.id !== woData.id) : [],
     [workOrders, woData]
@@ -51,8 +60,15 @@ export default function WorkOrderDetail(props: any) {
     () => woData ? invoices.filter(i => i.wot === woData.id && i.state !== "draft") : [],
     [invoices, woData]
   );
+  // All invoices on this WO (incl. drafts) for the per-WO group panel — drafts
+  // get a "Resume" affordance, everything else gets state badges + actions.
+  const woAllInvoices = useMemo(
+    () => woData ? invoices.filter(i => i.wot === woData.id) : [],
+    [invoices, woData]
+  );
   const currentSpend = useMemo(
-    () => woInvoices.reduce((s, i) => s + (i.total || 0), 0),
+    // NTE spend excludes rejected too — a rejected invoice isn't a real charge.
+    () => woInvoices.filter(i => i.state !== "rejected").reduce((s, i) => s + (i.total || 0), 0),
     [woInvoices]
   );
   const canInvoice = isManager
@@ -307,16 +323,24 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated to pending invoice"}
                         </button>
                       )}
-                      {(woData.status === "completed" || woData.status === "pending_invoice") && !isManager && canInvoice && <button onClick={() => setModal("createInvoice")} className="btn-accent">Create invoice</button>}
+                      {/* Multi-invoice: a contractor can keep adding invoices for
+                          follow-up visits until the WO closes. The per-invoice
+                          approve/reject/mark-paid actions are rendered in the
+                          invoice group block below. */}
+                      {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
                       {!isManager && ["wip", "parts", "completed"].includes(woData.status) && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
-                      {woData.status === "pending_approval" && isManager && (
-                        <button onClick={() => doApproveInvoice(woData.id)} disabled={isLoading("approveInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("approveInvoice_" + woData.id)}>
-                          {isLoading("approveInvoice_" + woData.id) ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
-                        </button>
-                      )}
                       {woData.status === "pending_payment" && isManager && (
                         <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
                           {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}
+                        </button>
+                      )}
+                      {/* Manual close — staff judgement decides when the job is done.
+                          Paying invoices no longer auto-closes the WO (capital jobs
+                          run for weeks while invoices land). Closing stamps closed_at,
+                          clears the NTE flag, and starts the 24h linger to History. */}
+                      {isManager && woData.status !== "closed" && (
+                        <button onClick={() => setModal("closeWO")} disabled={isLoading("closeWO_" + woData.id)} className="btn-primary" style={loadingStyle("closeWO_" + woData.id)}>
+                          {isLoading("closeWO_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close work order"}
                         </button>
                       )}
                       {/* Closed job: always-available invoice download + staff-only reopen. */}
@@ -328,6 +352,133 @@ export default function WorkOrderDetail(props: any) {
                       )}
 
                     </div>
+
+                    {/* ─────────────── INVOICES ON THIS WORK ORDER ────────────────
+                        Multi-invoice support: each visit is its own complete
+                        invoice. Staff see per-invoice approve / reject / mark
+                        paid / delete; contractor sees Resume on their drafts +
+                        Download. The WO advances only when all live invoices
+                        are approved/paid (logic lives in useWorkOrders). */}
+                    {woAllInvoices.length > 0 && (
+                      <div className="card" style={{ padding: 0, marginBottom: 16, overflow: "hidden" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${T.borderSoft}`, background: T.surfaceSoft }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>
+                            {woAllInvoices.length} invoice{woAllInvoices.length === 1 ? "" : "s"} on this work order
+                          </div>
+                          {!isManager && canInvoice && woData.status !== "closed" && (
+                            <button onClick={() => openCreate(null)} className="btn-soft" style={{ padding: "6px 12px", fontSize: 11 }}>+ Add invoice</button>
+                          )}
+                        </div>
+                        {woAllInvoices
+                          .slice()
+                          .sort((a: any, b: any) => (a.invoiceDate || "").localeCompare(b.invoiceDate || ""))
+                          .map((inv: any, idx: number) => {
+                            const isMyDraft = inv.state === "draft" && (inv.contractor === currentUser?.id || isManager);
+                            const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Paid" } as any)[inv.state] || inv.state;
+                            const stateColor = (
+                              inv.state === "paid" ? T.success :
+                              inv.state === "approved" ? T.accent :
+                              inv.state === "rejected" ? T.danger :
+                              inv.state === "draft" ? T.subtle : T.warn
+                            );
+                            const stateBg = (
+                              inv.state === "paid" ? T.successSoft :
+                              inv.state === "approved" ? T.accentSoft :
+                              inv.state === "rejected" ? T.dangerSoft :
+                              inv.state === "draft" ? T.surfaceSoft : T.warnSoft
+                            );
+                            const rowBusy = busyInvId === inv.id;
+                            return (
+                              <div key={inv.id || inv.num} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: idx < woAllInvoices.length - 1 ? `1px solid ${T.borderSoft}` : "none", flexWrap: "wrap" }}>
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>#{inv.num}</span>
+                                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: stateColor, background: stateBg, border: `1px solid ${stateColor}33`, padding: "2px 8px", borderRadius: 999 }}>{stateLabel}</span>
+                                    <span className="mono" style={{ fontSize: 12, color: T.muted }}>{fmt(inv.total || 0)}</span>
+                                    {inv.invoiceDate && <span style={{ fontSize: 11, color: T.subtle }}>{inv.invoiceDate}</span>}
+                                  </div>
+                                  {inv.state === "rejected" && inv.reason && (
+                                    <div style={{ fontSize: 11, color: T.danger, marginTop: 4, lineHeight: 1.45 }}><strong>Rejected:</strong> {inv.reason}</div>
+                                  )}
+                                </div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  {inv.state !== "draft" && (
+                                    <button onClick={() => doDownloadInvoice && doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ padding: "6px 10px", fontSize: 11 }}>Download</button>
+                                  )}
+                                  {isMyDraft && !isManager && (
+                                    <button onClick={() => openCreate(inv)} className="btn-accent" style={{ padding: "6px 10px", fontSize: 11 }}>Resume</button>
+                                  )}
+                                  {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                                    <>
+                                      <button
+                                        onClick={async () => { setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }}
+                                        disabled={rowBusy || isLoading("approveInvoice_" + inv.id)}
+                                        className="btn-accent"
+                                        style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
+                                      >{rowBusy || isLoading("approveInvoice_" + inv.id) ? <><BtnSpinner />Approving…</> : "Approve"}</button>
+                                      <button onClick={() => { setRejectingInv(inv); setRejectReason(""); }} className="btn-soft" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
+                                    </>
+                                  )}
+                                  {isManager && inv.state === "approved" && (
+                                    <button
+                                      onClick={async () => { setBusyInvId(inv.id); try { await doMarkPaid(inv.id); } finally { setBusyInvId(null); } }}
+                                      disabled={rowBusy || isLoading("markPaid_" + inv.id)}
+                                      className="btn-primary"
+                                      style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
+                                    >{rowBusy || isLoading("markPaid_" + inv.id) ? <><BtnSpinner />…</> : "Mark paid"}</button>
+                                  )}
+                                  {isManager && (
+                                    <button onClick={() => setDeletingInvId(inv.id)} className="btn-soft" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+
+                    {/* Reject-invoice confirmation modal — staff-only, reason required. */}
+                    {rejectingInv && (
+                      <Modal onClose={() => { setRejectingInv(null); setRejectReason(""); }} title={`Reject invoice #${rejectingInv.num}`} width={460}>
+                        <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
+                          The contractor sees the reason on their invoice. The WO does not advance until the remaining live invoices are approved.
+                        </div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
+                        <TA rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" />
+                        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                          <button onClick={() => { setRejectingInv(null); setRejectReason(""); }} className="btn-soft">Cancel</button>
+                          <button
+                            onClick={async () => {
+                              const ok = await doRejectInvoice(rejectingInv, rejectReason);
+                              if (ok) { setRejectingInv(null); setRejectReason(""); }
+                            }}
+                            disabled={!rejectReason.trim()}
+                            style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: rejectReason.trim() ? "pointer" : "default", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: rejectReason.trim() ? 1 : 0.5 }}
+                          >Reject</button>
+                        </div>
+                      </Modal>
+                    )}
+
+                    {/* Per-row delete-invoice confirmation — staff only. */}
+                    {deletingInvId && (() => {
+                      const inv = woAllInvoices.find((i: any) => i.id === deletingInvId);
+                      if (!inv) return null;
+                      return (
+                        <Modal onClose={() => setDeletingInvId(null)} title="Delete invoice" width={420}>
+                          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                            Delete invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This cannot be undone from the portal.
+                          </div>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                            <button onClick={() => setDeletingInvId(null)} className="btn-soft">Cancel</button>
+                            <button
+                              onClick={async () => { await doDeleteInvoice(inv); setDeletingInvId(null); }}
+                              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+                            >Delete</button>
+                          </div>
+                        </Modal>
+                      );
+                    })()}
+
                     {/* Destructive secondary action — deliberately separated from the
                         primary action zone above. Soft delete, manager/dispatcher/
                         back-office only (never contractor). */}

@@ -805,7 +805,7 @@ export default function PortalShell() {
     patchLocalWO, localActivity, dbCall,
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doReopen,
+    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto } = useWorkOrders({
@@ -839,16 +839,26 @@ export default function PortalShell() {
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy,
-    nextInvNum, resetNewInv,
+    nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
-    doDownloadInvoice, doDeleteInvoice,
+    doSaveDraftInvoice,
+    doDownloadInvoice, doDeleteInvoice, doRejectInvoice,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, fire });
-  const doSubmitInvoice = async (wo: any, data?: any) => {
-    const ok = await submitInvoice(wo, data);
-    if (ok) setModal("invoiceSubmitted");
+  // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
+  // on modal close. Passed to InvoiceCreateModal to hydrate the form.
+  const [resumeDraft, setResumeDraft] = useState<any>(null);
+  const doSubmitInvoice = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
+    const ok = await submitInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null);
+    if (ok) { setResumeDraft(null); setModal("invoiceSubmitted"); }
     return ok;
-  };  // Tick every 60s so SLA countdowns update live
+  };
+  const doSaveDraft = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
+    const ok = await doSaveDraftInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null);
+    if (ok) setResumeDraft(null);
+    return ok;
+  };
+  const openCreateInvoice = (draft?: any) => { setResumeDraft(draft ?? null); setModal("createInvoice"); };  // Tick every 60s so SLA countdowns update live
   const [, forceTick] = useState(0);
   useEffect(() => { const i = setInterval(() => forceTick(x => x + 1), 60000); return () => clearInterval(i); }, []);
 
@@ -867,6 +877,10 @@ export default function PortalShell() {
     return () => { [t1, t2, t3, t4].forEach(clearTimeout); };
   }, [isDemoManager]);
 
+  // Pre-fill the legacy `newInv` mirror used by the modal's other consumers.
+  // The actual editable Invoice # field in InvoiceCreateModal hydrates itself
+  // against nextInvNumFromDb (authoritative); this line just keeps any
+  // downstream readers in sync with our best cache-derived guess.
   useEffect(() => {
     if (modal !== "createInvoice") return;
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
@@ -1538,13 +1552,13 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
@@ -1786,35 +1800,73 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "markPaid" && woData && (
-        <Modal onClose={() => setModal(null)} title="Mark paid" width={420}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Confirm payment received for this work order? It will move to <span style={{ color: T.ink, fontWeight: 600 }}>Closed</span> and the linked invoice will be marked paid.
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button
-              onClick={async () => {
-                setModalLoading(true);
-                try {
-                  await doMarkPaid(woData.id);
-                  setModal(null);
-                } finally {
-                  setModalLoading(false);
-                }
-              }}
-              disabled={modalLoading}
-              className="btn-primary"
-              style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />Processing...</> : "Mark paid"}</button>
-          </div>
-        </Modal>
-      )}
+      {modal === "markPaid" && woData && (() => {
+        // Multi-invoice safe: act on a SPECIFIC invoice (the earliest
+        // approved-but-unpaid one on this WO). If there are multiple, the
+        // user should use the per-invoice "Mark paid" on the WO detail.
+        const approved = invoices.filter((i: any) => i.wot === woData.id && i.state === "approved").sort((a: any, b: any) => (a.num || "").localeCompare(b.num || ""));
+        const target = approved[0] || null;
+        return (
+          <Modal onClose={() => setModal(null)} title="Mark paid" width={420}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+              {target
+                ? <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{target.num}</span> paid?{approved.length > 1 ? ` ${approved.length - 1} other approved invoice${approved.length - 1 === 1 ? "" : "s"} on this WO will stay unpaid — use the per-invoice action to mark them.` : " The WO will move to Closed once every invoice is paid."}</>
+                : <>No approved invoice ready to pay. Use the per-invoice actions on the WO detail.</>}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+              <button
+                onClick={async () => {
+                  if (!target) { setModal(null); return; }
+                  setModalLoading(true);
+                  try {
+                    await doMarkPaid(target.id);
+                    setModal(null);
+                  } finally {
+                    setModalLoading(false);
+                  }
+                }}
+                disabled={modalLoading || !target}
+                className="btn-primary"
+                style={{ ...modalActionStyle, opacity: !target ? 0.5 : (modalActionStyle as any).opacity }}
+              >{modalLoading ? <><BtnSpinner />Processing...</> : "Mark paid"}</button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {modal === "closeWO" && woData && (() => {
+        const unpaid = invoices.filter((i: any) => i.wot === woData.id && (i.state === "submitted" || i.state === "revised" || i.state === "approved")).length;
+        return (
+          <Modal onClose={() => setModal(null)} title="Close work order" width={460}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It moves to History after the 24h linger, the NTE flag clears, and contractors can no longer add invoices.{unpaid > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{unpaid} invoice{unpaid === 1 ? " is" : "s are"} still unpaid.</strong> Closing won't pay them — you can still mark them paid after the WO is closed, or Reopen if needed.</> : null}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+              <button
+                onClick={async () => {
+                  setModalLoading(true);
+                  try {
+                    await doCloseWO(woData.id);
+                    setModal(null);
+                  } finally {
+                    setModalLoading(false);
+                  }
+                }}
+                disabled={modalLoading}
+                className="btn-primary"
+                style={modalActionStyle}
+              >{modalLoading ? <><BtnSpinner />Closing...</> : "Close work order"}</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {modal === "reopen" && woData && (
         <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board at <span style={{ color: T.ink, fontWeight: 600 }}>Pending Payment</span>, leaves History, and the linked invoice reverts to Approved.
+            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board, leaves History, and the NTE-flag bucket recovers it if applicable. Invoice states are untouched — staff can resume Mark paid or add more invoices.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -2031,7 +2083,7 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={setModal} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} />
+      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} />
 
       {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
         const inv = submittedInvoice;

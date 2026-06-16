@@ -9,9 +9,12 @@ import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/cons
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doDownloadInvoice, doDeleteInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, workOrders, isManager, setSelectedInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [submittingReject, setSubmittingReject] = useState(false);
   const inv = useMemo(
     () => invoices.find(i => i.num === selectedInvoice),
     [invoices, selectedInvoice]
@@ -33,15 +36,30 @@ export default function InvoiceDetail(props: any) {
                       <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
                       {pdfBusy ? "Preparing…" : "Download PDF"}
                     </button>
+                    {/* Multi-invoice: every action is per-invoice (inv.id).
+                        Approving here updates ONE invoice; the WO advances
+                        only when all its non-draft, non-rejected siblings are
+                        approved/paid (logic in useWorkOrders). */}
                     {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                      <>
+                        <button
+                          onClick={async () => { await doApproveInvoice(inv.id); }}
+                          disabled={loadingStates["approveInvoice_" + inv.id]}
+                          className="btn-primary"
+                          style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["approveInvoice_" + inv.id] ? 0.7 : 1, cursor: loadingStates["approveInvoice_" + inv.id] ? "default" : "pointer" }}
+                        >
+                          {loadingStates["approveInvoice_" + inv.id] ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
+                        </button>
+                        <button onClick={() => setRejecting(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
+                      </>
+                    )}
+                    {isManager && inv.state === "approved" && doMarkPaid && (
                       <button
-                        onClick={async () => { await doApproveInvoice(inv.wot); setSelectedInvoice(null); }}
-                        disabled={loadingStates["approveInvoice_" + inv.wot]}
+                        onClick={async () => { await doMarkPaid(inv.id); }}
+                        disabled={loadingStates["markPaid_" + inv.id]}
                         className="btn-primary"
-                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["approveInvoice_" + inv.wot] ? 0.7 : 1, cursor: loadingStates["approveInvoice_" + inv.wot] ? "default" : "pointer" }}
-                      >
-                        {loadingStates["approveInvoice_" + inv.wot] ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
-                      </button>
+                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["markPaid_" + inv.id] ? 0.7 : 1, cursor: loadingStates["markPaid_" + inv.id] ? "default" : "pointer" }}
+                      >{loadingStates["markPaid_" + inv.id] ? <><BtnSpinner />…</> : "Mark paid"}</button>
                     )}
                     {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
                     {isManager && (
@@ -49,6 +67,28 @@ export default function InvoiceDetail(props: any) {
                     )}
                   </div>
                 </div>
+                {rejecting && (
+                  <Modal onClose={() => { setRejecting(false); setRejectReason(""); }} title={`Reject invoice #${inv.num}`} width={460}>
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
+                      The contractor sees this reason on their invoice. The WO does not advance until the remaining live invoices are approved.
+                    </div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
+                    <textarea rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                      <button onClick={() => { setRejecting(false); setRejectReason(""); }} className="btn-soft">Cancel</button>
+                      <button
+                        onClick={async () => {
+                          setSubmittingReject(true);
+                          const ok = await doRejectInvoice(inv, rejectReason);
+                          setSubmittingReject(false);
+                          if (ok) { setRejecting(false); setRejectReason(""); setSelectedInvoice(null); }
+                        }}
+                        disabled={!rejectReason.trim() || submittingReject}
+                        style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: rejectReason.trim() && !submittingReject ? "pointer" : "default", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: rejectReason.trim() && !submittingReject ? 1 : 0.5, display: "flex", alignItems: "center", gap: 6 }}
+                      >{submittingReject ? <><BtnSpinner />Rejecting…</> : "Reject"}</button>
+                    </div>
+                  </Modal>
+                )}
                 {confirmDelete && (
                   <Modal onClose={() => setConfirmDelete(false)} title="Delete invoice" width={420}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
