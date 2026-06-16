@@ -84,11 +84,12 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   y += 8;
 
   // ── Top: Logo block + Invoice title.
-  // When a logo data URL is provided, paint it top-left and shift the
-  // wordmark right. Falls back to text-only branding so a missing asset
-  // never breaks invoice generation.
+  // Staff/P1 perspective: paint the P1 Pros logo top-left and shift the
+  // wordmark right. Contractor perspective: NO P1 logo — this is the
+  // contractor's invoice to P1, so P1's branding doesn't belong on it; the
+  // contractor's company name is the seller wordmark, rendered as text only.
   let textX = M;
-  if (logoDataUrl) {
+  if (!isContractor && logoDataUrl) {
     try {
       doc.addImage(logoDataUrl, "JPEG", M, y, 56, 56, undefined, "FAST");
       textX = M + 68;
