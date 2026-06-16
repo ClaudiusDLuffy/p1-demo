@@ -72,13 +72,15 @@ export const INV_STATE = {
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Single source of truth for P1 Pros invoice contact info. invoicePdf.ts
+// imports from here too — DO NOT add a divergent copy. Legal-name
+// parenthetical intentionally removed (Lindsay 2026-06-16).
 export const P1_BUSINESS = {
-  legalName: "P Hospitality Repairs LLC",
   dba: "P1 Pros",
   addr1: "10181 Sample Rd #204",
   addr2: "Coral Springs, FL 33065",
-  email: "eddie@phospitality.com",
-  phone: "+1 (561) 421-1281",
+  email: "service@p1pros.com",
+  phone: "352-585-6498",
   website: "www.p1pros.com",
   // Rate fields start empty — the contractor enters their own number.
   // Truck Charge is the one exception: editable default of 60.

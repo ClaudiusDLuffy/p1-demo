@@ -265,6 +265,17 @@ export default function useInvoices({ currentUser, fire }: any) {
     try {
       const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename, loadLogoDataUrl } = await import("../../lib/invoicePdf");
       const filename = invoiceFilename(inv);
+      // Contractor download: always regenerate with the contractor-perspective
+      // framing (FROM contractor → BILL TO P1 Pros). We never serve the stored
+      // bytes (those are the staff/7-Eleven document P1 posts) and never
+      // overwrite storage, so the two perspectives don't cross-contaminate.
+      if (currentUser?.role === "contractor") {
+        const logoDataUrl = await loadLogoDataUrl();
+        const blob = generateInvoicePDFBlob(inv, logoDataUrl, { perspective: "contractor", fromName: currentUser?.company || currentUser?.name || "Contractor" });
+        triggerBlobDownload(blob, filename);
+        fire(`Invoice ${inv.num} downloaded`);
+        return;
+      }
       if (inv.pdfStoragePath) {
         const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
         triggerBlobDownload(blob, filename);

@@ -307,6 +307,16 @@ export async function getPhotoUrl(path: string): Promise<string | null> {
 const WO_FIELD_MAP: Record<string, string> = {
   contractor: "contractor_id",
   functionalStatus: "functional_status",
+  // Header fields editable via the staff "Edit work order" modal. (priority,
+  // nte, city, category, summary, description already match their column
+  // names so they pass through toDbWoPatch unchanged.)
+  store: "store_number",
+  addr: "address",
+  lineOfService: "line_of_service",
+  businessService: "business_service",
+  subCategory: "sub_category",
+  afm: "afm_name",
+  afmEmail: "afm_email",
   dispatchedAt: "dispatched_at",
   startTime: "start_time",
   endTime: "end_time",

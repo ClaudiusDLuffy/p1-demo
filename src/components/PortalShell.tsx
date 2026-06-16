@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   insertActivity, insertWorkOrder, findExistingWoId, subscribeToChanges,
 } from "../lib/db";
-import { computeSlaState } from "../lib/slaConfig";
+import { computeSlaState, computeSlaBreaches } from "../lib/slaConfig";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
 import { DatePickerField, TimePickerField } from "./ui/DateTimePicker";
@@ -774,6 +774,10 @@ export default function PortalShell() {
   const [etaTimeInput, setEtaTimeInput] = useState("14:00");
   const [nteInputValue, setNteInputValue] = useState("");
   const [nteFlagInputValue, setNteFlagInputValue] = useState("");
+  // Staff "Edit work order" form. One object mirroring the editable fields;
+  // populated from woData when the modal opens, diffed on save.
+  const EMPTY_EDIT_WO = { priority: "", nte: "", store: "", city: "", addr: "", lineOfService: "", businessService: "", category: "", subCategory: "", afm: "", afmEmail: "", summary: "", description: "" };
+  const [editWoForm, setEditWoForm] = useState<any>(EMPTY_EDIT_WO);
   const [startNotesInput, setStartNotesInput] = useState("");
   const [pauseReasonInput, setPauseReasonInput] = useState("");
   const [partDescInput, setPartDescInput] = useState("");
@@ -806,7 +810,7 @@ export default function PortalShell() {
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
-    doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto } = useWorkOrders({
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
@@ -899,6 +903,21 @@ export default function PortalShell() {
     }
     if (modal === "editNte") setNteInputValue(woData.nte || "");
     if (modal === "editNteFlag") setNteFlagInputValue(woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
+    if (modal === "editWO") setEditWoForm({
+      priority: woData.priority || "",
+      nte: woData.nte != null ? String(woData.nte) : "",
+      store: woData.store || "",
+      city: woData.city || "",
+      addr: woData.addr || "",
+      lineOfService: woData.lineOfService || "",
+      businessService: woData.businessService || "",
+      category: woData.category || "",
+      subCategory: woData.subCategory || "",
+      afm: woData.afm || "",
+      afmEmail: woData.afmEmail || "",
+      summary: woData.summary || "",
+      description: woData.description || "",
+    });
     if (modal === "reassign") {
       setReassignTarget("");
       setReassignSearch("");
@@ -1552,7 +1571,7 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
 
@@ -1912,6 +1931,103 @@ export default function PortalShell() {
           </div>
         </Modal>
       )}
+
+      {modal === "editWO" && woData && isManager && (() => {
+        const saveEdit = async () => {
+          const orig: any = {
+            priority: woData.priority || "",
+            nte: woData.nte != null ? Number(woData.nte) : 0,
+            store: woData.store || "", city: woData.city || "", addr: woData.addr || "",
+            lineOfService: woData.lineOfService || "", businessService: woData.businessService || "",
+            category: woData.category || "", subCategory: woData.subCategory || "",
+            afm: woData.afm || "", afmEmail: woData.afmEmail || "",
+            summary: woData.summary || "", description: woData.description || "",
+          };
+          const patch: any = {};
+          const entries: string[] = [];
+          const textFields: [string, string][] = [
+            ["store", "Store number"], ["city", "City"], ["addr", "Address"],
+            ["lineOfService", "Line of Service"], ["businessService", "Business Service"],
+            ["category", "Category"], ["subCategory", "Sub Category"],
+            ["afm", "AFM name"], ["afmEmail", "AFM email"],
+            ["summary", "Short description"], ["description", "Description"],
+          ];
+          for (const [key, label] of textFields) {
+            const next = (editWoForm[key] || "").trim();
+            if (next !== orig[key]) {
+              patch[key] = next;
+              entries.push(`${label} changed${orig[key] ? ` from "${orig[key]}"` : ""} to "${next || "(blank)"}" by ${currentUser.name}.`);
+            }
+          }
+          if (editWoForm.priority && editWoForm.priority !== orig.priority) {
+            patch.priority = editWoForm.priority;
+            const fromL = PRIORITY[orig.priority]?.label || orig.priority || "(none)";
+            const toL = PRIORITY[editWoForm.priority]?.label || editWoForm.priority;
+            entries.push(`Priority changed from ${fromL} to ${toL} by ${currentUser.name}.`);
+            // Recompute SLA breach windows off the existing intake time so the
+            // SLA badge reflects the new priority's deadlines.
+            const startedAt = woData.slaStartedAt ? new Date(woData.slaStartedAt) : new Date();
+            const b = computeSlaBreaches(editWoForm.priority, startedAt);
+            patch.responseBreachAt = b.responseBreachAt.toISOString();
+            patch.resolutionBreachAt = b.resolutionBreachAt.toISOString();
+          }
+          const nextNte = editWoForm.nte === "" ? 0 : parseFloat(editWoForm.nte);
+          if (isFinite(nextNte) && nextNte >= 0 && nextNte !== orig.nte) {
+            patch.nte = nextNte;
+            entries.push(`NTE changed from ${fmt(orig.nte)} to ${fmt(nextNte)} by ${currentUser.name}.`);
+          }
+          if (entries.length === 0) { fire("No changes to save"); setModal(null); return; }
+          setModalLoading(true);
+          try {
+            const ok = await doEditWorkOrder(woData.id, patch, entries);
+            if (ok) setModal(null);
+          } finally {
+            setModalLoading(false);
+          }
+        };
+        const set = (k: string) => (e: any) => setEditWoForm((f: any) => ({ ...f, [k]: e.target.value }));
+        return (
+          <Modal onClose={() => setModal(null)} title="Edit work order" width={620}>
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
+              Editing <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Status, contractor assignment, and timestamps have their own actions and aren't edited here. Each change is logged.
+            </div>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Priority"><Sel value={editWoForm.priority} onChange={set("priority")}>
+                  {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
+                </Sel></Field>
+                <Field label="NTE ($)"><Input type="number" step="0.01" value={editWoForm.nte} onChange={set("nte")} placeholder="e.g. 1500" /></Field>
+              </div>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Store Number"><Input value={editWoForm.store} onChange={set("store")} /></Field>
+                <Field label="City, State"><Input value={editWoForm.city} onChange={set("city")} /></Field>
+              </div>
+              <Field label="Store Address"><Input value={editWoForm.addr} onChange={set("addr")} /></Field>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Line of Service"><Input value={editWoForm.lineOfService} onChange={set("lineOfService")} /></Field>
+                <Field label="Business Service"><Sel value={editWoForm.businessService} onChange={set("businessService")}>
+                  <option value="">Not set</option>
+                  {["Refrigeration equipment", "Frozen Beverage - Equipment", "Cold Beverage - Equipment", "HVAC", "EMS", "Plumbing", "Hot food", "Ice merchandiser", "Walk-in cooler/freezer", "Septic/Grease"].map(c => <option key={c}>{c}</option>)}
+                </Sel></Field>
+              </div>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Category"><Input value={editWoForm.category} onChange={set("category")} /></Field>
+                <Field label="Sub Category"><Input value={editWoForm.subCategory} onChange={set("subCategory")} /></Field>
+              </div>
+              <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="AFM Name"><Input value={editWoForm.afm} onChange={set("afm")} /></Field>
+                <Field label="AFM Email"><Input value={editWoForm.afmEmail} onChange={set("afmEmail")} /></Field>
+              </div>
+              <Field label="Short Description"><Input value={editWoForm.summary} onChange={set("summary")} /></Field>
+              <Field label="Description"><TA rows={3} value={editWoForm.description} onChange={set("description")} /></Field>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+              <button onClick={saveEdit} disabled={modalLoading} className="btn-primary" style={{ opacity: modalLoading ? 0.7 : 1, cursor: modalLoading ? "default" : "pointer" }}>{modalLoading ? "Saving..." : "Save changes"}</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {modal === "editNte" && woData && (
         <Modal onClose={() => setModal(null)} title={woData.nte > 0 ? "Edit NTE" : "Add NTE"} width={420}>
