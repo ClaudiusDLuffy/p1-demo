@@ -28,9 +28,11 @@ import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import {
   WORK_ORDERS_KEY,
+  WO_PARTS_KEY,
   useProfilesQuery,
   useTechniciansQuery,
   useWorkOrdersQuery,
+  useWoPartsQuery,
 } from "../features/work-orders/queries";
 import InvoiceList from "../features/invoices/InvoiceList";
 import InvoiceDetail from "../features/invoices/InvoiceDetail";
@@ -783,6 +785,9 @@ export default function PortalShell() {
   const [partDescInput, setPartDescInput] = useState("");
   const [partNumInput, setPartNumInput] = useState("");
   const [partEtaInput, setPartEtaInput] = useState("");
+  // Repeatable parts grid for the pause modal (one row per part). Each row
+  // becomes a wo_parts insert when the contractor confirms the pause.
+  const [pausePartsList, setPausePartsList] = useState<{ description: string; partNumber: string; qty: number; expectedReturnDate: string }[]>([]);
   const [pauseNotesInput, setPauseNotesInput] = useState("");
   const [assetMakeInput, setAssetMakeInput] = useState("");
   const [assetModelInput, setAssetModelInput] = useState("");
@@ -799,6 +804,8 @@ export default function PortalShell() {
   const { data: profilesData } = useProfilesQuery(isAuthenticated);
   const { data: invoicesData } = useInvoicesQuery(isAuthenticated);
   const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
+  const { data: woPartsData } = useWoPartsQuery(isAuthenticated);
+  const woParts = woPartsData ?? [];
   const USERS = useMemo(
     () => profilesData ?? DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })),
     [profilesData]
@@ -812,7 +819,8 @@ export default function PortalShell() {
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
-    doAddPhotos, doRemovePhoto } = useWorkOrders({
+    doAddPhotos, doRemovePhoto,
+    doAddPart, doUpdatePart, doDeletePart } = useWorkOrders({
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
@@ -952,6 +960,7 @@ export default function PortalShell() {
       setPartDescInput("");
       setPartNumInput("");
       setPartEtaInput("");
+      setPausePartsList([]);
       setPauseNotesInput("");
     }
     if (modal === "closeComplete") {
@@ -976,6 +985,7 @@ export default function PortalShell() {
     const unsub = subscribeToChanges(() => {
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
     });
     return () => { unsub(); };
   }, [currentUser?.id, qc]);
@@ -986,6 +996,7 @@ export default function PortalShell() {
     qc.resetQueries({ queryKey: INVOICES_KEY });
     qc.resetQueries({ queryKey: ["profiles"] });
     qc.resetQueries({ queryKey: ["technicians"] });
+    qc.resetQueries({ queryKey: WO_PARTS_KEY });
   }, [currentUser?.id, qc]);
   const nav = useCallback((p: string) => {
     setPage(p);
@@ -1589,7 +1600,7 @@ export default function PortalShell() {
 
           <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} />
+          <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
 
           <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} getUser={getUser} loadingStates={loadingStates} />
 
@@ -1601,7 +1612,7 @@ export default function PortalShell() {
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
@@ -2136,14 +2147,46 @@ export default function PortalShell() {
               <Field label="Stamp-out date"><DatePickerField value={pauseDateInput} onChange={setPauseDateInput} /></Field>
               <Field label="Stamp-out time"><TimePickerField value={pauseTimeInput} onChange={setPauseTimeInput} /></Field>
             </div>
-            <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts information</div>
-              <div style={{ display: "grid", gap: 10 }}>
-                <Field label="Part description (generic)"><Input value={partDescInput} onChange={(e: any) => setPartDescInput(e.target.value)} placeholder="e.g. Evaporator coil, blower motor..." /></Field>
-                <Field label="Specific part number"><Input value={partNumInput} onChange={(e: any) => setPartNumInput(e.target.value)} placeholder="e.g. Heatcraft BHL136BE" /></Field>
-                <Field label="Expected return date"><DatePickerField value={partEtaInput} onChange={setPartEtaInput} placeholder="Select return date" placement="right" mobileYOffset={-44} desktopYOffset={-72} avoidDesktopBottomCut /></Field>
+            {pauseReasonInput === "Awaiting parts" && (
+              <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts on order</div>
+                  <button
+                    type="button"
+                    onClick={() => setPausePartsList(prev => [...prev, { description: "", partNumber: "", qty: 1, expectedReturnDate: "" }])}
+                    className="btn-soft"
+                    style={{ padding: "5px 10px", fontSize: 11 }}
+                  >+ Add part</button>
+                </div>
+                {pausePartsList.length === 0 && (
+                  <div style={{ fontSize: 12, color: T.muted, marginBottom: 10, lineHeight: 1.5 }}>
+                    Add one row per part you're waiting on. Status starts as <strong>Ordered</strong> — update Shipped / Received / Backordered from the parts list on the work order.
+                  </div>
+                )}
+                <div style={{ display: "grid", gap: 12 }}>
+                  {pausePartsList.map((row, i) => (
+                    <div key={i} style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.warn}22` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6 }}>Part {i + 1}</div>
+                        <button
+                          type="button"
+                          onClick={() => setPausePartsList(prev => prev.filter((_, j) => j !== i))}
+                          style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 14, padding: 0 }}
+                        >x</button>
+                      </div>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <Field label="Description"><Input value={row.description} onChange={(e: any) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, description: e.target.value } : r))} placeholder="e.g. Evaporator coil" /></Field>
+                        <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.4fr 70px", gap: 8 }}>
+                          <Field label="Part number"><Input value={row.partNumber} onChange={(e: any) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, partNumber: e.target.value } : r))} placeholder="e.g. BHL136BE" /></Field>
+                          <Field label="Qty"><Input type="number" min="1" step="1" value={row.qty} onChange={(e: any) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, qty: Number(e.target.value) || 1 } : r))} /></Field>
+                        </div>
+                        <Field label="Expected return date"><DatePickerField value={row.expectedReturnDate} onChange={(v: string) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, expectedReturnDate: v } : r))} placeholder="Select return date" placement="right" mobileYOffset={-44} desktopYOffset={-72} avoidDesktopBottomCut /></Field>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             <Field label="Notes"><TA rows={2} value={pauseNotesInput} onChange={(e: any) => setPauseNotesInput(e.target.value)} placeholder="Explain what was done so far..." /></Field>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
@@ -2152,7 +2195,7 @@ export default function PortalShell() {
               onClick={async () => {
                 setModalLoading(true);
                 try {
-                  await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput);
+                  await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput, pausePartsList);
                   setModal(null);
                 } finally {
                   setModalLoading(false);
@@ -2223,7 +2266,7 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} />
+      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
 
       {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
         const inv = submittedInvoice;

@@ -38,7 +38,7 @@ const formatEta = (v: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {} } = props;
+  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // The single-invoice "Approve (on behalf of AFM)" button on the WO actions
   // row is gone — multi-invoice approvals happen per-row in the invoice
@@ -60,6 +60,44 @@ export default function WorkOrderDetail(props: any) {
     () => woData ? invoices.filter(i => i.wot === woData.id && i.state !== "draft") : [],
     [invoices, woData]
   );
+  // Parts tracking list for this WO (everyone — staff + contractor sees the
+  // same list since the contractor view is for THEIR own job). Sort:
+  // pending statuses first, received last, so what needs attention is at top.
+  const PART_STATUS_ORDER: Record<string, number> = {
+    backordered: 0,
+    ordered: 1,
+    shipped: 2,
+    received: 3,
+  };
+  const myParts = useMemo(
+    () => woData
+      ? [...woParts]
+          .filter(p => p.workOrderId === woData.id)
+          .sort((a: any, b: any) => (PART_STATUS_ORDER[a.status] ?? 9) - (PART_STATUS_ORDER[b.status] ?? 9))
+      : [],
+    [woParts, woData]
+  );
+  // "Billed" hint: any non-rejected invoice line whose description loosely
+  // matches a part's description tags it as already billed so the contractor
+  // doesn't double-bill. Match is description-substring (case-insensitive).
+  const billedDescriptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const inv of woInvoices) {
+      if (inv.state === "rejected") continue;
+      for (const line of (inv.lines || [])) {
+        if (line?.desc) set.add(String(line.desc).toLowerCase());
+      }
+    }
+    return set;
+  }, [woInvoices]);
+  const isPartBilled = (desc: string) => {
+    if (!desc) return false;
+    const d = desc.toLowerCase();
+    for (const b of billedDescriptions) {
+      if (b.includes(d) || d.includes(b)) return true;
+    }
+    return false;
+  };
   // All invoices on this WO (incl. drafts) for the per-WO group panel — drafts
   // get a "Resume" affordance, everything else gets state badges + actions.
   const woAllInvoices = useMemo(
@@ -808,12 +846,48 @@ export default function WorkOrderDetail(props: any) {
                         </div>
                       ))}
                     </div>
-                    {woData.partNeeded && (
+                    {/* Parts tracking panel — structured wo_parts list. Visible to
+                        staff and to the assigned contractor. Both can edit
+                        status / tracking / return date inline. Legacy yellow
+                        card is the fallback when there are no rows yet (old
+                        WOs that only have part_needed/part_eta scalars). */}
+                    {myParts.length > 0 ? (
+                      <PartsPanel
+                        woId={woData.id}
+                        parts={myParts}
+                        isManager={isManager}
+                        doAddPart={doAddPart}
+                        doUpdatePart={doUpdatePart}
+                        doDeletePart={doDeletePart}
+                        isPartBilled={isPartBilled}
+                        loadingStates={loadingStates}
+                        T={T}
+                      />
+                    ) : woData.partNeeded ? (
                       <div className="card" style={{ padding: 18, background: T.warnSoft, borderColor: `${T.warn}33` }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn, marginBottom: 6 }}>{woData.status === "capital" ? "Equipment" : "Part"} on order</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn }}>{woData.status === "capital" ? "Equipment" : "Part"} on order</div>
+                          {doAddPart && (
+                            <button
+                              type="button"
+                              onClick={() => doAddPart(woData.id, { description: "", status: "ordered" })}
+                              className="btn-soft"
+                              style={{ padding: "4px 10px", fontSize: 11 }}
+                            >+ Add to list</button>
+                          )}
+                        </div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: "#73560C" }}>{woData.partNeeded}</div>
-                        {woData.partEta && <div style={{ fontSize: 11, color: T.warn, marginTop: 4 }}>ETA: {woData.partEta}</div>}
+                        {woData.partEta && <div style={{ fontSize: 11, color: T.warn, marginTop: 4 }}>Expected return: {woData.partEta}</div>}
                       </div>
+                    ) : (
+                      doAddPart && (woData.status === "parts" || woData.status === "wip" || isManager) && (
+                        <button
+                          type="button"
+                          onClick={() => doAddPart(woData.id, { description: "", status: "ordered" })}
+                          className="btn-soft"
+                          style={{ padding: "8px 14px", fontSize: 12 }}
+                        >+ Add part</button>
+                      )
                     )}
                   </div>
                 </div>
@@ -844,5 +918,130 @@ export default function WorkOrderDetail(props: any) {
           )}
 
     </>
+  );
+}
+
+// ── PartsPanel ─────────────────────────────────────────────────────────────
+// Visible to staff and to the assigned contractor. Inline status pill toggle,
+// editable tracking # and expected return date. "Billed" hint is a UI signal
+// only (description loose-match to invoice lines) — not authoritative.
+const PART_STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
+  ordered:     { label: "Ordered",     bg: "#FEF3C7", fg: "#92400E" },
+  backordered: { label: "Backordered", bg: "#FECACA", fg: "#7F1D1D" },
+  shipped:     { label: "Shipped",     bg: "#DBEAFE", fg: "#1E3A8A" },
+  received:    { label: "Received",    bg: "#D1FAE5", fg: "#065F46" },
+};
+
+function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, isPartBilled, loadingStates, T }: any) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<any>({});
+  const startEdit = (p: any) => {
+    setEditingId(p.id);
+    setDraft({
+      description: p.description,
+      partNumber: p.partNumber || "",
+      qty: p.qty || 1,
+      trackingNumber: p.trackingNumber || "",
+      expectedReturnDate: p.expectedReturnDate || "",
+    });
+  };
+  const saveEdit = async (p: any) => {
+    await doUpdatePart(p.id, woId, {
+      description: draft.description,
+      partNumber: draft.partNumber,
+      qty: Number(draft.qty) || 1,
+      trackingNumber: draft.trackingNumber,
+      expectedReturnDate: draft.expectedReturnDate || null,
+    });
+    setEditingId(null);
+  };
+  const receivedCount = parts.filter((p: any) => p.status === "received").length;
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>Parts</div>
+          <div style={{ fontSize: 11, color: T.muted }}>{receivedCount} of {parts.length} received</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => doAddPart(woId, { description: "New part", status: "ordered" })}
+          disabled={!!loadingStates["addPart_" + woId]}
+          className="btn-soft"
+          style={{ padding: "5px 12px", fontSize: 11 }}
+        >+ Add part</button>
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        {parts.map((p: any) => {
+          const meta = PART_STATUS_META[p.status] || PART_STATUS_META.ordered;
+          const isEditing = editingId === p.id;
+          const billed = isPartBilled ? isPartBilled(p.description) : false;
+          const updating = !!loadingStates["updatePart_" + p.id];
+          return (
+            <div key={p.id} style={{ padding: 12, background: T.surfaceSoft, borderRadius: 10, border: `1px solid ${T.borderSoft}` }}>
+              {isEditing ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.4fr 110px 70px", gap: 8 }}>
+                    <Field label="Description"><Input value={draft.description} onChange={(e: any) => setDraft((d: any) => ({ ...d, description: e.target.value }))} /></Field>
+                    <Field label="Part #"><Input value={draft.partNumber} onChange={(e: any) => setDraft((d: any) => ({ ...d, partNumber: e.target.value }))} /></Field>
+                    <Field label="Qty"><Input type="number" min="1" step="1" value={draft.qty} onChange={(e: any) => setDraft((d: any) => ({ ...d, qty: e.target.value }))} /></Field>
+                  </div>
+                  <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <Field label="Tracking #"><Input value={draft.trackingNumber} onChange={(e: any) => setDraft((d: any) => ({ ...d, trackingNumber: e.target.value }))} placeholder="e.g. 1Z..." /></Field>
+                    <Field label="Expected return"><Input type="date" value={draft.expectedReturnDate} onChange={(e: any) => setDraft((d: any) => ({ ...d, expectedReturnDate: e.target.value }))} /></Field>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 4 }}>
+                    <button type="button" onClick={() => setEditingId(null)} className="btn-soft" style={{ padding: "5px 12px", fontSize: 11 }}>Cancel</button>
+                    <button type="button" onClick={() => saveEdit(p)} disabled={updating} className="btn-accent" style={{ padding: "5px 12px", fontSize: 11 }}>{updating ? "Saving..." : "Save"}</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 2 }}>
+                        {p.description || "(no description)"}
+                        {p.qty && p.qty !== 1 ? <span style={{ fontSize: 11, color: T.subtle, fontWeight: 400, marginLeft: 6 }}>× {p.qty}</span> : null}
+                      </div>
+                      {p.partNumber && <div className="mono" style={{ fontSize: 11, color: T.muted }}>{p.partNumber}</div>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: meta.fg, background: meta.bg, padding: "3px 9px", borderRadius: 10, letterSpacing: 0.4, textTransform: "uppercase" }}>{meta.label}</span>
+                      {billed && <span style={{ fontSize: 9, fontWeight: 700, color: T.subtle, background: T.surface, padding: "3px 8px", borderRadius: 10, letterSpacing: 0.4, textTransform: "uppercase", border: `1px solid ${T.border}` }}>Billed</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", fontSize: 11, color: T.muted, marginTop: 4 }}>
+                    {p.trackingNumber ? (
+                      <span>Tracking <span className="mono" style={{ color: T.ink }}>{p.trackingNumber}</span></span>
+                    ) : (
+                      <span style={{ color: T.subtle, fontStyle: "italic" }}>No tracking #</span>
+                    )}
+                    {p.expectedReturnDate && <span>Expected return <span style={{ color: T.ink }}>{p.expectedReturnDate}</span></span>}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 8, flexWrap: "wrap" }}>
+                    <Sel
+                      value={p.status}
+                      onChange={(e: any) => doUpdatePart(p.id, woId, { status: e.target.value })}
+                      style={{ padding: "5px 10px", fontSize: 11, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+                    >
+                      <option value="ordered">Ordered</option>
+                      <option value="backordered">Backordered</option>
+                      <option value="shipped">Shipped</option>
+                      <option value="received">Received</option>
+                    </Sel>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button type="button" onClick={() => startEdit(p)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit</button>
+                      {isManager && doDeletePart && (
+                        <button type="button" onClick={() => doDeletePart(p.id, woId)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11, color: T.danger }}>Remove</button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

@@ -7,10 +7,18 @@ import {
   updateWorkOrder, insertActivity, updateInvoiceState,
   unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
   uploadPhotos, removePhoto,
+  insertWoPart, updateWoPart, deleteWoPart,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
-import { WORK_ORDERS_KEY } from "./queries";
+import { WORK_ORDERS_KEY, WO_PARTS_KEY } from "./queries";
 import { INVOICES_KEY } from "../invoices/queries";
+
+const PART_STATUS_LABEL: Record<string, string> = {
+  ordered: "Ordered",
+  backordered: "Backordered",
+  shipped: "Shipped",
+  received: "Received",
+};
 
 export default function useWorkOrders({
   currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
@@ -204,24 +212,183 @@ export default function useWorkOrders({
     }
   };
 
-  const doPauseWork = async (woId: string, reason: string, partDesc: string, partNum: string, partEta: string, notes: string) => {
+  // partsList: optional structured rows that go into wo_parts. When present,
+  // the legacy part_needed/part_eta scalars get filled from the first row so
+  // historical surfaces (legacy fallback card, exports) still have something.
+  const doPauseWork = async (
+    woId: string,
+    reason: string,
+    partDesc: string,
+    partNum: string,
+    partEta: string,
+    notes: string,
+    partsList?: { description: string; partNumber?: string; qty?: number; expectedReturnDate?: string }[]
+  ) => {
     setLoading("pauseWork_" + woId, true);
     try {
     const pauseIso = pauseDateInput && pauseTimeInput ? new Date(`${pauseDateInput}T${pauseTimeInput}`).toISOString() : new Date().toISOString();
-    const partLabel = partDesc ? `${partDesc}${partNum ? ` (${partNum})` : ""}` : null;
-    const text = notes || `Work paused: ${reason}.${partLabel ? ` Part needed: ${partLabel}.` : ""}`;
+    const cleanParts = (partsList || []).filter(p => (p.description || "").trim());
+    // Legacy fallback fields: first structured row wins when present, else
+    // fall back to the single-field inputs (preserves old API for callers
+    // that haven't moved to the parts grid yet).
+    const firstPart = cleanParts[0];
+    const partLabel = firstPart
+      ? `${firstPart.description}${firstPart.partNumber ? ` (${firstPart.partNumber})` : ""}`
+      : partDesc
+        ? `${partDesc}${partNum ? ` (${partNum})` : ""}`
+        : null;
+    const legacyEta = firstPart?.expectedReturnDate || partEta || "";
+    const partsSummary = cleanParts.length > 1
+      ? ` Parts needed: ${cleanParts.map(p => p.description).join(", ")}.`
+      : (partLabel ? ` Part needed: ${partLabel}.` : "");
+    const text = notes || `Work paused: ${reason}.${partsSummary}`;
     const updates: any = { status: "parts", functionalStatus: "Awaiting Parts", endTime: pauseIso };
     if (partLabel) updates.partNeeded = partLabel;
-    if (partEta) updates.partEta = partEta; // ISO date string from input type=date
+    if (legacyEta) updates.partEta = legacyEta;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    const partsSnapshot = qc.getQueryData(WO_PARTS_KEY);
     patchLocalWO(woId, updates, localActivity(text, "note"));
     fire("Paused — awaiting parts");
     await dbCall(async () => {
       await updateWorkOrder(woId, updates);
       await insertActivity(woId, currentUser.name, text, "note");
-    }, "Pause failed", () => restoreWorkOrders(snapshot));
+      if (cleanParts.length) {
+        const inserted: any[] = [];
+        for (const p of cleanParts) {
+          const row = await insertWoPart({
+            workOrderId: woId,
+            description: p.description.trim(),
+            partNumber: (p.partNumber || "").trim(),
+            qty: p.qty || 1,
+            status: "ordered",
+            expectedReturnDate: p.expectedReturnDate || null,
+          });
+          inserted.push(row);
+        }
+        // Optimistic cache append so the parts panel shows them instantly.
+        qc.setQueryData(WO_PARTS_KEY, (prev: any) =>
+          prev ? [...prev, ...inserted] : inserted
+        );
+        qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
+      }
+    }, "Pause failed", () => {
+      restoreWorkOrders(snapshot);
+      if (partsSnapshot) qc.setQueryData(WO_PARTS_KEY, partsSnapshot);
+    });
     } finally {
       setLoading("pauseWork_" + woId, false);
+    }
+  };
+
+  // ── Parts list mutations ────────────────────────────────────────────────
+  // Each one writes a structured activity-feed entry so the audit trail
+  // captures who moved what, when. Cache-direct optimistic updates keep the
+  // UI snappy; snapshot rollback on failure.
+  const patchPartsCache = (mapper: (rows: any[]) => any[]) => {
+    qc.setQueryData(WO_PARTS_KEY, (prev: any) =>
+      Array.isArray(prev) ? mapper(prev) : prev
+    );
+  };
+
+  const doAddPart = async (woId: string, part: {
+    description: string;
+    partNumber?: string;
+    qty?: number;
+    status?: "ordered" | "backordered" | "shipped" | "received";
+    trackingNumber?: string;
+    expectedReturnDate?: string | null;
+  }) => {
+    setLoading("addPart_" + woId, true);
+    try {
+      const snapshot = qc.getQueryData(WO_PARTS_KEY);
+      const tempId = `tmp_${Date.now()}`;
+      const optimistic = {
+        id: tempId,
+        workOrderId: woId,
+        description: part.description,
+        partNumber: part.partNumber || "",
+        qty: part.qty || 1,
+        status: part.status || "ordered",
+        trackingNumber: part.trackingNumber || "",
+        expectedReturnDate: part.expectedReturnDate || null,
+      };
+      patchPartsCache(rows => [...rows, optimistic]);
+      const text = `Part added: ${part.description}${part.partNumber ? ` (${part.partNumber})` : ""}.`;
+      patchLocalWO(woId, {}, localActivity(text, "note"));
+      const ok = await dbCall(async () => {
+        const row = await insertWoPart({ workOrderId: woId, ...part });
+        patchPartsCache(rows => rows.map(r => r.id === tempId ? row : r));
+        await insertActivity(woId, currentUser.name, text, "note");
+      }, "Add part failed", () => {
+        if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
+      }, () => qc.invalidateQueries({ queryKey: WO_PARTS_KEY }));
+      if (ok) fire("Part added");
+    } finally {
+      setLoading("addPart_" + woId, false);
+    }
+  };
+
+  const doUpdatePart = async (
+    partId: string,
+    woId: string,
+    patch: {
+      description?: string;
+      partNumber?: string | null;
+      qty?: number;
+      status?: "ordered" | "backordered" | "shipped" | "received";
+      trackingNumber?: string | null;
+      expectedReturnDate?: string | null;
+    }
+  ) => {
+    setLoading("updatePart_" + partId, true);
+    try {
+      const snapshot = qc.getQueryData(WO_PARTS_KEY);
+      const existing = (snapshot as any[] | undefined)?.find(r => r.id === partId);
+      patchPartsCache(rows => rows.map(r => r.id === partId ? { ...r, ...patch } : r));
+      // Structured activity entry — captures the field-level change so staff
+      // can audit "who moved part X to Shipped at 11:42".
+      const entries: string[] = [];
+      if (patch.status && existing && patch.status !== existing.status) {
+        entries.push(`marked ${PART_STATUS_LABEL[patch.status] || patch.status}`);
+      }
+      if (patch.trackingNumber !== undefined && existing && (patch.trackingNumber || "") !== (existing.trackingNumber || "")) {
+        entries.push(patch.trackingNumber ? `tracking ${patch.trackingNumber}` : "tracking cleared");
+      }
+      if (patch.expectedReturnDate !== undefined && existing && (patch.expectedReturnDate || null) !== (existing.expectedReturnDate || null)) {
+        entries.push(patch.expectedReturnDate ? `return ${patch.expectedReturnDate}` : "return date cleared");
+      }
+      const label = existing ? `${existing.description}${existing.partNumber ? ` (${existing.partNumber})` : ""}` : "Part";
+      const text = entries.length ? `${label}: ${entries.join(" · ")}.` : `${label} updated.`;
+      if (entries.length) patchLocalWO(woId, {}, localActivity(text, "note"));
+      const ok = await dbCall(async () => {
+        await updateWoPart(partId, patch);
+        if (entries.length) await insertActivity(woId, currentUser.name, text, "note");
+      }, "Part update failed", () => {
+        if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
+      }, () => qc.invalidateQueries({ queryKey: WO_PARTS_KEY }));
+      if (ok && entries.length) fire("Part updated");
+    } finally {
+      setLoading("updatePart_" + partId, false);
+    }
+  };
+
+  const doDeletePart = async (partId: string, woId: string) => {
+    setLoading("deletePart_" + partId, true);
+    try {
+      const snapshot = qc.getQueryData(WO_PARTS_KEY);
+      const existing = (snapshot as any[] | undefined)?.find(r => r.id === partId);
+      patchPartsCache(rows => rows.filter(r => r.id !== partId));
+      const text = existing ? `Part removed: ${existing.description}.` : "Part removed.";
+      patchLocalWO(woId, {}, localActivity(text, "note"));
+      const ok = await dbCall(async () => {
+        await deleteWoPart(partId);
+        await insertActivity(woId, currentUser.name, text, "note");
+      }, "Remove part failed", () => {
+        if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
+      }, () => qc.invalidateQueries({ queryKey: WO_PARTS_KEY }));
+      if (ok) fire("Part removed");
+    } finally {
+      setLoading("deletePart_" + partId, false);
     }
   };
 
@@ -645,5 +812,6 @@ export default function useWorkOrders({
     doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
+    doAddPart, doUpdatePart, doDeletePart,
   };
 }

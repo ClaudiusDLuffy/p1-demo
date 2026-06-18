@@ -7,12 +7,24 @@ import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useMemo } from "react";
 
 export default function MyJobs(props: any) {
-  const { page, isManager, myWOs, activeStatuses, slaLabel, setSelectedWO, setPage, setAiNote } = props;
+  const { page, isManager, myWOs, activeStatuses, slaLabel, setSelectedWO, setPage, setAiNote, woParts = [] } = props;
   const jobCounts = useMemo(() => ({
     active: myWOs.filter(w => activeStatuses.includes(w.status)).length,
     pendingInvoice: myWOs.filter(w => w.status === "pending_invoice").length,
     capital: myWOs.filter(w => w.status === "capital").length,
   }), [myWOs, activeStatuses]);
+  // Per-WO parts summary for the parts-status badge. Only counted when there
+  // are structured wo_parts rows for the WO — legacy part_needed scalars get
+  // their own card on detail view, not a badge here.
+  const partsByWO = useMemo(() => {
+    const map: Record<string, { total: number; received: number }> = {};
+    for (const p of woParts) {
+      const m = (map[p.workOrderId] ||= { total: 0, received: 0 });
+      m.total += 1;
+      if (p.status === "received") m.received += 1;
+    }
+    return map;
+  }, [woParts]);
   return (
     <>
           {/* ═════ MY JOBS (contractor) ═════ */}
@@ -33,6 +45,7 @@ export default function MyJobs(props: any) {
               {myWOs.map((wo, i) => {
                 const sla = slaLabel(wo);
                 const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
+                const partsSummary = partsByWO[wo.id];
                 return (
                   <div key={wo.id} className="card card-hover" onClick={() => { setSelectedWO(wo.id); setPage("wo_detail"); setAiNote(null); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", marginBottom: 10, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.04}s both`, gap: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -42,6 +55,11 @@ export default function MyJobs(props: any) {
                         {hasNewSla
                           ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
                           : sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>}
+                        {partsSummary && partsSummary.total > 0 && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: partsSummary.received === partsSummary.total ? "#065F46" : "#92400E", background: partsSummary.received === partsSummary.total ? "#D1FAE5" : "#FEF3C7", padding: "2px 8px", borderRadius: 10, letterSpacing: 0.3 }}>
+                            {partsSummary.total} part{partsSummary.total !== 1 ? "s" : ""} · {partsSummary.received} received
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
                       <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary || "—"}</div>
