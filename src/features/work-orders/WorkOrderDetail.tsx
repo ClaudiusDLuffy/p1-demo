@@ -74,6 +74,13 @@ export default function WorkOrderDetail(props: any) {
   const canInvoice = isManager
     ? false
     : currentUser?.contractorTier === "direct" || currentUser?.contractorTier === null;
+  // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
+  // his work actions (pause / close complete / submit report / resume) as long
+  // as the job itself is alive — driven by whether the WO is closed, NOT by the
+  // invoice-driven status (submitting an invoice flips the WO to
+  // pending_approval, which previously hid these). Capital is excluded (it has
+  // its own staff flow). Pausing/closing never touches existing invoices.
+  const jobOpen = !["closed", "capital"].includes(woData?.status);
   const isLoading = (key: string) => !!loadingStates[key];
   const loadingStyle = (key: string) => ({
     opacity: isLoading(key) ? 0.7 : 1,
@@ -297,12 +304,18 @@ export default function WorkOrderDetail(props: any) {
                           </button>
                         </>
                       )}
-                      {woData.status === "wip" && (
+                      {/* Job-progress actions (Pause / Close complete) — parallel
+                          to invoicing. Shown at WIP for everyone (staff preserved),
+                          and for a contractor any time the job is still open and not
+                          already paused, so submitting an invoice (which flips the WO
+                          to pending_approval) no longer hides them. Resume covers the
+                          paused (parts) state below. */}
+                      {(woData.status === "wip" || (!isManager && jobOpen && woData.status !== "parts")) && (
                         <>
                           <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
                             {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
                           </button>
-                          {isManager && <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>}
+                          {isManager && woData.status === "wip" && <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>}
                           <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
                             {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Closing...</> : "Close complete"}
                           </button>
@@ -328,7 +341,7 @@ export default function WorkOrderDetail(props: any) {
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
                       {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
-                      {!isManager && ["wip", "parts", "completed"].includes(woData.status) && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
+                      {!isManager && jobOpen && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
                       {woData.status === "pending_payment" && isManager && (
                         <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
                           {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}
