@@ -813,6 +813,88 @@ export async function insertWorkReport(
   return { success: true };
 }
 
+// ── WO PARTS ───────────────────────────────────────────────────────────────
+// Structured parts-tracking list per WO. Loaded once and grouped client-side
+// like invoice_lines, so the WORK_ORDERS_KEY cache stays the single source.
+const mapWoPart = (p: any) => ({
+  id: p.id,
+  workOrderId: p.work_order_id,
+  description: p.description,
+  partNumber: p.part_number || "",
+  qty: p.qty != null ? Number(p.qty) : 1,
+  status: p.status as "ordered" | "backordered" | "shipped" | "received",
+  trackingNumber: p.tracking_number || "",
+  expectedReturnDate: p.expected_return_date || null,
+  notes: p.notes || "",
+  createdAt: p.created_at,
+  updatedAt: p.updated_at,
+});
+
+export async function loadWoParts(): Promise<any[]> {
+  const sb = supabase();
+  const { data, error } = await (sb as any)
+    .from("wo_parts")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapWoPart);
+}
+
+export async function insertWoPart(part: {
+  workOrderId: string;
+  description: string;
+  partNumber?: string;
+  qty?: number;
+  status?: "ordered" | "backordered" | "shipped" | "received";
+  trackingNumber?: string;
+  expectedReturnDate?: string | null;
+}): Promise<any> {
+  const sb = supabase();
+  const { data: { user } } = await sb.auth.getUser();
+  const { data, error } = await (sb as any).from("wo_parts").insert({
+    work_order_id: part.workOrderId,
+    description: part.description,
+    part_number: part.partNumber || null,
+    qty: part.qty != null ? part.qty : 1,
+    status: part.status || "ordered",
+    tracking_number: part.trackingNumber || null,
+    expected_return_date: part.expectedReturnDate || null,
+    created_by: user?.id || null,
+  }).select().single();
+  if (error) throw error;
+  return mapWoPart(data);
+}
+
+export async function updateWoPart(
+  id: string,
+  patch: {
+    description?: string;
+    partNumber?: string | null;
+    qty?: number;
+    status?: "ordered" | "backordered" | "shipped" | "received";
+    trackingNumber?: string | null;
+    expectedReturnDate?: string | null;
+  }
+): Promise<any> {
+  const sb = supabase();
+  const dbPatch: any = { updated_at: new Date().toISOString() };
+  if (patch.description !== undefined) dbPatch.description = patch.description;
+  if (patch.partNumber !== undefined) dbPatch.part_number = patch.partNumber || null;
+  if (patch.qty !== undefined) dbPatch.qty = patch.qty;
+  if (patch.status !== undefined) dbPatch.status = patch.status;
+  if (patch.trackingNumber !== undefined) dbPatch.tracking_number = patch.trackingNumber || null;
+  if (patch.expectedReturnDate !== undefined) dbPatch.expected_return_date = patch.expectedReturnDate || null;
+  const { data, error } = await ((sb as any).from("wo_parts") as any).update(dbPatch).eq("id", id).select().single();
+  if (error) throw error;
+  return mapWoPart(data);
+}
+
+export async function deleteWoPart(id: string): Promise<void> {
+  const sb = supabase();
+  const { error } = await (sb as any).from("wo_parts").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function loadWorkReports(
   workOrderId: string
 ): Promise<any[]> {
@@ -882,6 +964,7 @@ export function subscribeToChanges(onChange: () => void): () => void {
     .on("postgres_changes", { event: "*", schema: "public", table: "activities" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, onChange)
     .subscribe();
   return () => { sb.removeChannel(channel); };
 }

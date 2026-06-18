@@ -21,7 +21,14 @@ const initialLines = () => [
 ];
 
 export default function InvoiceCreateModal(props: any) {
-  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb } = props;
+  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts = [] } = props;
+  // Parts on this WO that have been received (and so are billable) — feeds
+  // the "Add from parts list" button below the line items grid. Description
+  // + qty pre-fill only; the contractor types their own rate.
+  const receivedPartsForWO = useMemo(() => {
+    if (!woData) return [];
+    return woParts.filter((p: any) => p.workOrderId === woData.id && p.status === "received");
+  }, [woParts, woData]);
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const existingInvoiceId = resumeDraft?.id || null;
@@ -209,6 +216,21 @@ export default function InvoiceCreateModal(props: any) {
           {["Labor", "Truck Charge", "Parts/Hardware", "Shipping", "Other"].map(type => (
             <button key={type} type="button" onClick={() => append({ type, desc: "", qty: 1, rate: type === "Truck Charge" ? P1_BUSINESS.defaultTruckCharge : undefined })} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ {type === "Parts/Hardware" ? "Parts" : type}</button>
           ))}
+          {receivedPartsForWO.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                // Description + qty only — rate stays blank so the contractor
+                // enters their own number per Jennifer's note on the call.
+                for (const p of receivedPartsForWO) {
+                  const desc = `${p.description}${p.partNumber ? ` (${p.partNumber})` : ""}`;
+                  append({ type: "Parts/Hardware", desc, qty: Number(p.qty) || 1, rate: undefined });
+                }
+              }}
+              className="btn-soft"
+              style={{ padding: "7px 12px", fontSize: 11, fontWeight: 600 }}
+            >+ Add from parts list ({receivedPartsForWO.length})</button>
+          )}
         </div>
 
         <div className="inv-totals-row" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 14, marginBottom: 18, alignItems: "start" }}>
