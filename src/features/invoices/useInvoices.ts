@@ -197,7 +197,15 @@ export default function useInvoices({ currentUser, fire }: any) {
     // threshold (default $900), flag the WO so it lands in Mandy's "NTE
     // Approval Needed" queue. Dollar-based, separate from the actual-NTE
     // overage highlight. Only ever sets the flag on (never auto-clears).
-    const flagThreshold = wo.nteFlagThreshold != null ? wo.nteFlagThreshold : 900;
+    //
+    // BELT + SUSPENDERS — the staff bucket must fire off the REAL DB value.
+    // Read nteFlagThreshold directly from the React-Query cache (unmasked)
+    // and fall back to the wo prop, so any future display mask on the
+    // contractor side can't accidentally swallow the staff flag write.
+    const cached = (qc.getQueryData(WORK_ORDERS_KEY) as any[] | undefined)?.find(w => w.id === wo.id);
+    const flagThreshold = (cached?.nteFlagThreshold ?? wo.nteFlagThreshold) != null
+      ? (cached?.nteFlagThreshold ?? wo.nteFlagThreshold)
+      : 900;
     const shouldFlag = total >= flagThreshold;
     const userTypedNum = !!draft.num;
     try {

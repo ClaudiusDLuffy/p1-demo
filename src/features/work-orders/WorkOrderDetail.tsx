@@ -160,7 +160,10 @@ export default function WorkOrderDetail(props: any) {
                     </div>
                   </div>
                 )}
-                {nteBreach && (
+                {/* Contractors never see over/under-NTE banners (Lindsay
+                    2026-06-16) — they see a masked $1,000 NTE and a neutral
+                    total only, no red/green flags. Staff continue to see both. */}
+                {isManager && nteBreach && (
                   <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 20 }}>⚠️</div>
                     <div style={{ flex: 1 }}>
@@ -169,7 +172,7 @@ export default function WorkOrderDetail(props: any) {
                     </div>
                   </div>
                 )}
-                {!nteBreach && currentSpend > 0 && (
+                {isManager && !nteBreach && currentSpend > 0 && (
                   <div className="card" style={{ background: T.successSoft, border: `1px solid ${T.success}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 18 }}>✓</div>
                     <div style={{ flex: 1 }}>
@@ -235,13 +238,20 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                     </div>
 
-                    {/* NTE summary — visible on every WO. Edit in-place. No hard stop on overage. */}
-                    <div className="card" style={{ padding: 18, marginBottom: 16, background: nteBreach ? T.dangerSoft : T.surface, border: nteBreach ? `1px solid ${T.danger}33` : `1px solid ${T.borderSoft}` }}>
+                    {/* NTE summary — visible on every WO. Edit in-place. No hard stop on overage.
+                        Contractors see a neutral card (no over-budget colors/badges):
+                        masked NTE value, neutral running total, neutral progress bar
+                        clamped to 100% with no red overflow. Staff continue to see
+                        red/green styling driven by nteBreach against the real NTE. */}
+                    {(() => {
+                      const showBreach = isManager && nteBreach;
+                      return (
+                    <div className="card" style={{ padding: 18, marginBottom: 16, background: showBreach ? T.dangerSoft : T.surface, border: showBreach ? `1px solid ${T.danger}33` : `1px solid ${T.borderSoft}` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>NTE</div>
                           <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: T.ink }}>{nte > 0 ? fmt(nte) : "Not set"}</div>
-                          {nteBreach && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: T.danger, padding: "2px 8px", borderRadius: 10, letterSpacing: 0.4 }}>EXCEEDS NTE</span>}
+                          {showBreach && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: T.danger, padding: "2px 8px", borderRadius: 10, letterSpacing: 0.4 }}>EXCEEDS NTE</span>}
                         </div>
                         {isManager && (
                           <button onClick={() => setModal("editNte")} className="btn-soft" style={{ padding: "6px 12px", fontSize: 11 }}>{nte > 0 ? "Edit" : "Add NTE"}</button>
@@ -249,12 +259,14 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: T.muted, marginBottom: 8 }}>
                         <span>Current spend: <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{fmt(currentSpend)}</span></span>
-                        <span style={{ color: nteBreach ? T.danger : T.muted, fontWeight: nteBreach ? 700 : 500 }}>{nte > 0 ? `${Math.round(ntePercent)}% of NTE` : "No NTE set"}</span>
+                        {isManager && <span style={{ color: showBreach ? T.danger : T.muted, fontWeight: showBreach ? 700 : 500 }}>{nte > 0 ? `${Math.round(ntePercent)}% of NTE` : "No NTE set"}</span>}
                       </div>
-                      {/* Progress bar — fills past 100% with red overflow when exceeded */}
+                      {/* Progress bar — staff see red/warn/success + red overflow when
+                          over NTE. Contractors see a neutral single fill clamped at
+                          100% with no overflow segment. */}
                       <div style={{ height: 8, borderRadius: 4, background: T.borderSoft, overflow: "hidden", display: "flex" }}>
-                        <div style={{ width: `${Math.min(100, ntePercent)}%`, height: "100%", background: ntePercent > 90 ? T.danger : ntePercent > 75 ? T.warn : T.success, transition: "width 300ms ease" }} />
-                        {ntePercent > 100 && (
+                        <div style={{ width: `${Math.min(100, ntePercent)}%`, height: "100%", background: isManager ? (ntePercent > 90 ? T.danger : ntePercent > 75 ? T.warn : T.success) : T.accent, transition: "width 300ms ease" }} />
+                        {isManager && ntePercent > 100 && (
                           <div style={{ width: `${Math.min(100, ntePercent - 100)}%`, height: "100%", background: T.danger, opacity: 0.55 }} />
                         )}
                       </div>
@@ -274,6 +286,8 @@ export default function WorkOrderDetail(props: any) {
                         {isManager && <button onClick={() => setModal("editNteFlag")} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit flag</button>}
                       </div>
                     </div>
+                      );
+                    })()}
 
                     {/* Actions */}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>

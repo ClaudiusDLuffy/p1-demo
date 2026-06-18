@@ -890,9 +890,30 @@ export default function PortalShell() {
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
   }, [modal, nextInvNum]);
 
+  // ── Contractor NTE display mask ────────────────────────────────────────
+  // Contractors must never see the real 7-Eleven NTE; they'd bill toward it.
+  // Mask once at this role boundary: clone each WO and override .nte with
+  // the per-contractor display cap from their profile (defaults 1000). The
+  // ORIGINAL workOrders array stays untouched so every staff render, every
+  // mutation (useWorkOrders/useInvoices), and every NTE-flag math path
+  // continues to read the real database value. nteFlagThreshold /
+  // nteFlagged / nteFlagAmount are separate columns and are intentionally
+  // NOT masked — staff bucket logic relies on them.
+  const isContractorRole = currentUser?.role === "contractor";
+  const contractorNteCap = currentUser?.contractorNteDisplay != null ? Number(currentUser.contractorNteDisplay) : 1000;
+  const maskedWorkOrders = useMemo(
+    () => isContractorRole
+      ? workOrders.map((w: any) => ({ ...w, nte: contractorNteCap }))
+      : workOrders,
+    [workOrders, isContractorRole, contractorNteCap]
+  );
+
+  // Reads from maskedWorkOrders so contractor surfaces inherit the $1,000
+  // mask automatically. For staff the mask is an identity transform, so this
+  // returns the real NTE — keeping the staff editNte/editWO modals correct.
   const woData = useMemo(
-    () => selectedWO ? workOrders.find(w => w.id === selectedWO) : null,
-    [workOrders, selectedWO]
+    () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
+    [maskedWorkOrders, selectedWO]
   );
 
   useEffect(() => {
@@ -990,11 +1011,14 @@ export default function PortalShell() {
         .includes(q)
     );
   }, [contractorsOnly, reassignSearch]);
+  // Render-side view: inherits the contractor NTE mask via maskedWorkOrders.
+  // For staff this is identity (mask is a no-op), so the stats block below
+  // continues to see the real DB values.
   const myWOs = useMemo(
     () => currentUser?.role === "contractor"
-      ? workOrders.filter(w => w.contractor === currentUser.id)
-      : workOrders,
-    [workOrders, currentUser]
+      ? maskedWorkOrders.filter((w: any) => w.contractor === currentUser.id)
+      : maskedWorkOrders,
+    [maskedWorkOrders, currentUser]
   );
   const filteredWOs = useMemo(
     () => myWOs.filter(w => {
@@ -1537,7 +1561,7 @@ export default function PortalShell() {
         </div>
 
         <div className="content-pad" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}>
-          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={workOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} />
+          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} />
 
           <WorkOrderList
             page={page}
@@ -1563,7 +1587,7 @@ export default function PortalShell() {
             USERS={USERS}
           />
 
-          <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
+          <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} />
 
@@ -1571,13 +1595,13 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={workOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={workOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>

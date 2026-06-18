@@ -262,7 +262,7 @@ export default function InvoiceDetail(props: any) {
                         <span style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Total</span>
                         <span className="display" style={{ fontSize: 26, color: T.ink, letterSpacing: -0.5 }}>{fmt(Math.round(inv.total * 100) / 100)}</span>
                       </div>
-                      {wo && (
+                      {wo && isManager && (
                         <div style={{ fontSize: 11, color: inv.total > wo.nte ? T.danger : T.success, textAlign: "right", marginTop: 4 }}>
                           {inv.total > wo.nte ? `Exceeds NTE by ${fmt(inv.total - wo.nte)}` : `${fmt(wo.nte - inv.total)} under NTE`}
                         </div>

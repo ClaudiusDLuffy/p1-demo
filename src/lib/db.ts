@@ -75,6 +75,10 @@ const mapProfile = (p: any) => ({
   color: p.color,
   contractorTier: p.contractor_tier || null,
   dispatcherId: p.dispatcher_id || null,
+  // Display-only NTE cap shown to this contractor in place of the real WO
+  // NTE (Lindsay 2026-06-16). Falls back to 1000 if the migration hasn't
+  // been applied yet, so a stale schema can't blow up logins.
+  contractorNteDisplay: p.contractor_nte_display != null ? Number(p.contractor_nte_display) : 1000,
   // Per-contractor rate columns are reserved for the Phase 2 rate work —
   // the invoice form no longer reads them (rates start empty, truck = 60).
   defaultLaborRate: p.default_labor_rate ?? null,
