@@ -118,7 +118,13 @@ export default function InvoiceCreateModal(props: any) {
   if (modal !== "createInvoice" || !woData) return null;
 
   const projectedSpend = priorSpend + total;
-  const over = (woData.nte || 0) > 0 && projectedSpend > woData.nte;
+  // Contractors never see over/under-NTE warnings — the WO.nte they see is
+  // already the masked display cap (per-contractor profile column). Showing
+  // "exceeds NTE" against the masked $1k would either bait them past it or
+  // confuse them, and the staff-side flag still fires off the REAL DB value
+  // (see useInvoices.ts belt+suspenders). Banner gated to staff only.
+  const isContractor = currentUser?.role === "contractor";
+  const over = !isContractor && (woData.nte || 0) > 0 && projectedSpend > woData.nte;
   const close = () => { setModal(null); resetNewInv(); };
   const onSubmit = async (data: CreateInvoiceForm) => {
     setSubmitting(true);
@@ -215,7 +221,9 @@ export default function InvoiceCreateModal(props: any) {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: over ? T.danger : T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
             <div style={{ fontSize: 11, color: over ? T.danger : T.muted, marginTop: 8, textAlign: "right" }}>
-              {(woData.nte || 0) > 0 ? (over ? `Total spend would be ${fmt(projectedSpend)} - exceeds NTE by ${fmt(projectedSpend - woData.nte)}` : `${fmt(woData.nte - projectedSpend)} under NTE (${fmt(woData.nte)})${priorSpend > 0 ? ` - prior invoices ${fmt(priorSpend)}` : ""}`) : "No NTE set on this work order"}
+              {isContractor
+                ? (priorSpend > 0 ? `Running total ${fmt(projectedSpend)} - prior invoices ${fmt(priorSpend)}` : `Running total ${fmt(projectedSpend)}`)
+                : ((woData.nte || 0) > 0 ? (over ? `Total spend would be ${fmt(projectedSpend)} - exceeds NTE by ${fmt(projectedSpend - woData.nte)}` : `${fmt(woData.nte - projectedSpend)} under NTE (${fmt(woData.nte)})${priorSpend > 0 ? ` - prior invoices ${fmt(priorSpend)}` : ""}`) : "No NTE set on this work order")}
             </div>
           </div>
         </div>

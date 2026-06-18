@@ -44,6 +44,7 @@ export default function useAuth({
       if (!prof) throw new Error("Profile not found for this account");
       if (lastLoadedUserIdRef.current === prof.id) return;
       lastLoadedUserIdRef.current = prof.id;
+      const profAny = prof as any;
       setCurrentUser({
         id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
         title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
@@ -51,6 +52,10 @@ export default function useAuth({
         isDemo: DEMO_ACCOUNTS.some(d => d.email === prof.email),
         contractorTier: prof.contractor_tier || null,
         dispatcherId: prof.dispatcher_id || null,
+        // Display cap for the WO NTE shown to this contractor. Mask applied
+        // at the PortalShell boundary so this never reaches staff math or
+        // the NTE-flag bucket. Falls back to 1000 pre-migration.
+        contractorNteDisplay: profAny.contractor_nte_display != null ? Number(profAny.contractor_nte_display) : 1000,
         // Reserved for Phase 2 per-contractor rates — the invoice form no
         // longer reads these (rates start empty, Truck Charge defaults 60).
         defaultLaborRate: prof.default_labor_rate ?? null,
