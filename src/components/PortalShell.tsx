@@ -452,13 +452,71 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     flex-wrap: wrap !important;
     gap: 8px !important;
     padding: 12px 16px !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .invoice-action-bar .invoice-back-button {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    min-height: 36px !important;
+    width: auto !important;
+    justify-content: flex-start !important;
+  }
+  .invoice-action-buttons {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
   }
   .invoice-action-bar button,
   .invoice-action-bar a {
     flex: 1 !important;
-    min-width: 120px !important;
+    min-width: 0 !important;
     justify-content: center !important;
     min-height: 44px !important;
+    box-sizing: border-box !important;
+    white-space: normal !important;
+    text-align: center !important;
+  }
+  .invoice-action-buttons button,
+  .invoice-action-buttons a {
+    width: 100% !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+  .wo-invoice-list {
+    overflow: visible !important;
+  }
+  .wo-invoice-list-header {
+    align-items: flex-start !important;
+    gap: 10px !important;
+    flex-wrap: wrap !important;
+  }
+  .wo-invoice-list-header .wo-invoice-action {
+    min-height: 40px !important;
+    padding: 10px 12px !important;
+    font-size: 12px !important;
+  }
+  .wo-invoice-row {
+    align-items: flex-start !important;
+    flex-wrap: nowrap !important;
+    gap: 10px !important;
+    padding: 14px !important;
+  }
+  .wo-invoice-row-main {
+    flex: 1 1 auto !important;
+    width: auto !important;
+  }
+  .wo-invoice-actions {
+    display: none !important;
+  }
+  .wo-invoice-mobile-actions {
+    display: block !important;
   }
   .invoice-totals-section {
     margin-top: 16px !important;
@@ -495,6 +553,42 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     min-height: 44px;
     padding: 10px 14px !important;
     white-space: nowrap;
+  }
+  .mobile-tabs.invoice-tabs {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    overflow-x: hidden !important;
+    gap: 0 !important;
+  }
+  .mobile-tabs.invoice-tabs button {
+    flex: 0 0 25% !important;
+    max-width: 25% !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    min-height: 42px !important;
+    padding: 9px 2px !important;
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-top: none !important;
+    border-radius: 0 !important;
+    margin-bottom: -2px !important;
+  }
+  .mobile-tabs.invoice-tabs .tab-full-label {
+    display: inline !important;
+  }
+  .mobile-tabs.invoice-tabs .tab-short-label {
+    display: none !important;
+  }
+  .mobile-tabs .tab-full-label {
+    display: none !important;
+  }
+  .mobile-tabs .tab-short-label {
+    display: inline !important;
   }
   .mobile-alert {
     align-items: flex-start !important;
@@ -702,6 +796,9 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     padding-right: 8px !important;
     font-size: 11px !important;
   }
+  .invoice-action-buttons {
+    grid-template-columns: 1fr !important;
+  }
   .mobile-tabs {
     display: grid !important;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -718,6 +815,16 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
+  }
+  .mobile-tabs.invoice-tabs {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+  }
+  .mobile-tabs.invoice-tabs button {
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    font-size: 10px !important;
   }
   .reassign-option {
     padding: 11px 12px !important;
@@ -1612,7 +1719,7 @@ export default function PortalShell() {
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setSelectedInvoice={setSelectedInvoice} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>

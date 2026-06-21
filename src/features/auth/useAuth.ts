@@ -32,6 +32,7 @@ export default function useAuth({
   const [fadeIn, setFadeIn] = useState(false);
   const [hasSession, setHasSession] = useState(false);
   const lastLoadedUserIdRef = useRef<string | null>(null);
+  const loginAttemptRef = useRef(false);
 
   useEffect(() => { const t = setTimeout(() => setFadeIn(true), 50); return () => clearTimeout(t); }, []);
 
@@ -67,6 +68,7 @@ export default function useAuth({
       if (fire) fire(err?.message || "Could not load your profile");
       throw err;
     } finally {
+      loginAttemptRef.current = false;
       setLoginLoading(false);
     }
   }, [fire, setPage]);
@@ -78,6 +80,7 @@ export default function useAuth({
     if (!v) { setLoginError("Enter an email to sign in"); return; }
     setLoginError(null);
     setLoginLoading(true);
+    loginAttemptRef.current = true;
     try {
       // Clear any stale session before signing in fresh - guards against
       // wedged refresh tokens left over from a previous demo run.
@@ -87,14 +90,17 @@ export default function useAuth({
         setHasSession(true);
         await hydrateProfile(data.user.id);
       } else {
+        loginAttemptRef.current = false;
         setLoginLoading(false);
       }
     } catch (err: any) {
       setLoginError(err.message || "Sign in failed");
+      loginAttemptRef.current = false;
       setLoginLoading(false);
     }
   };
   const logout = async () => {
+    loginAttemptRef.current = false;
     await signOut();
     qc.clear();
     setHasSession(false);
@@ -142,7 +148,7 @@ export default function useAuth({
         lastLoadedUserIdRef.current = null;
         setHasSession(false);
         setCurrentUser(null);
-        setLoginLoading(false);
+        if (!loginAttemptRef.current) setLoginLoading(false);
       }
     });
     return () => { mounted = false; subscription.unsubscribe(); };
