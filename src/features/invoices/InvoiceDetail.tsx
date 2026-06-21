@@ -16,6 +16,10 @@ export default function InvoiceDetail(props: any) {
   const contractorView = !isManager;
   const contractorName = currentUser?.company || currentUser?.name || "Your company";
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmApprove, setConfirmApprove] = useState(false);
+  const [confirmMarkPaid, setConfirmMarkPaid] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -35,8 +39,8 @@ export default function InvoiceDetail(props: any) {
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
                 <div className="invoice-action-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
-                  <button onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <button className="invoice-back-button" onClick={() => setSelectedInvoice(null)} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to invoices</button>
+                  <div className="invoice-action-buttons" style={{ display: "flex", gap: 8 }}>
                     <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
                       <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
                       {pdfBusy ? "Preparing…" : "Download PDF"}
@@ -48,23 +52,23 @@ export default function InvoiceDetail(props: any) {
                     {isManager && (inv.state === "submitted" || inv.state === "revised") && (
                       <>
                         <button
-                          onClick={async () => { await doApproveInvoice(inv.id); }}
-                          disabled={loadingStates["approveInvoice_" + inv.id]}
+                          onClick={() => setConfirmApprove(true)}
+                          disabled={loadingStates["approveInvoice_" + inv.id] || approving}
                           className="btn-primary"
-                          style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["approveInvoice_" + inv.id] ? 0.7 : 1, cursor: loadingStates["approveInvoice_" + inv.id] ? "default" : "pointer" }}
+                          style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["approveInvoice_" + inv.id] || approving ? 0.7 : 1, cursor: loadingStates["approveInvoice_" + inv.id] || approving ? "default" : "pointer" }}
                         >
-                          {loadingStates["approveInvoice_" + inv.id] ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
+                          {loadingStates["approveInvoice_" + inv.id] || approving ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
                         </button>
                         <button onClick={() => setRejecting(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
                       </>
                     )}
                     {isManager && inv.state === "approved" && doMarkPaid && (
                       <button
-                        onClick={async () => { await doMarkPaid(inv.id); }}
-                        disabled={loadingStates["markPaid_" + inv.id]}
+                        onClick={() => setConfirmMarkPaid(true)}
+                        disabled={loadingStates["markPaid_" + inv.id] || markingPaid}
                         className="btn-primary"
-                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["markPaid_" + inv.id] ? 0.7 : 1, cursor: loadingStates["markPaid_" + inv.id] ? "default" : "pointer" }}
-                      >{loadingStates["markPaid_" + inv.id] ? <><BtnSpinner />…</> : "Mark paid"}</button>
+                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["markPaid_" + inv.id] || markingPaid ? 0.7 : 1, cursor: loadingStates["markPaid_" + inv.id] || markingPaid ? "default" : "pointer" }}
+                      >{loadingStates["markPaid_" + inv.id] || markingPaid ? <><BtnSpinner />Marking...</> : "Mark paid"}</button>
                     )}
                     {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
                     {isManager && (
@@ -72,6 +76,54 @@ export default function InvoiceDetail(props: any) {
                     )}
                   </div>
                 </div>
+                {confirmApprove && (
+                  <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} title={`Approve invoice #${inv.num}`} width={440}>
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                      Approve this invoice on behalf of the AFM? This updates only invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>. The work order advances only when all live invoices are approved or paid.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button onClick={() => setConfirmApprove(false)} disabled={approving} className="btn-soft">Cancel</button>
+                      <button
+                        onClick={async () => {
+                          setApproving(true);
+                          try {
+                            await doApproveInvoice(inv.id);
+                            setConfirmApprove(false);
+                          } finally {
+                            setApproving(false);
+                          }
+                        }}
+                        disabled={approving || loadingStates["approveInvoice_" + inv.id]}
+                        className="btn-primary"
+                        style={{ padding: "10px 18px", opacity: approving || loadingStates["approveInvoice_" + inv.id] ? 0.7 : 1, cursor: approving || loadingStates["approveInvoice_" + inv.id] ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                      >{approving || loadingStates["approveInvoice_" + inv.id] ? <><BtnSpinner />Approving...</> : "Approve"}</button>
+                    </div>
+                  </Modal>
+                )}
+                {confirmMarkPaid && (
+                  <Modal onClose={() => { if (!markingPaid) setConfirmMarkPaid(false); }} title={`Mark invoice #${inv.num} paid`} width={440}>
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                      Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as paid? This records payment for this invoice only.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button onClick={() => setConfirmMarkPaid(false)} disabled={markingPaid} className="btn-soft">Cancel</button>
+                      <button
+                        onClick={async () => {
+                          setMarkingPaid(true);
+                          try {
+                            await doMarkPaid(inv.id);
+                            setConfirmMarkPaid(false);
+                          } finally {
+                            setMarkingPaid(false);
+                          }
+                        }}
+                        disabled={markingPaid || loadingStates["markPaid_" + inv.id]}
+                        className="btn-primary"
+                        style={{ padding: "10px 18px", opacity: markingPaid || loadingStates["markPaid_" + inv.id] ? 0.7 : 1, cursor: markingPaid || loadingStates["markPaid_" + inv.id] ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                      >{markingPaid || loadingStates["markPaid_" + inv.id] ? <><BtnSpinner />Marking...</> : "Mark paid"}</button>
+                    </div>
+                  </Modal>
+                )}
                 {rejecting && (
                   <Modal onClose={() => { setRejecting(false); setRejectReason(""); }} title={`Reject invoice #${inv.num}`} width={460}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>

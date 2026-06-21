@@ -38,7 +38,7 @@ const formatEta = (v: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
+  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // The single-invoice "Approve (on behalf of AFM)" button on the WO actions
   // row is gone — multi-invoice approvals happen per-row in the invoice
@@ -47,7 +47,17 @@ export default function WorkOrderDetail(props: any) {
   const [rejectingInv, setRejectingInv] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [deletingInvId, setDeletingInvId] = useState<string | null>(null);
+  const [markingPaidInvId, setMarkingPaidInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
+  const [invoiceMenuId, setInvoiceMenuId] = useState<string | null>(null);
+  const viewInvoice = (inv: any) => {
+    if (!inv?.num || !setSelectedInvoice) return;
+    setInvoiceMenuId(null);
+    setSelectedInvoice(inv.num);
+    setSelectedWO(null);
+    setAiNote(null);
+    setPage("invoices");
+  };
   const storeHistory = useMemo(
     () => woData ? workOrders.filter(w => w.store === woData.store && w.id !== woData.id) : [],
     [workOrders, woData]
@@ -425,13 +435,13 @@ export default function WorkOrderDetail(props: any) {
                         Download. The WO advances only when all live invoices
                         are approved/paid (logic lives in useWorkOrders). */}
                     {woAllInvoices.length > 0 && (
-                      <div className="card" style={{ padding: 0, marginBottom: 16, overflow: "hidden" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${T.borderSoft}`, background: T.surfaceSoft }}>
+                      <div className="card wo-invoice-list" style={{ padding: 0, marginBottom: 16, overflow: "hidden" }}>
+                        <div className="wo-invoice-list-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${T.borderSoft}`, background: T.surfaceSoft }}>
                           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>
                             {woAllInvoices.length} invoice{woAllInvoices.length === 1 ? "" : "s"} on this work order
                           </div>
                           {!isManager && canInvoice && woData.status !== "closed" && (
-                            <button onClick={() => openCreate(null)} className="btn-soft" style={{ padding: "6px 12px", fontSize: 11 }}>+ Add invoice</button>
+                            <button onClick={() => openCreate(null)} className="btn-soft wo-invoice-action" style={{ padding: "6px 12px", fontSize: 11 }}>+ Add invoice</button>
                           )}
                         </div>
                         {woAllInvoices
@@ -453,9 +463,11 @@ export default function WorkOrderDetail(props: any) {
                               inv.state === "draft" ? T.surfaceSoft : T.warnSoft
                             );
                             const rowBusy = busyInvId === inv.id;
+                            const invoiceMenuKey = String(inv.id || inv.num);
+                            const invoiceMenuOpen = invoiceMenuId === invoiceMenuKey;
                             return (
-                              <div key={inv.id || inv.num} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: idx < woAllInvoices.length - 1 ? `1px solid ${T.borderSoft}` : "none", flexWrap: "wrap" }}>
-                                <div style={{ minWidth: 0, flex: 1 }}>
+                              <div key={inv.id || inv.num} className="wo-invoice-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: idx < woAllInvoices.length - 1 ? `1px solid ${T.borderSoft}` : "none", flexWrap: "wrap" }}>
+                                <div className="wo-invoice-row-main" style={{ minWidth: 0, flex: 1 }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                                     <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>#{inv.num}</span>
                                     <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: stateColor, background: stateBg, border: `1px solid ${stateColor}33`, padding: "2px 8px", borderRadius: 999 }}>{stateLabel}</span>
@@ -466,34 +478,68 @@ export default function WorkOrderDetail(props: any) {
                                     <div style={{ fontSize: 11, color: T.danger, marginTop: 4, lineHeight: 1.45 }}><strong>Rejected:</strong> {inv.reason}</div>
                                   )}
                                 </div>
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <div className="wo-invoice-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  <button onClick={() => viewInvoice(inv)} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>View</button>
                                   {inv.state !== "draft" && (
-                                    <button onClick={() => doDownloadInvoice && doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ padding: "6px 10px", fontSize: 11 }}>Download</button>
+                                    <button onClick={() => doDownloadInvoice && doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Download</button>
                                   )}
                                   {isMyDraft && !isManager && (
-                                    <button onClick={() => openCreate(inv)} className="btn-accent" style={{ padding: "6px 10px", fontSize: 11 }}>Resume</button>
+                                    <button onClick={() => openCreate(inv)} className="btn-accent wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Resume</button>
                                   )}
                                   {isManager && (inv.state === "submitted" || inv.state === "revised") && (
                                     <>
                                       <button
                                         onClick={async () => { setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }}
                                         disabled={rowBusy || isLoading("approveInvoice_" + inv.id)}
-                                        className="btn-accent"
+                                        className="btn-accent wo-invoice-action"
                                         style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
                                       >{rowBusy || isLoading("approveInvoice_" + inv.id) ? <><BtnSpinner />Approving…</> : "Approve"}</button>
-                                      <button onClick={() => { setRejectingInv(inv); setRejectReason(""); }} className="btn-soft" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
+                                      <button onClick={() => { setRejectingInv(inv); setRejectReason(""); }} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
                                     </>
                                   )}
                                   {isManager && inv.state === "approved" && (
                                     <button
-                                      onClick={async () => { setBusyInvId(inv.id); try { await doMarkPaid(inv.id); } finally { setBusyInvId(null); } }}
+                                      onClick={() => setMarkingPaidInvId(inv.id)}
                                       disabled={rowBusy || isLoading("markPaid_" + inv.id)}
-                                      className="btn-primary"
+                                      className="btn-primary wo-invoice-action"
                                       style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
                                     >{rowBusy || isLoading("markPaid_" + inv.id) ? <><BtnSpinner />…</> : "Mark paid"}</button>
                                   )}
                                   {isManager && (
-                                    <button onClick={() => setDeletingInvId(inv.id)} className="btn-soft" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
+                                    <button onClick={() => setDeletingInvId(inv.id)} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
+                                  )}
+                                </div>
+                                <div className="wo-invoice-mobile-actions" style={{ display: "none", position: "relative", flexShrink: 0 }}>
+                                  <button
+                                    onClick={() => setInvoiceMenuId(invoiceMenuOpen ? null : invoiceMenuKey)}
+                                    aria-label={`Invoice ${inv.num} actions`}
+                                    style={{ width: 40, height: 40, borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surface, color: T.ink, cursor: "pointer", fontSize: 20, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                                  >⋮</button>
+                                  {invoiceMenuOpen && (
+                                    <>
+                                      <div className="wo-invoice-mobile-menu-backdrop" onClick={() => setInvoiceMenuId(null)} style={{ position: "fixed", inset: 0, zIndex: 42 }} />
+                                      <div className="wo-invoice-mobile-menu" style={{ position: "absolute", top: 44, right: 0, zIndex: 43, minWidth: 156, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, boxShadow: "0 10px 28px rgba(31,30,28,0.16)", overflow: "hidden" }}>
+                                        <button onClick={() => viewInvoice(inv)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>View</button>
+                                        {inv.state !== "draft" && (
+                                          <button onClick={() => { setInvoiceMenuId(null); doDownloadInvoice && doDownloadInvoice(inv); }} disabled={pdfBusy} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: pdfBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: pdfBusy ? 0.6 : 1 }}>Download</button>
+                                        )}
+                                        {isMyDraft && !isManager && (
+                                          <button onClick={() => { setInvoiceMenuId(null); openCreate(inv); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Resume</button>
+                                        )}
+                                        {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                                          <>
+                                            <button onClick={async () => { setInvoiceMenuId(null); setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }} disabled={rowBusy || isLoading("approveInvoice_" + inv.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: rowBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: rowBusy ? 0.6 : 1 }}>Approve</button>
+                                            <button onClick={() => { setInvoiceMenuId(null); setRejectingInv(inv); setRejectReason(""); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Reject</button>
+                                          </>
+                                        )}
+                                        {isManager && inv.state === "approved" && (
+                                          <button onClick={() => { setInvoiceMenuId(null); setMarkingPaidInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Mark paid</button>
+                                        )}
+                                        {isManager && (
+                                          <button onClick={() => { setInvoiceMenuId(null); setDeletingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Delete</button>
+                                        )}
+                                      </div>
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -525,20 +571,60 @@ export default function WorkOrderDetail(props: any) {
                     )}
 
                     {/* Per-row delete-invoice confirmation — staff only. */}
+                    {markingPaidInvId && (() => {
+                      const inv = woAllInvoices.find((i: any) => i.id === markingPaidInvId);
+                      if (!inv) return null;
+                      const isBusy = busyInvId === inv.id || isLoading("markPaid_" + inv.id);
+                      return (
+                        <Modal onClose={() => { if (!isBusy) setMarkingPaidInvId(null); }} title="Mark invoice paid" width={420}>
+                          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                            Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as paid?
+                          </div>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                            <button onClick={() => setMarkingPaidInvId(null)} disabled={isBusy} className="btn-soft">Cancel</button>
+                            <button
+                              onClick={async () => {
+                                setBusyInvId(inv.id);
+                                try {
+                                  await doMarkPaid(inv.id);
+                                  setMarkingPaidInvId(null);
+                                } finally {
+                                  setBusyInvId(null);
+                                }
+                              }}
+                              disabled={isBusy}
+                              className="btn-primary"
+                              style={{ padding: "10px 18px", opacity: isBusy ? 0.7 : 1, cursor: isBusy ? "default" : "pointer" }}
+                            >{isBusy ? <><BtnSpinner />Marking...</> : "Mark paid"}</button>
+                          </div>
+                        </Modal>
+                      );
+                    })()}
+
                     {deletingInvId && (() => {
                       const inv = woAllInvoices.find((i: any) => i.id === deletingInvId);
                       if (!inv) return null;
+                      const isBusy = busyInvId === inv.id || isLoading("deleteInvoice_" + inv.id);
                       return (
-                        <Modal onClose={() => setDeletingInvId(null)} title="Delete invoice" width={420}>
+                        <Modal onClose={() => { if (!isBusy) setDeletingInvId(null); }} title="Delete invoice" width={420}>
                           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
                             Delete invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This cannot be undone from the portal.
                           </div>
                           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                            <button onClick={() => setDeletingInvId(null)} className="btn-soft">Cancel</button>
+                            <button onClick={() => setDeletingInvId(null)} disabled={isBusy} className="btn-soft">Cancel</button>
                             <button
-                              onClick={async () => { await doDeleteInvoice(inv); setDeletingInvId(null); }}
-                              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
-                            >Delete</button>
+                              onClick={async () => {
+                                setBusyInvId(inv.id);
+                                try {
+                                  await doDeleteInvoice(inv);
+                                  setDeletingInvId(null);
+                                } finally {
+                                  setBusyInvId(null);
+                                }
+                              }}
+                              disabled={isBusy}
+                              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: isBusy ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: isBusy ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}
+                            >{isBusy ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
                           </div>
                         </Modal>
                       );

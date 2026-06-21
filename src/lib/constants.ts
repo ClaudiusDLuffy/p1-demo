@@ -63,10 +63,12 @@ export const FUNCTIONAL_STATUS = {
 };
 
 export const INV_STATE = {
+  draft: { label: "Draft", color: T.subtle, bg: T.surfaceSoft },
   submitted: { label: "Submitted", color: T.accent, bg: T.accentSoft },
   approved: { label: "Approved", color: T.success, bg: T.successSoft },
   rejected: { label: "Rejected", color: T.danger, bg: T.dangerSoft },
   revised: { label: "Revised", color: T.warn, bg: T.warnSoft },
+  paid: { label: "Paid", color: T.success, bg: T.successSoft },
 };
 
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

@@ -8,9 +8,18 @@ import { useMemo } from "react";
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt } = props;
   const currentUserId = currentUser?.id ?? null;
+  const invoiceTabs = [
+    { id: "all", l: "All", m: "All" },
+    { id: "draft", l: "Draft", m: "Draft" },
+    { id: "submitted", l: "Submitted", m: "Sub" },
+    { id: "revised", l: "Revised", m: "Rev" },
+    { id: "rejected", l: "Rejected", m: "Rej" },
+    { id: "approved", l: "Approved", m: "Appr" },
+    { id: "paid", l: "Paid", m: "Paid" },
+  ];
   const visibleInvoices = useMemo(
     () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))
-      .filter(i => invTab === "all" ? true : invTab === "pending" ? (i.state === "submitted" || i.state === "revised") : i.state === invTab),
+      .filter(i => invTab === "all" ? true : i.state === invTab),
     [isManager, invoices, currentUserId, invTab]
   );
   return (
@@ -18,9 +27,12 @@ export default function InvoiceList(props: any) {
           {/* ═════ INVOICES ═════ */}
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
-              <div className="mobile-tabs" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
-                {[{ id: "all", l: "All", m: "All" }, { id: "pending", l: "Pending", m: "Pend" }, { id: "submitted", l: "Submitted", m: "Sub" }, { id: "rejected", l: "Rejected", m: "Rej" }, { id: "approved", l: "Approved", m: "Appr" }].map(t => (
-                  <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>{t.l}</button>
+              <div className="mobile-tabs invoice-tabs" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
+                {invoiceTabs.map(t => (
+                  <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>
+                    <span className="tab-full-label">{t.l}</span>
+                    <span className="tab-short-label" style={{ display: "none" }}>{t.m}</span>
+                  </button>
                 ))}
               </div>
               <div className="desktop-only-table">
