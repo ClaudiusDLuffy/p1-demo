@@ -48,6 +48,11 @@ type ContractorProfile = {
 
 const args = process.argv.slice(2);
 const applyMode = args.includes("--apply");
+const includeReviewRows = args.includes("--include-review");
+const approvedNteArgIndex = args.findIndex(arg => arg === "--approved-nte");
+const approvedNteAmount = approvedNteArgIndex >= 0 && args[approvedNteArgIndex + 1]
+  ? Number(args[approvedNteArgIndex + 1])
+  : 0;
 
 const fileArgIndex = args.findIndex(arg => arg === "--file");
 const filePath = fileArgIndex >= 0 && args[fileArgIndex + 1] ? args[fileArgIndex + 1] : DEFAULT_FILE;
@@ -117,6 +122,25 @@ const mapPortalStatus = (functionalStatus: string, contractorId: string | null) 
   if (functionalStatus === "Pending Capital Approval") return "capital";
   if (functionalStatus === "Completed") return "completed";
   return contractorId ? "assigned" : "unassigned";
+};
+
+const isReviewRow = (row: ExcelWorkOrder) =>
+  row.warnings.some(warning => warning.startsWith("review:"));
+
+const mapReviewDisposition = (row: ExcelWorkOrder) => {
+  const text = `${row.summary} ${row.nteApproval}`.toLowerCase();
+  if (/billing only|bill only|billing of|do not dispatch po|submit docs|submit invoice|\bpo for\b/.test(text)) {
+    return {
+      status: "pending_invoice",
+      functionalStatus: "Completed",
+      isCapital: false,
+    };
+  }
+  return {
+    status: "capital",
+    functionalStatus: "Pending Capital Approval",
+    isCapital: true,
+  };
 };
 
 const fullAddress = (row: ExcelWorkOrder) =>
@@ -479,9 +503,14 @@ const toWorkOrderPayload = (
   contractorId: string | null,
   existing: ExistingWorkOrder | undefined,
 ) => {
+  const review = isReviewRow(row);
+  const reviewDisposition = review ? mapReviewDisposition(row) : null;
   const resolvedContractorId = contractorId || existing?.contractor_id || null;
-  const functionalStatus = mapFunctionalStatus(row.state);
+  const functionalStatus = reviewDisposition?.functionalStatus || mapFunctionalStatus(row.state);
   const createdAt = row.created || new Date().toISOString();
+  const nte = row.nteApproval.toLowerCase() === "approved" && approvedNteAmount > 0
+    ? approvedNteAmount
+    : 0;
 
   return {
     id: row.number,
@@ -491,15 +520,17 @@ const toWorkOrderPayload = (
     summary: nullableText(row.summary) || row.number,
     description: nullableText(row.summary) || row.number,
     priority: row.priority,
-    status: mapPortalStatus(functionalStatus, resolvedContractorId),
+    status: reviewDisposition?.status || mapPortalStatus(functionalStatus, resolvedContractorId),
     functional_status: functionalStatus,
     contractor_id: resolvedContractorId,
-    nte: 0,
+    nte,
     dispatched_at: createdAt,
     sla_started_at: createdAt,
     response_breach_at: null,
     resolution_breach_at: row.resolutionBreachAt,
-    source: existing && !existing.deleted_at ? existing.source || "bulk_import" : "bulk_import",
+    source: review ? "bulk_import_review" : existing && !existing.deleted_at ? existing.source || "bulk_import" : "bulk_import",
+    is_capital: reviewDisposition?.isCapital || false,
+    capital_status: reviewDisposition?.isCapital ? "Pending approval" : null,
     created_at: createdAt,
     updated_at: new Date().toISOString(),
     deleted_at: null,
@@ -534,9 +565,11 @@ const upsertWorkOrders = async (payloads: ReturnType<typeof toWorkOrderPayload>[
 const main = async () => {
   const rows = parseLegacyXls(filePath);
   const workOrders = mapExcelRows(rows);
-  const reviewRows = workOrders.filter(row => row.warnings.some(warning => warning.startsWith("review:")));
+  const reviewRows = workOrders.filter(isReviewRow);
   const reviewIds = new Set(reviewRows.map(row => row.number));
-  const importableRows = workOrders.filter(row => !reviewIds.has(row.number));
+  const importableRows = includeReviewRows
+    ? workOrders
+    : workOrders.filter(row => !reviewIds.has(row.number));
   const allIds = workOrders.map(row => row.number).filter(Boolean);
   const ids = importableRows.map(row => row.number).filter(Boolean);
   const duplicatesInFile = allIds.filter((id, index) => allIds.indexOf(id) !== index);
@@ -558,6 +591,8 @@ const main = async () => {
   });
   const p5Rows = importableRows.filter(row => row.priority === "p5");
   const missingBreachRows = importableRows.filter(row => !row.resolutionBreachAt);
+  const approvedNteRows = importableRows.filter(row => row.nteApproval.toLowerCase() === "approved");
+  const reviewRowsIncluded = importableRows.filter(isReviewRow);
   const assignedRows = importableRows.filter(row => !!contractorByRow.get(row.number));
   const unmatchedAssignedRows = importableRows.filter(row => row.assignedTo && !contractorByRow.get(row.number));
   const payloads = importableRows.map(row => toWorkOrderPayload(row, contractorByRow.get(row.number) || null, existing.get(row.number)));
@@ -568,7 +603,8 @@ const main = async () => {
   console.log(applyMode ? "Mode: APPLY; DB writes will be performed after validation" : "Mode: dry-run only; no DB writes are performed");
   console.log("");
   console.log(`Rows parsed: ${workOrders.length}`);
-  console.log(`Rows excluded for client confirmation: ${reviewRows.length}`);
+  console.log(`Rows excluded for client confirmation: ${includeReviewRows ? 0 : reviewRows.length}`);
+  console.log(`Review rows included for client editing: ${reviewRowsIncluded.length}`);
   console.log(`Rows eligible for import: ${importableRows.length}`);
   console.log(`Unique WOTs: ${new Set(allIds).size}`);
   console.log(`Unique importable WOTs: ${new Set(ids).size}`);
@@ -580,16 +616,21 @@ const main = async () => {
   console.log("");
   console.log(`P5 rows imported as p5: ${p5Rows.length}`);
   console.log(`Rows with null resolution_breach_at: ${missingBreachRows.length}`);
+  console.log(`Approved NTE rows set to $${approvedNteAmount}: ${approvedNteRows.length}`);
   console.log(`Rows assigned to matched contractors: ${assignedRows.length}`);
   console.log(`Rows with Assigned to value but no contractor match: ${unmatchedAssignedRows.length}`);
   console.log("");
 
   if (applyMode) {
-    if (workOrders.length !== 443 || reviewRows.length !== 21 || importableRows.length !== 422) {
-      throw new Error("Apply stopped: parsed/excluded/eligible counts changed from the reviewed 443/21/422 plan.");
+    const expectedImportable = includeReviewRows ? 443 : 422;
+    if (workOrders.length !== 443 || reviewRows.length !== 21 || importableRows.length !== expectedImportable) {
+      throw new Error(`Apply stopped: parsed/review/importable counts changed from the reviewed 443/21/${expectedImportable} plan.`);
     }
     if (duplicatesInFile.length > 0) {
       throw new Error("Apply stopped: duplicate WOTs were found inside the Excel file.");
+    }
+    if (includeReviewRows && approvedNteAmount !== 300) {
+      throw new Error("Apply stopped: --include-review requires --approved-nte 300 for the approved NTE update.");
     }
   }
 
@@ -628,9 +669,10 @@ const main = async () => {
   }
 
   if (reviewRows.length > 0) {
-    console.log("Manual review rows excluded from import:");
+    console.log(includeReviewRows ? "Review rows included for client editing:" : "Manual review rows excluded from import:");
     for (const row of reviewRows) {
-      console.log(`- ${row.number} | excel_row=${row.rowNumber} | ${row.priorityRaw} | ${row.state} | ${row.summary}`);
+      const disposition = mapReviewDisposition(row);
+      console.log(`- ${row.number} | excel_row=${row.rowNumber} | ${row.priorityRaw} | ${row.state} | ${disposition.status} | ${row.summary}`);
     }
     console.log("");
   }
