@@ -41,8 +41,8 @@ async function main() {
     const breaches = computeSlaBreaches(row.priority as Priority, new Date(startedIso));
     const { error: upErr } = await sb.from("work_orders").update({
       sla_started_at: startedIso,
-      response_breach_at: breaches.responseBreachAt.toISOString(),
-      resolution_breach_at: breaches.resolutionBreachAt.toISOString(),
+      response_breach_at: breaches.responseBreachAt?.toISOString() ?? null,
+      resolution_breach_at: breaches.resolutionBreachAt?.toISOString() ?? null,
     }).eq("id", row.id);
     if (upErr) { console.error(`  ${row.id}: ${upErr.message}`); skipped++; continue; }
     updated++;

@@ -14,7 +14,7 @@ export type ParsedWorkOrder = {
   incidentId: string | null;
   storeNumber: string | null;
   storeLocation: string | null;
-  priority: "p1" | "p2" | "p3" | "p4" | null;
+  priority: "p1" | "p2" | "p3" | "p4" | "p5" | null;
   summary: string | null;
   description: string | null;
   lineOfService: string | null;
@@ -80,6 +80,7 @@ const normalizePriority = (value: string | null): ParsedWorkOrder["priority"] =>
   if (normalized === "P2") return "p2";
   if (normalized === "P3") return "p3";
   if (normalized === "P4") return "p4";
+  if (normalized === "P5") return "p5";
   return null;
 };
 
@@ -112,7 +113,7 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
   const storeLocation = firstMatch(body, [/^Store Location:\s*(.+?)(?=\r?\n)/m]);
   const address = firstMatch(body, [/^Store Address:\s*(.+?)(?=\r?\n)/m]);
   const addressParts = parseAddressParts(address);
-  const priorityRaw = firstMatch(body, [/^Priority:\s*(P[1-4])\s*-/m]);
+  const priorityRaw = firstMatch(body, [/^Priority:\s*(P[1-5])\s*-/m]);
   const state = firstMatch(body, [/^State:\s*(.+?)(?=\r?\n)/m]);
   const lineOfService = firstMatch(body, [/^Line of Service:\s*(.+?)(?=\r?\n)/m]);
   const businessService = firstMatch(body, [/^Business Service:\s*(.+?)(?=\r?\n)/m]);

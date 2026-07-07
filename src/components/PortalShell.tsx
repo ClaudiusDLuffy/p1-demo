@@ -121,6 +121,7 @@ const hoursBetween = (aIso: string, bIso: string) => (new Date(bIso).getTime() -
 const slaRemaining = (wo: any) => {
   if (!wo.dispatchedAt || !PRIORITY[wo.priority]) return null;
   const slaH = PRIORITY[wo.priority].slaHours;
+  if (!slaH || slaH <= 0) return null;
   const elapsed = hoursBetween(wo.dispatchedAt, new Date().toISOString());
   return { remainingHours: slaH - elapsed, elapsedHours: elapsed, slaHours: slaH, percent: Math.min(100, (elapsed / slaH) * 100) };
 };
@@ -2123,8 +2124,8 @@ export default function PortalShell() {
             // SLA badge reflects the new priority's deadlines.
             const startedAt = woData.slaStartedAt ? new Date(woData.slaStartedAt) : new Date();
             const b = computeSlaBreaches(editWoForm.priority, startedAt);
-            patch.responseBreachAt = b.responseBreachAt.toISOString();
-            patch.resolutionBreachAt = b.resolutionBreachAt.toISOString();
+            patch.responseBreachAt = b.responseBreachAt?.toISOString() ?? null;
+            patch.resolutionBreachAt = b.resolutionBreachAt?.toISOString() ?? null;
           }
           const nextNte = editWoForm.nte === "" ? 0 : parseFloat(editWoForm.nte);
           if (isFinite(nextNte) && nextNte >= 0 && nextNte !== orig.nte) {
