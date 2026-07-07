@@ -815,7 +815,7 @@ export type Database = {
         | "revised"
         | "paid"
       user_role: "manager" | "dispatcher" | "back_office" | "contractor"
-      wo_priority: "p1" | "p2" | "p3" | "p4"
+      wo_priority: "p1" | "p2" | "p3" | "p4" | "p5"
       wo_status:
         | "unassigned"
         | "assigned"
@@ -979,7 +979,7 @@ export const Constants = {
         "paid",
       ],
       user_role: ["manager", "dispatcher", "back_office", "contractor"],
-      wo_priority: ["p1", "p2", "p3", "p4"],
+      wo_priority: ["p1", "p2", "p3", "p4", "p5"],
       wo_status: [
         "unassigned",
         "assigned",

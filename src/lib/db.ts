@@ -549,8 +549,8 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
     is_capital: !!wo.isCapital,
     source: wo.source || "manual",
     sla_started_at: startedAt.toISOString(),
-    response_breach_at: breaches.responseBreachAt.toISOString(),
-    resolution_breach_at: breaches.resolutionBreachAt.toISOString(),
+    response_breach_at: breaches.responseBreachAt?.toISOString() ?? null,
+    resolution_breach_at: breaches.resolutionBreachAt?.toISOString() ?? null,
     created_by: user?.id || null,
   };
   const { data, error } = await sb.from("work_orders").insert(dbRow).select().single();

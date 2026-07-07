@@ -9,7 +9,7 @@ export const WorkOrderSchema = z.object({
     "completed", "pending_invoice", "pending_approval",
     "pending_payment", "closed"
   ]),
-  priority: z.enum(["p1", "p2", "p3", "p4"]).optional().nullable(),
+  priority: z.enum(["p1", "p2", "p3", "p4", "p5"]).optional().nullable(),
   contractor_id: z.string().optional().nullable(),
   nte: z.number().optional().nullable(),
   store_number: z.string().optional().nullable(),
@@ -87,7 +87,7 @@ export const CreateWorkOrderSchema = z.object({
   businessService: z.string().optional(),
   category: z.string().optional(),
   subCategory: z.string().optional(),
-  priority: z.enum(["p1", "p2", "p3", "p4"]).optional(),
+  priority: z.enum(["p1", "p2", "p3", "p4", "p5"]).optional(),
   nte: z.string().optional(),
   assign: z.string().optional(),
   summary: z.string().optional(),

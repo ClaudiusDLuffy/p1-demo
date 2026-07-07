@@ -11,12 +11,20 @@ export const SLA_WINDOWS = {
   p2: { responseHours: 4,  resolutionHours: 8 },    // P2 Emergency
   p3: { responseHours: 24, resolutionHours: 48 },   // P3 Standard / Rush
   p4: { responseHours: 48, resolutionHours: 72 },   // P4 Minor
+  p5: null,                                         // P5 Preventative / PM work has no SLA deadline
 } as const;
 
 export type Priority = keyof typeof SLA_WINDOWS;
 
 export function computeSlaBreaches(priority: Priority, startedAt: Date) {
-  const win = SLA_WINDOWS[priority] || SLA_WINDOWS.p3;
+  const win = SLA_WINDOWS[priority];
+  if (!win) {
+    return {
+      responseBreachAt: null,
+      resolutionBreachAt: null,
+    };
+  }
+
   return {
     responseBreachAt: new Date(startedAt.getTime() + win.responseHours * 3600 * 1000),
     resolutionBreachAt: new Date(startedAt.getTime() + win.resolutionHours * 3600 * 1000),

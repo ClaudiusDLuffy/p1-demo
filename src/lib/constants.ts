@@ -38,6 +38,7 @@ export const PRIORITY = {
   p2: { label: "P2 Emergency", short: "P2", color: T.accent, bg: T.accentSoft, ring: T.accentRing, icon: "â—†", slaHours: 24 },
   p3: { label: "P3 Standard", short: "P3", color: T.warn, bg: T.warnSoft, ring: "#EED9A6", icon: "â—", slaHours: 72 },
   p4: { label: "P4 Minor", short: "P4", color: T.muted, bg: T.borderSoft, ring: T.border, icon: "â—‹", slaHours: 168 },
+  p5: { label: "P5 Preventative", short: "P5", color: T.success, bg: T.successSoft, ring: "#CFDED3", icon: "PM", slaHours: 0 },
 };
 
 export const STATUS = {
