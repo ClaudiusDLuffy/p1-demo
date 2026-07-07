@@ -6,6 +6,7 @@ import { BtnSpinner } from "../../components/ui/BtnSpinner";
 
 export default function LoginForm({
   loginEmail, setLoginEmail, loginPassword, setLoginPassword,
+  rememberMe, setRememberMe,
   loginLoading, loginError, fadeIn, imageErrors, setImageErrors,
   doLogin, CSS
 }: any) {
@@ -39,13 +40,22 @@ export default function LoginForm({
             <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 7, display: "block", textTransform: "uppercase", letterSpacing: 0.8 }}>Email</label>
             <input value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="you@p1pros.com" style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
           </div>
-          <div style={{ marginBottom: 18 }}>
+          <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 7, display: "block", textTransform: "uppercase", letterSpacing: 0.8 }}>Password</label>
             <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18, fontSize: 13, color: T.muted, cursor: "pointer", userSelect: "none" }}>
+            <input
+              type="checkbox"
+              checked={!!rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+              style={{ width: 16, height: 16, accentColor: T.ink, cursor: "pointer" }}
+            />
+            Remember me
+          </label>
           {loginError && <div style={{ fontSize: 12, color: T.danger, background: T.dangerSoft, border: `1px solid ${T.dangerSoft}`, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>{loginError}</div>}
           <button
-            onClick={() => doLogin(loginEmail, loginPassword)}
+            onClick={() => doLogin(loginEmail, loginPassword, rememberMe)}
             disabled={loginLoading}
             style={{
               width: "100%",

@@ -533,6 +533,19 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     width: 100% !important;
     box-sizing: border-box;
   }
+  .work-order-pagination {
+    justify-content: center !important;
+    text-align: center !important;
+  }
+  .work-order-pagination > div {
+    justify-content: center !important;
+  }
+  .work-order-pagination .btn-soft:not(:disabled):focus,
+  .work-order-pagination .btn-soft:not(:disabled):active {
+    background: ${T.surface} !important;
+    color: ${T.ink} !important;
+    opacity: 1 !important;
+  }
   .mobile-tabs {
     overflow-x: auto !important;
     overflow-y: hidden !important;
@@ -903,7 +916,7 @@ export default function PortalShell() {
   const [resolutionInput, setResolutionInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const { currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
-    loginPassword, setLoginPassword, loginLoading, loginError,
+    loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
   const isAuthenticated = hasSession || !!currentUser;
   const qc = useQueryClient();
@@ -1338,7 +1351,7 @@ export default function PortalShell() {
   // ===============================================================
   //  LOGIN
   // ===============================================================
-  if (!currentUser) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} loginLoading={loginLoading} loginError={loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
+  if (!currentUser) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} rememberMe={rememberMe} setRememberMe={setRememberMe} loginLoading={loginLoading} loginError={loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
 
   // ===============================================================
   //  APP SHELL

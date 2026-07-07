@@ -4,17 +4,98 @@
 import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
 import { Sel } from "../../components/ui/Sel";
+import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function WorkOrderList(props: any) {
   const { page, selectedWO, search, setSearch, isManager, filterC, setFilterC, contractorsOnly, filterP, setFilterP, nteQueue, setNteQueue, filteredWOs, slaLabel, setSelectedWO, setAiNote, setPage, getUser, fmt, invoices } = props;
-  const tableWOs = useMemo(
-    () => filteredWOs.filter(w => w.status !== "capital"),
-    [filteredWOs]
+  const [listPage, setListPage] = useState(1);
+  const pageSize = 10;
+  const [pagingBusy, setPagingBusy] = useState<"prev" | "next" | null>(null);
+  const tableWOs = useMemo(() => {
+    const createdTime = (wo: any) => {
+      const value = wo.created_at || wo.createdAt;
+      const time = value ? new Date(value).getTime() : 0;
+      return Number.isFinite(time) ? time : 0;
+    };
+    return filteredWOs
+      .filter(w => w.status !== "capital")
+      .sort((a, b) => createdTime(b) - createdTime(a));
+  }, [filteredWOs]);
+  const totalPages = Math.max(1, Math.ceil(tableWOs.length / pageSize));
+  const safePage = Math.min(listPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const paginatedWOs = tableWOs.slice(startIndex, startIndex + pageSize);
+  const showingStart = tableWOs.length === 0 ? 0 : startIndex + 1;
+  const showingEnd = Math.min(startIndex + pageSize, tableWOs.length);
+  const nonCapitalWOs = paginatedWOs;
+
+  useEffect(() => {
+    setListPage(1);
+  }, [search, filterC, filterP, nteQueue]);
+
+  useEffect(() => {
+    setListPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
+  const goToPage = (direction: "prev" | "next") => {
+    setPagingBusy(direction);
+    setListPage((prev) => direction === "prev"
+      ? Math.max(1, prev - 1)
+      : Math.min(totalPages, prev + 1)
+    );
+    window.setTimeout(() => setPagingBusy(null), 260);
+  };
+
+  const renderPaginationControls = () => tableWOs.length > 0 && (
+    <div
+      className="work-order-pagination"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        flexWrap: "wrap",
+        margin: "0 0 14px",
+      }}
+    >
+      <div style={{ fontSize: 12, color: T.muted }}>
+        Showing <span style={{ color: T.ink, fontWeight: 700 }}>{showingStart}-{showingEnd}</span> of <span style={{ color: T.ink, fontWeight: 700 }}>{tableWOs.length}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={(e: any) => {
+            e.currentTarget.blur();
+            goToPage("prev");
+          }}
+          disabled={safePage <= 1 || !!pagingBusy}
+          className="btn-soft"
+          style={{ padding: "8px 12px", minHeight: 36, minWidth: 92, fontSize: 12, background: T.surface, color: T.ink, opacity: safePage <= 1 ? 0.45 : 1, cursor: safePage <= 1 || pagingBusy ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          {pagingBusy === "prev" ? <><BtnSpinnerDark />Loading</> : "Previous"}
+        </button>
+        <span style={{ fontSize: 12, color: T.muted, minWidth: 72, textAlign: "center" }}>
+          Page {safePage} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={(e: any) => {
+            e.currentTarget.blur();
+            goToPage("next");
+          }}
+          disabled={safePage >= totalPages || !!pagingBusy}
+          className="btn-soft"
+          style={{ padding: "8px 12px", minHeight: 36, minWidth: 92, fontSize: 12, background: T.surface, color: T.ink, opacity: safePage >= totalPages ? 0.45 : 1, cursor: safePage >= totalPages || pagingBusy ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          {pagingBusy === "next" ? <><BtnSpinnerDark />Loading</> : "Next"}
+        </button>
+      </div>
+    </div>
   );
-  const nonCapitalWOs = tableWOs;
+
   return (
     <>
           {/* ═════ WORK ORDERS TABLE ═════ */}
@@ -46,7 +127,7 @@ export default function WorkOrderList(props: any) {
                     </tr>
                   </thead>
                   <tbody>
-                    {tableWOs.map((wo, i) => {
+                    {paginatedWOs.map((wo, i) => {
                       const sla = slaLabel(wo);
                       const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                       return (
@@ -144,6 +225,7 @@ export default function WorkOrderList(props: any) {
                   </div>
                 )}
               </div>
+              {renderPaginationControls()}
             </div>
           )}
 

@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { signIn, signOut } from "../../lib/db";
-import { supabase } from "../../lib/supabase/client";
+import {
+  getRememberedEmail,
+  getRememberMePreference,
+  setRememberMePreference,
+  supabase,
+} from "../../lib/supabase/client";
 import { DEMO_ACCOUNTS } from "../../lib/constants";
 
 export async function changePassword(
@@ -25,8 +30,9 @@ export default function useAuth({
 }: any) {
   const qc = useQueryClient();
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginEmail, setLoginEmail] = useState(() => getRememberedEmail());
   const [loginPassword, setLoginPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(() => getRememberMePreference());
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [fadeIn, setFadeIn] = useState(false);
@@ -74,7 +80,7 @@ export default function useAuth({
   }, [fire, setPage]);
 
   // Real Supabase auth - replaces demo button login
-  const doLogin = async (email: string, password: string) => {
+  const doLogin = async (email: string, password: string, remember = rememberMe) => {
     if (loginLoading) return;
     const v = (email || "").trim();
     if (!v) { setLoginError("Enter an email to sign in"); return; }
@@ -82,6 +88,7 @@ export default function useAuth({
     setLoginLoading(true);
     loginAttemptRef.current = true;
     try {
+      setRememberMePreference(remember, v);
       // Clear any stale session before signing in fresh - guards against
       // wedged refresh tokens left over from a previous demo run.
       await signOut().catch(() => {});
@@ -156,7 +163,7 @@ export default function useAuth({
 
   return {
     currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
-    loginPassword, setLoginPassword, loginLoading, loginError,
+    loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
     fadeIn, doLogin, logout
   };
 }
