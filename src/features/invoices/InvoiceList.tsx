@@ -19,6 +19,7 @@ export default function InvoiceList(props: any) {
   ];
   const visibleInvoices = useMemo(
     () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))
+      .filter(i => (i.invoiceType || "contractor") === "contractor")
       .filter(i => invTab === "all" ? true : i.state === invTab),
     [isManager, invoices, currentUserId, invTab]
   );

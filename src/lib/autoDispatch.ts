@@ -78,7 +78,7 @@ export const detectDispatchTerritory = (parsed: ParsedWorkOrder): string[] => {
 
 export async function resolveContractor(
   parsed: ParsedWorkOrder,
-): Promise<{ contractorId: string | null; reason: string }> {
+): Promise<{ contractorId: string | null; contractorEmail?: string | null; contractorName?: string | null; reason: string }> {
   const territoryText = detectDispatchTerritory(parsed).join(" ");
   const trade = detectDispatchTrade(parsed);
   const tradeText = trade || "";
@@ -87,9 +87,12 @@ export async function resolveContractor(
     return { contractorId: null, reason: "manual hold: Florida HVAC is not auto-assigned" };
   }
 
-  const rule = DISPATCH_RULES.find(item =>
-    containsAny(territoryText, item.territory) && containsAny(tradeText, item.trades),
-  );
+  const vaOverride = containsAny(territoryText, ["Virginia", "VA", "Virginia Beach"]);
+  const rule = vaOverride
+    ? DISPATCH_RULES.find(item => item.contractorEmail === "pro.ops.inc@gmail.com")
+    : DISPATCH_RULES.find(item =>
+      containsAny(territoryText, item.territory) && containsAny(tradeText, item.trades),
+    );
 
   if (!rule) {
     return { contractorId: null, reason: "no routing rule" };
@@ -112,7 +115,14 @@ export async function resolveContractor(
       return { contractorId: null, reason: `routing matched ${rule.contractorName}, but profile was not found` };
     }
 
-    return { contractorId: data.id, reason: `matched ${rule.contractorName} by territory/trade` };
+    return {
+      contractorId: data.id,
+      contractorEmail: data.email,
+      contractorName: data.name || rule.contractorName,
+      reason: vaOverride
+        ? `matched ${rule.contractorName} by VA territory`
+        : `matched ${rule.contractorName} by territory/trade`,
+    };
   } catch (err) {
     console.error("Contractor routing error", err);
     return { contractorId: null, reason: `routing matched ${rule.contractorName}, but lookup errored` };

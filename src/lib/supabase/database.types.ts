@@ -182,6 +182,7 @@ export type Database = {
           due_date: string | null
           id: string
           invoice_date: string
+          invoice_type: string
           num: string
           paid_at: string | null
           pdf_storage_path: string | null
@@ -209,6 +210,7 @@ export type Database = {
           due_date?: string | null
           id?: string
           invoice_date: string
+          invoice_type?: string
           num: string
           paid_at?: string | null
           pdf_storage_path?: string | null
@@ -236,6 +238,7 @@ export type Database = {
           due_date?: string | null
           id?: string
           invoice_date?: string
+          invoice_type?: string
           num?: string
           paid_at?: string | null
           pdf_storage_path?: string | null

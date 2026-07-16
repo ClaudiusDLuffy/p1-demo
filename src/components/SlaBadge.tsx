@@ -37,7 +37,8 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: 
   let bg = C.successSoft;
   let label: string;
   let pulse = false;
-  if (state.responseBreached && state.resolutionBreached) {
+  const bothBreached = state.responseBreached && state.resolutionBreached;
+  if (bothBreached) {
     color = C.danger; bg = C.dangerSoft;
     label = "Both Breached";
     pulse = true;
@@ -60,9 +61,10 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: 
       <span style={{
         fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10,
         color, background: bg, border: `1px solid ${color}22`,
-        whiteSpace: "nowrap",
+        whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
         animation: pulse ? "slaBadgePulse 1.6s infinite" : undefined,
       }}>
+        {bothBreached && <span style={{ color: C.warn, fontSize: 11, lineHeight: 1 }}>⚠</span>}
         {label}
         <style>{`@keyframes slaBadgePulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
       </span>
@@ -78,7 +80,10 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: 
     : formatRemaining(state.resolutionRemainingHours);
   return (
     <div style={{ padding: "10px 14px", borderRadius: 12, background: bg, border: `1px solid ${color}33`, display: "inline-flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color, letterSpacing: 0.2 }}>{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
+        {bothBreached && <span style={{ color: C.warn, fontSize: 13, lineHeight: 1 }}>⚠</span>}
+        {label}
+      </div>
       <div style={{ fontSize: 11, color: C.muted }}>
         Response: <span style={{ color: state.responseBreached ? C.danger : C.ink, fontWeight: 600 }}>{responseStr}</span>
         {" · "}

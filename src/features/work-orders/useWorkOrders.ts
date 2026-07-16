@@ -10,6 +10,7 @@ import {
   insertWoPart, updateWoPart, deleteWoPart,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
+import { supabase } from "../../lib/supabase/client";
 import { WORK_ORDERS_KEY, WO_PARTS_KEY } from "./queries";
 import { INVOICES_KEY } from "../invoices/queries";
 
@@ -75,6 +76,31 @@ export default function useWorkOrders({
     finally { if (onSettled) onSettled(); else invalidateBoth(); }
   };
 
+  const notifyDispatch = async (workOrderId: string, contractorId?: string | null) => {
+    try {
+      const sb = supabase();
+      const { data } = await sb.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return;
+
+      const res = await fetch("/api/notifications/dispatch", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ workOrderId, contractorId }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        console.error("Dispatch notification request failed", payload.error || res.statusText);
+      }
+    } catch (err) {
+      console.error("Dispatch notification request error", err);
+    }
+  };
+
   const doAssign = async (woId: string, contractorId: string) => {
     const c = getUser(contractorId);
     if (!c) { fire("Contractor not found"); return; }
@@ -85,10 +111,11 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" }, localActivity(text, "system"));
     fire(`Dispatched to ${c.name}`);
-    await dbCall(async () => {
+    const ok = await dbCall(async () => {
       await updateWorkOrder(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" });
       await insertActivity(woId, "System", text, "system");
     }, "Dispatch failed", () => restoreWorkOrders(snapshot));
+    if (ok) await notifyDispatch(woId, contractorId);
     } finally {
       setLoading("assign_" + woId, false);
     }
@@ -145,9 +172,10 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { contractor: newContractorId, status: "assigned", functionalStatus: "Dispatched" }, localActivity(text, "system"));
     fire(`Reassigned to ${newC.name}`);
-    await dbCall(async () => {
+    const ok = await dbCall(async () => {
       await reassignWorkOrder(woId, newContractorId, oldName, newC.name, currentUser.name);
     }, "Reassign failed", () => restoreWorkOrders(snapshot));
+    if (ok) await notifyDispatch(woId, newContractorId);
     } finally {
       setLoading("reassign_" + woId, false);
     }
@@ -702,6 +730,7 @@ export default function useWorkOrders({
       try {
         await updateWorkOrder(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt });
         await insertActivity(w.id, "System", text, "system");
+        await notifyDispatch(w.id, matched);
         count++;
       } catch (e: any) {
         hadError = true;

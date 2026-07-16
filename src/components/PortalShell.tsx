@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   insertActivity, insertWorkOrder, findExistingWoId, subscribeToChanges,
 } from "../lib/db";
+import { supabase } from "../lib/supabase/client";
 import { computeSlaState, computeSlaBreaches } from "../lib/slaConfig";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
@@ -50,6 +51,21 @@ const InvoiceCreateModal = dynamic(
   { ssr: false }
 );
 
+const BillingInvoiceList = dynamic(
+  () => import("../features/billing/BillingInvoiceList"),
+  { ssr: false }
+);
+
+const BillingInvoiceCreateModal = dynamic(
+  () => import("../features/billing/BillingInvoiceCreateModal"),
+  { ssr: false }
+);
+
+const BillingInvoiceDetail = dynamic(
+  () => import("../features/billing/BillingInvoiceDetail"),
+  { ssr: false }
+);
+
 const WorkOrderCreateForm = dynamic(
   () => import("../features/work-orders/WorkOrderCreateForm"),
   { ssr: false }
@@ -59,6 +75,47 @@ const ManageAccountModal = dynamic(
   () => import("../features/auth/ManageAccountModal"),
   { ssr: false }
 );
+
+const BILLING_INVOICES_KEY = ["billing-invoices"] as const;
+
+async function billingFetch(path: string, init: RequestInit = {}) {
+  const sb = supabase();
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Missing session");
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const res = await fetch(path, { ...init, headers });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.error || "Billing request failed");
+  return payload;
+}
+
+async function notificationFetch(path: string, body: Record<string, unknown>) {
+  const sb = supabase();
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return;
+
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    console.error("Notification request failed", payload.error || res.statusText);
+  }
+}
 
 // ===============================================================
 //  THEME - Claude-inspired warm palette. Tokens are the source of truth.
@@ -391,6 +448,36 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     box-sizing: border-box !important;
   }
   .detail-fields { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .wo-date-grid { grid-template-columns: 1fr !important; }
+  .billing-form-grid,
+  .billing-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .billing-line-head {
+    display: none !important;
+  }
+  .billing-line-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+  .billing-status-tabs {
+    width: 100% !important;
+    justify-content: center !important;
+    row-gap: 0 !important;
+  }
+  .billing-status-tabs .billing-status-tab {
+    flex: 0 0 33.333% !important;
+    max-width: 33.333% !important;
+    min-width: 0 !important;
+    text-align: center !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+  .billing-create-button {
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
   .detail-fields > * {
     min-width: 0 !important;
   }
@@ -866,6 +953,7 @@ export default function PortalShell() {
   const [filterP, setFilterP] = useState("all");
   const [nteQueue, setNteQueue] = useState(false); // "NTE Approval Needed" bucket filter
   const [invTab, setInvTab] = useState("all");
+  const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
   const [histContractor, setHistContractor] = useState("all");
@@ -1106,6 +1194,7 @@ export default function PortalShell() {
     const unsub = subscribeToChanges(() => {
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
       qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
     });
     return () => { unsub(); };
@@ -1115,6 +1204,7 @@ export default function PortalShell() {
     if (!currentUser?.id) return;
     qc.resetQueries({ queryKey: WORK_ORDERS_KEY });
     qc.resetQueries({ queryKey: INVOICES_KEY });
+    qc.resetQueries({ queryKey: BILLING_INVOICES_KEY });
     qc.resetQueries({ queryKey: ["profiles"] });
     qc.resetQueries({ queryKey: ["technicians"] });
     qc.resetQueries({ queryKey: WO_PARTS_KEY });
@@ -1122,11 +1212,59 @@ export default function PortalShell() {
   const nav = useCallback((p: string) => {
     setPage(p);
     setSelectedWO(null);
+    setSelectedBillingInvoice(null);
     setAiNote(null);
     setNteQueue(false);
   }, []);
 
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
+  const { data: billingInvoices = [] } = useQuery({
+    queryKey: BILLING_INVOICES_KEY,
+    queryFn: async () => {
+      const payload = await billingFetch("/api/billing-invoices");
+      return payload.invoices || [];
+    },
+    enabled: isAuthenticated && isManager,
+    staleTime: 30_000,
+  });
+  const selectedBillingInvoiceData = useMemo(
+    () => billingInvoices.find((invoice: any) => invoice.id === selectedBillingInvoice) || null,
+    [billingInvoices, selectedBillingInvoice]
+  );
+  const doDownloadBillingInvoice = async (invoice: any) => {
+    try {
+      const { triggerBlobDownload, generateStaffInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
+      const logoDataUrl = await loadLogoDataUrl();
+      const blob = generateStaffInvoicePDFBlob({
+        num: invoice.num,
+        wot: invoice.wot || "Standalone",
+        store: invoice.store || "",
+        storeAddr: invoice.storeAddr || "",
+        invoiceDate: invoice.invoiceDate || invoice.invoiceDateRaw || "",
+        serviceDate: invoice.serviceDate || invoice.serviceDateRaw || "",
+        terms: invoice.terms || "Net 30",
+        cme: invoice.cme || "",
+        lines: invoice.lines || [],
+        subtotal: invoice.subtotal || 0,
+        salesTax: invoice.salesTax || 0,
+        total: invoice.total || 0,
+      }, logoDataUrl);
+      triggerBlobDownload(blob, `Invoice-${invoice.num}-${invoice.wot || "Standalone"}.pdf`);
+      fire(`Invoice ${invoice.num} downloaded`);
+    } catch (e: any) {
+      fire(`Download failed: ${e.message || e}`);
+    }
+  };
+  const doDeleteBillingInvoice = async (invoice: any) => {
+    try {
+      await billingFetch(`/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`, { method: "DELETE" });
+      setSelectedBillingInvoice(null);
+      qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+      fire(`Invoice #${invoice.num} deleted`);
+    } catch (e: any) {
+      fire(`Delete failed: ${e.message || e}`);
+    }
+  };
   const getUser = (id: string) => USERS.find(u => u.id === id);
   const contractorsOnly = useMemo(
     () => USERS.filter(u => u.role === "contractor"),
@@ -1157,7 +1295,19 @@ export default function PortalShell() {
       // Archived closed jobs (>24h past close) leave the active board -> History only.
       if (isArchivedClosed(w)) return false;
       if (nteQueue && (!w.nteFlagged || w.status === "closed")) return false;
-      if (search && !w.id.toLowerCase().includes(search.toLowerCase()) && !w.store.includes(search) && !(w.summary || "").toLowerCase().includes(search.toLowerCase())) return false;
+      if (search) {
+        const q = search.trim().toLowerCase();
+        const haystack = [
+          w.id,
+          w.incidentId,
+          w.store,
+          w.city,
+          w.addr,
+          w.summary,
+          w.description,
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
       if (filterC !== "all" && w.contractor !== filterC) return false;
       if (filterP !== "all" && w.priority !== filterP) return false;
       return true;
@@ -1270,6 +1420,12 @@ export default function PortalShell() {
     try {
       await insertWorkOrder(wo, createdText, "System");
       if (assignedText) await insertActivity(wot, "System", assignedText, "system");
+      if (contractor) {
+        await notificationFetch("/api/notifications/dispatch", {
+          workOrderId: wot,
+          contractorId: contractor,
+        });
+      }
       fire(contractor
         ? `Work order ${wot} created. Assigned to ${contractorName}.`
         : `Work order ${wot} created. Added to Unassigned.`);
@@ -1329,6 +1485,7 @@ export default function PortalShell() {
       { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
       { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
+      { id: "billing", label: "Billing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6M9 9h1" },
       { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: closedWOs.length || null },
     ]
@@ -1357,7 +1514,7 @@ export default function PortalShell() {
   // ===============================================================
   //  APP SHELL
   // ===============================================================
-  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
+  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
 
   // =====  // ===============================================================
   //  LAYOUT
@@ -1693,7 +1850,7 @@ export default function PortalShell() {
         </div>
 
         <div className="content-pad" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}>
-          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} />
+          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} search={search} setSearch={setSearch} />
 
           <WorkOrderList
             page={page}
@@ -1728,6 +1885,29 @@ export default function PortalShell() {
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
           <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+
+          {isManager && page === "billing" && !selectedBillingInvoice && (
+            <BillingInvoiceList
+              page={page}
+              currentUser={currentUser}
+              invoices={billingInvoices}
+              setSelectedBillingInvoice={setSelectedBillingInvoice}
+              onCreate={() => setModal("createBillingInvoice")}
+              fmt={fmt}
+            />
+          )}
+
+          {isManager && page === "billing" && selectedBillingInvoice && (
+            <BillingInvoiceDetail
+              invoice={selectedBillingInvoiceData}
+              invoiceLines={selectedBillingInvoiceData?.lines || []}
+              onBack={() => setSelectedBillingInvoice(null)}
+              onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
+              onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
+              currentUser={currentUser}
+              fmt={fmt}
+            />
+          )}
 
           <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
 
@@ -2388,6 +2568,22 @@ export default function PortalShell() {
       )}
 
       <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
+
+      {isManager && (
+        <BillingInvoiceCreateModal
+          modal={modal}
+          currentUser={currentUser}
+          workOrders={maskedWorkOrders}
+          billingInvoices={billingInvoices}
+          onClose={() => setModal(null)}
+          onCreated={(invoice: any) => {
+            qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+            if (invoice?.id) setSelectedBillingInvoice(invoice.id);
+          }}
+          fire={fire}
+          fmt={fmt}
+        />
+      )}
 
       {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
         const inv = submittedInvoice;
