@@ -210,7 +210,7 @@ export async function loadInvoices(): Promise<Invoice[]> {
   // Soft-deleted invoices are excluded at the source — every list, badge,
   // stat, and spend calc consumes this array, so one filter covers all.
   const [invRes, lineRes] = await Promise.all([
-    sb.from("invoices").select("*").is("deleted_at", null).order("invoice_date", { ascending: false }),
+    sb.from("invoices").select("*").is("deleted_at", null).eq("invoice_type", "contractor").order("invoice_date", { ascending: false }),
     sb.from("invoice_lines").select("*").order("position"),
   ]);
   if (invRes.error) throw invRes.error;
@@ -234,6 +234,7 @@ const mapInvoice = (i: any) => ({
   store: i.store_number,
   storeAddr: i.store_address,
   contractor: i.contractor_id,
+  invoiceType: i.invoice_type || "contractor",
   cme: i.cme,
   invoiceDate: formatDate(i.invoice_date),
   serviceDate: formatDate(i.service_date),

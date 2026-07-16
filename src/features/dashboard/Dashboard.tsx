@@ -7,7 +7,7 @@ import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useMemo } from "react";
 
 export default function Dashboard(props: any) {
-  const { page, isManager, openValue, openCount, openWOs, workOrders, p1Count, p1Unassigned, slaAtRisk, slaBreached, capitalCount, awaitingPayment, nteFlaggedCount, nav, setNteQueue, doAutoAssign, filteredWOs, activeStatuses, closingStatuses, invoices, USERS, getUser, slaLabel, setSelectedWO, setAiNote, setPage, fmt } = props;
+  const { page, isManager, openValue, openCount, openWOs, workOrders, p1Count, p1Unassigned, slaAtRisk, slaBreached, capitalCount, awaitingPayment, nteFlaggedCount, nav, setNteQueue, doAutoAssign, filteredWOs, activeStatuses, closingStatuses, invoices, USERS, getUser, slaLabel, setSelectedWO, setAiNote, setPage, fmt, search, setSearch } = props;
   const p1SavedHours = useMemo(
     () => (workOrders.reduce((s, w) => s + (w.activities?.length || 0), 0) * 2.3 / 60).toFixed(1),
     [workOrders]
@@ -72,8 +72,27 @@ export default function Dashboard(props: any) {
                 ))}
               </div>
 
-              <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.muted, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 18, height: 2, background: T.border, display: "inline-block", borderRadius: 2 }} />Active pipeline
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.muted, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 18, height: 2, background: T.border, display: "inline-block", borderRadius: 2 }} />Active pipeline
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    value={search}
+                    onChange={(e: any) => setSearch(e.target.value)}
+                    placeholder="Search WO#, store, keyword..."
+                    style={{ width: 280, maxWidth: "100%", padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13, fontFamily: "inherit" }}
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      style={{ border: "none", background: "none", color: T.muted, fontSize: 12, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
               <KanbanBoard filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} workOrders={workOrders} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} isManager={isManager} />
             </div>

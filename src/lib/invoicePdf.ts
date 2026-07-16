@@ -4,7 +4,7 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { P1_BUSINESS } from "./constants";
+import { P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "./constants";
 
 // Single source of truth lives in constants.ts; aliased to P1 here so the
 // existing PDF layout code reads the same. DO NOT reintroduce a local copy.
@@ -64,10 +64,15 @@ export async function loadLogoDataUrl(path = "/p1-pros-logo.jpeg"): Promise<stri
 // (the document P1 posts after review). "contractor" flips it to
 // FROM = contractor (opts.fromName) → BILL TO = P1 Pros, since contractors
 // have no 7-Eleven access.
-type InvoicePdfOpts = { perspective?: "staff" | "contractor"; fromName?: string };
+type InvoicePdfOpts = {
+  perspective?: "staff" | "contractor";
+  fromName?: string;
+  billTo?: { name: string; apAddr1: string; apAddr2: string };
+};
 export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): jsPDF {
   const isContractor = opts.perspective === "contractor";
   const fromName = opts.fromName || "Contractor";
+  const billTo = opts.billTo || SEVEN;
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const W = doc.internal.pageSize.getWidth();
   const M = 40; // margin
@@ -159,8 +164,8 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
     doc.text(P1.dba, M, y);
     doc.text(`Store #${inv.store}`, M + 240, y);
   } else {
-    doc.text(SEVEN.name, M, y);
-    doc.text(`${SEVEN.name}`, M + 240, y);
+    doc.text(billTo.name, M, y);
+    doc.text(`${billTo.name}`, M + 240, y);
   }
   doc.setFont("helvetica", "bold");
   doc.text(inv.wot, W - M - 130, y);
@@ -181,7 +186,7 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   doc.text(`Store #${inv.store}`, W - M - 130, y);
 
   y += 12;
-  doc.text(isContractor ? P1.addr2 : SEVEN.apAddr1, M, y);
+  doc.text(isContractor ? P1.addr2 : billTo.apAddr1, M, y);
   if (isContractor) {
     if (inv.storeAddr) {
       const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
@@ -194,7 +199,7 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
 
   y += 12;
   if (!isContractor) {
-    doc.text(SEVEN.apAddr2, M, y);
+    doc.text(billTo.apAddr2, M, y);
     if (inv.storeAddr) {
       const rest = inv.storeAddr.split(",").slice(1).join(",").trim();
       if (rest) doc.text(rest, M + 240, y);
@@ -319,6 +324,17 @@ export function downloadInvoicePDF(inv: Invoice): void {
 export function generateInvoicePDFBlob(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): Blob {
   const doc = generateInvoicePDF(inv, logoDataUrl, opts);
   return doc.output("blob") as Blob;
+}
+
+export function generateStaffInvoicePDFBlob(inv: Invoice, logoDataUrl?: string | null): Blob {
+  return generateInvoicePDFBlob(inv, logoDataUrl, {
+    perspective: "staff",
+    billTo: {
+      name: SEVEN_STAFF_BILL_TO.name,
+      apAddr1: SEVEN_STAFF_BILL_TO.addr1,
+      apAddr2: SEVEN_STAFF_BILL_TO.addr2,
+    },
+  });
 }
 
 // Trigger a download of an arbitrary blob (used when we pull the PDF

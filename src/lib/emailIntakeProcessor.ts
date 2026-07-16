@@ -9,6 +9,7 @@ import {
 import { parseDispatchEmail, type ParsedWorkOrder } from "./emailParser";
 import { resolveContractor } from "./autoDispatch";
 import { createServerClient } from "./supabase/server";
+import { sendDispatchNotification } from "./notificationService";
 
 export type IntakeResult = {
   emailId: string;
@@ -22,6 +23,38 @@ export type IntakeResult = {
 };
 
 const generateWOId = () => `EMAIL-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+
+const getAllowedIntakeStates = () => {
+  const raw = process.env.EMAIL_INTAKE_ALLOWED_STATES;
+  if (!raw) return null;
+
+  const states = raw
+    .split(",")
+    .map(state => state.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (states.length === 0 || states.includes("ALL") || states.includes("*")) {
+    return null;
+  }
+
+  return states;
+};
+
+const stateAllowlistReason = (state: string | null) => {
+  const allowedStates = getAllowedIntakeStates();
+  if (!allowedStates) return null;
+
+  const normalizedState = state?.trim().toUpperCase() || "";
+  if (!normalizedState) {
+    return `state missing; allowed intake states: ${allowedStates.join(", ")}`;
+  }
+
+  if (!allowedStates.includes(normalizedState)) {
+    return `state ${normalizedState} not in allowed intake states: ${allowedStates.join(", ")}`;
+  }
+
+  return null;
+};
 
 const compactPatch = (parsed: ParsedWorkOrder) => {
   const patch: Record<string, unknown> = {};
@@ -131,12 +164,16 @@ export async function processEmail(
   };
 
   try {
+    const allowlistReason = stateAllowlistReason(parsed.state);
+
     if (parsed.doNotDispatch) {
       result = skippedResult(result, "do not dispatch flag detected");
     } else if (parsed.emailType === "TYPE_UNKNOWN") {
       result = skippedResult(result, "unknown email type");
     } else if (parsed.parseConfidence === "low") {
       result = skippedResult(result, "low parse confidence; manual review needed");
+    } else if (allowlistReason) {
+      result = skippedResult(result, allowlistReason);
     } else if (parsed.emailType === "TYPE_NTE_APPROVED") {
       const existingId = await findExistingWorkOrder(parsed);
       if (!existingId) {
@@ -228,6 +265,23 @@ export async function processEmail(
 
         const { error } = await (sb as any).from("work_orders").insert(row);
         if (error) throw error;
+
+        if (contractor.contractorId) {
+          await sendDispatchNotification({
+            workOrder: {
+              id: workOrderId,
+              incidentId: parsed.incidentId,
+              storeNumber: parsed.storeNumber,
+              city: parsed.city,
+              address: parsed.address,
+              priority: parsed.priority || "p2",
+              summary: parsed.summary,
+              description: parsed.description,
+            },
+            contractorEmail: contractor.contractorEmail,
+            contractorName: contractor.contractorName,
+          }).catch(err => console.error("Dispatch notification failed", err));
+        }
 
         result = {
           ...result,

@@ -15,6 +15,7 @@ import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import { computeSlaState } from "../../lib/slaConfig";
+import { getSlaAgingStyle, getWorkOrderDateMeta } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
 
 const WorkReportForm = dynamic(
@@ -151,6 +152,8 @@ export default function WorkOrderDetail(props: any) {
             const sla = slaLabel(woData);
             const slaR = slaRemaining(woData);
             const sla2 = computeSlaState(woData.responseBreachAt, woData.resolutionBreachAt);
+            const dates = getWorkOrderDateMeta(woData);
+            const aging = getSlaAgingStyle(woData);
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
                 <button onClick={() => { setSelectedWO(null); setAiNote(null); if (!isManager) setPage("my_jobs"); }} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
@@ -162,10 +165,17 @@ export default function WorkOrderDetail(props: any) {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>
                         {sla2.responseBreached && sla2.resolutionBreached
-                          ? "Both SLA deadlines breached"
+                          ? "SLA breached"
                           : sla2.responseBreached
-                            ? `Response breached — ${Math.floor(-sla2.responseRemainingHours)}h past arrival deadline`
-                            : `Resolution breached — ${Math.floor(-sla2.resolutionRemainingHours)}h past resolve deadline`}
+                            ? "Response SLA breached"
+                            : "Resolution SLA breached"}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2, fontWeight: 600 }}>
+                        {sla2.responseBreached && sla2.resolutionBreached
+                          ? "Response and resolution deadlines were both missed."
+                          : sla2.responseBreached
+                            ? `${Math.floor(-sla2.responseRemainingHours)}h past response/arrival deadline.`
+                            : `${Math.floor(-sla2.resolutionRemainingHours)}h past resolution deadline.`}
                       </div>
                       <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Functional status is "{woData.functionalStatus || "—"}" — update immediately to close the gap with 7-Eleven.</div>
                     </div>
@@ -243,6 +253,18 @@ export default function WorkOrderDetail(props: any) {
                         {[woData.store ? `Store #${woData.store}` : null, woData.city || null].filter(Boolean).join(" · ") || woData.id}
                       </div>
                       {woData.addr && <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{woData.addr}</div>}
+                      <div className="wo-date-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                        {[
+                          { label: "Created", value: dates.created, color: T.inkSoft, bg: T.surfaceSoft, ring: T.borderSoft },
+                          { label: "Last updated", value: dates.updated, color: T.inkSoft, bg: T.surfaceSoft, ring: T.borderSoft },
+                          { label: "SLA due", value: dates.slaDue, color: aging.color, bg: aging.bg, ring: aging.ring },
+                        ].map((item) => (
+                          <div key={item.label} style={{ padding: "10px 12px", borderRadius: 10, background: item.bg, border: `1px solid ${item.ring}`, minWidth: 0 }}>
+                            <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, marginBottom: 4 }}>{item.label}</div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: item.color, lineHeight: 1.35 }}>{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
                         <Badge conf={PRIORITY[woData.priority]} />
                         <Badge conf={STATUS[woData.status]} />

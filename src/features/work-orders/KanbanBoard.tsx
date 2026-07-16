@@ -5,6 +5,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
+import { getSlaAgingStyle, getWorkOrderDateMeta, sortWorkOrders } from "../../lib/workOrderView";
 import { useMemo } from "react";
 
 export default function KanbanBoard(props: any) {
@@ -22,12 +23,18 @@ export default function KanbanBoard(props: any) {
     for (const w of filteredWOs) {
       (grouped[w.status] ||= []).push(w);
     }
+    for (const key of Object.keys(grouped)) {
+      grouped[key] = sortWorkOrders(grouped[key], "sla_due");
+    }
     return grouped;
   }, [filteredWOs]);
 
   const renderCard = (wo: any) => {
     const pr = PRIORITY[wo.priority];
+    const st = STATUS[wo.status];
     const sla = slaLabel(wo);
+    const dates = getWorkOrderDateMeta(wo);
+    const aging = getSlaAgingStyle(wo);
     // NTE pill — quick-glance budget signal. Sums every non-draft invoice for
     // the WO so multi-invoice work orders surface overage early.
     const cardSpend = spendByWo[wo.id] || 0;
@@ -35,14 +42,24 @@ export default function KanbanBoard(props: any) {
     const cardOver = cardNte > 0 && cardSpend > cardNte;
     const nteShort = cardNte >= 1000 ? `$${(cardNte / 1000).toFixed(cardNte % 1000 === 0 ? 0 : 1)}K` : `$${cardNte}`;
     return (
-      <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer" }}>
-        <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: pr?.color || T.subtle }} />
+      <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer", borderColor: aging.ring || st?.ring || T.borderSoft }}>
+        <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: st?.color || pr?.color || T.subtle }} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: st?.color, background: st?.bg, border: `1px solid ${st?.ring || st?.color}55`, borderRadius: 10, padding: "2px 6px" }}>{st?.label}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>
+          </div>
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{wo.store ? `Store #${wo.store}` : wo.id}</div>
         <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{wo.summary || "—"}</div>
+        <div style={{ marginTop: 8, display: "grid", gap: 3, fontSize: 10, color: T.subtle, lineHeight: 1.35 }}>
+          <div>Created <span style={{ color: T.muted, fontWeight: 600 }}>{dates.created}</span></div>
+          <div>Updated <span style={{ color: T.muted, fontWeight: 600 }}>{dates.updated}</span></div>
+          <div style={{ color: aging.color, background: aging.bg, border: `1px solid ${aging.ring}66`, borderRadius: 8, padding: "3px 6px", fontWeight: 700 }}>
+            SLA due <span>{dates.slaDue}</span>
+          </div>
+        </div>
         {wo.technicianOnJob && <div style={{ fontSize: 10, color: T.subtle, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><Ico d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" size={10} color={T.subtle} />{wo.technicianOnJob}</div>}
         {cardNte > 0 && (
           <div style={{ marginTop: 6 }}>

@@ -216,3 +216,43 @@ export async function moveEmailToFolder(
     console.error("Graph move message error", err);
   }
 }
+
+export async function sendEmail(
+  accessToken: string,
+  to: string[],
+  subject: string,
+  body: string,
+): Promise<void> {
+  const { userEmail } = outlookConfig();
+  const recipients = to.map(email => email.trim()).filter(Boolean);
+  if (!accessToken || !userEmail || recipients.length === 0 || !subject || !body) return;
+
+  try {
+    const res = await fetch(`${GRAPH_BASE_URL}/users/${encodeURIComponent(userEmail)}/sendMail`, {
+      method: "POST",
+      headers: graphHeaders(accessToken),
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: {
+            contentType: "Text",
+            content: body,
+          },
+          toRecipients: recipients.map(address => ({
+            emailAddress: { address },
+          })),
+        },
+        saveToSentItems: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const message = `Graph send mail failed ${res.status}: ${await res.text()}`;
+      console.error(message);
+      throw new Error(message);
+    }
+  } catch (err) {
+    console.error("Graph send mail error", err);
+    throw err;
+  }
+}
