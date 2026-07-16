@@ -33,7 +33,8 @@ export type WorkOrder = z.infer<typeof WorkOrderSchema>
 export const InvoiceSchema = z.object({
   id: z.string().uuid(),
   num: z.string().min(1),
-  work_order_id: z.string().min(1),
+  work_order_id: z.string().optional().nullable(),
+  invoice_type: z.enum(["contractor", "staff"]).optional().nullable(),
   store_number: z.string().optional().nullable(),
   store_address: z.string().optional().nullable(),
   contractor_id: z.string().optional().nullable(),
@@ -41,7 +42,7 @@ export const InvoiceSchema = z.object({
   invoice_date: z.string().optional().nullable(),
   service_date: z.string().optional().nullable(),
   terms: z.string().optional().nullable(),
-  state: z.enum(["submitted", "approved", "rejected", "revised", "paid"]),
+  state: z.enum(["draft", "submitted", "approved", "rejected", "revised", "paid"]),
   subtotal: z.number(),
   sales_tax: z.number().optional().nullable(),
   total: z.number(),

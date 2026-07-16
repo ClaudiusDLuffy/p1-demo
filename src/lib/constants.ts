@@ -97,4 +97,10 @@ export const SEVEN_BILL_TO = {
   addr2: "Irving, TX 75063 USA",
 };
 
+export const SEVEN_STAFF_BILL_TO = {
+  name: "7-Eleven Inc",
+  addr1: "2711 Haskell Ave",
+  addr2: "Dallas TX 75204",
+};
+
 export const LINE_TYPES = ["Truck Charge", "Labor", "Parts/Hardware", "Shipping", "Other"] as const;
