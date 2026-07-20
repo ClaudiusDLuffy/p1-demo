@@ -20,7 +20,10 @@ export type Database = {
           author_name: string
           created_at: string | null
           deleted_at: string | null
+          entered_by_role: string
           id: string
+          is_staff_override: boolean
+          override_for_contractor_id: string | null
           text: string
           type: string | null
           work_order_id: string
@@ -30,7 +33,10 @@ export type Database = {
           author_name: string
           created_at?: string | null
           deleted_at?: string | null
+          entered_by_role?: string
           id?: string
+          is_staff_override?: boolean
+          override_for_contractor_id?: string | null
           text: string
           type?: string | null
           work_order_id: string
@@ -40,7 +46,10 @@ export type Database = {
           author_name?: string
           created_at?: string | null
           deleted_at?: string | null
+          entered_by_role?: string
           id?: string
+          is_staff_override?: boolean
+          override_for_contractor_id?: string | null
           text?: string
           type?: string | null
           work_order_id?: string
@@ -49,6 +58,13 @@ export type Database = {
           {
             foreignKeyName: "activities_author_id_fkey"
             columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_override_for_contractor_id_fkey"
+            columns: ["override_for_contractor_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -477,6 +493,62 @@ export type Database = {
           },
           {
             foreignKeyName: "service_notes_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_invoice_sources: {
+        Row: {
+          contractor_invoice_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          staff_invoice_id: string
+          work_order_id: string
+        }
+        Insert: {
+          contractor_invoice_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          staff_invoice_id: string
+          work_order_id: string
+        }
+        Update: {
+          contractor_invoice_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          staff_invoice_id?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_invoice_sources_contractor_invoice_id_fkey"
+            columns: ["contractor_invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invoice_sources_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invoice_sources_staff_invoice_id_fkey"
+            columns: ["staff_invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invoice_sources_work_order_id_fkey"
             columns: ["work_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"

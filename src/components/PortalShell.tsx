@@ -453,6 +453,9 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   .billing-summary-grid {
     grid-template-columns: 1fr !important;
   }
+  .billing-source-metrics {
+    grid-template-columns: 1fr !important;
+  }
   .billing-line-head {
     display: none !important;
   }
@@ -1884,7 +1887,7 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           {isManager && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
@@ -1904,6 +1907,7 @@ export default function PortalShell() {
               onBack={() => setSelectedBillingInvoice(null)}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
+              onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.num); setPage("invoices"); }}
               currentUser={currentUser}
               fmt={fmt}
             />
@@ -2574,6 +2578,7 @@ export default function PortalShell() {
           modal={modal}
           currentUser={currentUser}
           workOrders={maskedWorkOrders}
+          contractorInvoices={invoices}
           billingInvoices={billingInvoices}
           onClose={() => setModal(null)}
           onCreated={(invoice: any) => {

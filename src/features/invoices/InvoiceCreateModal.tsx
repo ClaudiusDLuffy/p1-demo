@@ -11,6 +11,13 @@ import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
+const todayIso = () => {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 // Rates start EMPTY so the contractor enters their own number; Truck Charge
 // is the one exception — editable default of 60. (Per-contractor profile
@@ -47,8 +54,8 @@ export default function InvoiceCreateModal(props: any) {
     resolver: zodResolver(CreateInvoiceSchema),
     defaultValues: {
       num: "",
-      invoiceDate: new Date().toISOString().slice(0, 10),
-      serviceDate: new Date().toISOString().slice(0, 10),
+      invoiceDate: todayIso(),
+      serviceDate: todayIso(),
       terms: "Net 30",
       tax: "",
       cme: "",
@@ -73,8 +80,8 @@ export default function InvoiceCreateModal(props: any) {
     if (resumeDraft) {
       reset({
         num: resumeDraft.num || "",
-        invoiceDate: resumeDraft.invoiceDate || new Date().toISOString().slice(0, 10),
-        serviceDate: resumeDraft.serviceDate || new Date().toISOString().slice(0, 10),
+        invoiceDate: resumeDraft.invoiceDate || todayIso(),
+        serviceDate: resumeDraft.serviceDate || todayIso(),
         terms: resumeDraft.terms || "Net 30",
         tax: resumeDraft.salesTax != null ? String(resumeDraft.salesTax) : "",
         cme: resumeDraft.cme || "",
@@ -83,7 +90,7 @@ export default function InvoiceCreateModal(props: any) {
           : initialLines(),
       });
     } else {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayIso();
       reset({
         num: "",
         invoiceDate: today,

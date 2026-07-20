@@ -45,7 +45,7 @@ async function requireStaff(req: NextRequest) {
   const sb = createServerClient();
   const { data: profile, error: profileError } = await sb
     .from("profiles")
-    .select("id, role")
+    .select("id, role, name")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -111,28 +111,67 @@ const mapInvoice = (invoice: any, lines: any[]) => ({
   lines: lines.map(mapLine),
 });
 
+const sourceMetrics = (sourceInvoices: any[], staffTotal: number) => {
+  const contractorCost = sourceInvoices.reduce(
+    (sum, invoice) => sum + Number(invoice.total || 0),
+    0,
+  );
+  const grossProfit = staffTotal - contractorCost;
+  const marginPercent = staffTotal > 0 ? (grossProfit / staffTotal) * 100 : null;
+  return { contractorCost, grossProfit, marginPercent };
+};
+
 async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
-  const [invoiceRes, lineRes] = await Promise.all([
+  const [invoiceRes, contractorRes, lineRes, sourceRes] = await Promise.all([
     (sb as any)
       .from("invoices")
       .select("*")
       .eq("invoice_type", "staff")
       .is("deleted_at", null)
       .order("invoice_date", { ascending: false }),
+    (sb as any)
+      .from("invoices")
+      .select("*")
+      .eq("invoice_type", "contractor")
+      .is("deleted_at", null),
     sb.from("invoice_lines").select("*").order("position"),
+    (sb as any).from("staff_invoice_sources").select("*"),
   ]);
 
   if (invoiceRes.error) throw invoiceRes.error;
+  if (contractorRes.error) throw contractorRes.error;
   if (lineRes.error) throw lineRes.error;
+  if (sourceRes.error) throw sourceRes.error;
 
   const linesByInvoice: Record<string, any[]> = {};
   for (const line of lineRes.data || []) {
     (linesByInvoice[line.invoice_id] ||= []).push(line);
   }
 
-  return (invoiceRes.data || []).map((invoice: any) =>
-    mapInvoice(invoice, linesByInvoice[invoice.id] || []),
+  const contractorById = new Map<string, any>(
+    (contractorRes.data || []).map((invoice: any) => [invoice.id, invoice]),
   );
+  const sourcesByStaffInvoice: Record<string, any[]> = {};
+  for (const source of sourceRes.data || []) {
+    const contractorInvoice = contractorById.get(source.contractor_invoice_id);
+    if (!contractorInvoice) continue;
+    const mapped = mapInvoice(
+      contractorInvoice,
+      linesByInvoice[contractorInvoice.id] || [],
+    );
+    (sourcesByStaffInvoice[source.staff_invoice_id] ||= []).push(mapped);
+  }
+
+  return (invoiceRes.data || []).map((invoice: any) => {
+    const mapped = mapInvoice(invoice, linesByInvoice[invoice.id] || []);
+    const sourceInvoices = sourcesByStaffInvoice[invoice.id] || [];
+    return {
+      ...mapped,
+      sourceInvoices,
+      sourceInvoiceIds: sourceInvoices.map((source: any) => source.id),
+      ...sourceMetrics(sourceInvoices, mapped.total),
+    };
+  });
 }
 
 const nextStaffInvoiceNum = async (sb: ReturnType<typeof createServerClient>) => {
@@ -171,6 +210,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+    const sourceInvoiceIds = Array.from(new Set(
+      (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
+        .map((id: unknown) => String(id || "").trim())
+        .filter(Boolean),
+    ));
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
     const validLines = lines
       .map(line => ({
@@ -184,6 +228,58 @@ export async function POST(req: NextRequest) {
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
     if (validLines.length === 0) return jsonError("At least one valid line item is required", 400);
+    if (sourceInvoiceIds.length > 0 && !body.workOrderId) {
+      return jsonError("A work order is required when contractor invoices are linked", 400);
+    }
+
+    if (sourceInvoiceIds.length > 0) {
+      const { data: existingLinks, error: existingLinkError } = await (auth.sb as any)
+        .from("staff_invoice_sources")
+        .select("contractor_invoice_id, staff_invoice_id")
+        .in("contractor_invoice_id", sourceInvoiceIds);
+      if (existingLinkError) throw existingLinkError;
+
+      const linkedStaffIds = Array.from(new Set(
+        (existingLinks || []).map((link: any) => link.staff_invoice_id),
+      ));
+      if (linkedStaffIds.length > 0) {
+        const { data: activeLinkedStaff, error: linkedStaffError } = await (auth.sb as any)
+          .from("invoices")
+          .select("id, num")
+          .in("id", linkedStaffIds)
+          .eq("invoice_type", "staff")
+          .is("deleted_at", null);
+        if (linkedStaffError) throw linkedStaffError;
+        if ((activeLinkedStaff || []).length > 0) {
+          return jsonError(
+            `A selected contractor invoice is already linked to ${activeLinkedStaff[0].num}`,
+            409,
+          );
+        }
+      }
+
+      const { data: sourceInvoices, error: sourceError } = await (auth.sb as any)
+        .from("invoices")
+        .select("id, work_order_id, invoice_type, state, deleted_at")
+        .in("id", sourceInvoiceIds)
+        .eq("invoice_type", "contractor")
+        .is("deleted_at", null);
+
+      if (sourceError) throw sourceError;
+      if ((sourceInvoices || []).length !== sourceInvoiceIds.length) {
+        return jsonError("One or more contractor invoices are invalid", 400);
+      }
+      if ((sourceInvoices || []).some((invoice: any) =>
+        invoice.work_order_id !== body.workOrderId
+        || invoice.state === "draft"
+        || invoice.state === "rejected"
+      )) {
+        return jsonError(
+          "Source invoices must be live contractor invoices on the selected work order",
+          400,
+        );
+      }
+    }
 
     const subtotal = validLines.reduce((sum, line) => sum + line.qty * line.rate, 0);
     const salesTax = Number(body.salesTax || 0);
@@ -251,8 +347,59 @@ export async function POST(req: NextRequest) {
       throw lineError;
     }
 
+    if (sourceInvoiceIds.length > 0) {
+      const sourceRows = sourceInvoiceIds.map(contractorInvoiceId => ({
+        staff_invoice_id: inserted.id,
+        contractor_invoice_id: contractorInvoiceId,
+        work_order_id: body.workOrderId,
+        created_by: auth.user.id,
+      }));
+      const { error: sourceInsertError } = await (auth.sb as any)
+        .from("staff_invoice_sources")
+        .insert(sourceRows);
+
+      if (sourceInsertError) {
+        await (auth.sb as any)
+          .from("invoices")
+          .update({ deleted_at: new Date().toISOString(), deleted_by: auth.user.id })
+          .eq("id", inserted.id);
+        throw sourceInsertError;
+      }
+    }
+
+    const sourceInvoices = sourceInvoiceIds.length > 0
+      ? await loadStaffInvoices(auth.sb).then((items: any[]) =>
+          items.find(item => item.id === inserted.id)?.sourceInvoices || [],
+        )
+      : [];
+    const mappedInvoice = mapInvoice(inserted, createdLines || []);
+
+    if (body.workOrderId) {
+      const sourceText = sourceInvoiceIds.length > 0
+        ? ` from ${sourceInvoiceIds.length} contractor invoice${sourceInvoiceIds.length === 1 ? "" : "s"}`
+        : "";
+      const { error: activityError } = await (auth.sb as any)
+        .from("activities")
+        .insert({
+          work_order_id: body.workOrderId,
+          author_id: auth.user.id,
+          author_name: auth.profile.name || "P1 staff",
+          text: `P1 invoice #${mappedInvoice.num} created${sourceText}.`,
+          type: "system",
+          is_staff_override: false,
+        });
+      if (activityError) {
+        console.error("Billing activity audit insert failed", activityError);
+      }
+    }
+
     return NextResponse.json({
-      invoice: mapInvoice(inserted, createdLines || []),
+      invoice: {
+        ...mappedInvoice,
+        sourceInvoices,
+        sourceInvoiceIds,
+        ...sourceMetrics(sourceInvoices, mappedInvoice.total),
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create billing invoice";

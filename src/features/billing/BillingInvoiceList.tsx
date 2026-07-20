@@ -104,7 +104,10 @@ export default function BillingInvoiceList(props: any) {
                 >
                   <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, color: T.accent }}>#{invoice.num}</td>
                   <td style={{ padding: "13px 14px", color: T.subtle }}>{invoice.date || invoice.invoiceDate}</td>
-                  <td className="mono" style={{ padding: "13px 14px", color: invoice.wot ? T.muted : T.subtle }}>{invoice.wot || "Standalone"}</td>
+                  <td style={{ padding: "13px 14px", color: invoice.wot ? T.muted : T.subtle }}>
+                    <div className="mono">{invoice.wot || "Standalone"}</div>
+                    {(invoice.sourceInvoices || []).length > 0 && <div style={{ fontSize: 10, color: T.subtle, marginTop: 3 }}>{invoice.sourceInvoices.length} contractor invoice{invoice.sourceInvoices.length === 1 ? "" : "s"}</div>}
+                  </td>
                   <td style={{ padding: "13px 14px" }}>{invoice.store ? `#${invoice.store}` : "-"}</td>
                   <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(Math.round(invoice.total || 0))}</td>
                   <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[invoice.state]} small /></td>
@@ -147,6 +150,7 @@ export default function BillingInvoiceList(props: any) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}` }}>
               <span style={{ fontSize: 11, color: T.muted }}>
                 WO: <span className="mono" style={{ color: invoice.wot ? T.accent : T.subtle }}>{invoice.wot || "Standalone"}</span>
+                {(invoice.sourceInvoices || []).length > 0 && <span> / {invoice.sourceInvoices.length} source{invoice.sourceInvoices.length === 1 ? "" : "s"}</span>}
               </span>
               <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(Math.round(invoice.total || 0))}</span>
             </div>

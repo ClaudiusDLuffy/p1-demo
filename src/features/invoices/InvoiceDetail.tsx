@@ -9,7 +9,7 @@ import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/cons
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, workOrders, isManager, currentUser, setSelectedInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
   // Contractor perspective flips the invoice framing to FROM = their company,
   // BILL TO = P1 Pros (they have no 7-Eleven access). Staff keep the
   // 7-Eleven framing — that's the document P1 posts after review.
@@ -31,6 +31,14 @@ export default function InvoiceDetail(props: any) {
   const wo = useMemo(
     () => inv ? workOrders.find(w => w.id === inv.wot) : null,
     [workOrders, inv]
+  );
+  const linkedStaffInvoices = useMemo(
+    () => !isManager || !inv
+      ? []
+      : billingInvoices.filter((billingInvoice: any) =>
+          (billingInvoice.sourceInvoiceIds || []).includes(inv.id),
+        ),
+    [billingInvoices, inv, isManager],
   );
   return (
     <>
@@ -225,6 +233,20 @@ export default function InvoiceDetail(props: any) {
                       </div>
                     </div>
                   </div>
+
+                  {isManager && linkedStaffInvoices.length > 0 && (
+                    <div style={{ padding: "16px 32px", borderBottom: `1px solid ${T.borderSoft}`, background: T.surfaceSoft }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: T.subtle, marginBottom: 8 }}>Used in P1 to 7-Eleven billing</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {linkedStaffInvoices.map((billingInvoice: any) => (
+                          <button key={billingInvoice.id} type="button" className="btn-soft" onClick={() => onOpenBillingInvoice?.(billingInvoice)} style={{ padding: "7px 11px", fontSize: 11 }}>
+                            <span className="mono" style={{ color: T.accent, fontWeight: 700 }}>#{billingInvoice.num}</span>
+                            <span style={{ marginLeft: 8 }}>{fmt(billingInvoice.total || 0)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Line items */}
                   <div>

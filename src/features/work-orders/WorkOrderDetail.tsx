@@ -378,7 +378,7 @@ export default function WorkOrderDetail(props: any) {
                           </button>
                         </>
                       )}
-                      {woData.status === "assigned" && !isManager && (
+                      {woData.status === "assigned" && (
                         <>
                           <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
                             {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
@@ -394,7 +394,10 @@ export default function WorkOrderDetail(props: any) {
                           already paused, so submitting an invoice (which flips the WO
                           to pending_approval) no longer hides them. Resume covers the
                           paused (parts) state below. */}
-                      {(woData.status === "wip" || (!isManager && jobOpen && woData.status !== "parts")) && (
+                      {(
+                        (!isManager && jobOpen && !["assigned", "parts", "completed"].includes(woData.status))
+                        || (isManager && ["wip", "pending_invoice", "pending_approval", "pending_payment"].includes(woData.status))
+                      ) && (
                         <>
                           <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
                             {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
@@ -410,7 +413,7 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("capitalDecline_" + woData.id) ? <><BtnSpinnerDark />Returning...</> : "Capital declined - return to dispatched"}
                         </button>
                       )}
-                      {woData.status === "parts" && !isManager && (
+                      {woData.status === "parts" && (
                         <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
                           {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : "Resume work"}
                         </button>
@@ -425,7 +428,7 @@ export default function WorkOrderDetail(props: any) {
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
                       {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
-                      {!isManager && jobOpen && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
+                      {jobOpen && woData.status !== "unassigned" && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
                       {woData.status === "pending_payment" && isManager && (
                         <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
                           {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}
@@ -813,6 +816,14 @@ export default function WorkOrderDetail(props: any) {
                       {(woData.activities || []).map((e: any, i: number) => {
                         const canDelete = !!e.id && e.type !== "system" && !!e.authorId && (isManager || e.authorId === currentUser.id);
                         const menuOpen = activityMenuId === e.id;
+                        const staffEntered = ["manager", "dispatcher", "back_office"].includes(e.enteredByRole);
+                        const originLabel = e.isStaffOverride
+                          ? "Staff override"
+                          : staffEntered
+                            ? "Staff-entered"
+                            : e.enteredByRole === "contractor"
+                              ? "Contractor-entered"
+                              : null;
                         return (
                           <div key={e.id || i} style={{ display: "flex", gap: 12, marginBottom: 16, animation: i === 0 ? "fadeUp 0.3s" : "none", position: "relative" }}>
                             <div style={{ width: 8, height: 8, borderRadius: "50%", background: e.type === "system" ? T.border : T.accent, marginTop: 6, flexShrink: 0 }} />
@@ -820,6 +831,11 @@ export default function WorkOrderDetail(props: any) {
                               <div style={{ fontSize: 12 }}>
                                 <span style={{ fontWeight: 600, color: T.ink }}>{e.author}</span>
                                 <span style={{ color: T.subtle, marginLeft: 8, fontSize: 11 }}>{e.time}</span>
+                                {originLabel && (
+                                  <span style={{ display: "inline-block", marginLeft: 8, padding: "2px 6px", borderRadius: 6, fontSize: 9, fontWeight: 700, color: e.isStaffOverride ? "#73560C" : T.muted, background: e.isStaffOverride ? T.warnSoft : T.surfaceSoft, border: `1px solid ${e.isStaffOverride ? `${T.warn}55` : T.borderSoft}` }}>
+                                    {originLabel}
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginTop: 3 }}>{e.text}</div>
                             </div>
@@ -1008,6 +1024,9 @@ export default function WorkOrderDetail(props: any) {
               woId={woData.id}
               woStore={woData.store}
               technicianOnJob={woData.technicianOnJob}
+              currentUser={currentUser}
+              isManager={isManager}
+              contractorId={woData.contractor}
               onClose={() => setModal(null)}
               onSuccess={() => {
                 setModal(null);
