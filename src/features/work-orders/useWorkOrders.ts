@@ -62,11 +62,24 @@ export default function useWorkOrders({
       activities: newActivity ? [newActivity, ...w.activities] : w.activities,
     } : w));
   };
-  const localActivity = (text: string, type: "note" | "system" | "ai" = "system") => ({
+  const workflowAuditFor = (woId: string) => ({
+    staffOverride: !!isManager,
+    overrideForContractorId: isManager
+      ? workOrders.find(w => w.id === woId)?.contractor || null
+      : null,
+  });
+  const localActivity = (
+    text: string,
+    type: "note" | "system" | "ai" = "system",
+    staffOverride = false,
+  ) => ({
     author: type === "system" ? "System" : currentUser.name,
     time: dateNow(),
     text,
     type,
+    enteredByRole: currentUser?.role || "system",
+    isStaffOverride: staffOverride,
+    overrideForContractorId: null,
   });
 
   // Wrap a DB call in a try/catch that fires a toast on failure
@@ -203,11 +216,11 @@ export default function useWorkOrders({
       : d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
     const text = `ETA set: ${etaForLog}`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { eta }, localActivity(text, "system"));
+    patchLocalWO(woId, { eta }, localActivity(text, "system", isManager));
     fire("ETA set");
     await dbCall(async () => {
       await updateWorkOrder(woId, { eta });
-      await insertActivity(woId, currentUser.name, text, "system");
+      await insertActivity(woId, currentUser.name, text, "system", workflowAuditFor(woId));
     }, "ETA save failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("setEta_" + woId, false);
@@ -217,9 +230,11 @@ export default function useWorkOrders({
   // Contractor records who was on the job (text snapshot). Blank clears it.
   const doSetTechnician = async (woId: string, name: string) => {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { technicianOnJob: name || null });
+    const text = name ? `Technician on job set to ${name}.` : "Technician on job cleared.";
+    patchLocalWO(woId, { technicianOnJob: name || null }, localActivity(text, "note", isManager));
     await dbCall(async () => {
       await updateWorkOrder(woId, { technicianOnJob: name || null });
+      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
     }, "Technician save failed", () => restoreWorkOrders(snapshot));
   };
 
@@ -229,11 +244,11 @@ export default function useWorkOrders({
     const startIso = startDateInput && startTimeInput ? new Date(`${startDateInput}T${startTimeInput}`).toISOString() : new Date().toISOString();
     const text = notes || `Checked in and started work at ${timeNow()}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso }, localActivity(text, "note"));
+    patchLocalWO(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso }, localActivity(text, "note", isManager));
     fire(`Work started · status synced to 7-Eleven`);
     await dbCall(async () => {
       await updateWorkOrder(woId, { status: "wip", functionalStatus: "Work in Progress", startTime: startIso });
-      await insertActivity(woId, currentUser.name, text, "note");
+      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
     }, "Start work failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("startWork_" + woId, false);
@@ -275,11 +290,11 @@ export default function useWorkOrders({
     if (legacyEta) updates.partEta = legacyEta;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const partsSnapshot = qc.getQueryData(WO_PARTS_KEY);
-    patchLocalWO(woId, updates, localActivity(text, "note"));
+    patchLocalWO(woId, updates, localActivity(text, "note", isManager));
     fire("Paused — awaiting parts");
     await dbCall(async () => {
       await updateWorkOrder(woId, updates);
-      await insertActivity(woId, currentUser.name, text, "note");
+      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
       if (cleanParts.length) {
         const inserted: any[] = [];
         for (const p of cleanParts) {
@@ -342,11 +357,11 @@ export default function useWorkOrders({
       };
       patchPartsCache(rows => [...rows, optimistic]);
       const text = `Part added: ${part.description}${part.partNumber ? ` (${part.partNumber})` : ""}.`;
-      patchLocalWO(woId, {}, localActivity(text, "note"));
+      patchLocalWO(woId, {}, localActivity(text, "note", isManager));
       const ok = await dbCall(async () => {
         const row = await insertWoPart({ workOrderId: woId, ...part });
         patchPartsCache(rows => rows.map(r => r.id === tempId ? row : r));
-        await insertActivity(woId, currentUser.name, text, "note");
+        await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
       }, "Add part failed", () => {
         if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
       }, () => qc.invalidateQueries({ queryKey: WO_PARTS_KEY }));
@@ -387,10 +402,10 @@ export default function useWorkOrders({
       }
       const label = existing ? `${existing.description}${existing.partNumber ? ` (${existing.partNumber})` : ""}` : "Part";
       const text = entries.length ? `${label}: ${entries.join(" · ")}.` : `${label} updated.`;
-      if (entries.length) patchLocalWO(woId, {}, localActivity(text, "note"));
+      if (entries.length) patchLocalWO(woId, {}, localActivity(text, "note", isManager));
       const ok = await dbCall(async () => {
         await updateWoPart(partId, patch);
-        if (entries.length) await insertActivity(woId, currentUser.name, text, "note");
+        if (entries.length) await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
       }, "Part update failed", () => {
         if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
       }, () => qc.invalidateQueries({ queryKey: WO_PARTS_KEY }));
@@ -407,10 +422,10 @@ export default function useWorkOrders({
       const existing = (snapshot as any[] | undefined)?.find(r => r.id === partId);
       patchPartsCache(rows => rows.filter(r => r.id !== partId));
       const text = existing ? `Part removed: ${existing.description}.` : "Part removed.";
-      patchLocalWO(woId, {}, localActivity(text, "note"));
+      patchLocalWO(woId, {}, localActivity(text, "note", isManager));
       const ok = await dbCall(async () => {
         await deleteWoPart(partId);
-        await insertActivity(woId, currentUser.name, text, "note");
+        await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
       }, "Remove part failed", () => {
         if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
       }, () => qc.invalidateQueries({ queryKey: WO_PARTS_KEY }));
@@ -428,11 +443,11 @@ export default function useWorkOrders({
     const patch: any = { status: "completed", functionalStatus: "Completed", assetMake: make, assetModel: model, assetSerial: serial, endTime: endIso, resolutionCode: resolution || null };
     if (assetYear) patch.assetYear = assetYear;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, patch, localActivity(text, "note"));
+    patchLocalWO(woId, patch, localActivity(text, "note", isManager));
     fire("Completed");
     await dbCall(async () => {
       await updateWorkOrder(woId, patch);
-      await insertActivity(woId, currentUser.name, text, "note");
+      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId));
     }, "Close failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("closeComplete_" + woId, false);
@@ -751,7 +766,7 @@ export default function useWorkOrders({
     try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     setNoteText("");
-    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note" }, ...w.activities] } : w));
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: false }, ...w.activities] } : w));
     fire("Note posted");
     await dbCall(async () => {
       await insertActivity(woId, currentUser.name, text, "note");
@@ -769,7 +784,7 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     fire(`Uploading ${limited.length} photo${limited.length > 1 ? "s" : ""}...`);
     try {
-      const paths = await uploadPhotos(woId, limited, currentUser.name);
+      const paths = await uploadPhotos(woId, limited, currentUser.name, workflowAuditFor(woId));
       const text = `Added ${paths.length} photo${paths.length > 1 ? "s" : ""}.`;
       qc.setQueryData(WORK_ORDERS_KEY, (old: any[]) =>
         old?.map(w => w.id === woId
@@ -779,7 +794,7 @@ export default function useWorkOrders({
       setWorkOrders(prev => prev.map(w => w.id === woId ? {
         ...w,
         photos: [...(w.photos || []), ...paths],
-        activities: [{ author: currentUser.name, time: dateNow(), text, type: "note" }, ...w.activities],
+        activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: !!isManager }, ...w.activities],
       } : w));
       fire(`${paths.length} photo${paths.length > 1 ? "s" : ""} uploaded`);
     } catch (e: any) {
@@ -822,6 +837,7 @@ export default function useWorkOrders({
         : w)
     );
     setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((p: string, i: number) => typeof photo === "number" ? i !== photo : p !== photo) } : w));
+    await insertActivity(woId, currentUser.name, "Photo removed.", "note", workflowAuditFor(woId));
     invalidateBoth();
     fire("Photo removed");
     } finally {

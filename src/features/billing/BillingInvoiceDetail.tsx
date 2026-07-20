@@ -14,6 +14,7 @@ export default function BillingInvoiceDetail(props: any) {
     onBack,
     onDownloadPdf,
     onDelete,
+    onOpenContractorInvoice,
     currentUser,
     fmt,
   } = props;
@@ -23,6 +24,7 @@ export default function BillingInvoiceDetail(props: any) {
   if (!invoice) return null;
 
   const lines = invoice.lines || [];
+  const sourceInvoices = invoice.sourceInvoices || [];
   const canDelete = ["manager", "dispatcher", "back_office"].includes(currentUser?.role || "");
 
   return (
@@ -100,6 +102,36 @@ export default function BillingInvoiceDetail(props: any) {
             </div>
           </div>
         </div>
+
+        {sourceInvoices.length > 0 && (
+          <div style={{ padding: "18px 32px", borderBottom: `1px solid ${T.borderSoft}`, background: T.surfaceSoft }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>Built from contractor invoices</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>These source records remain linked in both directions.</div>
+              </div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
+                <span style={{ color: T.muted }}>Cost <strong className="mono" style={{ color: T.ink }}>{fmt(invoice.contractorCost || 0)}</strong></span>
+                <span style={{ color: T.muted }}>Profit <strong className="mono" style={{ color: (invoice.grossProfit || 0) >= 0 ? T.success : T.danger }}>{fmt(invoice.grossProfit || 0)}</strong></span>
+                <span style={{ color: T.muted }}>Margin <strong className="mono" style={{ color: invoice.marginPercent == null ? T.subtle : invoice.marginPercent >= 30 ? T.success : T.danger }}>{invoice.marginPercent == null ? "-" : `${Number(invoice.marginPercent).toFixed(1)}%`}</strong></span>
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 7 }}>
+              {sourceInvoices.map((source: any) => (
+                <button
+                  key={source.id}
+                  type="button"
+                  onClick={() => onOpenContractorInvoice?.(source)}
+                  className="btn-soft"
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, width: "100%", textAlign: "left", padding: "9px 12px" }}
+                >
+                  <span><span className="mono" style={{ color: T.accent, fontWeight: 700 }}>#{source.num}</span><span style={{ color: T.muted, marginLeft: 8, textTransform: "capitalize" }}>{source.state}</span></span>
+                  <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>{fmt(source.total || 0)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <div className="desktop-only-table">

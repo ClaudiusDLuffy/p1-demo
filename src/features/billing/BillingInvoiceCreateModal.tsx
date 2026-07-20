@@ -33,15 +33,27 @@ const BillingInvoiceSchema = z.object({
   lines: z.array(BillingLineSchema).min(1, "At least one line item is required"),
 });
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const dateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+const todayIso = () => dateInputValue(new Date());
 const addDays = (iso: string, days: number) => {
   const date = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "";
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  return dateInputValue(date);
 };
 
 const amount = (line: any) => (Number(line?.qty) || 0) * (Number(line?.rate) || 0);
+const normalizeLineType = (type: string) => {
+  if ((LINE_TYPES as readonly string[]).includes(type)) return type;
+  if (type === "Travel") return "Truck Charge";
+  if (type === "Parts") return "Parts/Hardware";
+  return "Other";
+};
 
 const nextStaffNum = (invoices: any[]) => {
   const maxNum = (invoices || []).reduce((max: number, invoice: any) => {
@@ -56,6 +68,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const {
     modal,
     workOrders,
+    contractorInvoices,
     billingInvoices,
     onClose,
     onCreated,
@@ -64,6 +77,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   } = props;
   const [submitting, setSubmitting] = useState(false);
   const [woSearch, setWoSearch] = useState("");
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [targetMargin, setTargetMargin] = useState("30");
 
   const {
     register,
@@ -72,6 +87,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     watch,
     reset,
     setValue,
+    clearErrors,
+    trigger,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(BillingInvoiceSchema),
@@ -91,7 +108,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     },
   });
 
-  const { fields, append, remove } = useFieldArray({ control, name: "lines" });
+  const { fields, append, remove, replace } = useFieldArray({ control, name: "lines" });
   const lines = watch("lines") || [];
   const salesTax = Number(watch("salesTax") || 0);
   const subtotal = lines.reduce((sum: number, line: any) => sum + amount(line), 0);
@@ -103,6 +120,41 @@ export default function BillingInvoiceCreateModal(props: any) {
     () => (workOrders || []).filter((wo: any) => wo.status !== "closed"),
     [workOrders],
   );
+
+  const sourceOwnerById = useMemo(() => {
+    const owners = new Map<string, string>();
+    for (const invoice of billingInvoices || []) {
+      for (const sourceId of invoice.sourceInvoiceIds || []) {
+        owners.set(sourceId, invoice.num);
+      }
+    }
+    return owners;
+  }, [billingInvoices]);
+
+  const availableSourceInvoices = useMemo(
+    () => (contractorInvoices || []).filter((invoice: any) =>
+      invoice.wot === selectedWorkOrderId
+      && invoice.state !== "draft"
+      && invoice.state !== "rejected",
+    ),
+    [contractorInvoices, selectedWorkOrderId],
+  );
+
+  const selectedSourceInvoices = useMemo(
+    () => availableSourceInvoices.filter((invoice: any) =>
+      selectedSourceIds.includes(invoice.id),
+    ),
+    [availableSourceInvoices, selectedSourceIds],
+  );
+
+  const contractorCost = selectedSourceInvoices.reduce(
+    (sum: number, invoice: any) => sum + Number(invoice.total || 0),
+    0,
+  );
+  const grossProfit = total - contractorCost;
+  const actualMargin = total > 0 && contractorCost > 0
+    ? (grossProfit / total) * 100
+    : null;
 
   const workOrderOptions = useMemo(() => {
     const q = woSearch.trim().toLowerCase();
@@ -134,6 +186,8 @@ export default function BillingInvoiceCreateModal(props: any) {
       lines: [{ type: "Labor", desc: "", qty: 1, rate: undefined }],
     });
     setWoSearch("");
+    setSelectedSourceIds([]);
+    setTargetMargin("30");
   }, [modal, billingInvoices, reset]);
 
   useEffect(() => {
@@ -145,11 +199,56 @@ export default function BillingInvoiceCreateModal(props: any) {
     if (!selectedWorkOrderId) return;
     const wo = activeWorkOrders.find((item: any) => item.id === selectedWorkOrderId);
     if (!wo) return;
-    setValue("storeNumber", wo.store || "");
-    setValue("storeAddress", wo.addr || "");
-  }, [selectedWorkOrderId, activeWorkOrders, setValue]);
+    setValue("storeNumber", wo.store || "", { shouldDirty: true, shouldValidate: true });
+    setValue("storeAddress", wo.addr || "", { shouldDirty: true });
+    clearErrors("storeNumber");
+  }, [selectedWorkOrderId, activeWorkOrders, clearErrors, setValue]);
+
+  useEffect(() => {
+    setSelectedSourceIds([]);
+  }, [selectedWorkOrderId]);
 
   if (modal !== "createBillingInvoice") return null;
+
+  const toggleSourceInvoice = (invoiceId: string) => {
+    if (sourceOwnerById.has(invoiceId)) return;
+    setSelectedSourceIds(current => current.includes(invoiceId)
+      ? current.filter(id => id !== invoiceId)
+      : [...current, invoiceId]);
+  };
+
+  const pullSourceLines = () => {
+    if (selectedSourceInvoices.length === 0) {
+      fire?.("Select at least one contractor invoice");
+      return;
+    }
+    const margin = Number(targetMargin);
+    if (!Number.isFinite(margin) || margin < 0 || margin >= 100) {
+      fire?.("Target margin must be between 0 and 99.99 percent");
+      return;
+    }
+    const multiplier = 1 / (1 - margin / 100);
+    const imported = selectedSourceInvoices.flatMap((invoice: any) => {
+      if ((invoice.lines || []).length === 0) {
+        return [{
+          type: "Other",
+          desc: "Contracted service",
+          qty: 1,
+          rate: Math.round(Number(invoice.total || 0) * multiplier * 100) / 100,
+        }];
+      }
+      return invoice.lines.map((line: any) => ({
+        type: normalizeLineType(line.type || "Other"),
+        desc: line.desc || line.description || "Contractor service",
+        qty: Number(line.qty || 1),
+        rate: Math.round(Number(line.rate || 0) * multiplier * 100) / 100,
+      }));
+    });
+    replace(imported);
+    clearErrors("lines");
+    setTimeout(() => void trigger("lines"), 0);
+    fire?.(`Pulled ${imported.length} line item${imported.length === 1 ? "" : "s"}`);
+  };
 
   const submit = async (data: any, state: "draft" | "submitted") => {
     setSubmitting(true);
@@ -169,6 +268,7 @@ export default function BillingInvoiceCreateModal(props: any) {
           ...data,
           state,
           salesTax: Number(data.salesTax || 0),
+          sourceInvoiceIds: selectedSourceIds,
         }),
       });
 
@@ -214,7 +314,29 @@ export default function BillingInvoiceCreateModal(props: any) {
           <div>
             <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Search work order</span>
             <input value={woSearch} onChange={(e: any) => setWoSearch(e.target.value)} placeholder="WO number, store, city, keyword" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13, marginBottom: 8 }} />
-            <Sel {...register("workOrderId")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
+            {woSearch.trim() && (
+              <div role="listbox" aria-label="Matching work orders" style={{ display: "grid", gap: 4, padding: 5, marginBottom: 8, maxHeight: 210, overflowY: "auto", border: `1px solid ${T.borderSoft}`, borderRadius: 9, background: T.surface }}>
+                {workOrderOptions.length === 0 ? (
+                  <div style={{ padding: "10px 9px", fontSize: 12, color: T.subtle }}>No matching work orders.</div>
+                ) : workOrderOptions.slice(0, 8).map((wo: any) => (
+                  <button
+                    key={wo.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selectedWorkOrderId === wo.id}
+                    onClick={() => {
+                      setValue("workOrderId", wo.id, { shouldDirty: true, shouldValidate: true });
+                      setWoSearch("");
+                    }}
+                    style={{ padding: "9px 10px", border: "none", borderRadius: 7, background: selectedWorkOrderId === wo.id ? T.accentSoft : T.surface, color: T.ink, cursor: "pointer", textAlign: "left", fontFamily: "inherit", fontSize: 12 }}
+                  >
+                    <span className="mono" style={{ color: T.accent, fontWeight: 700 }}>{wo.id}</span>
+                    <span style={{ color: T.muted }}> - Store #{wo.store || "-"} - {wo.summary || "No summary"}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Sel {...register("workOrderId")} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
               <option value="">Standalone invoice</option>
               {workOrderOptions.map((wo: any) => (
                 <option key={wo.id} value={wo.id}>{wo.id} - Store #{wo.store || "-"} - {wo.summary || "No summary"}</option>
@@ -223,6 +345,52 @@ export default function BillingInvoiceCreateModal(props: any) {
           </div>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store number</span><input {...register("storeNumber")} placeholder="Required" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.storeNumber ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.storeNumber && <span style={{ fontSize: 11, color: T.danger }}>{errors.storeNumber.message}</span>}</label>
         </div>
+
+        {selectedWorkOrderId && (
+          <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, padding: 14, marginBottom: 16, background: T.surfaceSoft }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.ink }}>Contractor invoices on {selectedWorkOrderId}</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>Select the source invoices used to build this 7-Eleven invoice.</div>
+              </div>
+              {selectedSourceInvoices.length > 0 && (
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                  <label>
+                    <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.subtle, marginBottom: 4 }}>Target margin %</span>
+                    <input type="number" min="0" max="99.99" step="0.1" value={targetMargin} onChange={(e: any) => setTargetMargin(e.target.value)} style={{ width: 92, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12 }} />
+                  </label>
+                  <button type="button" onClick={pullSourceLines} className="btn-primary" style={{ padding: "8px 12px", fontSize: 11 }}>Pull lines + apply margin</button>
+                </div>
+              )}
+            </div>
+            {availableSourceInvoices.length === 0 ? (
+              <div style={{ fontSize: 12, color: T.subtle, padding: "10px 0" }}>No submitted contractor invoices are available on this work order.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 7 }}>
+                {availableSourceInvoices.map((invoice: any) => {
+                  const linkedTo = sourceOwnerById.get(invoice.id);
+                  const checked = selectedSourceIds.includes(invoice.id);
+                  return (
+                    <label key={invoice.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: `1px solid ${checked ? T.accent : T.borderSoft}`, background: T.surface, opacity: linkedTo ? 0.6 : 1, cursor: linkedTo ? "not-allowed" : "pointer" }}>
+                      <input type="checkbox" checked={checked} disabled={!!linkedTo} onChange={() => toggleSourceInvoice(invoice.id)} />
+                      <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
+                      <span style={{ fontSize: 11, color: T.muted, textTransform: "capitalize" }}>{invoice.state}</span>
+                      <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.ink }}>{fmt(Number(invoice.total || 0))}</span>
+                      {linkedTo && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {selectedSourceInvoices.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 12 }} className="billing-source-metrics">
+                <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>Contractor cost</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(contractorCost)}</div></div>
+                <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>P1 invoice</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(total)}</div></div>
+                <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>Current margin</div><div className="mono" style={{ fontSize: 13, fontWeight: 700, color: actualMargin == null ? T.subtle : actualMargin >= 30 ? T.success : T.danger }}>{actualMargin == null ? "-" : `${actualMargin.toFixed(1)}%`}</div></div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store address</span><input {...register("storeAddress")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
@@ -239,7 +407,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             const line = lines[i] || field;
             return (
               <div key={field.id} className="billing-line-row" style={{ display: "grid", gridTemplateColumns: "120px 1fr 70px 90px 100px 32px", gap: 10, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
-                <Sel {...register(`lines.${i}.type` as const)} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink }}>{LINE_TYPES.map(t => <option key={t}>{t}</option>)}</Sel>
+                <Sel {...register(`lines.${i}.type` as const)} defaultValue={field.type} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink }}>{LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</Sel>
                 <textarea {...register(`lines.${i}.desc` as const)} placeholder="Description" style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
                 <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
                 <input type="number" step="0.01" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />

@@ -14,7 +14,7 @@ import { TA } from "../../components/ui/TA";
 import { T } from "../../lib/constants";
 
 export default function WorkReportForm(props: any) {
-  const { woId, woStore, technicianOnJob, onClose, onSuccess } = props;
+  const { woId, woStore, technicianOnJob, currentUser, isManager, contractorId, onClose, onSuccess } = props;
   const [submitError, setSubmitError] = useState<string | null>(null);
   const {
     register,
@@ -44,6 +44,9 @@ export default function WorkReportForm(props: any) {
       workOrderId: woId,
       ...data,
       partsUsed: data.partsUsed || [],
+    }, currentUser?.name || "Unknown user", {
+      staffOverride: !!isManager,
+      overrideForContractorId: isManager ? contractorId || null : null,
     });
     if (!result.success) {
       const msg = result.error instanceof Error ? result.error.message : "Work report submit failed";

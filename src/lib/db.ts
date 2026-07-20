@@ -187,6 +187,9 @@ const mapActivity = (a: any) => ({
   time: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
   text: a.text,
   type: a.type,
+  enteredByRole: a.entered_by_role || "system",
+  isStaffOverride: !!a.is_staff_override,
+  overrideForContractorId: a.override_for_contractor_id || null,
 });
 
 // "5h", "2d", "1w" — relative age string from a timestamp
@@ -363,7 +366,18 @@ export async function updateWorkOrder(id: string, patch: any): Promise<any> {
   return data;
 }
 
-export async function insertActivity(workOrderId: string, authorName: string, text: string, type: "note" | "system" | "ai" = "note"): Promise<void> {
+export type ActivityAuditOptions = {
+  staffOverride?: boolean;
+  overrideForContractorId?: string | null;
+};
+
+export async function insertActivity(
+  workOrderId: string,
+  authorName: string,
+  text: string,
+  type: "note" | "system" | "ai" = "note",
+  audit: ActivityAuditOptions = {},
+): Promise<void> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   const { error } = await sb.from("activities").insert({
@@ -372,6 +386,10 @@ export async function insertActivity(workOrderId: string, authorName: string, te
     author_name: authorName,
     text,
     type,
+    is_staff_override: !!audit.staffOverride,
+    override_for_contractor_id: audit.staffOverride
+      ? audit.overrideForContractorId || null
+      : null,
   });
   if (error) throw error;
 }
@@ -795,7 +813,9 @@ export async function updateInvoiceState(num: string, state: string, extra: Reco
 }
 
 export async function insertWorkReport(
-  report: any
+  report: any,
+  authorName?: string,
+  audit: ActivityAuditOptions = {},
 ): Promise<{ success: boolean; error?: unknown }> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
@@ -811,6 +831,19 @@ export async function insertWorkReport(
     resolution_notes: report.resolutionNotes || null,
   });
   if (error) return { success: false, error };
+  if (authorName) {
+    try {
+      await insertActivity(
+        report.workOrderId,
+        authorName,
+        `Work report submitted${report.technicianName ? ` for ${report.technicianName}` : ""}.`,
+        "note",
+        audit,
+      );
+    } catch (activityError) {
+      return { success: false, error: activityError };
+    }
+  }
   return { success: true };
 }
 
@@ -910,7 +943,12 @@ export async function loadWorkReports(
 }
 
 // ── PHOTO STORAGE ─────────────────────────────────────────────────────────
-export async function uploadPhotos(workOrderId: string, files: FileList | File[], authorName: string): Promise<string[]> {
+export async function uploadPhotos(
+  workOrderId: string,
+  files: FileList | File[],
+  authorName: string,
+  audit: ActivityAuditOptions = {},
+): Promise<string[]> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   const uploaded: string[] = [];
@@ -931,7 +969,7 @@ export async function uploadPhotos(workOrderId: string, files: FileList | File[]
     uploaded.push(path);
   }
   if (uploaded.length > 0) {
-    await insertActivity(workOrderId, authorName, `Added ${uploaded.length} photo${uploaded.length > 1 ? "s" : ""}.`, "note");
+    await insertActivity(workOrderId, authorName, `Added ${uploaded.length} photo${uploaded.length > 1 ? "s" : ""}.`, "note", audit);
   }
   return uploaded;
 }
