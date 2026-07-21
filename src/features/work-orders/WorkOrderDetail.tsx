@@ -428,7 +428,6 @@ export default function WorkOrderDetail(props: any) {
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
                       {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
-                      {jobOpen && woData.status !== "unassigned" && <button onClick={() => setModal("workReport")} className="btn-soft">Submit work report</button>}
                       {woData.status === "pending_payment" && isManager && (
                         <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
                           {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}

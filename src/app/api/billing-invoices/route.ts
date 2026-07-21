@@ -407,6 +407,221 @@ export async function POST(req: NextRequest) {
   }
 }
 
+export async function PATCH(req: NextRequest) {
+  const auth = await requireStaff(req);
+  if ("error" in auth) return auth.error;
+
+  const id = req.nextUrl.searchParams.get("id");
+  if (!id) return jsonError("Invoice id is required", 400);
+
+  try {
+    const body = await req.json();
+    const targetState = body.state === "submitted" ? "submitted" : "draft";
+    const workOrderId = String(body.workOrderId || "").trim() || null;
+    const sourceInvoiceIds = Array.from(new Set(
+      (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
+        .map((sourceId: unknown) => String(sourceId || "").trim())
+        .filter(Boolean),
+    ));
+    const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
+    const validLines = lines
+      .map(line => ({
+        type: String(line.type || "Other").trim(),
+        description: String(line.desc || line.description || "").trim(),
+        qty: Number(line.qty || 0),
+        rate: Number(line.rate || 0),
+      }))
+      .filter(line => line.description && line.qty > 0 && line.rate > 0);
+
+    if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
+    if (!body.storeNumber) return jsonError("Store number is required", 400);
+    if (validLines.length === 0) return jsonError("At least one valid line item is required", 400);
+    if (sourceInvoiceIds.length > 0 && !workOrderId) {
+      return jsonError("A work order is required when contractor invoices are linked", 400);
+    }
+
+    const { data: existing, error: existingError } = await (auth.sb as any)
+      .from("invoices")
+      .select("*")
+      .eq("id", id)
+      .eq("invoice_type", "staff")
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (!existing) return jsonError("Billing invoice not found", 404);
+    if (existing.state !== "draft") {
+      return jsonError("Only draft billing invoices can be edited", 409);
+    }
+
+    if (sourceInvoiceIds.length > 0) {
+      const { data: existingLinks, error: existingLinkError } = await (auth.sb as any)
+        .from("staff_invoice_sources")
+        .select("contractor_invoice_id, staff_invoice_id")
+        .in("contractor_invoice_id", sourceInvoiceIds);
+      if (existingLinkError) throw existingLinkError;
+
+      const linkedStaffIds = Array.from(new Set(
+        (existingLinks || [])
+          .filter((link: any) => link.staff_invoice_id !== id)
+          .map((link: any) => link.staff_invoice_id),
+      ));
+      if (linkedStaffIds.length > 0) {
+        const { data: activeLinkedStaff, error: linkedStaffError } = await (auth.sb as any)
+          .from("invoices")
+          .select("id, num")
+          .in("id", linkedStaffIds)
+          .eq("invoice_type", "staff")
+          .is("deleted_at", null);
+        if (linkedStaffError) throw linkedStaffError;
+        if ((activeLinkedStaff || []).length > 0) {
+          return jsonError(
+            `A selected contractor invoice is already linked to ${activeLinkedStaff[0].num}`,
+            409,
+          );
+        }
+      }
+
+      const { data: sourceInvoices, error: sourceError } = await (auth.sb as any)
+        .from("invoices")
+        .select("id, work_order_id, invoice_type, state, deleted_at")
+        .in("id", sourceInvoiceIds)
+        .eq("invoice_type", "contractor")
+        .is("deleted_at", null);
+
+      if (sourceError) throw sourceError;
+      if ((sourceInvoices || []).length !== sourceInvoiceIds.length) {
+        return jsonError("One or more contractor invoices are invalid", 400);
+      }
+      if ((sourceInvoices || []).some((invoice: any) =>
+        invoice.work_order_id !== workOrderId
+        || invoice.state === "draft"
+        || invoice.state === "rejected"
+      )) {
+        return jsonError(
+          "Source invoices must be live contractor invoices on the selected work order",
+          400,
+        );
+      }
+    }
+
+    const subtotal = validLines.reduce((sum, line) => sum + line.qty * line.rate, 0);
+    const salesTax = Number(body.salesTax || 0);
+    if (!Number.isFinite(salesTax) || salesTax < 0) {
+      return jsonError("Sales tax must be zero or greater", 400);
+    }
+    const total = subtotal + salesTax;
+    const desiredNum = String(body.num || "").trim() || existing.num;
+    const updatedAt = new Date().toISOString();
+
+    const { data: updated, error: updateError } = await (auth.sb as any)
+      .from("invoices")
+      .update({
+        num: desiredNum,
+        work_order_id: workOrderId,
+        store_number: String(body.storeNumber || "").trim(),
+        store_address: body.storeAddress || null,
+        contractor_id: null,
+        cme: body.cme || null,
+        invoice_date: body.invoiceDate,
+        service_date: body.serviceDate || null,
+        due_date: body.dueDate || null,
+        terms: body.terms || "Net 30",
+        state: "draft",
+        subtotal,
+        sales_tax: salesTax,
+        total,
+        updated_at: updatedAt,
+      })
+      .eq("id", id)
+      .eq("invoice_type", "staff")
+      .eq("state", "draft")
+      .is("deleted_at", null)
+      .select()
+      .maybeSingle();
+
+    if (updateError?.code === "23505") {
+      return jsonError(`Invoice number ${desiredNum} already exists`, 409);
+    }
+    if (updateError) throw updateError;
+    if (!updated) return jsonError("Draft changed before it could be saved", 409);
+
+    const { error: lineDeleteError } = await auth.sb
+      .from("invoice_lines")
+      .delete()
+      .eq("invoice_id", id);
+    if (lineDeleteError) throw lineDeleteError;
+
+    const lineRows = validLines.map((line, index) => ({
+      invoice_id: id,
+      position: index + 1,
+      type: line.type,
+      description: line.description,
+      qty: line.qty,
+      rate: line.rate,
+    }));
+    const { error: lineInsertError } = await auth.sb
+      .from("invoice_lines")
+      .insert(lineRows);
+    if (lineInsertError) throw lineInsertError;
+
+    const { error: sourceDeleteError } = await (auth.sb as any)
+      .from("staff_invoice_sources")
+      .delete()
+      .eq("staff_invoice_id", id);
+    if (sourceDeleteError) throw sourceDeleteError;
+
+    if (sourceInvoiceIds.length > 0) {
+      const sourceRows = sourceInvoiceIds.map(contractorInvoiceId => ({
+        staff_invoice_id: id,
+        contractor_invoice_id: contractorInvoiceId,
+        work_order_id: workOrderId,
+        created_by: auth.user.id,
+      }));
+      const { error: sourceInsertError } = await (auth.sb as any)
+        .from("staff_invoice_sources")
+        .insert(sourceRows);
+      if (sourceInsertError) throw sourceInsertError;
+    }
+
+    if (targetState === "submitted") {
+      const { error: stateError } = await (auth.sb as any)
+        .from("invoices")
+        .update({ state: "submitted", updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("invoice_type", "staff")
+        .eq("state", "draft");
+      if (stateError) throw stateError;
+    }
+
+    if (workOrderId) {
+      const action = targetState === "submitted" ? "updated and submitted" : "draft updated";
+      const { error: activityError } = await (auth.sb as any)
+        .from("activities")
+        .insert({
+          work_order_id: workOrderId,
+          author_id: auth.user.id,
+          author_name: auth.profile.name || "P1 staff",
+          text: `P1 invoice #${desiredNum} ${action}.`,
+          type: "system",
+          is_staff_override: false,
+        });
+      if (activityError) {
+        console.error("Billing draft activity audit insert failed", activityError);
+      }
+    }
+
+    const refreshed = await loadStaffInvoices(auth.sb);
+    const invoice = refreshed.find((item: any) => item.id === id);
+    if (!invoice) throw new Error("Updated invoice could not be reloaded");
+
+    return NextResponse.json({ invoice });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update billing invoice";
+    return jsonError(message, 500);
+  }
+}
+
 export async function DELETE(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;

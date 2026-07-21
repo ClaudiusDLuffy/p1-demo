@@ -1,11 +1,12 @@
 ﻿"use client";
 // @ts-nocheck
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  insertActivity, insertWorkOrder, findExistingWoId, subscribeToChanges,
+  insertActivity, insertWorkOrder, findExistingWoId, markWorkOrderNotesSeen,
+  subscribeToChanges,
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
 import { computeSlaState, computeSlaBreaches } from "../lib/slaConfig";
@@ -957,6 +958,7 @@ export default function PortalShell() {
   const [nteQueue, setNteQueue] = useState(false); // "NTE Approval Needed" bucket filter
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
+  const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
   const [histContractor, setHistContractor] = useState("all");
@@ -1011,6 +1013,8 @@ export default function PortalShell() {
     loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
   const isAuthenticated = hasSession || !!currentUser;
+  const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
+  const notesSeenInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
   const { data: workOrdersData, isLoading: woLoading } = useWorkOrdersQuery(isAuthenticated);
   const { data: profilesData } = useProfilesQuery(isAuthenticated);
@@ -1036,7 +1040,7 @@ export default function PortalShell() {
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
-      isManager: currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office",
+      isManager,
       noteText, setNoteText, SERVICE_TO_TRADES, contractorFor,
       getUser: (id: string) => USERS.find(u => u.id === id),
       dateNow, timeNow, fmt,
@@ -1137,6 +1141,32 @@ export default function PortalShell() {
   );
 
   useEffect(() => {
+    if (!isManager || !selectedWO || !woData?.hasUnreadNotes || !woData?.latestNoteAt) return;
+    if (notesSeenInFlight.current.has(selectedWO)) return;
+
+    const workOrderId = selectedWO;
+    const latestNoteAt = woData.latestNoteAt;
+    notesSeenInFlight.current.add(workOrderId);
+
+    void markWorkOrderNotesSeen(workOrderId, latestNoteAt)
+      .then(() => {
+        const markSeen = (items: any[] | undefined) => items?.map((wo: any) =>
+          wo.id === workOrderId
+            ? { ...wo, staffNotesSeenAt: latestNoteAt, hasUnreadNotes: false }
+            : wo
+        );
+        setWorkOrders((items: any[]) => markSeen(items) || []);
+        qc.setQueryData(WORK_ORDERS_KEY, markSeen);
+      })
+      .catch((error: any) => {
+        fire(`Could not clear new-note indicator: ${error.message || error}`);
+      })
+      .finally(() => {
+        notesSeenInFlight.current.delete(workOrderId);
+      });
+  }, [fire, isManager, qc, selectedWO, setWorkOrders, woData?.hasUnreadNotes, woData?.latestNoteAt]);
+
+  useEffect(() => {
     if (!woData) return;
     if (modal === "setEta") {
       setEtaDateInput(new Date().toISOString().slice(0, 10));
@@ -1216,11 +1246,11 @@ export default function PortalShell() {
     setPage(p);
     setSelectedWO(null);
     setSelectedBillingInvoice(null);
+    setBillingDraftToEdit(null);
     setAiNote(null);
     setNteQueue(false);
   }, []);
 
-  const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const { data: billingInvoices = [] } = useQuery({
     queryKey: BILLING_INVOICES_KEY,
     queryFn: async () => {
@@ -1895,7 +1925,7 @@ export default function PortalShell() {
               currentUser={currentUser}
               invoices={billingInvoices}
               setSelectedBillingInvoice={setSelectedBillingInvoice}
-              onCreate={() => setModal("createBillingInvoice")}
+              onCreate={() => { setBillingDraftToEdit(null); setModal("createBillingInvoice"); }}
               fmt={fmt}
             />
           )}
@@ -1905,6 +1935,11 @@ export default function PortalShell() {
               invoice={selectedBillingInvoiceData}
               invoiceLines={selectedBillingInvoiceData?.lines || []}
               onBack={() => setSelectedBillingInvoice(null)}
+              onEdit={() => {
+                if (!selectedBillingInvoiceData || selectedBillingInvoiceData.state !== "draft") return;
+                setBillingDraftToEdit(selectedBillingInvoiceData);
+                setModal("createBillingInvoice");
+              }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
               onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.num); setPage("invoices"); }}
@@ -2580,8 +2615,16 @@ export default function PortalShell() {
           workOrders={maskedWorkOrders}
           contractorInvoices={invoices}
           billingInvoices={billingInvoices}
-          onClose={() => setModal(null)}
+          editingInvoice={billingDraftToEdit}
+          onClose={() => { setModal(null); setBillingDraftToEdit(null); }}
           onCreated={(invoice: any) => {
+            qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
+              if (!invoice?.id) return items || [];
+              const exists = (items || []).some(item => item.id === invoice.id);
+              return exists
+                ? (items || []).map(item => item.id === invoice.id ? invoice : item)
+                : [invoice, ...(items || [])];
+            });
             qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
             if (invoice?.id) setSelectedBillingInvoice(invoice.id);
           }}

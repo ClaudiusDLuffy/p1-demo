@@ -3,6 +3,7 @@
 
 import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
+import { NewNotesDot } from "../../components/ui/NewNotesDot";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { getSlaAgingStyle, getWorkOrderDateMeta, sortWorkOrders } from "../../lib/workOrderView";
@@ -45,7 +46,10 @@ export default function KanbanBoard(props: any) {
       <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer", borderColor: aging.ring || st?.ring || T.borderSoft }}>
         <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: st?.color || pr?.color || T.subtle }} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
+            {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+          </span>
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: st?.color, background: st?.bg, border: `1px solid ${st?.ring || st?.color}55`, borderRadius: 10, padding: "2px 6px" }}>{st?.label}</span>
             <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>

@@ -109,13 +109,24 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     (photosByWo[p.work_order_id] ||= []).push(p);
   }
 
-  const mapped = (woRes.data || []).map(wo => ({
-    ...mapWO(wo),
-    activities: actsByWo[wo.id] || [],
-    photos: (photosByWo[wo.id] || [])
-      .map(p => p.storage_path)
-      .filter(Boolean),
-  }));
+  const mapped = (woRes.data || []).map(wo => {
+    const activities = actsByWo[wo.id] || [];
+    const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
+    const seenAt = (wo as any).staff_notes_seen_at || null;
+    const hasUnreadNotes = !!latestNoteAt && (
+      !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
+    );
+
+    return {
+      ...mapWO(wo),
+      activities,
+      latestNoteAt,
+      hasUnreadNotes,
+      photos: (photosByWo[wo.id] || [])
+        .map(p => p.storage_path)
+        .filter(Boolean),
+    };
+  });
   for (const wo of woRes.data || []) {
     WorkOrderSchema.safeParse({
       id: wo.id,
@@ -170,6 +181,7 @@ const mapWO = (w: any) => ({
   partNeeded: w.part_needed,
   partEta: w.part_eta,
   source: w.source,
+  staffNotesSeenAt: w.staff_notes_seen_at || null,
   technicianOnJob: w.technician_on_job,
   createdAt: w.created_at,
   updatedAt: w.updated_at,
@@ -184,6 +196,7 @@ const mapActivity = (a: any) => ({
   id: a.id,
   authorId: a.author_id,
   author: a.author_name,
+  createdAt: a.created_at,
   time: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
   text: a.text,
   type: a.type,
@@ -350,6 +363,7 @@ const WO_FIELD_MAP: Record<string, string> = {
   nteFlagAmount: "nte_flag_amount",
   closedAt: "closed_at",
   technicianOnJob: "technician_on_job",
+  staffNotesSeenAt: "staff_notes_seen_at",
 };
 function toDbWoPatch(patch: any): Record<string, any> {
   const out: any = {};
@@ -364,6 +378,17 @@ export async function updateWorkOrder(id: string, patch: any): Promise<any> {
   const { data, error } = await (sb.from("work_orders") as any).update(toDbWoPatch(patch)).eq("id", id).select().single();
   if (error) throw error;
   return data;
+}
+
+export async function markWorkOrderNotesSeen(
+  workOrderId: string,
+  latestNoteAt: string,
+): Promise<void> {
+  const sb = supabase();
+  const { error } = await (sb.from("work_orders") as any)
+    .update({ staff_notes_seen_at: latestNoteAt })
+    .eq("id", workOrderId);
+  if (error) throw error;
 }
 
 export type ActivityAuditOptions = {

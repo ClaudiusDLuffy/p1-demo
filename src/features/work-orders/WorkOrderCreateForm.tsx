@@ -52,7 +52,7 @@ export default function WorkOrderCreateForm(props: any) {
   };
 
   return (
-    <Modal onClose={onClose} title="Create Work Order" width={520}>
+    <Modal onClose={onClose} title="Create Work Order" width={520} closeOnBackdrop={false}>
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>
           Only the WOT number is required - fill in what you have; the rest takes sensible defaults.
