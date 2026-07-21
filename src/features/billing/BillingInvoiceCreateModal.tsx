@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -70,6 +70,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     workOrders,
     contractorInvoices,
     billingInvoices,
+    editingInvoice,
     onClose,
     onCreated,
     fire,
@@ -79,6 +80,10 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [woSearch, setWoSearch] = useState("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [targetMargin, setTargetMargin] = useState("30");
+  const initializedFor = useRef<string | null>(null);
+  const previousInvoiceDate = useRef("");
+  const previousWorkOrderId = useRef("");
+  const isEditing = !!editingInvoice?.id;
 
   const {
     register,
@@ -117,15 +122,17 @@ export default function BillingInvoiceCreateModal(props: any) {
   const invoiceDate = watch("invoiceDate");
 
   const activeWorkOrders = useMemo(
-    () => (workOrders || []).filter((wo: any) => wo.status !== "closed"),
-    [workOrders],
+    () => (workOrders || []).filter((wo: any) =>
+      wo.status !== "closed" || wo.id === editingInvoice?.wot,
+    ),
+    [editingInvoice?.wot, workOrders],
   );
 
   const sourceOwnerById = useMemo(() => {
-    const owners = new Map<string, string>();
+    const owners = new Map<string, { id: string; num: string }>();
     for (const invoice of billingInvoices || []) {
       for (const sourceId of invoice.sourceInvoiceIds || []) {
-        owners.set(sourceId, invoice.num);
+        owners.set(sourceId, { id: invoice.id, num: invoice.num });
       }
     }
     return owners;
@@ -169,29 +176,53 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, [activeWorkOrders, woSearch]);
 
   useEffect(() => {
-    if (modal !== "createBillingInvoice") return;
+    if (modal !== "createBillingInvoice") {
+      initializedFor.current = null;
+      return;
+    }
+    const initializationKey = editingInvoice?.id
+      ? `edit:${editingInvoice.id}`
+      : "create";
+    if (initializedFor.current === initializationKey) return;
+    initializedFor.current = initializationKey;
+
     const today = todayIso();
+    const initialInvoiceDate = editingInvoice?.invoiceDateRaw || today;
+    const initialWorkOrderId = editingInvoice?.wot || "";
+    previousInvoiceDate.current = initialInvoiceDate;
+    previousWorkOrderId.current = initialWorkOrderId;
     reset({
-      num: nextStaffNum(billingInvoices),
-      invoiceDate: today,
-      serviceDate: "",
-      dueDate: addDays(today, 30),
-      workOrderId: "",
-      storeNumber: "",
-      storeAddress: "",
-      terms: "Net 30",
-      cme: "",
-      salesTax: "",
-      state: "submitted",
-      lines: [{ type: "Labor", desc: "", qty: 1, rate: undefined }],
+      num: editingInvoice?.num || nextStaffNum(billingInvoices),
+      invoiceDate: initialInvoiceDate,
+      serviceDate: editingInvoice?.serviceDateRaw || "",
+      dueDate: editingInvoice?.dueDateRaw || addDays(initialInvoiceDate, 30),
+      workOrderId: initialWorkOrderId,
+      storeNumber: editingInvoice?.store || "",
+      storeAddress: editingInvoice?.storeAddr || "",
+      terms: editingInvoice?.terms || "Net 30",
+      cme: editingInvoice?.cme || "",
+      salesTax: editingInvoice?.salesTax ? String(editingInvoice.salesTax) : "",
+      state: editingInvoice?.state === "draft" ? "draft" : "submitted",
+      lines: editingInvoice?.lines?.length
+        ? editingInvoice.lines.map((line: any) => ({
+            type: normalizeLineType(line.type || "Other"),
+            desc: line.desc || line.description || "",
+            qty: Number(line.qty || 1),
+            rate: Number(line.rate || 0),
+          }))
+        : [{ type: "Labor", desc: "", qty: 1, rate: undefined }],
     });
     setWoSearch("");
-    setSelectedSourceIds([]);
-    setTargetMargin("30");
-  }, [modal, billingInvoices, reset]);
+    setSelectedSourceIds(editingInvoice?.sourceInvoiceIds || []);
+    setTargetMargin(editingInvoice?.marginPercent != null
+      ? Number(editingInvoice.marginPercent).toFixed(1)
+      : "30");
+  }, [billingInvoices, editingInvoice, modal, reset]);
 
   useEffect(() => {
     if (!invoiceDate) return;
+    if (previousInvoiceDate.current === invoiceDate) return;
+    previousInvoiceDate.current = invoiceDate;
     setValue("dueDate", addDays(invoiceDate, 30));
   }, [invoiceDate, setValue]);
 
@@ -205,13 +236,16 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, [selectedWorkOrderId, activeWorkOrders, clearErrors, setValue]);
 
   useEffect(() => {
+    if (previousWorkOrderId.current === selectedWorkOrderId) return;
+    previousWorkOrderId.current = selectedWorkOrderId || "";
     setSelectedSourceIds([]);
   }, [selectedWorkOrderId]);
 
   if (modal !== "createBillingInvoice") return null;
 
   const toggleSourceInvoice = (invoiceId: string) => {
-    if (sourceOwnerById.has(invoiceId)) return;
+    const owner = sourceOwnerById.get(invoiceId);
+    if (owner && owner.id !== editingInvoice?.id) return;
     setSelectedSourceIds(current => current.includes(invoiceId)
       ? current.filter(id => id !== invoiceId)
       : [...current, invoiceId]);
@@ -258,8 +292,12 @@ export default function BillingInvoiceCreateModal(props: any) {
       const token = sessionData.session?.access_token;
       if (!token) throw new Error("Missing session");
 
-      const res = await fetch("/api/billing-invoices", {
-        method: "POST",
+      const res = await fetch(
+        isEditing
+          ? `/api/billing-invoices?id=${encodeURIComponent(editingInvoice.id)}`
+          : "/api/billing-invoices",
+        {
+        method: isEditing ? "PATCH" : "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -274,21 +312,23 @@ export default function BillingInvoiceCreateModal(props: any) {
 
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "Billing invoice save failed");
-      fire?.(`Invoice #${payload.invoice?.num || data.num} ${state === "draft" ? "draft saved" : "submitted"}`);
+      fire?.(`Invoice #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "submitted"}`);
       onCreated?.(payload.invoice);
       onClose?.();
     } catch (err: any) {
-      fire?.(`Billing invoice save failed: ${err.message || err}`);
+      fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${err.message || err}`);
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Modal onClose={onClose} title="Create P1 to 7-Eleven invoice" width={920}>
+    <Modal onClose={onClose} title={isEditing ? `Edit draft #${editingInvoice.num}` : "Create P1 to 7-Eleven invoice"} width={920}>
       <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
-          Direction is fixed: P1 Pros bills 7-Eleven. Linking a work order is optional.
+          {isEditing
+            ? "Update this draft, or submit it when it is ready."
+            : "Direction is fixed: P1 Pros bills 7-Eleven. Linking a work order is optional."}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, padding: "14px 16px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginBottom: 18 }} className="billing-summary-grid">
@@ -369,14 +409,15 @@ export default function BillingInvoiceCreateModal(props: any) {
               <div style={{ display: "grid", gap: 7 }}>
                 {availableSourceInvoices.map((invoice: any) => {
                   const linkedTo = sourceOwnerById.get(invoice.id);
+                  const linkedElsewhere = !!linkedTo && linkedTo.id !== editingInvoice?.id;
                   const checked = selectedSourceIds.includes(invoice.id);
                   return (
-                    <label key={invoice.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: `1px solid ${checked ? T.accent : T.borderSoft}`, background: T.surface, opacity: linkedTo ? 0.6 : 1, cursor: linkedTo ? "not-allowed" : "pointer" }}>
-                      <input type="checkbox" checked={checked} disabled={!!linkedTo} onChange={() => toggleSourceInvoice(invoice.id)} />
+                    <label key={invoice.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: `1px solid ${checked ? T.accent : T.borderSoft}`, background: T.surface, opacity: linkedElsewhere ? 0.6 : 1, cursor: linkedElsewhere ? "not-allowed" : "pointer" }}>
+                      <input type="checkbox" checked={checked} disabled={linkedElsewhere} onChange={() => toggleSourceInvoice(invoice.id)} />
                       <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
                       <span style={{ fontSize: 11, color: T.muted, textTransform: "capitalize" }}>{invoice.state}</span>
                       <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.ink }}>{fmt(Number(invoice.total || 0))}</span>
-                      {linkedTo && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo}</span>}
+                      {linkedElsewhere && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo?.num}</span>}
                     </label>
                   );
                 })}
@@ -438,7 +479,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button type="button" onClick={onClose} className="btn-soft">Cancel</button>
           <button type="button" disabled={submitting} onClick={handleSubmit(data => submit(data, "draft"))} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting ? 0.7 : 1 }}>
-            {submitting ? <><BtnSpinner />Saving...</> : "Save as Draft"}
+            {submitting ? <><BtnSpinner />Saving...</> : isEditing ? "Save Draft" : "Save as Draft"}
           </button>
           <button type="submit" disabled={submitting} className="btn-accent" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting ? 0.7 : 1 }}>
             {submitting ? <><BtnSpinner />Submitting...</> : "Submit Invoice"}

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { Sel } from "../../components/ui/Sel";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
+import { NewNotesDot } from "../../components/ui/NewNotesDot";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import {
@@ -174,7 +175,12 @@ export default function WorkOrderList(props: any) {
                     const aging = getSlaAgingStyle(wo);
                     return (
                       <tr key={wo.id} onClick={() => { setSelectedWO(wo.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
-                        <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>{wo.id}</td>
+                        <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            {wo.id}
+                            {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                          </span>
+                        </td>
                         <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>{wo.incidentId || "-"}</td>
                         <td style={{ padding: "12px 14px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "-"}</td>
                         <td style={{ padding: "12px 14px", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "-"}</td>
@@ -237,7 +243,10 @@ export default function WorkOrderList(props: any) {
                   }}
                 >
                   <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>{wo.id}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>
+                      {wo.id}
+                      {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                    </span>
                     <div className="mobile-card-badges" style={{ display: "flex", gap: 6 }}>
                       <Badge conf={PRIORITY[wo.priority]} small />
                       <Badge conf={STATUS[wo.status]} small />

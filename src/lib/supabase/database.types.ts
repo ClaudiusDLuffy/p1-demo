@@ -705,6 +705,7 @@ export type Database = {
           sla_duration_hours: number | null
           sla_started_at: string | null
           source: string | null
+          staff_notes_seen_at: string | null
           start_time: string | null
           status: Database["public"]["Enums"]["wo_status"]
           store_number: string | null
@@ -763,6 +764,7 @@ export type Database = {
           sla_duration_hours?: number | null
           sla_started_at?: string | null
           source?: string | null
+          staff_notes_seen_at?: string | null
           start_time?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
           store_number?: string | null
@@ -821,6 +823,7 @@ export type Database = {
           sla_duration_hours?: number | null
           sla_started_at?: string | null
           source?: string | null
+          staff_notes_seen_at?: string | null
           start_time?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
           store_number?: string | null
