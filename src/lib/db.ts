@@ -6,6 +6,7 @@ import { supabase } from "./supabase/client";
 import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
 import type { Invoice, WorkOrder } from "./schemas";
+import type { Json } from "./supabase/database.types";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -112,6 +113,9 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const mapped = (woRes.data || []).map(wo => {
     const activities = actsByWo[wo.id] || [];
     const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
+    const pendingSevenElevenActivities = activities.filter(activity =>
+      activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
+    );
     const seenAt = (wo as any).staff_notes_seen_at || null;
     const hasUnreadNotes = !!latestNoteAt && (
       !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
@@ -122,6 +126,9 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
       activities,
       latestNoteAt,
       hasUnreadNotes,
+      pendingSevenElevenActivities,
+      pendingSevenElevenSyncCount: pendingSevenElevenActivities.length,
+      hasPendingSevenElevenSync: pendingSevenElevenActivities.length > 0,
       photos: (photosByWo[wo.id] || [])
         .map(p => p.storage_path)
         .filter(Boolean),
@@ -169,6 +176,9 @@ const mapWO = (w: any) => ({
   eta: w.eta,
   dispatchedAt: w.dispatched_at,
   startTime: w.start_time ? new Date(w.start_time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null,
+  startTimeRaw: w.start_time || null,
+  endTime: w.end_time ? new Date(w.end_time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null,
+  endTimeRaw: w.end_time || null,
   assetMake: w.asset_make,
   assetModel: w.asset_model,
   assetSerial: w.asset_serial,
@@ -178,6 +188,8 @@ const mapWO = (w: any) => ({
   capitalNotes: w.capital_notes || null,
   isCapital: w.is_capital,
   capitalStatus: w.capital_status,
+  resolutionCode: w.resolution_code || null,
+  resolutionNotes: w.resolution_notes || null,
   partNeeded: w.part_needed,
   partEta: w.part_eta,
   source: w.source,
@@ -203,6 +215,11 @@ const mapActivity = (a: any) => ({
   enteredByRole: a.entered_by_role || "system",
   isStaffOverride: !!a.is_staff_override,
   overrideForContractorId: a.override_for_contractor_id || null,
+  eventKey: a.event_key || (a.type === "system" ? "system" : "note"),
+  eventData: a.event_data || {},
+  requiresSevenElevenSync: !!a.requires_7eleven_sync,
+  syncedToSevenElevenAt: a.synced_to_7eleven_at || null,
+  syncedToSevenElevenBy: a.synced_to_7eleven_by || null,
 });
 
 // "5h", "2d", "1w" — relative age string from a timestamp
@@ -394,7 +411,31 @@ export async function markWorkOrderNotesSeen(
 export type ActivityAuditOptions = {
   staffOverride?: boolean;
   overrideForContractorId?: string | null;
+  eventKey?: string;
+  eventData?: Json;
+  requiresSevenElevenSync?: boolean;
 };
+
+function inferActivityEventKey(text: string, type: "note" | "system" | "ai"): string {
+  if (type === "ai") return "ai_note";
+  const value = text.toLowerCase();
+  if (/draft (saved|updated)/.test(value)) return "invoice_draft";
+  if (/invoice .*uploaded|uploaded invoice/.test(value)) return "invoice_uploaded";
+  if (/invoice .*submitted/.test(value)) return "invoice_submitted";
+  if (/checked in|started work/.test(value)) return "check_in";
+  if (/job completed|clocked out/.test(value)) return "job_completed";
+  if (/work paused/.test(value)) return "job_paused";
+  if (/^part added/.test(value)) return "part_added";
+  if (/^part removed/.test(value)) return "part_removed";
+  if (/part|tracking|return date/.test(value)) return "part_updated";
+  if (/added .*photo/.test(value)) return "photo_added";
+  if (/photo removed/.test(value)) return "photo_removed";
+  if (/eta set/.test(value)) return "eta_updated";
+  if (/technician on job/.test(value)) return "technician_updated";
+  if (/dispatched|assigned|unassigned/.test(value)) return "assignment";
+  if (/moved to|status|reopened|closed/.test(value)) return "status_change";
+  return type === "system" ? "system" : "note";
+}
 
 export async function insertActivity(
   workOrderId: string,
@@ -405,6 +446,7 @@ export async function insertActivity(
 ): Promise<void> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
+  const eventKey = audit.eventKey || inferActivityEventKey(text, type);
   const { error } = await sb.from("activities").insert({
     work_order_id: workOrderId,
     author_id: user?.id || null,
@@ -415,7 +457,24 @@ export async function insertActivity(
     override_for_contractor_id: audit.staffOverride
       ? audit.overrideForContractorId || null
       : null,
+    event_key: eventKey,
+    event_data: audit.eventData || {},
+    requires_7eleven_sync: !!audit.requiresSevenElevenSync,
   });
+  if (error) throw error;
+}
+
+export async function markActivitySevenElevenSynced(
+  activityId: string,
+  synced: boolean,
+): Promise<void> {
+  const sb = supabase();
+  const { error } = await sb.from("activities")
+    .update({
+      synced_to_7eleven_at: synced ? new Date().toISOString() : null,
+      synced_to_7eleven_by: null,
+    })
+    .eq("id", activityId);
   if (error) throw error;
 }
 

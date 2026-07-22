@@ -146,13 +146,27 @@ export default function useInvoices({ currentUser, fire }: any) {
           { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "draft", salesTax: tax },
           validLines,
         );
-        await insertActivity(wo.id, currentUser.name, `Invoice #${result.num} draft updated.`, "system");
+        await insertActivity(wo.id, currentUser.name, `Invoice #${result.num} draft updated.`, "system", { eventKey: "invoice_draft" });
       } else {
         result = await insertInvoice(
           { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "draft" },
           validLines,
           currentUser.name,
         );
+      }
+      if (draft.pdfFile) {
+        try {
+          await uploadInvoicePdf(result.id, result.num, draft.pdfFile);
+          await insertActivity(
+            wo.id,
+            currentUser.name,
+            `PDF attached to invoice #${result.num} draft: ${draft.pdfFile.name}.`,
+            "system",
+            { eventKey: "invoice_draft", eventData: { fileName: draft.pdfFile.name, fileSize: draft.pdfFile.size } },
+          );
+        } catch (e: any) {
+          fire(`Draft saved, but PDF upload failed: ${e.message || e}`);
+        }
       }
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
@@ -243,7 +257,22 @@ export default function useInvoices({ currentUser, fire }: any) {
       // would label the file with the colliding number the user originally
       // typed, which would be wrong on download.
       const draftForPdf = { ...draft, num: finalNum };
-      await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
+      if (draft.pdfFile) {
+        try {
+          await uploadInvoicePdf(header.id, finalNum, draft.pdfFile);
+          await insertActivity(
+            wo.id,
+            currentUser.name,
+            `Contractor invoice PDF uploaded for #${finalNum}: ${draft.pdfFile.name}.`,
+            "system",
+            { eventKey: "invoice_uploaded", eventData: { invoiceId: header.id, invoiceNum: finalNum, fileName: draft.pdfFile.name, fileSize: draft.pdfFile.size } },
+          );
+        } catch (e: any) {
+          fire(`Invoice saved, but PDF upload failed: ${e.message || e}`);
+        }
+      } else if (!draft.hasExistingPdf) {
+        await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
+      }
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       setSubmittedInvoiceNum(finalNum);

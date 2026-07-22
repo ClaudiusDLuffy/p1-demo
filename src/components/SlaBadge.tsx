@@ -21,11 +21,12 @@ const C = {
 type Props = {
   responseBreachAt: string | null;
   resolutionBreachAt: string | null;
+  responseMetAt?: string | null;
   size?: "sm" | "md";
 };
 
-export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: Props) {
-  const state = computeSlaState(responseBreachAt, resolutionBreachAt);
+export function SlaBadge({ responseBreachAt, resolutionBreachAt, responseMetAt = null, size = "sm" }: Props) {
+  const state = computeSlaState(responseBreachAt, resolutionBreachAt, responseMetAt);
   if (!state) return null;
 
   // Color logic per spec:
@@ -38,7 +39,20 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: 
   let label: string;
   let pulse = false;
   const bothBreached = state.responseBreached && state.resolutionBreached;
-  if (bothBreached) {
+  if (state.responseMet && state.resolutionBreached) {
+    color = C.danger; bg = C.dangerSoft;
+    label = "Resolution Breached";
+  } else if (state.responseMet) {
+    const resolutionLeft = formatRemaining(state.resolutionRemainingHours);
+    if (state.resolutionRemainingHours < 2) {
+      color = C.danger; bg = C.dangerSoft;
+    } else if (state.resolutionRemainingHours < 4) {
+      color = C.warn; bg = C.warnSoft;
+    }
+    label = size === "sm"
+      ? `Resolution in ${resolutionLeft}`
+      : `Responded · Resolution in ${resolutionLeft}`;
+  } else if (bothBreached) {
     color = C.danger; bg = C.dangerSoft;
     label = "Both Breached";
     pulse = true;
@@ -72,9 +86,11 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: 
   }
 
   // md — full detail. Used on WO detail.
-  const responseStr = state.responseBreached
-    ? `breached ${formatRemaining(state.responseRemainingHours)}`
-    : formatRemaining(state.responseRemainingHours);
+  const responseStr = state.responseMet
+    ? `${state.responseWasLate ? "met late" : "met"} ${state.responseMetAt?.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+    : state.responseBreached
+      ? `breached ${formatRemaining(state.responseRemainingHours)}`
+      : formatRemaining(state.responseRemainingHours);
   const resolutionStr = state.resolutionBreached
     ? `breached ${formatRemaining(state.resolutionRemainingHours)}`
     : formatRemaining(state.resolutionRemainingHours);
@@ -85,7 +101,7 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, size = "sm" }: 
         {label}
       </div>
       <div style={{ fontSize: 11, color: C.muted }}>
-        Response: <span style={{ color: state.responseBreached ? C.danger : C.ink, fontWeight: 600 }}>{responseStr}</span>
+        Response: <span style={{ color: state.responseWasLate || state.responseBreached ? C.danger : C.ink, fontWeight: 600 }}>{responseStr}</span>
         {" · "}
         Resolution: <span style={{ color: state.resolutionBreached ? C.danger : C.ink, fontWeight: 600 }}>{resolutionStr}</span>
       </div>

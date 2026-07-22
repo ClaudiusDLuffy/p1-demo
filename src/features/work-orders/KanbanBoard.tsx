@@ -4,6 +4,7 @@
 import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
+import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { getSlaAgingStyle, getWorkOrderDateMeta, sortWorkOrders } from "../../lib/workOrderView";
@@ -49,6 +50,7 @@ export default function KanbanBoard(props: any) {
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
             {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+            {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: st?.color, background: st?.bg, border: `1px solid ${st?.ring || st?.color}55`, borderRadius: 10, padding: "2px 6px" }}>{st?.label}</span>
@@ -75,7 +77,7 @@ export default function KanbanBoard(props: any) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, gap: 6 }}>
           <span style={{ fontWeight: 600, color: wo.contractor ? T.inkSoft : T.subtle }}>{wo.contractor ? getUser(wo.contractor)?.name.split(" ")[0] : "Unassigned"}</span>
           {(wo.responseBreachAt || wo.resolutionBreachAt)
-            ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
+            ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} responseMetAt={wo.startTimeRaw} size="sm" />
             : sla && <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, border: `1px solid ${sla.color}20` }}>{sla.text}</span>}
         </div>
       </div>
