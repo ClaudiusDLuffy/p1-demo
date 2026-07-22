@@ -114,7 +114,29 @@ export const CreateInvoiceSchema = z.object({
   terms: z.string().min(1),
   tax: z.string().optional(),
   cme: z.string().optional(),
-  lines: z.array(CreateInvoiceLineSchema).min(1, "At least one line item is required"),
+  uploadOnly: z.boolean().optional(),
+  uploadedTotal: z.string().optional(),
+  lines: z.array(CreateInvoiceLineSchema),
+}).superRefine((invoice, ctx) => {
+  if (invoice.uploadOnly) {
+    const uploadedTotal = Number(invoice.uploadedTotal);
+    if (!Number.isFinite(uploadedTotal) || uploadedTotal <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["uploadedTotal"],
+        message: "Enter the total shown on the uploaded invoice",
+      });
+    }
+    return;
+  }
+
+  if (invoice.lines.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["lines"],
+      message: "At least one line item is required",
+    });
+  }
 })
 
 export type CreateInvoiceForm = z.infer<typeof CreateInvoiceSchema>

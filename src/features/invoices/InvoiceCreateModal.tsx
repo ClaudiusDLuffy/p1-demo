@@ -51,6 +51,7 @@ export default function InvoiceCreateModal(props: any) {
     control,
     watch,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<CreateInvoiceForm>({
     resolver: zodResolver(CreateInvoiceSchema),
@@ -61,15 +62,19 @@ export default function InvoiceCreateModal(props: any) {
       terms: "Net 30",
       tax: "",
       cme: "",
+      uploadOnly: false,
+      uploadedTotal: "",
       lines: initialLines(),
     },
   });
-  const { fields, append, remove } = useFieldArray({ control, name: "lines" });
+  const { fields, append, remove, replace } = useFieldArray({ control, name: "lines" });
   const watchedLines = watch("lines") || [];
   const watchedTax = watch("tax");
+  const uploadOnly = !!watch("uploadOnly");
+  const uploadedTotal = Number(watch("uploadedTotal") || 0);
   const sub = watchedLines.reduce((s: number, l: any) => s + amount(l), 0);
   const tax = parseFloat(watchedTax || "") || 0;
-  const total = sub + tax;
+  const total = uploadOnly ? uploadedTotal : sub + tax;
 
   useEffect(() => {
     if (modal !== "createInvoice") return;
@@ -82,14 +87,20 @@ export default function InvoiceCreateModal(props: any) {
     // next-number from the DB so the user sees a non-colliding suggestion
     // immediately; falls back to blank if the lookup fails.
     if (resumeDraft) {
+      const resumeUploadOnly = !!resumeDraft.pdfStoragePath
+        && (resumeDraft.lines || []).length === 0;
       reset({
         num: resumeDraft.num || "",
         invoiceDate: resumeDraft.invoiceDate || todayIso(),
         serviceDate: resumeDraft.serviceDate || todayIso(),
         terms: resumeDraft.terms || "Net 30",
-        tax: resumeDraft.salesTax != null ? String(resumeDraft.salesTax) : "",
+        tax: resumeUploadOnly ? "" : resumeDraft.salesTax != null ? String(resumeDraft.salesTax) : "",
         cme: resumeDraft.cme || "",
-        lines: (resumeDraft.lines || []).length
+        uploadOnly: resumeUploadOnly,
+        uploadedTotal: resumeUploadOnly ? String(resumeDraft.total || "") : "",
+        lines: resumeUploadOnly
+          ? []
+          : (resumeDraft.lines || []).length
           ? resumeDraft.lines.map((l: any) => ({ type: l.type, desc: l.desc || l.description || "", qty: Number(l.qty) || 1, rate: Number(l.rate) }))
           : initialLines(),
       });
@@ -102,6 +113,8 @@ export default function InvoiceCreateModal(props: any) {
         terms: "Net 30",
         tax: "",
         cme: "",
+        uploadOnly: false,
+        uploadedTotal: "",
         lines: initialLines(),
       });
       // Async hydrate the suggested invoice number. If the user is already
@@ -197,6 +210,7 @@ export default function InvoiceCreateModal(props: any) {
           <div><div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store #</div><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>#{woData.store}</div></div>
         </div>
 
+        <div style={{ display: uploadOnly ? "none" : "block" }}>
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
           <div className="inv-line-head" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
@@ -265,6 +279,40 @@ export default function InvoiceCreateModal(props: any) {
             </div>
           </div>
         </div>
+        </div>
+
+        {uploadOnly && (
+          <div style={{ padding: "14px 16px", marginBottom: 18, border: `1px solid ${errors.uploadedTotal ? T.danger : T.borderSoft}`, borderRadius: 12, background: T.surfaceSoft }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Uploaded invoice amount</div>
+            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "minmax(0, 240px) 1fr", gap: 14, alignItems: "end" }}>
+              <label>
+                <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice total</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  placeholder="0.00"
+                  {...register("uploadedTotal")}
+                  style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.uploadedTotal ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13, fontFamily: "var(--font-jetbrains-mono), monospace" }}
+                />
+                {errors.uploadedTotal && <span style={{ display: "block", marginTop: 5, fontSize: 11, color: T.danger }}>{errors.uploadedTotal.message}</span>}
+              </label>
+              <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>
+                Enter the final total from the PDF. This becomes the contractor cost used by staff for margin calculation.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn-soft"
+              onClick={() => {
+                setValue("uploadOnly", false, { shouldDirty: true });
+                setValue("uploadedTotal", "", { shouldDirty: true });
+                if (fields.length === 0) replace(initialLines());
+              }}
+              style={{ marginTop: 12, padding: "6px 10px", fontSize: 10 }}
+            >Enter detailed line items instead</button>
+          </div>
+        )}
 
         {over && (
           <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}55`, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 10 }}>
@@ -280,7 +328,7 @@ export default function InvoiceCreateModal(props: any) {
                 {pdfFile ? pdfFile.name : resumeDraft?.pdfStoragePath ? "A PDF is already attached" : "Upload your invoice PDF"}
               </div>
               <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>
-                PDF only, up to 5 MB. A portal PDF is generated when none is attached.
+                PDF only, up to 5 MB. Uploading a PDF makes detailed line items optional.
               </div>
               <input
                 type="file"
@@ -302,13 +350,24 @@ export default function InvoiceCreateModal(props: any) {
                   }
                   setPdfFile(file);
                   setPdfError("");
+                  setValue("uploadOnly", true, { shouldDirty: true });
+                  setValue("tax", "", { shouldDirty: true });
+                  replace([]);
                 }}
               />
             </div>
           </label>
           {pdfError && <div style={{ marginTop: 7, color: T.danger, fontSize: 11, fontWeight: 600 }}>{pdfError}</div>}
           {pdfFile && (
-            <button type="button" onClick={() => { setPdfFile(null); setPdfError(""); }} className="btn-soft" style={{ display: "block", margin: "8px auto 0", padding: "5px 10px", fontSize: 10 }}>
+            <button type="button" onClick={() => {
+              setPdfFile(null);
+              setPdfError("");
+              if (!resumeDraft?.pdfStoragePath) {
+                setValue("uploadOnly", false, { shouldDirty: true });
+                setValue("uploadedTotal", "", { shouldDirty: true });
+                if (fields.length === 0) replace(initialLines());
+              }
+            }} className="btn-soft" style={{ display: "block", margin: "8px auto 0", padding: "5px 10px", fontSize: 10 }}>
               Remove attachment
             </button>
           )}
@@ -333,6 +392,8 @@ export default function InvoiceCreateModal(props: any) {
                     terms: watch("terms"),
                     tax: watch("tax"),
                     cme: watch("cme"),
+                    uploadOnly: watch("uploadOnly"),
+                    uploadedTotal: watch("uploadedTotal"),
                     lines: watch("lines"),
                     userTypedNum: numTouched,
                     pdfFile,

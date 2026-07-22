@@ -891,6 +891,7 @@ export type Database = {
     }
     Functions: {
       is_staff: { Args: never; Returns: boolean }
+      next_contractor_invoice_num: { Args: never; Returns: string }
     }
     Enums: {
       capital_status:

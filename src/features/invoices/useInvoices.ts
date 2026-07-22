@@ -98,22 +98,33 @@ export default function useInvoices({ currentUser, fire }: any) {
   // can't be persisted; the caller surfaced the user-facing error.
   const buildInvoicePayload = (wo: any, draft: any, requireFullLines = true) => {
     if (!draft.num) { fire("Enter an invoice number"); return null; }
-    const validLines = requireFullLines
-      ? (draft.lines || []).filter((l: any) => l.desc && l.qty && l.rate)
-      : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
-    if (requireFullLines && validLines.length === 0) {
+    const uploadOnly = !!draft.uploadOnly;
+    const hasUploadedPdf = !!draft.pdfFile || !!draft.hasExistingPdf;
+    if (uploadOnly && !hasUploadedPdf) {
+      fire("Attach the contractor invoice PDF"); return null;
+    }
+    const validLines = uploadOnly
+      ? []
+      : requireFullLines
+        ? (draft.lines || []).filter((l: any) => l.desc && l.qty && l.rate)
+        : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
+    if (!uploadOnly && requireFullLines && validLines.length === 0) {
       fire("Add at least one line item with description, qty, and rate"); return null;
     }
-    const subtotal = invSubtotal(validLines);
-    const tax = parseFloat(draft.tax) || 0;
-    const total = subtotal + tax;
+    const uploadedTotal = Number(draft.uploadedTotal || 0);
+    if (uploadOnly && requireFullLines && (!Number.isFinite(uploadedTotal) || uploadedTotal <= 0)) {
+      fire("Enter the total shown on the uploaded invoice"); return null;
+    }
+    const tax = uploadOnly ? 0 : parseFloat(draft.tax) || 0;
+    const subtotal = uploadOnly ? Math.max(uploadedTotal, 0) : invSubtotal(validLines);
+    const total = uploadOnly ? Math.max(uploadedTotal, 0) : subtotal + tax;
     const mappedLines = validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) }));
     const woCity = (wo.city || "").trim();
     const woAddr = (wo.addr || "").trim();
     const fullStoreAddr = !woCity || (woAddr && woAddr.includes(woCity))
       ? woAddr
       : [woAddr, woCity].filter(Boolean).join(", ");
-    return { validLines, subtotal, tax, total, mappedLines, fullStoreAddr };
+    return { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly };
   };
 
   // Save (or re-save) an invoice as a DRAFT — does NOT advance the WO, skips
@@ -136,20 +147,20 @@ export default function useInvoices({ currentUser, fire }: any) {
     const draft = formData ?? newInv;
     const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ false);
     if (!payload) return false;
-    const { validLines, subtotal, tax, total, fullStoreAddr } = payload;
+    const { validLines, tax, total, fullStoreAddr, uploadOnly } = payload;
     const userTypedNum = !!draft.num;
     try {
       let result: any;
       if (existingInvoiceId) {
         result = await updateInvoiceWithLines(
           existingInvoiceId,
-          { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "draft", salesTax: tax },
+          { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "draft", salesTax: tax, totalOverride: uploadOnly ? total : undefined },
           validLines,
         );
         await insertActivity(wo.id, currentUser.name, `Invoice #${result.num} draft updated.`, "system", { eventKey: "invoice_draft" });
       } else {
         result = await insertInvoice(
-          { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "draft" },
+          { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "draft", totalOverride: uploadOnly ? total : undefined },
           validLines,
           currentUser.name,
         );
@@ -187,26 +198,9 @@ export default function useInvoices({ currentUser, fire }: any) {
 
   const doSubmitInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null) => {
     const draft = formData ?? newInv;
-    if (!draft.num) { fire("Enter an invoice number"); return false; }
-    const validLines = (draft.lines || []).filter((l: any) => l.desc && l.qty && l.rate);
-    if (validLines.length === 0) { fire("Add at least one line item with description, qty, and rate"); return false; }
-    // DEMO-SAFE SOFTENING (pending client decision on generate-vs-upload):
-    // the PDF attachment is intentionally NOT blocking submission. The
-    // QuickBooks upload field + labeling stay in place; when no PDF is
-    // attached the post-submit "Download PDF" still offers the generated one.
-    // Restore the hard block once the client confirms the invoice source.
-    const subtotal = invSubtotal(validLines);
-    const tax = parseFloat(draft.tax) || 0;
-    const total = subtotal + tax;
-    const mappedLines = validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) }));
-    // Full service-location for the PDF "ship to". The WO keeps street in
-    // `addr` and city/state in `city`; combine them so the state reaches the
-    // invoice. Avoid duplicating when addr already contains the city/state.
-    const woCity = (wo.city || "").trim();
-    const woAddr = (wo.addr || "").trim();
-    const fullStoreAddr = !woCity || (woAddr && woAddr.includes(woCity))
-      ? woAddr
-      : [woAddr, woCity].filter(Boolean).join(", ");
+    const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ true);
+    if (!payload) return false;
+    const { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly } = payload;
     // NTE early-warning flag: if this invoice total reaches the WO's flag
     // threshold (default $900), flag the WO so it lands in Mandy's "NTE
     // Approval Needed" queue. Dollar-based, separate from the actual-NTE
@@ -232,7 +226,7 @@ export default function useInvoices({ currentUser, fire }: any) {
         // pending_approval (matches the brand-new submit path below).
         const res = await updateInvoiceWithLines(
           existingInvoiceId,
-          { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "submitted", salesTax: tax },
+          { num: draft.num, userTypedNum, cme: draft.cme || null, invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate || null, terms: draft.terms, storeAddr: fullStoreAddr, state: "submitted", salesTax: tax, totalOverride: uploadOnly ? total : undefined },
           validLines,
         );
         header = { id: res.id };
@@ -242,7 +236,7 @@ export default function useInvoices({ currentUser, fire }: any) {
         await insertActivity(wo.id, currentUser.name, `Invoice ${finalNum} submitted. Total: $${total.toFixed(2)}.`, "system");
       } else {
         header = await insertInvoice(
-          { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted" },
+          { ...draft, userTypedNum, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr, contractor: wo.contractor, state: "submitted", totalOverride: uploadOnly ? total : undefined },
           validLines,
           currentUser.name,
         );
@@ -302,6 +296,14 @@ export default function useInvoices({ currentUser, fire }: any) {
     try {
       const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename, loadLogoDataUrl } = await import("../../lib/invoicePdf");
       const filename = invoiceFilename(inv);
+      // PDF-only invoices use the contractor's uploaded document as the
+      // source of truth because there are no portal line items to regenerate.
+      if (currentUser?.role === "contractor" && inv.pdfStoragePath && (inv.lines || []).length === 0) {
+        const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
+        triggerBlobDownload(blob, filename);
+        fire(`Invoice ${inv.num} downloaded`);
+        return;
+      }
       // Contractor download: always regenerate with the contractor-perspective
       // framing (FROM contractor → BILL TO P1 Pros). We never serve the stored
       // bytes (those are the staff/7-Eleven document P1 posts) and never
