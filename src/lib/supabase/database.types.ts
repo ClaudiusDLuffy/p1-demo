@@ -21,9 +21,14 @@ export type Database = {
           created_at: string | null
           deleted_at: string | null
           entered_by_role: string
+          event_data: Json
+          event_key: string
           id: string
           is_staff_override: boolean
           override_for_contractor_id: string | null
+          requires_7eleven_sync: boolean
+          synced_to_7eleven_at: string | null
+          synced_to_7eleven_by: string | null
           text: string
           type: string | null
           work_order_id: string
@@ -34,9 +39,14 @@ export type Database = {
           created_at?: string | null
           deleted_at?: string | null
           entered_by_role?: string
+          event_data?: Json
+          event_key?: string
           id?: string
           is_staff_override?: boolean
           override_for_contractor_id?: string | null
+          requires_7eleven_sync?: boolean
+          synced_to_7eleven_at?: string | null
+          synced_to_7eleven_by?: string | null
           text: string
           type?: string | null
           work_order_id: string
@@ -47,9 +57,14 @@ export type Database = {
           created_at?: string | null
           deleted_at?: string | null
           entered_by_role?: string
+          event_data?: Json
+          event_key?: string
           id?: string
           is_staff_override?: boolean
           override_for_contractor_id?: string | null
+          requires_7eleven_sync?: boolean
+          synced_to_7eleven_at?: string | null
+          synced_to_7eleven_by?: string | null
           text?: string
           type?: string | null
           work_order_id?: string
@@ -65,6 +80,13 @@ export type Database = {
           {
             foreignKeyName: "activities_override_for_contractor_id_fkey"
             columns: ["override_for_contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_synced_to_7eleven_by_fkey"
+            columns: ["synced_to_7eleven_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]

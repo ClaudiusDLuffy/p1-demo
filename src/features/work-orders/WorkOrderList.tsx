@@ -6,6 +6,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Sel } from "../../components/ui/Sel";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
+import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import {
@@ -179,6 +180,7 @@ export default function WorkOrderList(props: any) {
                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             {wo.id}
                             {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                            {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
                         </td>
                         <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>{wo.incidentId || "-"}</td>
@@ -196,7 +198,7 @@ export default function WorkOrderList(props: any) {
                             <span style={{ fontSize: 11, color: T.muted }}>{dates.slaDue}</span>
                             <span style={{ fontSize: 10, fontWeight: 700, color: aging.color, background: aging.bg, border: `1px solid ${aging.ring}66`, padding: "2px 8px", borderRadius: 10, width: "fit-content" }}>{aging.label}</span>
                             {hasNewSla
-                              ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
+                              ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} responseMetAt={wo.startTimeRaw} size="sm" />
                               : (sla ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, width: "fit-content" }}>{sla.text}</span> : null)}
                           </div>
                         </td>
@@ -246,6 +248,7 @@ export default function WorkOrderList(props: any) {
                     <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>
                       {wo.id}
                       {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                      {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                     </span>
                     <div className="mobile-card-badges" style={{ display: "flex", gap: 6 }}>
                       <Badge conf={PRIORITY[wo.priority]} small />
@@ -275,7 +278,7 @@ export default function WorkOrderList(props: any) {
                         <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: T.danger, color: "#fff" }}>OVER NTE</span>
                       )}
                       {hasNewSla
-                        ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} size="sm" />
+                        ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} responseMetAt={wo.startTimeRaw} size="sm" />
                         : sla
                           ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>
                           : null}

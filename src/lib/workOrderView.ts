@@ -24,7 +24,11 @@ export const getUpdatedTime = (wo: any) =>
   toTime(wo?.updatedAt || wo?.updated_at || wo?.createdAt || wo?.created_at) || getCreatedTime(wo);
 
 export const getSlaDueTime = (wo: any) => {
-  const twoDeadlineState = computeSlaState(wo?.responseBreachAt || null, wo?.resolutionBreachAt || null);
+  const twoDeadlineState = computeSlaState(
+    wo?.responseBreachAt || null,
+    wo?.resolutionBreachAt || null,
+    wo?.startTimeRaw || wo?.start_time || null,
+  );
   if (twoDeadlineState) {
     return twoDeadlineState.headline === "response"
       ? twoDeadlineState.responseBreachAt.getTime()

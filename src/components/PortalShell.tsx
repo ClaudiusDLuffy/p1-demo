@@ -1008,6 +1008,7 @@ export default function PortalShell() {
   const [assetSerialInput, setAssetSerialInput] = useState("");
   const [assetYearInput, setAssetYearInput] = useState("");
   const [resolutionInput, setResolutionInput] = useState("");
+  const [resolutionNotesInput, setResolutionNotesInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const { currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
@@ -1036,7 +1037,7 @@ export default function PortalShell() {
     doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
-    doAddPart, doUpdatePart, doDeletePart } = useWorkOrders({
+    doAddPart, doUpdatePart, doDeletePart, doMarkSevenElevenSynced } = useWorkOrders({
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
@@ -1214,6 +1215,7 @@ export default function PortalShell() {
       setAssetSerialInput(woData.assetSerial || "");
       setAssetYearInput(woData.assetYear || "");
       setResolutionInput("");
+      setResolutionNotesInput(woData.resolutionNotes || "");
     }
   }, [modal, woData]);
 
@@ -1363,15 +1365,15 @@ export default function PortalShell() {
       closedWOs: workOrders.filter(w => w.status === "closed"),
       slaAtRisk: workOrders.filter(w => {
         if (!activeStatuses.includes(w.status)) return false;
-        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt);
+        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt, w.startTimeRaw);
         if (s2) return !s2.responseBreached && !s2.resolutionBreached
-          && (s2.responseRemainingHours < 2 || s2.resolutionRemainingHours < 2);
+          && ((!s2.responseMet && s2.responseRemainingHours < 2) || s2.resolutionRemainingHours < 2);
         const s = slaRemaining(w);
         return s && s.remainingHours < 2 && s.remainingHours > 0;
       }).length,
       slaBreached: workOrders.filter(w => {
         if (!activeStatuses.includes(w.status)) return false;
-        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt);
+        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt, w.startTimeRaw);
         if (s2) return s2.responseBreached || s2.resolutionBreached;
         const s = slaRemaining(w);
         return s && s.remainingHours <= 0;
@@ -1952,7 +1954,7 @@ export default function PortalShell() {
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setSelectedInvoice={setSelectedInvoice} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setSelectedInvoice={setSelectedInvoice} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} doMarkSevenElevenSynced={doMarkSevenElevenSynced} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
@@ -2575,7 +2577,7 @@ export default function PortalShell() {
                 <option>Other</option>
               </Sel></Field>
             </div>
-            <Field label="Resolution details"><TA id="resolution-notes" rows={3} placeholder="Brief summary of what was found and done..." /></Field>
+            <Field label="Closing notes"><TA id="resolution-notes" rows={3} value={resolutionNotesInput} onChange={(e: any) => setResolutionNotesInput(e.target.value)} placeholder="Brief summary of what was found and done..." /></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="End date"><DatePickerField value={closeDateInput} onChange={setCloseDateInput} /></Field>
               <Field label="End time"><TimePickerField value={closeTimeInput} onChange={setCloseTimeInput} /></Field>
@@ -2593,7 +2595,7 @@ export default function PortalShell() {
               const y = parseInt(assetYearInput, 10);
               if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
               const completedAt = closeDateInput && closeTimeInput ? new Date(`${closeDateInput}T${closeTimeInput}`).toISOString() : new Date().toISOString();
-              await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt); setModal(null);
+              await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt, resolutionNotesInput); setModal(null);
               } finally {
                 setModalLoading(false);
               }

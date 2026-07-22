@@ -38,6 +38,8 @@ export default function InvoiceCreateModal(props: any) {
   }, [woParts, woData]);
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfError, setPdfError] = useState("");
   const existingInvoiceId = resumeDraft?.id || null;
   // Tracks whether the user has touched the # field — if so we trust their
   // value (and surface a friendly toast if it collides). If untouched, the
@@ -73,6 +75,8 @@ export default function InvoiceCreateModal(props: any) {
     if (modal !== "createInvoice") return;
     let cancelled = false;
     setNumTouched(false);
+    setPdfFile(null);
+    setPdfError("");
     // Resuming an existing draft → hydrate the form from its stored fields
     // (keep its existing number untouched). Otherwise pull the authoritative
     // next-number from the DB so the user sees a non-colliding suggestion
@@ -139,11 +143,16 @@ export default function InvoiceCreateModal(props: any) {
   // (see useInvoices.ts belt+suspenders). Banner gated to staff only.
   const isContractor = currentUser?.role === "contractor";
   const over = !isContractor && (woData.nte || 0) > 0 && projectedSpend > woData.nte;
-  const close = () => { setModal(null); resetNewInv(); };
+  const close = () => { setModal(null); resetNewInv(); setPdfFile(null); setPdfError(""); };
   const onSubmit = async (data: CreateInvoiceForm) => {
     setSubmitting(true);
     try {
-    const ok = await doSubmitInvoice(woData, { ...data, userTypedNum: numTouched }, existingInvoiceId);
+    const ok = await doSubmitInvoice(woData, {
+      ...data,
+      userTypedNum: numTouched,
+      pdfFile,
+      hasExistingPdf: !!resumeDraft?.pdfStoragePath,
+    }, existingInvoiceId);
     if (ok) reset();
     } finally {
       setSubmitting(false);
@@ -264,13 +273,46 @@ export default function InvoiceCreateModal(props: any) {
           </div>
         )}
 
-        <label style={{ padding: "12px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}`, cursor: "pointer", display: "block", marginBottom: 4 }}>
-          <div style={{ border: `2px dashed ${T.accent}`, borderRadius: 8, padding: 18, textAlign: "center" }}>
-            <div style={{ fontSize: 13, color: T.accent, fontWeight: 600 }}>Attach the PDF invoice (from QuickBooks)</div>
-            <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>A copy is generated on submit if none is attached</div>
-            <input type="file" accept="application/pdf" style={{ display: "none" }} />
-          </div>
-        </label>
+        <div style={{ padding: "12px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${pdfError ? T.danger : T.accentRing}`, marginBottom: 4 }}>
+          <label style={{ cursor: "pointer", display: "block" }}>
+            <div style={{ border: `2px dashed ${pdfError ? T.danger : T.accent}`, borderRadius: 8, padding: 18, textAlign: "center" }}>
+              <div style={{ fontSize: 13, color: pdfError ? T.danger : T.accent, fontWeight: 600 }}>
+                {pdfFile ? pdfFile.name : resumeDraft?.pdfStoragePath ? "A PDF is already attached" : "Upload your invoice PDF"}
+              </div>
+              <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>
+                PDF only, up to 5 MB. A portal PDF is generated when none is attached.
+              </div>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  event.target.value = "";
+                  if (!file) return;
+                  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+                    setPdfFile(null);
+                    setPdfError("Choose a PDF file.");
+                    return;
+                  }
+                  if (file.size > 5 * 1024 * 1024) {
+                    setPdfFile(null);
+                    setPdfError("PDF must be 5 MB or smaller.");
+                    return;
+                  }
+                  setPdfFile(file);
+                  setPdfError("");
+                }}
+              />
+            </div>
+          </label>
+          {pdfError && <div style={{ marginTop: 7, color: T.danger, fontSize: 11, fontWeight: 600 }}>{pdfError}</div>}
+          {pdfFile && (
+            <button type="button" onClick={() => { setPdfFile(null); setPdfError(""); }} className="btn-soft" style={{ display: "block", margin: "8px auto 0", padding: "5px 10px", fontSize: 10 }}>
+              Remove attachment
+            </button>
+          )}
+        </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button type="button" onClick={close} className="btn-soft">Cancel</button>
@@ -293,6 +335,8 @@ export default function InvoiceCreateModal(props: any) {
                     cme: watch("cme"),
                     lines: watch("lines"),
                     userTypedNum: numTouched,
+                    pdfFile,
+                    hasExistingPdf: !!resumeDraft?.pdfStoragePath,
                   };
                   const ok = await doSaveDraftInvoice(woData, data, existingInvoiceId);
                   if (ok) { setModal(null); resetNewInv(); }

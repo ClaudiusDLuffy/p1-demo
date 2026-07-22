@@ -37,6 +37,9 @@ export type SlaState = {
   responseRemainingHours: number;
   resolutionRemainingHours: number;
   responseBreached: boolean;
+  responseMet: boolean;
+  responseMetAt: Date | null;
+  responseWasLate: boolean;
   resolutionBreached: boolean;
   responseBreachAt: Date;
   resolutionBreachAt: Date;
@@ -51,6 +54,7 @@ export type SlaState = {
 export function computeSlaState(
   responseBreachAtIso: string | null,
   resolutionBreachAtIso: string | null,
+  responseMetAtIso: string | null = null,
   now: Date = new Date(),
 ): SlaState | null {
   if (!responseBreachAtIso || !resolutionBreachAtIso) return null;
@@ -58,16 +62,28 @@ export function computeSlaState(
   const resolutionBreachAt = new Date(resolutionBreachAtIso);
   const responseRemainingHours = (responseBreachAt.getTime() - now.getTime()) / 3600000;
   const resolutionRemainingHours = (resolutionBreachAt.getTime() - now.getTime()) / 3600000;
-  const responseBreached = responseRemainingHours <= 0;
+  const responseMetAt = responseMetAtIso ? new Date(responseMetAtIso) : null;
+  const responseMet = !!responseMetAt && !Number.isNaN(responseMetAt.getTime());
+  const responseWasLate = responseMet
+    ? responseMetAt.getTime() > responseBreachAt.getTime()
+    : false;
+  // Once the contractor has checked in, the response obligation is complete.
+  // Keep responseWasLate for audit/display, but do not leave an active breach
+  // warning across the work order after work has started.
+  const responseBreached = !responseMet && responseRemainingHours <= 0;
   const resolutionBreached = resolutionRemainingHours <= 0;
   let headline: "response" | "resolution";
-  if (responseBreached && !resolutionBreached) headline = "resolution";
+  if (responseMet) headline = "resolution";
+  else if (responseBreached && !resolutionBreached) headline = "resolution";
   else if (responseBreached && resolutionBreached) headline = "resolution";
   else headline = responseRemainingHours <= resolutionRemainingHours ? "response" : "resolution";
   return {
     responseRemainingHours,
     resolutionRemainingHours,
     responseBreached,
+    responseMet,
+    responseMetAt: responseMet ? responseMetAt : null,
+    responseWasLate,
     resolutionBreached,
     responseBreachAt,
     resolutionBreachAt,
