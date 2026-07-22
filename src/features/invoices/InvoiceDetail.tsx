@@ -250,6 +250,12 @@ export default function InvoiceDetail(props: any) {
 
                   {/* Line items */}
                   <div>
+                    {(inv.lines || []).length === 0 && inv.pdfStoragePath && (
+                      <div style={{ padding: "18px 32px", background: T.surfaceSoft, borderBottom: `1px solid ${T.borderSoft}`, fontSize: 12, color: T.muted }}>
+                        Line-item details are contained in the uploaded contractor invoice PDF.
+                      </div>
+                    )}
+                    {(inv.lines || []).length > 0 && (<>
                     <div className="desktop-only-table">
                       <div style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "12px 32px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
                         <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div>
@@ -319,6 +325,7 @@ export default function InvoiceDetail(props: any) {
                         </div>
                       ))}
                     </div>
+                    </>)}
                   </div>
 
                   {/* Totals */}

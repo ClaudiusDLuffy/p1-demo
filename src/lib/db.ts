@@ -664,24 +664,18 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
   return data as unknown as WorkOrder;
 }
 
-// Source-of-truth invoice numbering: read the current max from the DB, not
-// from a cached React-Query list. The 6500 floor matches the legacy seed.
-// Called both as the "what number should we pre-fill?" suggester AND as the
-// retry-on-collision recalculator. Soft-deleted invoices KEEP their numbers
-// (the unique index is on `num` without a partial predicate), so we can't
-// recycle them — bumping past max is the safe move.
+// Source-of-truth invoice numbering. The RPC can see the global numeric
+// sequence without exposing other contractors' invoices through RLS. The
+// 6500 floor and soft-deleted-number handling live in the database function.
 export async function nextInvoiceNumFromDb(): Promise<string> {
   const sb = supabase();
-  // ORDER BY num::int can't use a regular index, but the table is small and
-  // num is short text. Simpler + correct: pull the whole list and parse.
-  // If perf ever matters, swap to an RPC that runs `MAX((num)::int)`.
-  const { data, error } = await sb.from("invoices").select("num");
+  const { data, error } = await sb.rpc("next_contractor_invoice_num");
   if (error) throw error;
-  const maxNum = (data || []).reduce((m: number, r: any) => {
-    const n = parseInt(r.num) || 0;
-    return n > m ? n : m;
-  }, 6500);
-  return String(maxNum + 1);
+  const nextNum = String(data || "").trim();
+  if (!/^\d+$/.test(nextNum)) {
+    throw new Error("Invoice number allocator returned an invalid value");
+  }
+  return nextNum;
 }
 
 // Postgres unique-violation. We need to distinguish "number collided" from
@@ -727,9 +721,12 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   // Insert header
-  const subtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
+  const calculatedSubtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
   const salesTax = parseFloat(inv.salesTax) || 0;
-  const total = subtotal + salesTax;
+  const hasTotalOverride = inv.totalOverride !== undefined
+    && Number.isFinite(Number(inv.totalOverride));
+  const total = hasTotalOverride ? Number(inv.totalOverride) : calculatedSubtotal + salesTax;
+  const subtotal = hasTotalOverride ? Math.max(total - salesTax, 0) : calculatedSubtotal;
   const todayIso = new Date().toISOString().slice(0, 10);
   // Resolve the number at insert time. If the caller passed a number, prefer
   // it (the user may have typed one); otherwise pull a fresh one from the DB
@@ -805,13 +802,16 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
 // this is still a draft or a real submission.
 export async function updateInvoiceWithLines(
   invoiceId: string,
-  patch: { num?: string; userTypedNum?: boolean; cme?: string | null; invoiceDate?: string; serviceDate?: string | null; terms?: string; storeAddr?: string | null; state?: string; salesTax?: number },
+  patch: { num?: string; userTypedNum?: boolean; cme?: string | null; invoiceDate?: string; serviceDate?: string | null; terms?: string; storeAddr?: string | null; state?: string; salesTax?: number; totalOverride?: number },
   lines: any[],
 ): Promise<{ id: string; num: string; subtotal: number; salesTax: number; total: number; collidedFrom: string | null }> {
   const sb = supabase();
-  const subtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
+  const calculatedSubtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
   const salesTax = parseFloat(patch.salesTax as any) || 0;
-  const total = subtotal + salesTax;
+  const hasTotalOverride = patch.totalOverride !== undefined
+    && Number.isFinite(Number(patch.totalOverride));
+  const total = hasTotalOverride ? Number(patch.totalOverride) : calculatedSubtotal + salesTax;
+  const subtotal = hasTotalOverride ? Math.max(total - salesTax, 0) : calculatedSubtotal;
   const update: any = {
     subtotal, sales_tax: salesTax, total,
     updated_at: new Date().toISOString(),
