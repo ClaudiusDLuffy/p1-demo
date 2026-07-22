@@ -173,7 +173,7 @@ export default function useInvoices({ currentUser, fire }: any) {
             currentUser.name,
             `PDF attached to invoice #${result.num} draft: ${draft.pdfFile.name}.`,
             "system",
-            { eventKey: "invoice_draft", eventData: { fileName: draft.pdfFile.name, fileSize: draft.pdfFile.size } },
+            { eventKey: "invoice_uploaded", eventData: { invoiceId: result.id, invoiceNum: result.num, fileName: draft.pdfFile.name, fileSize: draft.pdfFile.size } },
           );
         } catch (e: any) {
           fire(`Draft saved, but PDF upload failed: ${e.message || e}`);
@@ -296,11 +296,18 @@ export default function useInvoices({ currentUser, fire }: any) {
     try {
       const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename, loadLogoDataUrl } = await import("../../lib/invoicePdf");
       const filename = invoiceFilename(inv);
-      // PDF-only invoices use the contractor's uploaded document as the
-      // source of truth because there are no portal line items to regenerate.
-      if (currentUser?.role === "contractor" && inv.pdfStoragePath && (inv.lines || []).length === 0) {
+      if (!inv.pdfStoragePath && (inv.lines || []).length === 0) {
+        fire(`Original PDF is unavailable for invoice ${inv.num}. Reattach the contractor invoice before downloading.`);
+        return;
+      }
+      // Externally uploaded PDFs are the source document even when a legacy
+      // invoice also has saved line items. Zero-line invoices are retained as
+      // a fallback for uploads created before upload audit metadata existed.
+      const hasOriginalPdf = inv.pdfStoragePath
+        && (inv.pdfIsOriginal || (inv.lines || []).length === 0);
+      if (currentUser?.role === "contractor" && hasOriginalPdf) {
         const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
-        triggerBlobDownload(blob, filename);
+        triggerBlobDownload(blob, inv.originalPdfName || filename);
         fire(`Invoice ${inv.num} downloaded`);
         return;
       }
@@ -317,7 +324,7 @@ export default function useInvoices({ currentUser, fire }: any) {
       }
       if (inv.pdfStoragePath) {
         const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
-        triggerBlobDownload(blob, filename);
+        triggerBlobDownload(blob, inv.originalPdfName || filename);
         fire(`Invoice ${inv.num} downloaded`);
         return;
       }
