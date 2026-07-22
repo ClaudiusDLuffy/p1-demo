@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateInvoiceSchema, CreateInvoiceForm } from "../../lib/schemas";
@@ -9,6 +9,7 @@ import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
+import { parseInvoicePdfTotal } from "../../lib/invoicePdfParserClient";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 const todayIso = () => {
@@ -40,6 +41,8 @@ export default function InvoiceCreateModal(props: any) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState("");
+  const [pdfParseStatus, setPdfParseStatus] = useState<"idle" | "reading" | "detected" | "manual">("idle");
+  const pdfParseAttempt = useRef(0);
   const existingInvoiceId = resumeDraft?.id || null;
   // Tracks whether the user has touched the # field — if so we trust their
   // value (and surface a friendly toast if it collides). If untouched, the
@@ -79,6 +82,7 @@ export default function InvoiceCreateModal(props: any) {
   useEffect(() => {
     if (modal !== "createInvoice") return;
     let cancelled = false;
+    pdfParseAttempt.current += 1;
     setNumTouched(false);
     setPdfFile(null);
     setPdfError("");
@@ -89,6 +93,7 @@ export default function InvoiceCreateModal(props: any) {
     if (resumeDraft) {
       const resumeUploadOnly = !!resumeDraft.pdfStoragePath
         && (resumeDraft.lines || []).length === 0;
+      setPdfParseStatus(resumeUploadOnly ? "detected" : "idle");
       reset({
         num: resumeDraft.num || "",
         invoiceDate: resumeDraft.invoiceDate || todayIso(),
@@ -105,6 +110,7 @@ export default function InvoiceCreateModal(props: any) {
           : initialLines(),
       });
     } else {
+      setPdfParseStatus("idle");
       const today = todayIso();
       reset({
         num: "",
@@ -135,7 +141,10 @@ export default function InvoiceCreateModal(props: any) {
         })();
       }
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      pdfParseAttempt.current += 1;
+    };
   }, [modal, reset, resumeDraft, nextInvNumFromDb]);
 
   const priorSpend = useMemo(
@@ -156,7 +165,29 @@ export default function InvoiceCreateModal(props: any) {
   // (see useInvoices.ts belt+suspenders). Banner gated to staff only.
   const isContractor = currentUser?.role === "contractor";
   const over = !isContractor && (woData.nte || 0) > 0 && projectedSpend > woData.nte;
-  const close = () => { setModal(null); resetNewInv(); setPdfFile(null); setPdfError(""); };
+  const close = () => {
+    pdfParseAttempt.current += 1;
+    setModal(null);
+    resetNewInv();
+    setPdfFile(null);
+    setPdfError("");
+    setPdfParseStatus("idle");
+  };
+  const clearPendingPdf = (error = "") => {
+    pdfParseAttempt.current += 1;
+    setPdfFile(null);
+    setPdfError(error);
+    setPdfParseStatus(resumeDraft?.pdfStoragePath ? "detected" : "idle");
+    if (resumeDraft?.pdfStoragePath) {
+      setValue("uploadOnly", true, { shouldDirty: true });
+      setValue("uploadedTotal", String(resumeDraft.total || ""), { shouldDirty: true });
+      replace([]);
+    } else {
+      setValue("uploadOnly", false, { shouldDirty: true });
+      setValue("uploadedTotal", "", { shouldDirty: true });
+      if (fields.length === 0) replace(initialLines());
+    }
+  };
   const onSubmit = async (data: CreateInvoiceForm) => {
     setSubmitting(true);
     try {
@@ -297,20 +328,16 @@ export default function InvoiceCreateModal(props: any) {
                 />
                 {errors.uploadedTotal && <span style={{ display: "block", marginTop: 5, fontSize: 11, color: T.danger }}>{errors.uploadedTotal.message}</span>}
               </label>
-              <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>
-                Enter the final total from the PDF. This becomes the contractor cost used by staff for margin calculation.
+              <div aria-live="polite" style={{ fontSize: 11, color: pdfParseStatus === "manual" ? T.warn : T.muted, lineHeight: 1.5 }}>
+                {pdfParseStatus === "reading"
+                  ? "Reading the invoice total from the PDF..."
+                  : pdfParseStatus === "detected"
+                    ? "Total detected from the PDF. Review and adjust it if needed."
+                    : pdfParseStatus === "manual"
+                      ? "The total could not be detected reliably. Enter it manually from the PDF."
+                      : "Enter the final total shown on the uploaded invoice."}
               </div>
             </div>
-            <button
-              type="button"
-              className="btn-soft"
-              onClick={() => {
-                setValue("uploadOnly", false, { shouldDirty: true });
-                setValue("uploadedTotal", "", { shouldDirty: true });
-                if (fields.length === 0) replace(initialLines());
-              }}
-              style={{ marginTop: 12, padding: "6px 10px", fontSize: 10 }}
-            >Enter detailed line items instead</button>
           </div>
         )}
 
@@ -334,25 +361,42 @@ export default function InvoiceCreateModal(props: any) {
                 type="file"
                 accept="application/pdf,.pdf"
                 style={{ display: "none" }}
-                onChange={(event) => {
+                onChange={async (event) => {
                   const file = event.target.files?.[0] || null;
                   event.target.value = "";
                   if (!file) return;
                   if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-                    setPdfFile(null);
-                    setPdfError("Choose a PDF file.");
+                    clearPendingPdf("Choose a PDF file.");
                     return;
                   }
                   if (file.size > 5 * 1024 * 1024) {
-                    setPdfFile(null);
-                    setPdfError("PDF must be 5 MB or smaller.");
+                    clearPendingPdf("PDF must be 5 MB or smaller.");
                     return;
                   }
                   setPdfFile(file);
                   setPdfError("");
                   setValue("uploadOnly", true, { shouldDirty: true });
+                  setValue("uploadedTotal", "", { shouldDirty: true });
                   setValue("tax", "", { shouldDirty: true });
                   replace([]);
+                  const attempt = pdfParseAttempt.current + 1;
+                  pdfParseAttempt.current = attempt;
+                  setPdfParseStatus("reading");
+                  try {
+                    const parsed = await parseInvoicePdfTotal(file);
+                    if (pdfParseAttempt.current !== attempt) return;
+                    if (parsed.total != null) {
+                      setValue("uploadedTotal", parsed.total.toFixed(2), {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      });
+                      setPdfParseStatus("detected");
+                    } else {
+                      setPdfParseStatus("manual");
+                    }
+                  } catch {
+                    if (pdfParseAttempt.current === attempt) setPdfParseStatus("manual");
+                  }
                 }}
               />
             </div>
@@ -360,13 +404,7 @@ export default function InvoiceCreateModal(props: any) {
           {pdfError && <div style={{ marginTop: 7, color: T.danger, fontSize: 11, fontWeight: 600 }}>{pdfError}</div>}
           {pdfFile && (
             <button type="button" onClick={() => {
-              setPdfFile(null);
-              setPdfError("");
-              if (!resumeDraft?.pdfStoragePath) {
-                setValue("uploadOnly", false, { shouldDirty: true });
-                setValue("uploadedTotal", "", { shouldDirty: true });
-                if (fields.length === 0) replace(initialLines());
-              }
+              clearPendingPdf();
             }} className="btn-soft" style={{ display: "block", margin: "8px auto 0", padding: "5px 10px", fontSize: 10 }}>
               Remove attachment
             </button>
@@ -381,7 +419,7 @@ export default function InvoiceCreateModal(props: any) {
           {doSaveDraftInvoice && (
             <button
               type="button"
-              disabled={savingDraft || submitting}
+              disabled={savingDraft || submitting || pdfParseStatus === "reading"}
               onClick={async () => {
                 setSavingDraft(true);
                 try {
@@ -404,18 +442,18 @@ export default function InvoiceCreateModal(props: any) {
                 } finally { setSavingDraft(false); }
               }}
               className="btn-soft"
-              style={{ opacity: savingDraft ? 0.7 : 1, cursor: savingDraft ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+              style={{ opacity: savingDraft || pdfParseStatus === "reading" ? 0.7 : 1, cursor: savingDraft || pdfParseStatus === "reading" ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
             >
               {savingDraft ? <><BtnSpinner />Saving...</> : (existingInvoiceId ? "Save draft" : "Save as draft")}
             </button>
           )}
           <button
             type="submit"
-            disabled={submitting || savingDraft}
+            disabled={submitting || savingDraft || pdfParseStatus === "reading"}
             className="btn-accent"
             style={{
-              opacity: submitting ? 0.7 : 1,
-              cursor: submitting ? "default" : "pointer",
+              opacity: submitting || pdfParseStatus === "reading" ? 0.7 : 1,
+              cursor: submitting || pdfParseStatus === "reading" ? "default" : "pointer",
               display: "flex",
               alignItems: "center",
               gap: 6,

@@ -242,21 +242,39 @@ export async function loadInvoices(): Promise<Invoice[]> {
   const sb = supabase();
   // Soft-deleted invoices are excluded at the source — every list, badge,
   // stat, and spend calc consumes this array, so one filter covers all.
-  const [invRes, lineRes] = await Promise.all([
+  const [invRes, lineRes, uploadActivityRes] = await Promise.all([
     sb.from("invoices").select("*").is("deleted_at", null).eq("invoice_type", "contractor").order("invoice_date", { ascending: false }),
     sb.from("invoice_lines").select("*").order("position"),
+    sb.from("activities")
+      .select("event_data, created_at")
+      .eq("event_key", "invoice_uploaded")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true }),
   ]);
   if (invRes.error) throw invRes.error;
   if (lineRes.error) throw lineRes.error;
+  if (uploadActivityRes.error) throw uploadActivityRes.error;
 
   const linesByInv: Record<string, any[]> = {};
   for (const l of lineRes.data || []) {
     (linesByInv[l.invoice_id] ||= []).push(mapInvoiceLine(l));
   }
 
+  const originalPdfByInv = new Map<string, string | null>();
+  for (const activity of uploadActivityRes.data || []) {
+    const eventData = activity.event_data;
+    if (!eventData || typeof eventData !== "object" || Array.isArray(eventData)) continue;
+    const invoiceId = typeof eventData.invoiceId === "string" ? eventData.invoiceId : null;
+    if (!invoiceId) continue;
+    const fileName = typeof eventData.fileName === "string" ? eventData.fileName : null;
+    originalPdfByInv.set(invoiceId, fileName);
+  }
+
   return (invRes.data || []).map(i => ({
     ...mapInvoice(i),
     lines: linesByInv[i.id] || [],
+    pdfIsOriginal: originalPdfByInv.has(i.id),
+    originalPdfName: originalPdfByInv.get(i.id) || null,
   })) as unknown as Invoice[];
 }
 
@@ -287,10 +305,14 @@ const mapInvoice = (i: any) => ({
 // the user's session. Path layout: {invoice_id}/{invoice_number}.pdf.
 export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, blob: Blob): Promise<string> {
   const sb = supabase();
-  const path = `${invoiceId}/${invoiceNum}.pdf`;
+  const safeInvoiceNum = String(invoiceNum || "invoice").replace(/[^a-zA-Z0-9_-]/g, "-");
+  const uploadId = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${invoiceId}/${safeInvoiceNum}-${uploadId}.pdf`;
   const { error: upErr } = await sb.storage.from("invoice-pdfs").upload(path, blob, {
     contentType: "application/pdf",
-    upsert: true,
+    upsert: false,
   });
   if (upErr) throw upErr;
   const { error: rowErr } = await sb.from("invoices")
