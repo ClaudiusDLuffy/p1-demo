@@ -51,6 +51,14 @@ export default function WorkOrderDetail(props: any) {
   const [markingPaidInvId, setMarkingPaidInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
   const [invoiceMenuId, setInvoiceMenuId] = useState<string | null>(null);
+  const copyWorkOrderNumber = async () => {
+    try {
+      await navigator.clipboard.writeText(String(woData.id));
+      fire(`Work order ${woData.id} copied`);
+    } catch {
+      fire("Could not copy the work order number");
+    }
+  };
   const viewInvoice = (inv: any) => {
     if (!inv?.num || !setSelectedInvoice) return;
     setInvoiceMenuId(null);
@@ -774,7 +782,14 @@ export default function WorkOrderDetail(props: any) {
                     <div className="card" style={{ padding: 22 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activities?.length || 0}</div>
-                        {isManager && <button className="desktop-only-activity-action" onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loadingâ€¦</> : <>AI enhance notes <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4 }}>PREVIEW</span></>}</button>}
+                        {isManager && (
+                          <div className="desktop-only-activity-action" style={{ alignItems: "center", gap: 8 }}>
+                            <button type="button" className="btn-soft" onClick={copyWorkOrderNumber} style={{ padding: "7px 12px", fontSize: 11 }}>
+                              Copy work order number
+                            </button>
+                            <button onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loadingâ€¦</> : <>AI enhance notes <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4 }}>PREVIEW</span></>}</button>
+                          </div>
+                        )}
                       </div>
                       <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                         <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id); }} placeholder="Add a note..." style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
@@ -788,6 +803,11 @@ export default function WorkOrderDetail(props: any) {
                         </button>
                       </div>
                       <div className="mobile-only-activity-actions" style={{ display: "none", gap: 8, marginBottom: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        {isManager && (
+                          <button type="button" onClick={copyWorkOrderNumber} className="btn-soft" style={{ fontSize: 11 }}>
+                            Copy work order number
+                          </button>
+                        )}
                         {isManager && (
                           <button
                             onClick={doAiEnhance}

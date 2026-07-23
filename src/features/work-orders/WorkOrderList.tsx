@@ -42,16 +42,23 @@ export default function WorkOrderList(props: any) {
 
   const [listPage, setListPage] = useState(1);
   const [sortBy, setSortBy] = useState<WorkOrderSortKey>(isManager ? "sla_due" : "newest");
+  const [hideClosed, setHideClosed] = useState(true);
   const [pagingBusy, setPagingBusy] = useState<"prev" | "next" | null>(null);
   const pageSize = 10;
 
   const tableWOs = useMemo(
     () => sortWorkOrders(
-      filteredWOs.filter((w: any) => w.status !== "capital"),
+      filteredWOs.filter((w: any) =>
+        w.status !== "capital"
+        && (!isManager || !hideClosed || w.status !== "closed"),
+      ),
       sortBy,
     ),
-    [filteredWOs, sortBy],
+    [filteredWOs, hideClosed, isManager, sortBy],
   );
+  const hiddenClosedCount = isManager && hideClosed
+    ? filteredWOs.filter((w: any) => w.status === "closed").length
+    : 0;
 
   const totalPages = Math.max(1, Math.ceil(tableWOs.length / pageSize));
   const safePage = Math.min(listPage, totalPages);
@@ -62,7 +69,7 @@ export default function WorkOrderList(props: any) {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, filterC, filterP, nteQueue, sortBy]);
+  }, [search, filterC, filterP, nteQueue, sortBy, hideClosed]);
 
   useEffect(() => {
     setListPage((prev) => Math.min(prev, totalPages));
@@ -150,6 +157,17 @@ export default function WorkOrderList(props: any) {
               <option value="oldest">Oldest to newest</option>
               <option value="priority">Priority</option>
             </Sel>
+            {isManager && (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 40, padding: "8px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                <input
+                  type="checkbox"
+                  checked={hideClosed}
+                  onChange={(event) => setHideClosed(event.target.checked)}
+                  style={{ width: 15, height: 15, accentColor: T.accent, cursor: "inherit" }}
+                />
+                Hide closed calls{hiddenClosedCount > 0 ? ` (${hiddenClosedCount})` : ""}
+              </label>
+            )}
             {nteQueue && <span style={{ fontSize: 11, fontWeight: 700, color: T.warn, background: T.warnSoft, padding: "5px 12px", borderRadius: 20, border: `1px solid ${T.warn}33` }}>NTE Approval Needed</span>}
             {(filterC !== "all" || filterP !== "all" || search || nteQueue) && (
               <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); setNteQueue(false); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
