@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-import { extractInvoiceTotalFromPdf } from "../../../../lib/invoicePdfParser";
+import { extractInvoiceDataFromPdf } from "../../../../lib/invoicePdfParser";
 import type { Database } from "../../../../lib/supabase/database.types";
 
 export const runtime = "nodejs";
@@ -48,10 +48,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await extractInvoiceTotalFromPdf(new Uint8Array(await file.arrayBuffer()));
+    const result = await extractInvoiceDataFromPdf(new Uint8Array(await file.arrayBuffer()));
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Invoice PDF total extraction failed", error);
+    console.error("Invoice PDF extraction failed", error);
     return jsonError("The PDF text could not be read", 422);
   }
 }

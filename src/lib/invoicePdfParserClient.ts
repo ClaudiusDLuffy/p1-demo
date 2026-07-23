@@ -1,12 +1,23 @@
 import { supabase } from "./supabase/client";
 
-export type ParsedInvoiceTotal = {
+export type ParsedInvoiceLine = {
+  type: "Truck Charge" | "Labor" | "Parts/Hardware" | "Shipping" | "Other";
+  desc: string;
+  qty: number;
+  rate: number;
+  amount: number;
+  confidence: "high" | "medium";
+};
+
+export type ParsedInvoicePdf = {
   total: number | null;
   confidence: "high" | "medium" | "none";
   matchedLabel: string | null;
+  lines: ParsedInvoiceLine[];
+  lineConfidence: "high" | "medium" | "none";
 };
 
-export async function parseInvoicePdfTotal(file: File): Promise<ParsedInvoiceTotal> {
+export async function parseInvoicePdf(file: File): Promise<ParsedInvoicePdf> {
   const { data: { session } } = await supabase().auth.getSession();
   if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
 
@@ -21,8 +32,10 @@ export async function parseInvoicePdfTotal(file: File): Promise<ParsedInvoiceTot
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.error || "Could not read the invoice total");
+    throw new Error(payload.error || "Could not read the invoice");
   }
 
-  return payload as ParsedInvoiceTotal;
+  return payload as ParsedInvoicePdf;
 }
+
+export const parseInvoicePdfTotal = parseInvoicePdf;

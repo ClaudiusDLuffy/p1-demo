@@ -103,11 +103,14 @@ export default function useInvoices({ currentUser, fire }: any) {
     if (uploadOnly && !hasUploadedPdf) {
       fire("Attach the contractor invoice PDF"); return null;
     }
-    const validLines = uploadOnly
-      ? []
-      : requireFullLines
-        ? (draft.lines || []).filter((l: any) => l.desc && l.qty && l.rate)
-        : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
+    const validLines = requireFullLines
+      ? (draft.lines || []).filter((l: any) =>
+          l.desc
+          && Number(l.qty) > 0
+          && Number.isFinite(Number(l.rate))
+          && Number(l.rate) >= 0,
+        )
+      : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
     if (!uploadOnly && requireFullLines && validLines.length === 0) {
       fire("Add at least one line item with description, qty, and rate"); return null;
     }
