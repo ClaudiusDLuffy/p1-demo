@@ -9,7 +9,7 @@ import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
-import { parseInvoicePdfTotal } from "../../lib/invoicePdfParserClient";
+import { parseInvoicePdf } from "../../lib/invoicePdfParserClient";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 const todayIso = () => {
@@ -42,6 +42,8 @@ export default function InvoiceCreateModal(props: any) {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState("");
   const [pdfParseStatus, setPdfParseStatus] = useState<"idle" | "reading" | "detected" | "manual">("idle");
+  const [pdfLineStatus, setPdfLineStatus] = useState<"idle" | "detected" | "none">("idle");
+  const [pdfLinesReviewed, setPdfLinesReviewed] = useState(false);
   const pdfParseAttempt = useRef(0);
   const existingInvoiceId = resumeDraft?.id || null;
   // Tracks whether the user has touched the # field — if so we trust their
@@ -78,6 +80,8 @@ export default function InvoiceCreateModal(props: any) {
   const sub = watchedLines.reduce((s: number, l: any) => s + amount(l), 0);
   const tax = parseFloat(watchedTax || "") || 0;
   const total = uploadOnly ? uploadedTotal : sub + tax;
+  const uploadedLineDifference = uploadOnly ? Math.abs(sub - uploadedTotal) : 0;
+  const uploadedLinesMatchTotal = uploadedLineDifference <= Math.max(0.05, uploadedTotal * 0.01);
 
   useEffect(() => {
     if (modal !== "createInvoice") return;
@@ -86,14 +90,22 @@ export default function InvoiceCreateModal(props: any) {
     setNumTouched(false);
     setPdfFile(null);
     setPdfError("");
+    setPdfLineStatus("idle");
+    setPdfLinesReviewed(false);
     // Resuming an existing draft → hydrate the form from its stored fields
     // (keep its existing number untouched). Otherwise pull the authoritative
     // next-number from the DB so the user sees a non-colliding suggestion
     // immediately; falls back to blank if the lookup fails.
     if (resumeDraft) {
       const resumeUploadOnly = !!resumeDraft.pdfStoragePath
-        && (resumeDraft.lines || []).length === 0;
+        && (!!resumeDraft.pdfIsOriginal || (resumeDraft.lines || []).length === 0);
       setPdfParseStatus(resumeUploadOnly ? "detected" : "idle");
+      setPdfLineStatus(
+        resumeUploadOnly
+          ? (resumeDraft.lines || []).length > 0 ? "detected" : "none"
+          : "idle",
+      );
+      setPdfLinesReviewed(resumeUploadOnly && (resumeDraft.lines || []).length > 0);
       reset({
         num: resumeDraft.num || "",
         invoiceDate: resumeDraft.invoiceDate || todayIso(),
@@ -103,14 +115,14 @@ export default function InvoiceCreateModal(props: any) {
         cme: resumeDraft.cme || "",
         uploadOnly: resumeUploadOnly,
         uploadedTotal: resumeUploadOnly ? String(resumeDraft.total || "") : "",
-        lines: resumeUploadOnly
-          ? []
-          : (resumeDraft.lines || []).length
+        lines: (resumeDraft.lines || []).length
           ? resumeDraft.lines.map((l: any) => ({ type: l.type, desc: l.desc || l.description || "", qty: Number(l.qty) || 1, rate: Number(l.rate) }))
-          : initialLines(),
+          : resumeUploadOnly ? [] : initialLines(),
       });
     } else {
       setPdfParseStatus("idle");
+      setPdfLineStatus("idle");
+      setPdfLinesReviewed(false);
       const today = todayIso();
       reset({
         num: "",
@@ -172,6 +184,8 @@ export default function InvoiceCreateModal(props: any) {
     setPdfFile(null);
     setPdfError("");
     setPdfParseStatus("idle");
+    setPdfLineStatus("idle");
+    setPdfLinesReviewed(false);
   };
   const clearPendingPdf = (error = "") => {
     pdfParseAttempt.current += 1;
@@ -181,14 +195,28 @@ export default function InvoiceCreateModal(props: any) {
     if (resumeDraft?.pdfStoragePath) {
       setValue("uploadOnly", true, { shouldDirty: true });
       setValue("uploadedTotal", String(resumeDraft.total || ""), { shouldDirty: true });
-      replace([]);
+      const existingLines = (resumeDraft.lines || []).map((line: any) => ({
+        type: line.type || "Other",
+        desc: line.desc || line.description || "",
+        qty: Number(line.qty) || 1,
+        rate: Number(line.rate) || 0,
+      }));
+      replace(existingLines);
+      setPdfLineStatus(existingLines.length > 0 ? "detected" : "none");
+      setPdfLinesReviewed(existingLines.length > 0);
     } else {
       setValue("uploadOnly", false, { shouldDirty: true });
       setValue("uploadedTotal", "", { shouldDirty: true });
       if (fields.length === 0) replace(initialLines());
+      setPdfLineStatus("idle");
+      setPdfLinesReviewed(false);
     }
   };
   const onSubmit = async (data: CreateInvoiceForm) => {
+    if (data.uploadOnly && (data.lines || []).length > 0 && !pdfLinesReviewed) {
+      setPdfError("Review the extracted line items and confirm them before submitting.");
+      return;
+    }
     setSubmitting(true);
     try {
     const ok = await doSubmitInvoice(woData, {
@@ -241,8 +269,32 @@ export default function InvoiceCreateModal(props: any) {
           <div><div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store #</div><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>#{woData.store}</div></div>
         </div>
 
-        <div style={{ display: uploadOnly ? "none" : "block" }}>
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
+        <div style={{ display: !uploadOnly || fields.length > 0 ? "block" : "none" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>
+            {uploadOnly ? "Review extracted line items" : "Line items"}
+          </div>
+          {uploadOnly && (
+            <button
+              type="button"
+              className="btn-soft"
+              onClick={() => {
+                replace([]);
+                setPdfLineStatus("none");
+                setPdfLinesReviewed(false);
+                setPdfError("");
+              }}
+              style={{ padding: "5px 9px", fontSize: 10 }}
+            >
+              Use invoice total only
+            </button>
+          )}
+        </div>
+        {uploadOnly && (
+          <div style={{ fontSize: 11, lineHeight: 1.5, color: T.muted, marginBottom: 10 }}>
+            Confirm the description, quantity, and rate against the uploaded PDF. You can edit, add, or remove any extracted row.
+          </div>
+        )}
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
           <div className="inv-line-head" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
             <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div><div></div>
@@ -294,15 +346,39 @@ export default function InvoiceCreateModal(props: any) {
           )}
         </div>
 
+        {uploadOnly && fields.length > 0 && (
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "10px 12px", marginBottom: 12, borderRadius: 10, border: `1px solid ${pdfLinesReviewed ? T.success : T.border}`, background: pdfLinesReviewed ? T.successSoft : T.surfaceSoft, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={pdfLinesReviewed}
+              onChange={event => {
+                setPdfLinesReviewed(event.target.checked);
+                if (event.target.checked) setPdfError("");
+              }}
+              style={{ marginTop: 2 }}
+            />
+            <span style={{ fontSize: 11, color: T.ink, lineHeight: 1.5 }}>
+              I reviewed these line items against the uploaded invoice.
+            </span>
+          </label>
+        )}
+
         <div className="inv-totals-row" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 14, marginBottom: 18, alignItems: "start" }}>
           <div />
           <div style={{ background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, padding: "14px 16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13 }}><span style={{ color: T.muted }}>Subtotal</span><span className="mono" style={{ fontWeight: 600, color: T.ink }}>{fmt(Math.round(sub * 100) / 100)}</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13, gap: 10 }}>
-              <span style={{ color: T.muted }}>Sales tax</span>
-              <input type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
-            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13 }}><span style={{ color: T.muted }}>{uploadOnly ? "Line item total" : "Subtotal"}</span><span className="mono" style={{ fontWeight: 600, color: T.ink }}>{fmt(Math.round(sub * 100) / 100)}</span></div>
+            {!uploadOnly && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13, gap: 10 }}>
+                <span style={{ color: T.muted }}>Sales tax</span>
+                <input type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: over ? T.danger : T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
+            {uploadOnly && uploadedTotal > 0 && !uploadedLinesMatchTotal && (
+              <div style={{ fontSize: 11, color: T.warn, lineHeight: 1.45, marginTop: 8, textAlign: "right" }}>
+                Lines differ from the PDF total by {fmt(uploadedLineDifference)}. Review before confirming.
+              </div>
+            )}
             <div style={{ fontSize: 11, color: over ? T.danger : T.muted, marginTop: 8, textAlign: "right" }}>
               {isContractor
                 ? (priorSpend > 0 ? `Running total ${fmt(projectedSpend)} - prior invoices ${fmt(priorSpend)}` : `Running total ${fmt(projectedSpend)}`)
@@ -330,14 +406,33 @@ export default function InvoiceCreateModal(props: any) {
               </label>
               <div aria-live="polite" style={{ fontSize: 11, color: pdfParseStatus === "manual" ? T.warn : T.muted, lineHeight: 1.5 }}>
                 {pdfParseStatus === "reading"
-                  ? "Reading the invoice total from the PDF..."
+                  ? "Reading the invoice total and line items from the PDF..."
                   : pdfParseStatus === "detected"
-                    ? "Total detected from the PDF. Review and adjust it if needed."
+                    ? pdfLineStatus === "detected"
+                      ? `${fields.length} line item${fields.length === 1 ? "" : "s"} and the total were detected. Review both before submitting.`
+                      : "Total detected. Line items were not found reliably, so you can submit the total only or enter them manually."
                     : pdfParseStatus === "manual"
-                      ? "The total could not be detected reliably. Enter it manually from the PDF."
+                      ? pdfLineStatus === "detected"
+                        ? `${fields.length} line item${fields.length === 1 ? "" : "s"} were detected, but the total was not. Enter the total and review the lines.`
+                        : "The invoice could not be read reliably. Enter the total manually; line items remain optional."
                       : "Enter the final total shown on the uploaded invoice."}
               </div>
             </div>
+            {fields.length === 0 && pdfParseStatus !== "reading" && (
+              <button
+                type="button"
+                className="btn-soft"
+                onClick={() => {
+                  replace([{ type: "Other", desc: "", qty: 1, rate: undefined }]);
+                  setPdfLineStatus("none");
+                  setPdfLinesReviewed(false);
+                  setPdfError("");
+                }}
+                style={{ marginTop: 12, padding: "7px 11px", fontSize: 11 }}
+              >
+                + Enter line items manually
+              </button>
+            )}
           </div>
         )}
 
@@ -379,12 +474,22 @@ export default function InvoiceCreateModal(props: any) {
                   setValue("uploadedTotal", "", { shouldDirty: true });
                   setValue("tax", "", { shouldDirty: true });
                   replace([]);
+                  setPdfLineStatus("idle");
+                  setPdfLinesReviewed(false);
                   const attempt = pdfParseAttempt.current + 1;
                   pdfParseAttempt.current = attempt;
                   setPdfParseStatus("reading");
                   try {
-                    const parsed = await parseInvoicePdfTotal(file);
+                    const parsed = await parseInvoicePdf(file);
                     if (pdfParseAttempt.current !== attempt) return;
+                    const parsedLines = (parsed.lines || []).map(line => ({
+                      type: line.type || "Other",
+                      desc: line.desc,
+                      qty: Number(line.qty) || 1,
+                      rate: Number(line.rate) || 0,
+                    }));
+                    replace(parsedLines);
+                    setPdfLineStatus(parsedLines.length > 0 ? "detected" : "none");
                     if (parsed.total != null) {
                       setValue("uploadedTotal", parsed.total.toFixed(2), {
                         shouldDirty: true,
@@ -395,7 +500,10 @@ export default function InvoiceCreateModal(props: any) {
                       setPdfParseStatus("manual");
                     }
                   } catch {
-                    if (pdfParseAttempt.current === attempt) setPdfParseStatus("manual");
+                    if (pdfParseAttempt.current === attempt) {
+                      setPdfParseStatus("manual");
+                      setPdfLineStatus("none");
+                    }
                   }
                 }}
               />
