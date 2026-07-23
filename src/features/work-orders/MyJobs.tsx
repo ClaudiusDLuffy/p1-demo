@@ -46,6 +46,10 @@ export default function MyJobs(props: any) {
                 const sla = slaLabel(wo);
                 const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                 const partsSummary = partsByWO[wo.id];
+                const location = (wo.addr || wo.city || "").trim();
+                const storeLocation = [wo.store ? `Store #${wo.store}` : null, location || null]
+                  .filter(Boolean)
+                  .join(" · ") || wo.id;
                 return (
                   <div key={wo.id} className="card card-hover" onClick={() => { setSelectedWO(wo.id); setPage("wo_detail"); setAiNote(null); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", marginBottom: 10, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.04}s both`, gap: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -61,7 +65,7 @@ export default function MyJobs(props: any) {
                           </span>
                         )}
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
+                      <div title={storeLocation} style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{storeLocation}</div>
                       <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary || "—"}</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
