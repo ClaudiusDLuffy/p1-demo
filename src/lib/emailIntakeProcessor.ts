@@ -8,8 +8,20 @@ import {
 } from "./graphClient";
 import { parseDispatchEmail, type ParsedWorkOrder } from "./emailParser";
 import { resolveContractor } from "./autoDispatch";
+import { normalizeStateCode, timezoneForWorkOrder } from "./billingRules";
 import { createServerClient } from "./supabase/server";
 import { sendDispatchNotification } from "./notificationService";
+import type { Database } from "./supabase/database.types";
+
+type WorkOrderInsert = Database["public"]["Tables"]["work_orders"]["Insert"];
+type WorkOrderUpdate = Database["public"]["Tables"]["work_orders"]["Update"];
+type IntakeLogClient = {
+  from: (table: "email_intake_log") => {
+    insert: (row: Record<string, unknown>) => PromiseLike<{
+      error: { message: string } | null;
+    }>;
+  };
+};
 
 export type IntakeResult = {
   emailId: string;
@@ -22,7 +34,10 @@ export type IntakeResult = {
   processedAt: string;
 };
 
-const generateWOId = () => `EMAIL-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+type WorkOrderMatch = {
+  id: string;
+  archived: boolean;
+};
 
 const getAllowedIntakeStates = () => {
   const raw = process.env.EMAIL_INTAKE_ALLOWED_STATES;
@@ -57,16 +72,20 @@ const stateAllowlistReason = (state: string | null) => {
 };
 
 const compactPatch = (parsed: ParsedWorkOrder) => {
-  const patch: Record<string, unknown> = {};
+  const patch: WorkOrderUpdate = {};
   if (parsed.incidentId) patch.incident_id = parsed.incidentId;
   if (parsed.storeNumber) patch.store_number = parsed.storeNumber;
   if (parsed.summary) patch.summary = parsed.summary;
   if (parsed.description) patch.description = parsed.description;
   if (parsed.priority) patch.priority = parsed.priority;
   if (parsed.afmName) patch.afm_name = parsed.afmName;
-  if (parsed.afmEmail) patch.afm_email = parsed.afmEmail;
   if (parsed.city) patch.city = parsed.city;
   if (parsed.address) patch.address = parsed.address;
+  const storeState = normalizeStateCode(parsed.state);
+  if (storeState) {
+    patch.store_state = storeState;
+    patch.store_timezone = timezoneForWorkOrder({ storeState });
+  }
   if (parsed.nte !== null) patch.nte = parsed.nte;
   if (parsed.lineOfService) patch.line_of_service = parsed.lineOfService;
   if (parsed.businessService) patch.business_service = parsed.businessService;
@@ -76,29 +95,46 @@ const compactPatch = (parsed: ParsedWorkOrder) => {
   return patch;
 };
 
-const findExistingWorkOrder = async (parsed: ParsedWorkOrder) => {
+const saveAfmContact = async (workOrderId: string, afmEmail: string | null) => {
+  const email = String(afmEmail || "").trim();
+  if (!email) return;
   const sb = createServerClient();
-  const ids = [parsed.wotId, parsed.fwkdId].filter(Boolean) as string[];
+  const { error } = await sb.from("work_order_afm_contacts").upsert({
+    work_order_id: workOrderId,
+    afm_email: email,
+  });
+  if (error) throw error;
+};
+
+const findWorkOrderMatch = async (parsed: ParsedWorkOrder): Promise<WorkOrderMatch | null> => {
+  const sb = createServerClient();
+  const ids = [...new Set([parsed.wotId, parsed.fwkdId].filter(Boolean) as string[])];
+  let archivedMatch: WorkOrderMatch | null = null;
+
   for (const id of ids) {
     const { data, error } = await sb
       .from("work_orders")
-      .select("id")
+      .select("id,deleted_at")
       .eq("id", id)
-      .is("deleted_at", null)
       .maybeSingle();
 
     if (error) {
-      console.error("Email intake dedup lookup failed", error);
-      continue;
+      throw new Error(`Work order lookup failed for ${id}: ${error.message}`);
     }
-    if (data?.id) return data.id;
+    if (data?.id && !data.deleted_at) {
+      return { id: data.id, archived: false };
+    }
+    if (data?.id && !archivedMatch) {
+      archivedMatch = { id: data.id, archived: true };
+    }
   }
-  return null;
+
+  return archivedMatch;
 };
 
 const addSystemActivity = async (workOrderId: string, text: string) => {
   const sb = createServerClient();
-  const { error } = await (sb as any).from("activities").insert({
+  const { error } = await sb.from("activities").insert({
     work_order_id: workOrderId,
     author_name: "System",
     text,
@@ -121,7 +157,8 @@ const skippedResult = (
 const insertLog = async (email: GraphEmail, result: IntakeResult) => {
   try {
     const sb = createServerClient();
-    const { error } = await (sb as any).from("email_intake_log").insert({
+    const logClient = sb as unknown as IntakeLogClient;
+    const { error } = await logClient.from("email_intake_log").insert({
       email_id: result.emailId,
       subject: result.subject,
       action: result.action,
@@ -163,144 +200,179 @@ export async function processEmail(
     processedAt,
   };
 
+  let shouldFinishEmail = true;
+
   try {
     const allowlistReason = stateAllowlistReason(parsed.state);
 
-    if (parsed.doNotDispatch) {
+    if (parsed.emailType === "TYPE_NTE_APPROVED") {
+      result = skippedResult(result, "NTE email ignored by intake policy");
+    } else if (parsed.doNotDispatch) {
       result = skippedResult(result, "do not dispatch flag detected");
     } else if (parsed.emailType === "TYPE_UNKNOWN") {
       result = skippedResult(result, "unknown email type");
-    } else if (parsed.parseConfidence === "low") {
-      result = skippedResult(result, "low parse confidence; manual review needed");
-    } else if (allowlistReason) {
-      result = skippedResult(result, allowlistReason);
-    } else if (parsed.emailType === "TYPE_NTE_APPROVED") {
-      const existingId = await findExistingWorkOrder(parsed);
-      if (!existingId) {
-        result = skippedResult(result, "NTE approved email did not match an existing work order");
-      } else {
-        await addSystemActivity(existingId, "NTE approved by 7-Eleven");
-        result = {
-          ...result,
-          action: "updated",
-          workOrderId: existingId,
-          reason: "NTE approval noted on existing work order",
-        };
-      }
-    } else if (parsed.emailType === "TYPE_CAPITAL_PENDING") {
-      const existingId = await findExistingWorkOrder(parsed);
-      if (!existingId) {
-        result = skippedResult(result, "capital pending email did not match an existing work order");
+    } else if (parsed.emailType === "TYPE_DISPATCHED") {
+      if (!parsed.wotId) {
+        result = skippedResult(result, "initial dispatch is missing a WOT number");
+      } else if (parsed.parseConfidence !== "high") {
+        result = skippedResult(result, "initial dispatch is missing required store data");
+      } else if (allowlistReason) {
+        result = skippedResult(result, allowlistReason);
       } else {
         const sb = createServerClient();
-        const { error } = await sb
-          .from("work_orders")
-          .update({ status: "capital" })
-          .eq("id", existingId);
-        if (error) throw error;
-        await addSystemActivity(existingId, "Capital approval pending");
-        result = {
-          ...result,
-          action: "updated",
-          workOrderId: existingId,
-          reason: "capital approval pending noted on existing work order",
-        };
+        const match = await findWorkOrderMatch(parsed);
+
+        if (match?.archived) {
+          result = skippedResult(
+            result,
+            "initial dispatch matched an archived work order; archived row was not recreated",
+            match.id,
+          );
+        } else if (match) {
+          const { error } = await sb
+            .from("work_orders")
+            .update(compactPatch(parsed))
+            .eq("id", match.id)
+            .is("deleted_at", null);
+
+          if (error) throw error;
+          await saveAfmContact(match.id, parsed.afmEmail);
+          result = {
+            ...result,
+            action: "updated",
+            workOrderId: match.id,
+            reason: "existing active work order refreshed from initial dispatch",
+          };
+        } else {
+          const contractor = await resolveContractor(parsed);
+          const workOrderId = parsed.wotId;
+          const row: WorkOrderInsert = {
+            id: workOrderId,
+            store_number: parsed.storeNumber,
+            summary: parsed.summary,
+            description: parsed.description,
+            priority: parsed.priority || "p2",
+            status: contractor.contractorId ? "assigned" : "unassigned",
+            functional_status: "New",
+            contractor_id: contractor.contractorId,
+            afm_name: parsed.afmName,
+            afm_email: null,
+            city: parsed.city,
+            address: parsed.address,
+            store_state: normalizeStateCode(parsed.state) || null,
+            store_timezone: timezoneForWorkOrder({ storeState: parsed.state }),
+            nte: parsed.nte || 0,
+            line_of_service: parsed.lineOfService,
+            business_service: parsed.businessService,
+            category: parsed.category,
+            sub_category: parsed.subCategory,
+            incident_id: parsed.incidentId,
+            source: "email_intake",
+            dispatched_at: email.receivedDateTime || processedAt,
+            sla_started_at: email.receivedDateTime || processedAt,
+            created_at: processedAt,
+          };
+
+          const { error } = await sb.from("work_orders").insert(row);
+          if (error) throw error;
+          await saveAfmContact(workOrderId, parsed.afmEmail);
+
+          if (contractor.contractorId) {
+            await sendDispatchNotification({
+              workOrder: {
+                id: workOrderId,
+                incidentId: parsed.incidentId,
+                storeNumber: parsed.storeNumber,
+                city: parsed.city,
+                address: parsed.address,
+                priority: parsed.priority || "p2",
+                summary: parsed.summary,
+                description: parsed.description,
+              },
+              contractorEmail: contractor.contractorEmail,
+              contractorName: contractor.contractorName,
+            }).catch(err => console.error("Dispatch notification failed", err));
+          }
+
+          result = {
+            ...result,
+            action: "created",
+            workOrderId,
+            reason: contractor.reason,
+            contractorAssigned: contractor.contractorId,
+          };
+        }
       }
-    } else if (parsed.emailType === "TYPE_STATE_UPDATE") {
-      const existingId = await findExistingWorkOrder(parsed);
-      if (!existingId) {
-        result = skippedResult(result, "state update email did not match an existing work order");
+    } else if (
+      parsed.emailType === "TYPE_CAPITAL_PENDING" ||
+      parsed.emailType === "TYPE_STATE_UPDATE"
+    ) {
+      if (!parsed.wotId && !parsed.fwkdId) {
+        result = skippedResult(result, "status email is missing a work order number");
+      } else if (parsed.state && allowlistReason) {
+        result = skippedResult(result, allowlistReason);
       } else {
-        await addSystemActivity(existingId, `7-Eleven state update: ${parsed.state || "state not provided"}`);
-        result = {
-          ...result,
-          action: "updated",
-          workOrderId: existingId,
-          reason: "7-Eleven state update noted on existing work order",
-        };
+        const match = await findWorkOrderMatch(parsed);
+
+        if (match?.archived) {
+          result = skippedResult(
+            result,
+            "status email matched an archived work order; archived row was not updated",
+            match.id,
+          );
+        } else if (!match) {
+          result = skippedResult(result, "status email did not match an active work order");
+        } else if (parsed.emailType === "TYPE_CAPITAL_PENDING") {
+          const sb = createServerClient();
+          const { error } = await sb
+            .from("work_orders")
+            .update({ status: "capital" })
+            .eq("id", match.id)
+            .is("deleted_at", null);
+
+          if (error) throw error;
+          await addSystemActivity(match.id, "Capital approval pending");
+          result = {
+            ...result,
+            action: "updated",
+            workOrderId: match.id,
+            reason: "capital status noted on existing active work order",
+          };
+        } else {
+          const statusLabel = parsed.functionalState || parsed.rawSubject || "status not provided";
+          await addSystemActivity(match.id, `7-Eleven status update: ${statusLabel}`);
+          result = {
+            ...result,
+            action: "updated",
+            workOrderId: match.id,
+            reason: "7-Eleven status noted on existing active work order",
+          };
+        }
       }
     } else {
-      const sb = createServerClient();
-      const existingId = await findExistingWorkOrder(parsed);
-      if (existingId) {
-        const { error } = await sb
-          .from("work_orders")
-          .update(compactPatch(parsed) as any)
-          .eq("id", existingId);
-
-        if (error) throw error;
-        result = {
-          ...result,
-          action: "updated",
-          workOrderId: existingId,
-          reason: "existing work order updated from email intake",
-        };
-      } else {
-        const contractor = await resolveContractor(parsed);
-        const workOrderId = parsed.wotId || parsed.fwkdId || generateWOId();
-        const row = {
-          id: workOrderId,
-          store_number: parsed.storeNumber,
-          summary: parsed.summary,
-          description: parsed.description,
-          priority: parsed.priority || "p2",
-          status: contractor.contractorId ? "assigned" : "unassigned",
-          functional_status: "New",
-          contractor_id: contractor.contractorId,
-          afm_name: parsed.afmName,
-          afm_email: parsed.afmEmail,
-          city: parsed.city,
-          address: parsed.address,
-          nte: parsed.nte || 0,
-          line_of_service: parsed.lineOfService,
-          business_service: parsed.businessService,
-          category: parsed.category,
-          sub_category: parsed.subCategory,
-          incident_id: parsed.incidentId,
-          source: "email_intake",
-          dispatched_at: email.receivedDateTime || processedAt,
-          sla_started_at: email.receivedDateTime || processedAt,
-          created_at: processedAt,
-        };
-
-        const { error } = await (sb as any).from("work_orders").insert(row);
-        if (error) throw error;
-
-        if (contractor.contractorId) {
-          await sendDispatchNotification({
-            workOrder: {
-              id: workOrderId,
-              incidentId: parsed.incidentId,
-              storeNumber: parsed.storeNumber,
-              city: parsed.city,
-              address: parsed.address,
-              priority: parsed.priority || "p2",
-              summary: parsed.summary,
-              description: parsed.description,
-            },
-            contractorEmail: contractor.contractorEmail,
-            contractorName: contractor.contractorName,
-          }).catch(err => console.error("Dispatch notification failed", err));
-        }
-
-        result = {
-          ...result,
-          action: "created",
-          workOrderId,
-          reason: contractor.reason,
-          contractorAssigned: contractor.contractorId,
-        };
-      }
+      result = skippedResult(result, "unsupported email type");
     }
-
-    await finishEmail(email, folderId);
   } catch (err) {
     console.error("Email intake processing failed", err);
+    shouldFinishEmail = false;
     result = {
       ...result,
       action: "failed",
       reason: err instanceof Error ? err.message : "unknown processing error",
     };
+  }
+
+  if (shouldFinishEmail) {
+    try {
+      await finishEmail(email, folderId);
+    } catch (err) {
+      const finishReason = err instanceof Error ? err.message : "unknown mailbox finalization error";
+      console.error("Email intake mailbox finalization failed", finishReason);
+      result = {
+        ...result,
+        reason: `${result.reason}; mailbox finalization failed: ${finishReason}`,
+      };
+    }
   }
 
   await insertLog(email, result);
@@ -309,11 +381,7 @@ export async function processEmail(
 
 export async function runIntakeCycle(): Promise<IntakeResult[]> {
   const accessToken = await getAccessToken();
-  if (!accessToken) return [];
-
   const folderId = await getOrCreateFolder(accessToken);
-  if (!folderId) return [];
-
   const emails = await getUnreadDispatchEmails(accessToken);
   const results: IntakeResult[] = [];
   for (const email of emails) {

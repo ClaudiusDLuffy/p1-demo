@@ -3,10 +3,22 @@ import { runIntakeCycle } from "../../../lib/emailIntakeProcessor";
 
 export const dynamic = "force-dynamic";
 
-const isAuthorized = (req: NextRequest) => {
+const authorizationError = (req: NextRequest) => {
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  return !cronSecret || authHeader === `Bearer ${cronSecret}`;
+  if (!cronSecret) {
+    return NextResponse.json(
+      { error: "Email intake cron authentication is not configured" },
+      { status: 503 },
+    );
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+  return null;
 };
 
 const runIntake = async () => {
@@ -33,31 +45,15 @@ const runIntake = async () => {
 };
 
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
+  const authError = authorizationError(req);
+  if (authError) return authError;
 
   return runIntake();
 }
 
 export async function GET(req: NextRequest) {
-  if (req.headers.has("authorization")) {
-    if (!isAuthorized(req)) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+  const authError = authorizationError(req);
+  if (authError) return authError;
 
-    return runIntake();
-  }
-
-  return NextResponse.json({
-    status: "ok",
-    enabled: process.env.EMAIL_INTAKE_ENABLED === "true",
-    timestamp: new Date().toISOString(),
-  });
+  return runIntake();
 }

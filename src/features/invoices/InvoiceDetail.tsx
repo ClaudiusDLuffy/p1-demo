@@ -25,7 +25,7 @@ export default function InvoiceDetail(props: any) {
   const [rejectReason, setRejectReason] = useState("");
   const [submittingReject, setSubmittingReject] = useState(false);
   const inv = useMemo(
-    () => invoices.find(i => i.num === selectedInvoice),
+    () => invoices.find(i => i.id === selectedInvoice),
     [invoices, selectedInvoice]
   );
   const wo = useMemo(

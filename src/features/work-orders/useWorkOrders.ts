@@ -9,8 +9,14 @@ import {
   uploadPhotos, removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
   markActivitySevenElevenSynced,
+  markActivityContractorAttention, acknowledgeContractorAttention,
+  openWorkOrderVisit, closeWorkOrderVisit,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
+import {
+  storeLocalDateTimeToIso,
+  timezoneForWorkOrder,
+} from "../../lib/billingRules";
 import { supabase } from "../../lib/supabase/client";
 import { WORK_ORDERS_KEY, WO_PARTS_KEY } from "./queries";
 import { INVOICES_KEY } from "../invoices/queries";
@@ -254,24 +260,34 @@ export default function useWorkOrders({
   const doStartWork = async (woId: string, notes: string) => {
     setLoading("startWork_" + woId, true);
     try {
-    const requestedStartIso = startDateInput && startTimeInput ? new Date(`${startDateInput}T${startTimeInput}`).toISOString() : new Date().toISOString();
     const existing = workOrders.find(w => w.id === woId);
-    const startIso = existing?.startTimeRaw || requestedStartIso;
-    const formattedStart = new Date(startIso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const timeZone = timezoneForWorkOrder(existing);
+    const requestedStartIso = startDateInput && startTimeInput
+      ? storeLocalDateTimeToIso(startDateInput, startTimeInput, timeZone)
+      : new Date().toISOString();
+    const firstStartIso = existing?.startTimeRaw || requestedStartIso;
+    const formattedStart = new Date(requestedStartIso).toLocaleString("en-US", {
+      timeZone,
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
     const text = `Checked in and started work at ${formattedStart}.${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
     const patch: any = { status: "wip", functionalStatus: "Work in Progress" };
     if (!existing?.startTimeRaw) {
       patch.startTime = formattedStart;
-      patch.startTimeRaw = startIso;
+      patch.startTimeRaw = firstStartIso;
     }
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "note", isManager, "check_in", true));
     fire("Work started · 7-Eleven update pending");
     await dbCall(async () => {
       const dbPatch: any = { status: "wip", functionalStatus: "Work in Progress" };
-      if (!existing?.startTimeRaw) dbPatch.startTime = startIso;
+      if (!existing?.startTimeRaw) dbPatch.startTime = firstStartIso;
       await updateWorkOrder(woId, dbPatch);
-      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "check_in", { checkedInAt: startIso, notes: notes.trim() || null }));
+      await openWorkOrderVisit(woId, requestedStartIso);
+      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "check_in", { checkedInAt: requestedStartIso, notes: notes.trim() || null }));
     }, "Start work failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("startWork_" + woId, false);
@@ -292,7 +308,11 @@ export default function useWorkOrders({
   ) => {
     setLoading("pauseWork_" + woId, true);
     try {
-    const pauseIso = pauseDateInput && pauseTimeInput ? new Date(`${pauseDateInput}T${pauseTimeInput}`).toISOString() : new Date().toISOString();
+    const existing = workOrders.find(w => w.id === woId);
+    const timeZone = timezoneForWorkOrder(existing);
+    const pauseIso = pauseDateInput && pauseTimeInput
+      ? storeLocalDateTimeToIso(pauseDateInput, pauseTimeInput, timeZone)
+      : new Date().toISOString();
     const cleanParts = (partsList || []).filter(p => (p.description || "").trim());
     // Legacy fallback fields: first structured row wins when present, else
     // fall back to the single-field inputs (preserves old API for callers
@@ -307,7 +327,13 @@ export default function useWorkOrders({
     const partsSummary = cleanParts.length > 1
       ? ` Parts needed: ${cleanParts.map(p => p.description).join(", ")}.`
       : (partLabel ? ` Part needed: ${partLabel}.` : "");
-    const formattedPause = new Date(pauseIso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const formattedPause = new Date(pauseIso).toLocaleString("en-US", {
+      timeZone,
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
     const text = `Work paused at ${formattedPause}: ${reason}.${partsSummary}${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
     const updates: any = { status: "parts", functionalStatus: "Awaiting Parts" };
     if (partLabel) updates.partNeeded = partLabel;
@@ -318,6 +344,7 @@ export default function useWorkOrders({
     fire("Paused — awaiting parts");
     await dbCall(async () => {
       await updateWorkOrder(woId, updates);
+      await closeWorkOrderVisit(woId, pauseIso);
       await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "job_paused", { pausedAt: pauseIso, reason, notes: notes || null }));
       if (cleanParts.length) {
         const inserted: any[] = [];
@@ -463,7 +490,15 @@ export default function useWorkOrders({
     setLoading("closeComplete_" + woId, true);
     try {
     const endIso = completedAt || new Date().toISOString();
-    const formattedEnd = new Date(endIso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const existing = workOrders.find(w => w.id === woId);
+    const timeZone = timezoneForWorkOrder(existing);
+    const formattedEnd = new Date(endIso).toLocaleString("en-US", {
+      timeZone,
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
     const cleanNotes = (resolutionNotes || "").trim();
     const text = `Job completed and clocked out at ${formattedEnd}. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.${cleanNotes ? ` Closing notes: ${cleanNotes}` : ""}`;
     const patch: any = { status: "completed", functionalStatus: "Completed", assetMake: make, assetModel: model, assetSerial: serial, endTime: formattedEnd, endTimeRaw: endIso, resolutionCode: resolution || null, resolutionNotes: cleanNotes || null };
@@ -483,6 +518,7 @@ export default function useWorkOrders({
         resolutionCode: resolution || null,
         resolutionNotes: cleanNotes || null,
       });
+      await closeWorkOrderVisit(woId, endIso);
       await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "job_completed", { clockedOutAt: endIso, resolution: resolution || null, closingNotes: cleanNotes || null }));
     }, "Close failed", () => restoreWorkOrders(snapshot));
     } finally {
@@ -545,7 +581,7 @@ export default function useWorkOrders({
     if (woText) patchLocalWO(inv.wot, {}, localActivity(woText, "system"));
     fire(nextWoStatus === "pending_payment" ? "All invoices approved — Pending Payment" : `Invoice #${inv.num} approved`);
     await dbCall(async () => {
-      await updateInvoiceState(inv.num, "approved");
+      await updateInvoiceState(inv.id, "approved");
       await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system");
       if (nextWoStatus) {
         await updateWorkOrder(inv.wot, { status: nextWoStatus });
@@ -580,7 +616,7 @@ export default function useWorkOrders({
     patchLocalWO(inv.wot, localPatch, localActivity(`Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system"));
     fire(`Invoice #${inv.num} marked paid`);
     await dbCall(async () => {
-      await updateInvoiceState(inv.num, "paid", { paid_at: paidAt });
+      await updateInvoiceState(inv.id, "paid", { paid_at: paidAt });
       await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system");
       if (nextWoStatus) {
         await updateWorkOrder(inv.wot, { status: nextWoStatus });
@@ -607,6 +643,7 @@ export default function useWorkOrders({
     patchLocalWO(woId, { status: "closed", closedAt, nteFlagged: false }, localActivity(text, "system"));
     fire("Work order closed");
     await dbCall(async () => {
+      await closeWorkOrderVisit(woId, closedAt);
       await updateWorkOrder(woId, { status: "closed", closedAt, nteFlagged: false });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "Close failed", () => restoreWorkOrders(woSnapshot));
@@ -910,6 +947,73 @@ export default function useWorkOrders({
     }
   };
 
+  const patchContractorAttention = (
+    woId: string,
+    activityId: string,
+    patch: Record<string, unknown>,
+  ) => {
+    setWorkOrders(prev => prev.map(w => {
+      if (w.id !== woId) return w;
+      const activities = (w.activities || []).map((activity: any) =>
+        activity.id === activityId ? { ...activity, ...patch } : activity
+      );
+      const pending = activities.filter((activity: any) =>
+        activity.requiresContractorAttention && !activity.contractorAcknowledgedAt
+      );
+      return {
+        ...w,
+        activities,
+        pendingContractorActivities: pending,
+        pendingContractorAttentionCount: pending.length,
+        hasPendingContractorAttention: pending.length > 0,
+      };
+    }));
+  };
+
+  const doMarkContractorAttention = async (
+    woId: string,
+    activityId: string,
+    required: boolean,
+  ) => {
+    setLoading("contractorAttention_" + activityId, true);
+    try {
+      await markActivityContractorAttention(activityId, required);
+      patchContractorAttention(woId, activityId, {
+        requiresContractorAttention: required,
+        contractorAcknowledgedAt: null,
+        contractorAcknowledgedBy: null,
+      });
+      invalidateWorkOrders();
+      fire(required ? "Contractor attention requested" : "Contractor attention cleared");
+    } catch (e: any) {
+      fire(`Contractor attention update failed: ${e.message || e}`);
+    } finally {
+      setLoading("contractorAttention_" + activityId, false);
+    }
+  };
+
+  const doAcknowledgeContractorAttention = async (
+    woId: string,
+    activityId: string,
+    acknowledged: boolean,
+  ) => {
+    if (!acknowledged) return;
+    setLoading("contractorAck_" + activityId, true);
+    try {
+      await acknowledgeContractorAttention(activityId);
+      patchContractorAttention(woId, activityId, {
+        contractorAcknowledgedAt: acknowledged ? new Date().toISOString() : null,
+        contractorAcknowledgedBy: acknowledged ? currentUser?.id || null : null,
+      });
+      invalidateWorkOrders();
+      fire(acknowledged ? "Marked reviewed" : "Attention item reopened");
+    } catch (e: any) {
+      fire(`Attention acknowledgement failed: ${e.message || e}`);
+    } finally {
+      setLoading("contractorAck_" + activityId, false);
+    }
+  };
+
 
 
   return {
@@ -924,5 +1028,7 @@ export default function useWorkOrders({
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart,
     doMarkSevenElevenSynced,
+    doMarkContractorAttention,
+    doAcknowledgeContractorAttention,
   };
 }

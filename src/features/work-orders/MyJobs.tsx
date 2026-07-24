@@ -4,15 +4,29 @@
 import { Badge } from "../../components/ui/Badge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 export default function MyJobs(props: any) {
   const { page, isManager, myWOs, activeStatuses, slaLabel, setSelectedWO, setPage, setAiNote, woParts = [] } = props;
+  const [search, setSearch] = useState("");
   const jobCounts = useMemo(() => ({
     active: myWOs.filter(w => activeStatuses.includes(w.status)).length,
     pendingInvoice: myWOs.filter(w => w.status === "pending_invoice").length,
     capital: myWOs.filter(w => w.status === "capital").length,
   }), [myWOs, activeStatuses]);
+  const visibleJobs = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return myWOs;
+    return myWOs.filter(wo => [
+      wo.id,
+      wo.incidentId,
+      wo.store,
+      wo.addr,
+      wo.city,
+      wo.summary,
+      wo.description,
+    ].some(value => String(value ?? "").toLowerCase().includes(needle)));
+  }, [myWOs, search]);
   // Per-WO parts summary for the parts-status badge. Only counted when there
   // are structured wo_parts rows for the WO — legacy part_needed scalars get
   // their own card on detail view, not a badge here.
@@ -42,7 +56,20 @@ export default function MyJobs(props: any) {
                   </div>
                 ))}
               </div>
-              {myWOs.map((wo, i) => {
+              <input
+                type="search"
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+                aria-label="Search my jobs"
+                placeholder="Search WO#, store, address, keyword..."
+                style={{ width: "100%", marginBottom: 18, padding: "11px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+              />
+              {visibleJobs.length === 0 && (
+                <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
+                  No matching work orders.
+                </div>
+              )}
+              {visibleJobs.map((wo, i) => {
                 const sla = slaLabel(wo);
                 const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                 const partsSummary = partsByWO[wo.id];
@@ -62,6 +89,14 @@ export default function MyJobs(props: any) {
                         {partsSummary && partsSummary.total > 0 && (
                           <span style={{ fontSize: 10, fontWeight: 700, color: partsSummary.received === partsSummary.total ? "#065F46" : "#92400E", background: partsSummary.received === partsSummary.total ? "#D1FAE5" : "#FEF3C7", padding: "2px 8px", borderRadius: 10, letterSpacing: 0.3 }}>
                             {partsSummary.total} part{partsSummary.total !== 1 ? "s" : ""} · {partsSummary.received} received
+                          </span>
+                        )}
+                        {Number(wo.pendingContractorAttentionCount || 0) > 0 && (
+                          <span
+                            title="Staff requested contractor attention"
+                            style={{ fontSize: 10, fontWeight: 800, color: "#166534", background: "#DCFCE7", border: "1px solid #22C55E66", padding: "2px 8px", borderRadius: 10 }}
+                          >
+                            {wo.pendingContractorAttentionCount} need{wo.pendingContractorAttentionCount === 1 ? "s" : ""} attention
                           </span>
                         )}
                       </div>

@@ -27,6 +27,7 @@ export type ParsedWorkOrder = {
   city: string | null;
   address: string | null;
   state: string | null;
+  functionalState: string | null;
   vendor: string | null;
   doNotDispatch: boolean;
   emailSource: string;
@@ -35,12 +36,36 @@ export type ParsedWorkOrder = {
   parseConfidence: "high" | "medium" | "low";
 };
 
+const THREAD_PREFIX_PATTERN = /^(?:(?:re|fw|fwd)\s*:\s*)+/i;
+const DISPATCH_PATTERN = /\bdispatch(?:ed)?\b/i;
+const NTE_EMAIL_PATTERN = /\bNTE\b|NTE\s*\/\s*Quote|Not\s+to\s+Exceed/i;
+const CAPITAL_EMAIL_PATTERN = /\bcapital\b/i;
+const STATUS_UPDATE_PATTERN =
+  /\b(?:approved|approval|projected|projection|accepted|assigned|work\s+in\s+progress|completed?|closed?|cancelled|canceled|rejected|revised|updated?|status|state|breach|invoice|mentioned)\b/i;
+const WORK_ORDER_REFERENCE_PATTERN = /\b(?:WOT|FWKD)\d{6,12}\b/i;
+
+export function isConfirmedInitialDispatchSubject(subject: string): boolean {
+  const normalized = (subject || "").trim();
+  if (!normalized || THREAD_PREFIX_PATTERN.test(normalized)) return false;
+  if (/\bdo\s+not\s+dispatch\b/i.test(normalized)) return false;
+  if (NTE_EMAIL_PATTERN.test(normalized) || CAPITAL_EMAIL_PATTERN.test(normalized)) return false;
+  if (STATUS_UPDATE_PATTERN.test(normalized)) return false;
+  return DISPATCH_PATTERN.test(normalized);
+}
+
 export function detectEmailType(subject: string): EmailType {
-  const normalized = subject || "";
-  if (/has been dispatched/i.test(normalized)) return "TYPE_DISPATCHED";
-  if (/NTE\/Quote Has Been Approved/i.test(normalized)) return "TYPE_NTE_APPROVED";
-  if (/Pending Capital Approval|Capital Project Requested/i.test(normalized)) return "TYPE_CAPITAL_PENDING";
-  if (/7-Eleven/i.test(normalized) || /\bWOT\S+/i.test(normalized)) return "TYPE_STATE_UPDATE";
+  const normalized = (subject || "").trim();
+  if (NTE_EMAIL_PATTERN.test(normalized)) return "TYPE_NTE_APPROVED";
+  if (CAPITAL_EMAIL_PATTERN.test(normalized)) return "TYPE_CAPITAL_PENDING";
+  if (isConfirmedInitialDispatchSubject(normalized)) return "TYPE_DISPATCHED";
+  if (
+    THREAD_PREFIX_PATTERN.test(normalized) ||
+    STATUS_UPDATE_PATTERN.test(normalized) ||
+    /7-Eleven/i.test(normalized) ||
+    WORK_ORDER_REFERENCE_PATTERN.test(normalized)
+  ) {
+    return "TYPE_STATE_UPDATE";
+  }
   return "TYPE_UNKNOWN";
 }
 
@@ -114,7 +139,7 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
   const address = firstMatch(body, [/^Store Address:\s*(.+?)(?=\r?\n)/m]);
   const addressParts = parseAddressParts(address);
   const priorityRaw = firstMatch(body, [/^Priority:\s*(P[1-5])\s*-/m]);
-  const state = firstMatch(body, [/^State:\s*(.+?)(?=\r?\n)/m]);
+  const functionalState = firstMatch(body, [/^State:\s*(.+?)(?=\r?\n)/m]);
   const lineOfService = firstMatch(body, [/^Line of Service:\s*(.+?)(?=\r?\n)/m]);
   const businessService = firstMatch(body, [/^Business Service:\s*(.+?)(?=\r?\n)/m]);
   const category = firstMatch(body, [/^Category:\s*(.+?)(?=\r?\n)/m]);
@@ -154,6 +179,7 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
     city: addressParts.city,
     address,
     state: addressParts.state,
+    functionalState,
     vendor: firstMatch(body, [/^Vendor:\s*(.+?)(?=\r?\n)/m]),
     doNotDispatch,
     emailSource: email.from?.emailAddress?.address || "unknown",

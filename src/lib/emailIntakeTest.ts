@@ -1,5 +1,10 @@
 import type { GraphEmail } from "./graphClient";
-import { parseDispatchEmail } from "./emailParser";
+import {
+  detectEmailType,
+  isConfirmedInitialDispatchSubject,
+  parseDispatchEmail,
+  type EmailType,
+} from "./emailParser";
 
 const MOCK_EMAILS: GraphEmail[] = [
   {
@@ -102,12 +107,125 @@ Description: this is for the slurpee job from FWKD do not dispatch`,
   },
 ];
 
-export async function runMockIntakeTest(): Promise<void> {
-  console.log("Running mock intake test...");
-  for (const email of MOCK_EMAILS) {
-    const parsed = parseDispatchEmail(email);
-    console.log("Parsed:", JSON.stringify(parsed, null, 2));
+const CLASSIFICATION_CASES: Array<{
+  subject: string;
+  expectedType: EmailType;
+  canCreate: boolean;
+}> = [
+  {
+    subject: "Dispatch - 7-Eleven Work Order WOT0617474 / INC26277634",
+    expectedType: "TYPE_DISPATCHED",
+    canCreate: true,
+  },
+  {
+    subject: "7-Eleven Work Order WOT0617474 / INC26277634 was dispatched",
+    expectedType: "TYPE_DISPATCHED",
+    canCreate: true,
+  },
+  {
+    subject: "7-Eleven Work Order WOT0617474 / INC26277634 has been dispatched",
+    expectedType: "TYPE_DISPATCHED",
+    canCreate: true,
+  },
+  {
+    subject: "Re: 7-Eleven Work Order WOT0617474 has been dispatched",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "Fw: 7-Eleven Work Order WOT0617474 has been dispatched",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "Fwd: WOT0617474 has been dispatched - NTE/Quote Has Been Approved",
+    expectedType: "TYPE_NTE_APPROVED",
+    canCreate: false,
+  },
+  {
+    subject: "Work Order Task WOT0617474 NTE approved",
+    expectedType: "TYPE_NTE_APPROVED",
+    canCreate: false,
+  },
+  {
+    subject: "Re: WOT0617474 has been dispatched - Pending Capital Approval",
+    expectedType: "TYPE_CAPITAL_PENDING",
+    canCreate: false,
+  },
+  {
+    subject: "WOT0617474 projected completion updated",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "WOT0617474 has been approved",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "WOT0617474 has been dispatched - Approved",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "Status update: WOT0617474 dispatched",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "Work Order Task WOT0617474 has been assigned",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "WOT0617474 do not dispatch",
+    expectedType: "TYPE_STATE_UPDATE",
+    canCreate: false,
+  },
+  {
+    subject: "General mailbox message",
+    expectedType: "TYPE_UNKNOWN",
+    canCreate: false,
+  },
+];
+
+const assertEqual = (actual: unknown, expected: unknown, label: string) => {
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${String(expected)}, received ${String(actual)}`);
   }
+};
+
+export function runDeterministicEmailIntakeTests(): void {
+  for (const testCase of CLASSIFICATION_CASES) {
+    assertEqual(
+      detectEmailType(testCase.subject),
+      testCase.expectedType,
+      `classification for "${testCase.subject}"`,
+    );
+    assertEqual(
+      isConfirmedInitialDispatchSubject(testCase.subject),
+      testCase.canCreate,
+      `creation eligibility for "${testCase.subject}"`,
+    );
+  }
+
+  const dispatched = parseDispatchEmail(MOCK_EMAILS[0]);
+  assertEqual(dispatched.emailType, "TYPE_DISPATCHED", "direct dispatch type");
+  assertEqual(dispatched.state, "TX", "store state");
+  assertEqual(dispatched.functionalState, "Accepted", "functional state");
+  assertEqual(dispatched.parseConfidence, "high", "direct dispatch confidence");
+
+  const nte = parseDispatchEmail(MOCK_EMAILS[1]);
+  assertEqual(nte.emailType, "TYPE_NTE_APPROVED", "NTE type");
+
+  const capital = parseDispatchEmail(MOCK_EMAILS[2]);
+  assertEqual(capital.emailType, "TYPE_CAPITAL_PENDING", "capital type");
+  assertEqual(capital.doNotDispatch, true, "capital do-not-dispatch detection");
+}
+
+export async function runMockIntakeTest(): Promise<void> {
+  runDeterministicEmailIntakeTests();
+  console.log(`Email intake tests passed (${CLASSIFICATION_CASES.length * 2 + 7} assertions)`);
 }
 
 export { MOCK_EMAILS };

@@ -13,6 +13,9 @@ export type ParsedInvoicePdf = {
   total: number | null;
   confidence: "high" | "medium" | "none";
   matchedLabel: string | null;
+  invoiceNumber: string | null;
+  invoiceNumberConfidence: "high" | "medium" | "none";
+  matchedNumberLabel: string | null;
   lines: ParsedInvoiceLine[];
   lineConfidence: "high" | "medium" | "none";
 };

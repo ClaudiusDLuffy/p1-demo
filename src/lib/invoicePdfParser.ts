@@ -15,7 +15,13 @@ export type InvoiceLineExtraction = {
   confidence: "high" | "medium";
 };
 
-export type InvoicePdfExtraction = InvoiceTotalExtraction & {
+export type InvoiceNumberExtraction = {
+  invoiceNumber: string | null;
+  invoiceNumberConfidence: "high" | "medium" | "none";
+  matchedNumberLabel: string | null;
+};
+
+export type InvoicePdfExtraction = InvoiceTotalExtraction & InvoiceNumberExtraction & {
   lines: InvoiceLineExtraction[];
   lineConfidence: "high" | "medium" | "none";
 };
@@ -54,6 +60,59 @@ const parseMoney = (raw: string) => {
 };
 
 const roundMoney = (value: number) => Math.round(value * 100) / 100;
+
+const normalizeInvoiceNumberCandidate = (raw: string) => {
+  const value = raw
+    .trim()
+    .replace(/^[#:=\s-]+/, "")
+    .replace(/[.,;:)\]}]+$/, "")
+    .trim();
+  if (!value || value.length > 64 || !/\d/.test(value)) return null;
+  if (/^(?:date|total|due|number|no)$/i.test(value)) return null;
+  if (/^(?:WOT|INC)\d+$/i.test(value)) return null;
+  if (/^\d{1,4}[/-]\d{1,2}[/-]\d{1,4}$/.test(value)) return null;
+  return value;
+};
+
+export function findInvoiceNumber(text: string): InvoiceNumberExtraction {
+  const lines = text
+    .replace(/\u00a0/g, " ")
+    .split(/\r?\n/)
+    .map(line => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean);
+
+  const explicit = /\binvoice\s*(number|no\.?|num\.?|#)\s*(?:[:#=-]\s*)?([A-Z0-9][A-Z0-9._/-]{0,63})\b/i;
+  for (const line of lines) {
+    const match = line.match(explicit);
+    const invoiceNumber = match ? normalizeInvoiceNumberCandidate(match[2]) : null;
+    if (invoiceNumber) {
+      return {
+        invoiceNumber,
+        invoiceNumberConfidence: "high",
+        matchedNumberLabel: `invoice ${match![1].toLowerCase()}`,
+      };
+    }
+  }
+
+  const bare = /^\s*invoice\s*[:=-]?\s+([A-Z0-9][A-Z0-9._/-]{0,63})\b/i;
+  for (const line of lines) {
+    const match = line.match(bare);
+    const invoiceNumber = match ? normalizeInvoiceNumberCandidate(match[1]) : null;
+    if (invoiceNumber) {
+      return {
+        invoiceNumber,
+        invoiceNumberConfidence: "medium",
+        matchedNumberLabel: "invoice",
+      };
+    }
+  }
+
+  return {
+    invoiceNumber: null,
+    invoiceNumberConfidence: "none",
+    matchedNumberLabel: null,
+  };
+}
 
 const rowText = (row: TextRow) =>
   row.items
@@ -285,6 +344,7 @@ export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<Invoi
 
   try {
     const pageText: string[] = [];
+    const pageRowText: string[] = [];
     const lines: InvoiceLineExtraction[] = [];
     const pageLimit = Math.min(pdf.numPages, 25);
 
@@ -301,16 +361,20 @@ export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<Invoi
         }));
       const text = positionedItems.map(item => `${item.text} `).join("");
       pageText.push(text);
+      pageRowText.push(buildRows(positionedItems).map(rowText).join("\n"));
       lines.push(...extractLinesFromPage(positionedItems));
     }
 
     const total = findInvoiceTotal(pageText.join("\n").slice(0, 250_000));
+    const invoiceNumber = findInvoiceNumber(
+      `${pageRowText.join("\n")}\n${pageText.join("\n")}`.slice(0, 250_000),
+    );
     const lineConfidence = lines.length === 0
       ? "none"
       : lines.every(line => line.confidence === "high")
         ? "high"
         : "medium";
-    return { ...total, lines, lineConfidence };
+    return { ...total, ...invoiceNumber, lines, lineConfidence };
   } finally {
     await pdf.destroy();
   }
