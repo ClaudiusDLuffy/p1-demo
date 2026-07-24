@@ -177,14 +177,28 @@ export default function InvoiceCreateModal(props: any) {
   const isContractor = currentUser?.role === "contractor";
   const over = !isContractor && (woData.nte || 0) > 0 && projectedSpend > woData.nte;
   const close = () => {
+    const today = todayIso();
     pdfParseAttempt.current += 1;
-    setModal(null);
+    numTouchedRef.current = false;
+    setNumTouched(false);
+    reset({
+      num: "",
+      invoiceDate: today,
+      serviceDate: today,
+      terms: "Net 30",
+      tax: "",
+      cme: "",
+      uploadOnly: false,
+      uploadedTotal: "",
+      lines: initialLines(),
+    });
     resetNewInv();
     setPdfFile(null);
     setPdfError("");
     setPdfParseStatus("idle");
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
+    setModal(null);
   };
   const clearPendingPdf = (error = "") => {
     pdfParseAttempt.current += 1;
@@ -231,7 +245,7 @@ export default function InvoiceCreateModal(props: any) {
   };
 
   return (
-    <Modal onClose={close} title="Create invoice" width={820}>
+    <Modal onClose={close} title="Create invoice" width={820} closeOnBackdrop={false}>
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {woData.id}</div>
 

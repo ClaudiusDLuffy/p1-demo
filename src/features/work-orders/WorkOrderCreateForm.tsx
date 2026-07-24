@@ -51,8 +51,14 @@ export default function WorkOrderCreateForm(props: any) {
     }
   };
 
+  const discardAndClose = () => {
+    reset();
+    setCreateErr(null);
+    onClose();
+  };
+
   return (
-    <Modal onClose={onClose} title="Create Work Order" width={520} closeOnBackdrop={false}>
+    <Modal onClose={discardAndClose} title="Create Work Order" width={520} closeOnBackdrop={false}>
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>
           Only the WOT number is required - fill in what you have; the rest takes sensible defaults.
@@ -123,7 +129,7 @@ export default function WorkOrderCreateForm(props: any) {
           </div>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-          <button type="button" onClick={onClose} className="btn-soft">Cancel</button>
+          <button type="button" onClick={discardAndClose} className="btn-soft">Cancel</button>
           <button
             type="submit"
             disabled={submitting}

@@ -384,6 +384,32 @@ export default function BillingInvoiceCreateModal(props: any) {
     setSelectedSourceIds([]);
   }, [selectedWorkOrderId]);
 
+  const discardAndClose = () => {
+    const today = todayIso();
+    initializedFor.current = null;
+    previousInvoiceDate.current = "";
+    previousWorkOrderId.current = "";
+    reset({
+      num: "",
+      invoiceDate: today,
+      serviceDate: "",
+      dueDate: addDays(today, 30),
+      workOrderId: "",
+      storeNumber: "",
+      storeAddress: "",
+      terms: "Net 30",
+      cme: "",
+      taxState: "",
+      state: "submitted",
+      lines: [],
+    });
+    clearErrors();
+    setWoSearch("");
+    setSelectedSourceIds([]);
+    setTargetMargin("30");
+    onClose?.();
+  };
+
   if (modal !== "createBillingInvoice") return null;
 
   const toggleSourceInvoice = (invoiceId: string) => {
@@ -501,7 +527,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       if (!res.ok) throw new Error(payload.error || "Billing invoice save failed");
       fire?.(`Invoice #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "submitted"}`);
       onCreated?.(payload.invoice);
-      onClose?.();
+      discardAndClose();
     } catch (err: any) {
       fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${err.message || err}`);
     } finally {
@@ -510,7 +536,12 @@ export default function BillingInvoiceCreateModal(props: any) {
   };
 
   return (
-    <Modal onClose={onClose} title={isEditing ? `Edit invoice #${editingInvoice.num}` : "Create P1 to 7-Eleven invoice"} width={980}>
+    <Modal
+      onClose={discardAndClose}
+      title={isEditing ? `Edit invoice #${editingInvoice.num}` : "Create P1 to 7-Eleven invoice"}
+      width={980}
+      closeOnBackdrop={false}
+    >
       <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
           {isEditing
@@ -811,7 +842,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button type="button" onClick={onClose} className="btn-soft">Cancel</button>
+          <button type="button" onClick={discardAndClose} className="btn-soft">Cancel</button>
           {editingInvoice?.state !== "submitted" && (
             <button type="button" disabled={submitting} onClick={handleSubmit(data => submit(data, "draft"))} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting ? 0.7 : 1 }}>
               {submitting ? <><BtnSpinner />Saving...</> : isEditing ? "Save Draft" : "Save as Draft"}
