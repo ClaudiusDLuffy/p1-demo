@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "../../../lib/supabase/server";
+import { normalizeStateCode } from "../../../lib/billingRules";
 import type { Database } from "../../../lib/supabase/database.types";
 
 const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
@@ -11,6 +12,10 @@ type BillingLineInput = {
   description?: string;
   qty: number;
   rate: number;
+  isTaxable?: boolean;
+  sourceInvoiceLineId?: string | null;
+  sourceUnitCost?: number | null;
+  markupPercent?: number | null;
 };
 
 const jsonError = (message: string, status: number) =>
@@ -67,6 +72,14 @@ const mapLine = (line: any) => ({
   qty: Number(line.qty || 0),
   rate: Number(line.rate || 0),
   amount: Number(line.amount || 0),
+  isTaxable: !!line.is_taxable,
+  sourceInvoiceLineId: line.source_invoice_line_id || null,
+  sourceUnitCost: line.source_unit_cost == null
+    ? null
+    : Number(line.source_unit_cost),
+  markupPercent: line.markup_percent == null
+    ? null
+    : Number(line.markup_percent),
 });
 
 const formatDate = (d: string | null) => {
@@ -103,23 +116,149 @@ const mapInvoice = (invoice: any, lines: any[]) => ({
   state: invoice.state,
   subtotal: Number(invoice.subtotal || 0),
   salesTax: Number(invoice.sales_tax || 0),
+  taxState: invoice.tax_state || null,
+  taxRate: invoice.tax_rate == null ? null : Number(invoice.tax_rate),
   total: Number(invoice.total || 0),
   pdfStoragePath: invoice.pdf_storage_path || null,
+  qboInvoiceId: invoice.qbo_invoice_id || null,
+  qboSyncedAt: invoice.qbo_synced_at || null,
   date: shortMonthDay(invoice.invoice_date),
   createdAt: invoice.created_at,
   updatedAt: invoice.updated_at,
   lines: lines.map(mapLine),
 });
 
-const sourceMetrics = (sourceInvoices: any[], staffTotal: number) => {
+const sourceMetrics = (sourceInvoices: any[], staffSubtotal: number) => {
   const contractorCost = sourceInvoices.reduce(
     (sum, invoice) => sum + Number(invoice.total || 0),
     0,
   );
-  const grossProfit = staffTotal - contractorCost;
-  const marginPercent = staffTotal > 0 ? (grossProfit / staffTotal) * 100 : null;
+  const grossProfit = staffSubtotal - contractorCost;
+  const marginPercent = staffSubtotal > 0
+    ? (grossProfit / staffSubtotal) * 100
+    : null;
   return { contractorCost, grossProfit, marginPercent };
 };
+
+type ValidBillingLine = {
+  type: string;
+  description: string;
+  qty: number;
+  rate: number;
+  isTaxable: boolean;
+  sourceInvoiceLineId: string | null;
+  sourceUnitCost: number | null;
+  markupPercent: number | null;
+};
+
+const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
+  lines
+    .map(line => {
+      const sourceUnitCost = line.sourceUnitCost == null
+        ? null
+        : Number(line.sourceUnitCost);
+      const markupPercent = line.markupPercent == null
+        ? null
+        : Number(line.markupPercent);
+      return {
+        type: String(line.type || "Other").trim(),
+        description: String(line.desc || line.description || "").trim(),
+        qty: Number(line.qty || 0),
+        rate: Number(line.rate || 0),
+        isTaxable: !!line.isTaxable,
+        sourceInvoiceLineId: String(line.sourceInvoiceLineId || "").trim() || null,
+        sourceUnitCost: sourceUnitCost != null && Number.isFinite(sourceUnitCost)
+          ? sourceUnitCost
+          : null,
+        markupPercent: markupPercent != null && Number.isFinite(markupPercent)
+          ? markupPercent
+          : null,
+      };
+    })
+    .filter(line =>
+      line.description
+      && line.qty > 0
+      && line.rate > 0
+      && (line.sourceUnitCost == null || line.sourceUnitCost >= 0)
+      && (line.markupPercent == null || line.markupPercent >= 0),
+    );
+
+async function resolveTax(
+  sb: ReturnType<typeof createServerClient>,
+  body: any,
+  lines: ValidBillingLine[],
+) {
+  let taxState = normalizeStateCode(body.taxState);
+  if (body.workOrderId) {
+    const { data: workOrder, error: workOrderError } = await (sb as any)
+      .from("work_orders")
+      .select("store_state")
+      .eq("id", body.workOrderId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (workOrderError) throw workOrderError;
+    if (!workOrder) {
+      throw new Error("Linked work order was not found");
+    }
+    taxState = normalizeStateCode(workOrder.store_state) || taxState;
+  }
+
+  const taxableSubtotal = lines.reduce(
+    (sum, line) => sum + (line.isTaxable ? line.qty * line.rate : 0),
+    0,
+  );
+  if (taxableSubtotal <= 0) {
+    return {
+      taxState: taxState || null,
+      taxRate: null as number | null,
+      salesTax: 0,
+    };
+  }
+  if (!taxState) {
+    throw new Error("Store state is required for taxable billing lines");
+  }
+
+  const onDate = String(body.serviceDate || body.invoiceDate || "").slice(0, 10);
+  const { data: rates, error: ratesError } = await (sb as any)
+    .from("state_sales_tax_rates")
+    .select("state_code, rate, effective_from, effective_to")
+    .eq("state_code", taxState)
+    .order("effective_from", { ascending: false });
+  if (ratesError) throw ratesError;
+  const rateRow = (rates || []).find((rate: any) =>
+    (!rate.effective_from || rate.effective_from <= onDate)
+    && (!rate.effective_to || rate.effective_to >= onDate),
+  );
+  if (!rateRow) {
+    throw new Error(`No active sales-tax rate is configured for ${taxState}`);
+  }
+
+  const taxRate = Number(rateRow.rate);
+  if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 1) {
+    throw new Error(`Configured sales-tax rate for ${taxState} is invalid`);
+  }
+  return {
+    taxState,
+    taxRate,
+    salesTax: Math.round(taxableSubtotal * taxRate * 100) / 100,
+  };
+}
+
+const lineRowsForInvoice = (
+  invoiceId: string,
+  lines: ValidBillingLine[],
+) => lines.map((line, index) => ({
+  invoice_id: invoiceId,
+  position: index + 1,
+  type: line.type,
+  description: line.description,
+  qty: line.qty,
+  rate: line.rate,
+  is_taxable: line.isTaxable,
+  source_invoice_line_id: line.sourceInvoiceLineId,
+  source_unit_cost: line.sourceUnitCost,
+  markup_percent: line.markupPercent,
+}));
 
 async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
   const [invoiceRes, contractorRes, lineRes, sourceRes] = await Promise.all([
@@ -169,7 +308,7 @@ async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
       ...mapped,
       sourceInvoices,
       sourceInvoiceIds: sourceInvoices.map((source: any) => source.id),
-      ...sourceMetrics(sourceInvoices, mapped.total),
+      ...sourceMetrics(sourceInvoices, mapped.subtotal),
     };
   });
 }
@@ -210,20 +349,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+    const targetState = body.state === "draft" ? "draft" : "submitted";
     const sourceInvoiceIds = Array.from(new Set(
       (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
         .map((id: unknown) => String(id || "").trim())
         .filter(Boolean),
     ));
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
-    const validLines = lines
-      .map(line => ({
-        type: String(line.type || "Other").trim(),
-        description: String(line.desc || line.description || "").trim(),
-        qty: Number(line.qty || 0),
-        rate: Number(line.rate || 0),
-      }))
-      .filter(line => line.description && line.qty > 0 && line.rate > 0);
+    const validLines = normalizeBillingLines(lines);
 
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
@@ -282,7 +415,8 @@ export async function POST(req: NextRequest) {
     }
 
     const subtotal = validLines.reduce((sum, line) => sum + line.qty * line.rate, 0);
-    const salesTax = Number(body.salesTax || 0);
+    const tax = await resolveTax(auth.sb, body, validLines);
+    const salesTax = tax.salesTax;
     const total = subtotal + salesTax;
     let desiredNum = String(body.num || "").trim() || await nextStaffInvoiceNum(auth.sb);
 
@@ -303,9 +437,11 @@ export async function POST(req: NextRequest) {
           service_date: body.serviceDate || null,
           due_date: body.dueDate || null,
           terms: body.terms || "Net 30",
-          state: body.state || "submitted",
+          state: targetState,
           subtotal,
           sales_tax: salesTax,
+          tax_state: tax.taxState,
+          tax_rate: tax.taxRate,
           total,
           created_by: auth.user.id,
         })
@@ -325,14 +461,7 @@ export async function POST(req: NextRequest) {
 
     if (insertError || !inserted) throw insertError || new Error("Invoice insert failed");
 
-    const lineRows = validLines.map((line, index) => ({
-      invoice_id: inserted.id,
-      position: index + 1,
-      type: line.type,
-      description: line.description,
-      qty: line.qty,
-      rate: line.rate,
-    }));
+    const lineRows = lineRowsForInvoice(inserted.id, validLines);
 
     const { data: createdLines, error: lineError } = await auth.sb
       .from("invoice_lines")
@@ -398,7 +527,7 @@ export async function POST(req: NextRequest) {
         ...mappedInvoice,
         sourceInvoices,
         sourceInvoiceIds,
-        ...sourceMetrics(sourceInvoices, mappedInvoice.total),
+        ...sourceMetrics(sourceInvoices, mappedInvoice.subtotal),
       },
     });
   } catch (err) {
@@ -424,14 +553,7 @@ export async function PATCH(req: NextRequest) {
         .filter(Boolean),
     ));
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
-    const validLines = lines
-      .map(line => ({
-        type: String(line.type || "Other").trim(),
-        description: String(line.desc || line.description || "").trim(),
-        qty: Number(line.qty || 0),
-        rate: Number(line.rate || 0),
-      }))
-      .filter(line => line.description && line.qty > 0 && line.rate > 0);
+    const validLines = normalizeBillingLines(lines);
 
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
@@ -450,8 +572,11 @@ export async function PATCH(req: NextRequest) {
 
     if (existingError) throw existingError;
     if (!existing) return jsonError("Billing invoice not found", 404);
-    if (existing.state !== "draft") {
-      return jsonError("Only draft billing invoices can be edited", 409);
+    if (!["draft", "submitted"].includes(existing.state)) {
+      return jsonError("Approved, paid, rejected, or revised billing invoices are locked", 409);
+    }
+    if (existing.qbo_invoice_id || existing.qbo_synced_at) {
+      return jsonError("QuickBooks-synced billing invoices are locked", 409);
     }
 
     if (sourceInvoiceIds.length > 0) {
@@ -506,7 +631,8 @@ export async function PATCH(req: NextRequest) {
     }
 
     const subtotal = validLines.reduce((sum, line) => sum + line.qty * line.rate, 0);
-    const salesTax = Number(body.salesTax || 0);
+    const tax = await resolveTax(auth.sb, body, validLines);
+    const salesTax = tax.salesTax;
     if (!Number.isFinite(salesTax) || salesTax < 0) {
       return jsonError("Sales tax must be zero or greater", 400);
     }
@@ -527,15 +653,17 @@ export async function PATCH(req: NextRequest) {
         service_date: body.serviceDate || null,
         due_date: body.dueDate || null,
         terms: body.terms || "Net 30",
-        state: "draft",
+        state: targetState,
         subtotal,
         sales_tax: salesTax,
+        tax_state: tax.taxState,
+        tax_rate: tax.taxRate,
         total,
         updated_at: updatedAt,
       })
       .eq("id", id)
       .eq("invoice_type", "staff")
-      .eq("state", "draft")
+      .in("state", ["draft", "submitted"])
       .is("deleted_at", null)
       .select()
       .maybeSingle();
@@ -544,7 +672,7 @@ export async function PATCH(req: NextRequest) {
       return jsonError(`Invoice number ${desiredNum} already exists`, 409);
     }
     if (updateError) throw updateError;
-    if (!updated) return jsonError("Draft changed before it could be saved", 409);
+    if (!updated) return jsonError("Invoice changed before it could be saved", 409);
 
     const { error: lineDeleteError } = await auth.sb
       .from("invoice_lines")
@@ -552,14 +680,7 @@ export async function PATCH(req: NextRequest) {
       .eq("invoice_id", id);
     if (lineDeleteError) throw lineDeleteError;
 
-    const lineRows = validLines.map((line, index) => ({
-      invoice_id: id,
-      position: index + 1,
-      type: line.type,
-      description: line.description,
-      qty: line.qty,
-      rate: line.rate,
-    }));
+    const lineRows = lineRowsForInvoice(id, validLines);
     const { error: lineInsertError } = await auth.sb
       .from("invoice_lines")
       .insert(lineRows);
@@ -584,18 +705,8 @@ export async function PATCH(req: NextRequest) {
       if (sourceInsertError) throw sourceInsertError;
     }
 
-    if (targetState === "submitted") {
-      const { error: stateError } = await (auth.sb as any)
-        .from("invoices")
-        .update({ state: "submitted", updated_at: new Date().toISOString() })
-        .eq("id", id)
-        .eq("invoice_type", "staff")
-        .eq("state", "draft");
-      if (stateError) throw stateError;
-    }
-
     if (workOrderId) {
-      const action = targetState === "submitted" ? "updated and submitted" : "draft updated";
+      const action = targetState === "submitted" ? "updated" : "draft updated";
       const { error: activityError } = await (auth.sb as any)
         .from("activities")
         .insert({

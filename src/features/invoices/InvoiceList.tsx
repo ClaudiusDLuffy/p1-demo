@@ -51,7 +51,7 @@ export default function InvoiceList(props: any) {
                   </thead>
                   <tbody>
                     {visibleInvoices.map(inv => (
-                      <tr key={inv.num} onClick={() => setSelectedInvoice(inv.num)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
+                      <tr key={inv.id} onClick={() => setSelectedInvoice(inv.id)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
                         <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
                         <td className="mono" style={{ padding: "13px 14px", fontSize: 11, color: T.muted }}>{inv.wot}</td>
                         {isManager && <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>}
@@ -70,8 +70,8 @@ export default function InvoiceList(props: any) {
                 {visibleInvoices.map((inv: any) => (
                   <div
                     className="mobile-card"
-                    key={inv.num}
-                    onClick={() => setSelectedInvoice(inv.num)}
+                    key={inv.id}
+                    onClick={() => setSelectedInvoice(inv.id)}
                     style={{
                       background: "#fff",
                       borderRadius: 12,

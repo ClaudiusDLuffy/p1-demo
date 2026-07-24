@@ -46,6 +46,11 @@ import Dashboard from "../features/dashboard/Dashboard";
 import {
   T, DEMO_ACCOUNTS, PRIORITY, MONTHS, WEEKDAYS,
 } from "../lib/constants";
+import {
+  dateTimeInputPartsInTimeZone,
+  storeLocalDateTimeToIso,
+  timezoneForWorkOrder,
+} from "../lib/billingRules";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -980,13 +985,13 @@ export default function PortalShell() {
   const [noteText, setNoteText] = useState("");
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [startDateInput, setStartDateInput] = useState(new Date().toISOString().slice(0, 10));
-  const [startTimeInput, setStartTimeInput] = useState(new Date().toTimeString().slice(0, 5));
-  const [pauseDateInput, setPauseDateInput] = useState(new Date().toISOString().slice(0, 10));
-  const [pauseTimeInput, setPauseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
-  const [closeDateInput, setCloseDateInput] = useState(new Date().toISOString().slice(0, 10));
-  const [closeTimeInput, setCloseTimeInput] = useState(new Date().toTimeString().slice(0, 5));
-  const [etaDateInput, setEtaDateInput] = useState(new Date().toISOString().slice(0, 10));
+  const [startDateInput, setStartDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
+  const [startTimeInput, setStartTimeInput] = useState(() => dateTimeInputPartsInTimeZone().time);
+  const [pauseDateInput, setPauseDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
+  const [pauseTimeInput, setPauseTimeInput] = useState(() => dateTimeInputPartsInTimeZone().time);
+  const [closeDateInput, setCloseDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
+  const [closeTimeInput, setCloseTimeInput] = useState(() => dateTimeInputPartsInTimeZone().time);
+  const [etaDateInput, setEtaDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
   const [etaTimeInput, setEtaTimeInput] = useState("14:00");
   const [nteInputValue, setNteInputValue] = useState("");
   const [nteFlagInputValue, setNteFlagInputValue] = useState("");
@@ -1037,7 +1042,8 @@ export default function PortalShell() {
     doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
-    doAddPart, doUpdatePart, doDeletePart, doMarkSevenElevenSynced } = useWorkOrders({
+    doAddPart, doUpdatePart, doDeletePart, doMarkSevenElevenSynced,
+    doMarkContractorAttention, doAcknowledgeContractorAttention } = useWorkOrders({
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
@@ -1169,8 +1175,12 @@ export default function PortalShell() {
 
   useEffect(() => {
     if (!woData) return;
+    const storeNow = dateTimeInputPartsInTimeZone(
+      new Date(),
+      timezoneForWorkOrder(woData),
+    );
     if (modal === "setEta") {
-      setEtaDateInput(new Date().toISOString().slice(0, 10));
+      setEtaDateInput(storeNow.date);
       setEtaTimeInput("14:00");
     }
     if (modal === "editNte") setNteInputValue(woData.nte || "");
@@ -1194,11 +1204,14 @@ export default function PortalShell() {
       setReassignTarget("");
       setReassignSearch("");
     }
-    if (modal === "startWork") setStartNotesInput("");
+    if (modal === "startWork") {
+      setStartDateInput(storeNow.date);
+      setStartTimeInput(storeNow.time);
+      setStartNotesInput("");
+    }
     if (modal === "pauseWork") {
-      const now = new Date();
-      setPauseDateInput(now.toISOString().slice(0, 10));
-      setPauseTimeInput(now.toTimeString().slice(0, 5));
+      setPauseDateInput(storeNow.date);
+      setPauseTimeInput(storeNow.time);
       setPauseReasonInput("");
       setPartDescInput("");
       setPartNumInput("");
@@ -1207,9 +1220,8 @@ export default function PortalShell() {
       setPauseNotesInput("");
     }
     if (modal === "closeComplete") {
-      const now = new Date();
-      setCloseDateInput(now.toISOString().slice(0, 10));
-      setCloseTimeInput(now.toTimeString().slice(0, 5));
+      setCloseDateInput(storeNow.date);
+      setCloseTimeInput(storeNow.time);
       setAssetMakeInput(woData.assetMake || "");
       setAssetModelInput(woData.assetModel || "");
       setAssetSerialInput(woData.assetSerial || "");
@@ -1510,6 +1522,13 @@ export default function PortalShell() {
     () => invoices.filter(i => i.contractor === currentUser?.id && (i.state === "submitted" || i.state === "revised")).length || null,
     [invoices, currentUser?.id]
   );
+  const contractorAttentionBadge = useMemo(
+    () => myWOs.reduce(
+      (count: number, wo: any) => count + Number(wo.pendingContractorAttentionCount || 0),
+      0,
+    ) || null,
+    [myWOs],
+  );
   const submittedInvoice = useMemo(
     () => invoices.find(i => i.num === submittedInvoiceNum),
     [invoices, submittedInvoiceNum]
@@ -1525,13 +1544,13 @@ export default function PortalShell() {
       { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: closedWOs.length || null },
     ]
     : [
-      { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge },
+      { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge, attentionBadge: contractorAttentionBadge },
       ...(currentUser?.contractorTier === "mr_freeze" ? [
         { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       ] : []),
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
     ],
-    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorInvoiceBadge, currentUser?.contractorTier]
+    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.contractorTier]
   );
   const bottomNavItems = useMemo(() => {
     const preferred = ["dashboard", "work_orders", "capital", "invoices"];
@@ -1666,6 +1685,14 @@ export default function PortalShell() {
                 <Ico d={item.icon} size={17} color={active ? T.accent : T.sidebarText} />
                 <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
                 {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
+                {item.attentionBadge != null && item.attentionBadge > 0 && (
+                  <span
+                    title={`${item.attentionBadge} update${item.attentionBadge === 1 ? "" : "s"} need your attention`}
+                    style={{ minWidth: 20, textAlign: "center", fontSize: 10, background: T.success, color: "#fff", borderRadius: 10, padding: "2px 6px", fontWeight: 800 }}
+                  >
+                    {item.attentionBadge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1762,6 +1789,14 @@ export default function PortalShell() {
               <Ico d={item.icon} size={16} color={page === item.id ? T.accent : T.sidebarText} />
               <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
               {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
+              {item.attentionBadge != null && item.attentionBadge > 0 && (
+                <span
+                  title={`${item.attentionBadge} update${item.attentionBadge === 1 ? "" : "s"} need your attention`}
+                  style={{ minWidth: 20, textAlign: "center", fontSize: 10, background: T.success, color: "#fff", borderRadius: 10, padding: "2px 6px", fontWeight: 800 }}
+                >
+                  {item.attentionBadge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -1938,13 +1973,18 @@ export default function PortalShell() {
               invoiceLines={selectedBillingInvoiceData?.lines || []}
               onBack={() => setSelectedBillingInvoice(null)}
               onEdit={() => {
-                if (!selectedBillingInvoiceData || selectedBillingInvoiceData.state !== "draft") return;
+                if (
+                  !selectedBillingInvoiceData
+                  || !["draft", "submitted"].includes(selectedBillingInvoiceData.state)
+                  || selectedBillingInvoiceData.qboInvoiceId
+                  || selectedBillingInvoiceData.qboSyncedAt
+                ) return;
                 setBillingDraftToEdit(selectedBillingInvoiceData);
                 setModal("createBillingInvoice");
               }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
-              onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.num); setPage("invoices"); }}
+              onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.id); setPage("invoices"); }}
               currentUser={currentUser}
               fmt={fmt}
             />
@@ -1954,7 +1994,7 @@ export default function PortalShell() {
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setSelectedInvoice={setSelectedInvoice} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} doMarkSevenElevenSynced={doMarkSevenElevenSynced} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
+          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setSelectedInvoice={setSelectedInvoice} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} doMarkSevenElevenSynced={doMarkSevenElevenSynced} doMarkContractorAttention={doMarkContractorAttention} doAcknowledgeContractorAttention={doAcknowledgeContractorAttention} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
@@ -1998,9 +2038,16 @@ export default function PortalShell() {
               // Save a real ISO timestamp (column is timestamptz) using the
               // exact date + time the user picked — same pattern as Start
               // Work. The display layer formats this for humans on read.
-              const dv = etaDateInput || new Date().toISOString().slice(0, 10);
+              const dv = etaDateInput || dateTimeInputPartsInTimeZone(
+                new Date(),
+                timezoneForWorkOrder(woData),
+              ).date;
               const t = etaTimeInput || "14:00";
-              const eta = new Date(`${dv}T${t}`).toISOString();
+              const eta = storeLocalDateTimeToIso(
+                dv,
+                t,
+                timezoneForWorkOrder(woData),
+              );
               await doSetEta(woData.id, eta); setModal(null);
               } finally {
                 setModalLoading(false);
@@ -2551,8 +2598,8 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "closeComplete" && woData && (
-        <Modal onClose={() => setModal(null)} title="Close complete" width={540}>
+      {modal === "closeComplete" && woData && !isManager && (
+        <Modal onClose={() => setModal(null)} title="Mark work complete" width={540}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Complete the job for Store #{woData.store}. Asset info is required.</div>
           <div style={{ display: "grid", gap: 14 }}>
             <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
@@ -2594,7 +2641,13 @@ export default function PortalShell() {
               const s = assetSerialInput.trim();
               const y = parseInt(assetYearInput, 10);
               if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
-              const completedAt = closeDateInput && closeTimeInput ? new Date(`${closeDateInput}T${closeTimeInput}`).toISOString() : new Date().toISOString();
+              const completedAt = closeDateInput && closeTimeInput
+                ? storeLocalDateTimeToIso(
+                    closeDateInput,
+                    closeTimeInput,
+                    timezoneForWorkOrder(woData),
+                  )
+                : new Date().toISOString();
               await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt, resolutionNotesInput); setModal(null);
               } finally {
                 setModalLoading(false);
@@ -2603,7 +2656,7 @@ export default function PortalShell() {
               disabled={modalLoading}
               className="btn-primary"
               style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />Closing...</> : "Close complete"}</button>
+            >{modalLoading ? <><BtnSpinner />Completing...</> : "Mark work complete"}</button>
           </div>
         </Modal>
       )}

@@ -18,6 +18,8 @@ export type Database = {
         Row: {
           author_id: string | null
           author_name: string
+          contractor_attention_acknowledged_at: string | null
+          contractor_attention_acknowledged_by: string | null
           created_at: string | null
           deleted_at: string | null
           entered_by_role: string
@@ -27,6 +29,7 @@ export type Database = {
           is_staff_override: boolean
           override_for_contractor_id: string | null
           requires_7eleven_sync: boolean
+          requires_contractor_attention: boolean
           synced_to_7eleven_at: string | null
           synced_to_7eleven_by: string | null
           text: string
@@ -36,6 +39,8 @@ export type Database = {
         Insert: {
           author_id?: string | null
           author_name: string
+          contractor_attention_acknowledged_at?: string | null
+          contractor_attention_acknowledged_by?: string | null
           created_at?: string | null
           deleted_at?: string | null
           entered_by_role?: string
@@ -45,6 +50,7 @@ export type Database = {
           is_staff_override?: boolean
           override_for_contractor_id?: string | null
           requires_7eleven_sync?: boolean
+          requires_contractor_attention?: boolean
           synced_to_7eleven_at?: string | null
           synced_to_7eleven_by?: string | null
           text: string
@@ -54,6 +60,8 @@ export type Database = {
         Update: {
           author_id?: string | null
           author_name?: string
+          contractor_attention_acknowledged_at?: string | null
+          contractor_attention_acknowledged_by?: string | null
           created_at?: string | null
           deleted_at?: string | null
           entered_by_role?: string
@@ -63,6 +71,7 @@ export type Database = {
           is_staff_override?: boolean
           override_for_contractor_id?: string | null
           requires_7eleven_sync?: boolean
+          requires_contractor_attention?: boolean
           synced_to_7eleven_at?: string | null
           synced_to_7eleven_by?: string | null
           text?: string
@@ -73,6 +82,13 @@ export type Database = {
           {
             foreignKeyName: "activities_author_id_fkey"
             columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_contractor_attention_acknowledged_by_fkey"
+            columns: ["contractor_attention_acknowledged_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -174,9 +190,13 @@ export type Database = {
           description: string | null
           id: string
           invoice_id: string
+          is_taxable: boolean
+          markup_percent: number | null
           position: number
           qty: number
           rate: number
+          source_invoice_line_id: string | null
+          source_unit_cost: number | null
           type: string
         }
         Insert: {
@@ -184,9 +204,13 @@ export type Database = {
           description?: string | null
           id?: string
           invoice_id: string
+          is_taxable?: boolean
+          markup_percent?: number | null
           position: number
           qty?: number
           rate?: number
+          source_invoice_line_id?: string | null
+          source_unit_cost?: number | null
           type: string
         }
         Update: {
@@ -194,9 +218,13 @@ export type Database = {
           description?: string | null
           id?: string
           invoice_id?: string
+          is_taxable?: boolean
+          markup_percent?: number | null
           position?: number
           qty?: number
           rate?: number
+          source_invoice_line_id?: string | null
+          source_unit_cost?: number | null
           type?: string
         }
         Relationships: [
@@ -205,6 +233,13 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_lines_source_invoice_line_id_fkey"
+            columns: ["source_invoice_line_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_lines"
             referencedColumns: ["id"]
           },
         ]
@@ -233,6 +268,8 @@ export type Database = {
           store_address: string | null
           store_number: string | null
           subtotal: number | null
+          tax_rate: number | null
+          tax_state: string | null
           terms: string | null
           total: number | null
           updated_at: string | null
@@ -261,6 +298,8 @@ export type Database = {
           store_address?: string | null
           store_number?: string | null
           subtotal?: number | null
+          tax_rate?: number | null
+          tax_state?: string | null
           terms?: string | null
           total?: number | null
           updated_at?: string | null
@@ -289,6 +328,8 @@ export type Database = {
           store_address?: string | null
           store_number?: string | null
           subtotal?: number | null
+          tax_rate?: number | null
+          tax_state?: string | null
           terms?: string | null
           total?: number | null
           updated_at?: string | null
@@ -522,6 +563,47 @@ export type Database = {
           },
         ]
       }
+      state_sales_tax_rates: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          id: string
+          rate: number
+          state_code: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          rate: number
+          state_code: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          rate?: number
+          state_code?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "state_sales_tax_rates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_invoice_sources: {
         Row: {
           contractor_invoice_id: string
@@ -676,6 +758,120 @@ export type Database = {
           },
         ]
       }
+      work_order_afm_contacts: {
+        Row: {
+          afm_email: string | null
+          created_at: string
+          updated_at: string
+          work_order_id: string
+        }
+        Insert: {
+          afm_email?: string | null
+          created_at?: string
+          updated_at?: string
+          work_order_id: string
+        }
+        Update: {
+          afm_email?: string | null
+          created_at?: string
+          updated_at?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_afm_contacts_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: true
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_order_visits: {
+        Row: {
+          check_in_activity_id: string | null
+          check_in_at: string
+          check_out_activity_id: string | null
+          check_out_at: string | null
+          checked_in_by: string
+          checked_out_by: string | null
+          contractor_id: string
+          created_at: string
+          id: string
+          updated_at: string
+          work_order_id: string
+        }
+        Insert: {
+          check_in_activity_id?: string | null
+          check_in_at?: string
+          check_out_activity_id?: string | null
+          check_out_at?: string | null
+          checked_in_by: string
+          checked_out_by?: string | null
+          contractor_id: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+          work_order_id: string
+        }
+        Update: {
+          check_in_activity_id?: string | null
+          check_in_at?: string
+          check_out_activity_id?: string | null
+          check_out_at?: string | null
+          checked_in_by?: string
+          checked_out_by?: string | null
+          contractor_id?: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_visits_check_in_activity_id_fkey"
+            columns: ["check_in_activity_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_visits_check_out_activity_id_fkey"
+            columns: ["check_out_activity_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_visits_checked_in_by_fkey"
+            columns: ["checked_in_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_visits_checked_out_by_fkey"
+            columns: ["checked_out_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_visits_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_visits_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_orders: {
         Row: {
           address: string | null
@@ -731,6 +927,8 @@ export type Database = {
           start_time: string | null
           status: Database["public"]["Enums"]["wo_status"]
           store_number: string | null
+          store_state: string | null
+          store_timezone: string | null
           sub_category: string | null
           summary: string | null
           technician_on_job: string | null
@@ -790,6 +988,8 @@ export type Database = {
           start_time?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
           store_number?: string | null
+          store_state?: string | null
+          store_timezone?: string | null
           sub_category?: string | null
           summary?: string | null
           technician_on_job?: string | null
@@ -849,6 +1049,8 @@ export type Database = {
           start_time?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
           store_number?: string | null
+          store_state?: string | null
+          store_timezone?: string | null
           sub_category?: string | null
           summary?: string | null
           technician_on_job?: string | null
@@ -890,8 +1092,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      acknowledge_contractor_attention: {
+        Args: { p_activity_id: string }
+        Returns: undefined
+      }
       is_staff: { Args: never; Returns: boolean }
       next_contractor_invoice_num: { Args: never; Returns: string }
+      set_activity_contractor_attention: {
+        Args: { p_activity_id: string; p_required: boolean }
+        Returns: undefined
+      }
     }
     Enums: {
       capital_status:

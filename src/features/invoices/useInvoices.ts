@@ -29,12 +29,8 @@ export default function useInvoices({ currentUser, fire }: any) {
   const [submittedInvoiceNum, setSubmittedInvoiceNum] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
 
-  // Rates start empty (contractor enters their own); Truck Charge is the one
-  // exception — editable default of 60.
-  const defaultInvLines = () => [
-    { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTruckCharge, amount: P1_BUSINESS.defaultTruckCharge },
-    { type: "Labor", desc: "", qty: 1, rate: "", amount: 0 },
-  ];
+  // Contractors explicitly add only the line types they need.
+  const defaultInvLines = () => [];
   // Cache-derived "best guess" for prefilling the form instantly when the
   // modal opens. NOT trusted at write time — that's what nextInvoiceNumFromDb
   // + the retry loop in insertInvoice are for. Two clients prefilling the
@@ -191,7 +187,7 @@ export default function useInvoices({ currentUser, fire }: any) {
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       if (e?.code === "INVOICE_NUM_CONFLICT") {
-        fire("Couldn't allocate an unused invoice number. Try again.");
+        fire(e.message || "That invoice number already exists for this contractor.");
       } else {
         fire(`Draft save failed: ${e.message || e}`);
       }
@@ -282,7 +278,7 @@ export default function useInvoices({ currentUser, fire }: any) {
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       if (e?.code === "INVOICE_NUM_CONFLICT") {
-        fire("Couldn't allocate an unused invoice number after several attempts. Please try again.");
+        fire(e.message || "That invoice number already exists for this contractor.");
       } else {
         fire(`Invoice save failed: ${e.message || e}`);
       }

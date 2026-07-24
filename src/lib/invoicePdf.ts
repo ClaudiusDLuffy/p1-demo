@@ -89,10 +89,12 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   // contractor's invoice to P1, so P1's branding doesn't belong on it; the
   // contractor's company name is the seller wordmark, rendered as text only.
   let textX = M;
+  let logoRendered = false;
   if (!isContractor && logoDataUrl) {
     try {
       doc.addImage(logoDataUrl, "JPEG", M, y, 56, 56, undefined, "FAST");
       textX = M + 68;
+      logoRendered = true;
     } catch {
       textX = M;
     }
@@ -101,7 +103,9 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   doc.setFontSize(22);
   doc.setTextColor(31, 30, 28);
   // Seller wordmark: contractor invoices are FROM the contractor.
-  doc.text(isContractor ? fromName : P1.dba, textX, y + 16);
+  if (isContractor || !logoRendered) {
+    doc.text(isContractor ? fromName : P1.dba, textX, y + 16);
+  }
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);

@@ -3,6 +3,7 @@
 // don't need to change. Keep this thin — heavy logic stays in components.
 
 import { supabase } from "./supabase/client";
+import { stateCodeFromWorkOrder, timezoneForWorkOrder } from "./billingRules";
 import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
 import type { Invoice, WorkOrder } from "./schemas";
@@ -91,30 +92,68 @@ const mapProfile = (p: any) => ({
 
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
-  // Pull WOs + activities + photos in 3 queries, stitch together
-  const [woRes, actRes, photoRes] = await Promise.all([
+  // Pull WOs + activities + photos + visit boundaries, then stitch together.
+  const [woRes, actRes, photoRes, visitRes, afmContactRes] = await Promise.all([
     sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("photos").select("*"),
+    (sb as any).from("work_order_visits").select("*").order("check_in_at", { ascending: true }),
+    sb.from("work_order_afm_contacts").select("work_order_id, afm_email"),
   ]);
   if (woRes.error) throw woRes.error;
   if (actRes.error) throw actRes.error;
   if (photoRes.error) throw photoRes.error;
+  if (visitRes.error) throw visitRes.error;
+  if (afmContactRes.error) throw afmContactRes.error;
 
+  const timeZoneByWo = Object.fromEntries(
+    (woRes.data || []).map(workOrder => [
+      workOrder.id,
+      timezoneForWorkOrder({
+        storeTimezone: workOrder.store_timezone,
+        storeState: workOrder.store_state,
+        city: workOrder.city,
+        address: workOrder.address,
+      }),
+    ]),
+  );
   const actsByWo: Record<string, any[]> = {};
   for (const a of actRes.data || []) {
-    (actsByWo[a.work_order_id] ||= []).push(mapActivity(a));
+    (actsByWo[a.work_order_id] ||= []).push(
+      mapActivity(a, timeZoneByWo[a.work_order_id]),
+    );
   }
   const photosByWo: Record<string, any[]> = {};
   for (const p of photoRes.data || []) {
     (photosByWo[p.work_order_id] ||= []).push(p);
   }
+  const visitsByWo: Record<string, any[]> = {};
+  for (const visit of visitRes.data || []) {
+    (visitsByWo[visit.work_order_id] ||= []).push({
+      id: visit.id,
+      workOrderId: visit.work_order_id,
+      contractorId: visit.contractor_id || null,
+      checkInAt: visit.check_in_at,
+      checkOutAt: visit.check_out_at || null,
+      createdBy: visit.checked_in_by || null,
+      closedBy: visit.checked_out_by || null,
+    });
+  }
+  const afmEmailByWo = Object.fromEntries(
+    (afmContactRes.data || []).map(contact => [
+      contact.work_order_id,
+      contact.afm_email || null,
+    ]),
+  );
 
   const mapped = (woRes.data || []).map(wo => {
     const activities = actsByWo[wo.id] || [];
     const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
     const pendingSevenElevenActivities = activities.filter(activity =>
       activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
+    );
+    const pendingContractorActivities = activities.filter(activity =>
+      activity.requiresContractorAttention && !activity.contractorAcknowledgedAt
     );
     const seenAt = (wo as any).staff_notes_seen_at || null;
     const hasUnreadNotes = !!latestNoteAt && (
@@ -123,12 +162,17 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
 
     return {
       ...mapWO(wo),
+      afmEmail: afmEmailByWo[wo.id] || null,
       activities,
       latestNoteAt,
       hasUnreadNotes,
       pendingSevenElevenActivities,
       pendingSevenElevenSyncCount: pendingSevenElevenActivities.length,
       hasPendingSevenElevenSync: pendingSevenElevenActivities.length > 0,
+      pendingContractorActivities,
+      pendingContractorAttentionCount: pendingContractorActivities.length,
+      hasPendingContractorAttention: pendingContractorActivities.length > 0,
+      visits: visitsByWo[wo.id] || [],
       photos: (photosByWo[wo.id] || [])
         .map(p => p.storage_path)
         .filter(Boolean),
@@ -150,12 +194,33 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
   return mapped as unknown as WorkOrder[];
 }
 
+const formatWorkOrderDateTime = (
+  value: string | null | undefined,
+  workOrder: any,
+) => {
+  if (!value) return null;
+  return new Date(value).toLocaleString("en-US", {
+    timeZone: timezoneForWorkOrder({
+      storeTimezone: workOrder.store_timezone,
+      storeState: workOrder.store_state,
+      city: workOrder.city,
+      address: workOrder.address,
+    }),
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
 const mapWO = (w: any) => ({
   id: w.id,
   incidentId: w.incident_id,
   store: w.store_number,
   city: w.city,
   addr: w.address,
+  storeState: w.store_state || null,
+  storeTimezone: w.store_timezone || null,
   lineOfService: w.line_of_service,
   businessService: w.business_service,
   category: w.category,
@@ -175,9 +240,9 @@ const mapWO = (w: any) => ({
   invoiceTotal: w.invoice_total ? parseFloat(w.invoice_total) : undefined,
   eta: w.eta,
   dispatchedAt: w.dispatched_at,
-  startTime: w.start_time ? new Date(w.start_time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null,
+  startTime: formatWorkOrderDateTime(w.start_time, w),
   startTimeRaw: w.start_time || null,
-  endTime: w.end_time ? new Date(w.end_time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null,
+  endTime: formatWorkOrderDateTime(w.end_time, w),
   endTimeRaw: w.end_time || null,
   assetMake: w.asset_make,
   assetModel: w.asset_model,
@@ -204,12 +269,18 @@ const mapWO = (w: any) => ({
   age: ageString(w.created_at, w.dispatched_at),
 });
 
-const mapActivity = (a: any) => ({
+const mapActivity = (a: any, timeZone?: string) => ({
   id: a.id,
   authorId: a.author_id,
   author: a.author_name,
   createdAt: a.created_at,
-  time: new Date(a.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+  time: new Date(a.created_at).toLocaleString("en-US", {
+    ...(timeZone ? { timeZone } : {}),
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }),
   text: a.text,
   type: a.type,
   enteredByRole: a.entered_by_role || "system",
@@ -220,6 +291,9 @@ const mapActivity = (a: any) => ({
   requiresSevenElevenSync: !!a.requires_7eleven_sync,
   syncedToSevenElevenAt: a.synced_to_7eleven_at || null,
   syncedToSevenElevenBy: a.synced_to_7eleven_by || null,
+  requiresContractorAttention: !!a.requires_contractor_attention,
+  contractorAcknowledgedAt: a.contractor_attention_acknowledged_at || null,
+  contractorAcknowledgedBy: a.contractor_attention_acknowledged_by || null,
 });
 
 // "5h", "2d", "1w" — relative age string from a timestamp
@@ -376,7 +450,6 @@ const WO_FIELD_MAP: Record<string, string> = {
   businessService: "business_service",
   subCategory: "sub_category",
   afm: "afm_name",
-  afmEmail: "afm_email",
   dispatchedAt: "dispatched_at",
   startTime: "start_time",
   endTime: "end_time",
@@ -403,6 +476,8 @@ const WO_FIELD_MAP: Record<string, string> = {
   closedAt: "closed_at",
   technicianOnJob: "technician_on_job",
   staffNotesSeenAt: "staff_notes_seen_at",
+  storeState: "store_state",
+  storeTimezone: "store_timezone",
 };
 function toDbWoPatch(patch: any): Record<string, any> {
   const out: any = {};
@@ -414,8 +489,27 @@ function toDbWoPatch(patch: any): Record<string, any> {
 
 export async function updateWorkOrder(id: string, patch: any): Promise<any> {
   const sb = supabase();
-  const { data, error } = await (sb.from("work_orders") as any).update(toDbWoPatch(patch)).eq("id", id).select().single();
+  const hasAfmEmail = Object.prototype.hasOwnProperty.call(patch || {}, "afmEmail");
+  const afmEmail = hasAfmEmail ? String(patch.afmEmail || "").trim() : "";
+  const workOrderPatch = { ...(patch || {}) };
+  delete workOrderPatch.afmEmail;
+  const dbPatch = toDbWoPatch(workOrderPatch);
+
+  const query = Object.keys(dbPatch).length > 0
+    ? (sb.from("work_orders") as any).update(dbPatch).eq("id", id).select().single()
+    : (sb.from("work_orders") as any).select("*").eq("id", id).single();
+  const { data, error } = await query;
   if (error) throw error;
+
+  if (hasAfmEmail) {
+    const contactResult = afmEmail
+      ? await sb.from("work_order_afm_contacts").upsert({
+          work_order_id: id,
+          afm_email: afmEmail,
+        })
+      : await sb.from("work_order_afm_contacts").delete().eq("work_order_id", id);
+    if (contactResult.error) throw contactResult.error;
+  }
   return data;
 }
 
@@ -427,6 +521,56 @@ export async function markWorkOrderNotesSeen(
   const { error } = await (sb.from("work_orders") as any)
     .update({ staff_notes_seen_at: latestNoteAt })
     .eq("id", workOrderId);
+  if (error) throw error;
+}
+
+export async function openWorkOrderVisit(
+  workOrderId: string,
+  checkInAt: string,
+): Promise<void> {
+  const sb = supabase();
+  const [{ data: authData }, { data: workOrder, error: workOrderError }] = await Promise.all([
+    sb.auth.getUser(),
+    sb.from("work_orders")
+      .select("contractor_id")
+      .eq("id", workOrderId)
+      .is("deleted_at", null)
+      .single(),
+  ]);
+  if (workOrderError) throw workOrderError;
+  const { error } = await (sb as any).from("work_order_visits").insert({
+    work_order_id: workOrderId,
+    contractor_id: workOrder?.contractor_id || null,
+    check_in_at: checkInAt,
+    checked_in_by: authData.user?.id || null,
+  });
+  if (error) throw error;
+}
+
+export async function closeWorkOrderVisit(
+  workOrderId: string,
+  checkOutAt: string,
+): Promise<void> {
+  const sb = supabase();
+  const { data: authData } = await sb.auth.getUser();
+  const { data: visit, error: findError } = await (sb as any)
+    .from("work_order_visits")
+    .select("id")
+    .eq("work_order_id", workOrderId)
+    .is("check_out_at", null)
+    .order("check_in_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (findError) throw findError;
+  if (!visit?.id) return;
+  const { error } = await (sb as any)
+    .from("work_order_visits")
+    .update({
+      check_out_at: checkOutAt,
+      checked_out_by: authData.user?.id || null,
+    })
+    .eq("id", visit.id)
+    .is("check_out_at", null);
   if (error) throw error;
 }
 
@@ -497,6 +641,28 @@ export async function markActivitySevenElevenSynced(
       synced_to_7eleven_by: null,
     })
     .eq("id", activityId);
+  if (error) throw error;
+}
+
+export async function markActivityContractorAttention(
+  activityId: string,
+  required: boolean,
+): Promise<void> {
+  const sb = supabase();
+  const { error } = await sb.rpc("set_activity_contractor_attention", {
+    p_activity_id: activityId,
+    p_required: required,
+  });
+  if (error) throw error;
+}
+
+export async function acknowledgeContractorAttention(
+  activityId: string,
+): Promise<void> {
+  const sb = supabase();
+  const { error } = await sb.rpc("acknowledge_contractor_attention", {
+    p_activity_id: activityId,
+  });
   if (error) throw error;
 }
 
@@ -657,6 +823,8 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
     store_number: wo.store,
     city: wo.city,
     address: wo.addr,
+    store_state: wo.storeState || stateCodeFromWorkOrder(wo) || null,
+    store_timezone: wo.storeTimezone || timezoneForWorkOrder(wo),
     line_of_service: wo.lineOfService,
     business_service: wo.businessService,
     category: wo.category,
@@ -668,7 +836,7 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
     functional_status: wo.functionalStatus,
     contractor_id: wo.contractor || null,
     afm_name: wo.afm || null,
-    afm_email: wo.afmEmail || null,
+    afm_email: null,
     nte: wo.nte || 0,
     dispatched_at: wo.dispatchedAt || null,
     is_capital: !!wo.isCapital,
@@ -680,6 +848,15 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
   };
   const { data, error } = await sb.from("work_orders").insert(dbRow).select().single();
   if (error) throw error;
+  if (String(wo.afmEmail || "").trim()) {
+    const { error: afmContactError } = await sb
+      .from("work_order_afm_contacts")
+      .upsert({
+        work_order_id: wo.id,
+        afm_email: String(wo.afmEmail).trim(),
+      });
+    if (afmContactError) throw afmContactError;
+  }
   if (activityText && authorName) {
     await insertActivity(wo.id, authorName, activityText, "system");
   }
@@ -725,10 +902,14 @@ async function insertInvoiceWithRetry(
     const { data, error } = await sb.from("invoices").insert({ ...baseRow, num: tryNum }).select().single();
     if (!error) return { header: data, finalNum: tryNum, collidedFrom };
     if (!isInvoiceNumCollision(error)) throw error;
-    // First collision: if the user typed this number specifically, surface
-    // it once with the collided-from value so the toast can name it; then
-    // proceed to retry on a DB-derived number.
-    if (attempt === 0 && userTyped) collidedFrom = tryNum;
+    if (userTyped) {
+      const conflict: any = new Error(
+        `Invoice #${tryNum} already exists for this contractor`,
+      );
+      conflict.code = "INVOICE_NUM_CONFLICT";
+      throw conflict;
+    }
+    if (attempt === 0) collidedFrom = tryNum;
     tryNum = await nextInvoiceNumFromDb();
     // Guard against the absurd "DB says next is the same one that just
     // collided" case (shouldn't happen, but if it does bump explicitly).
@@ -844,8 +1025,8 @@ export async function updateInvoiceWithLines(
   if (patch.terms) update.terms = patch.terms;
   if (patch.storeAddr !== undefined) update.store_address = patch.storeAddr || null;
   if (patch.state) update.state = patch.state;
-  // Number is treated specially: if it's changing AND would collide, we
-  // retry against the DB max + 1. Same shape as insertInvoiceWithRetry.
+  // Preserve contractor-supplied invoice numbers exactly. A conflict within
+  // the same contractor is surfaced instead of silently renumbering it.
   let finalNum: string | null = patch.num != null ? String(patch.num).trim() : null;
   let collidedFrom: string | null = null;
   const userTyped = !!patch.userTypedNum;
@@ -866,7 +1047,14 @@ export async function updateInvoiceWithLines(
     const { error: uErr } = await sb.from("invoices").update(payload).eq("id", invoiceId);
     if (!uErr) break;
     if (!isInvoiceNumCollision(uErr) || attempts >= 5 || finalNum == null) throw uErr;
-    if (attempts === 0 && userTyped) collidedFrom = finalNum;
+    if (userTyped) {
+      const conflict: any = new Error(
+        `Invoice #${finalNum} already exists for this contractor`,
+      );
+      conflict.code = "INVOICE_NUM_CONFLICT";
+      throw conflict;
+    }
+    if (attempts === 0) collidedFrom = finalNum;
     finalNum = await nextInvoiceNumFromDb();
     if (finalNum === collidedFrom) finalNum = String((parseInt(finalNum) || 6500) + 1);
     attempts++;
@@ -912,9 +1100,9 @@ export async function rejectInvoice(
 
 // Patch an invoice's state (and optionally paid_at). Used by the Owner
 // approve / mark-paid actions that carry a WO from pending_approval → closed.
-export async function updateInvoiceState(num: string, state: string, extra: Record<string, any> = {}): Promise<void> {
+export async function updateInvoiceState(invoiceId: string, state: string, extra: Record<string, any> = {}): Promise<void> {
   const sb = supabase();
-  const { error } = await sb.from("invoices").update({ state: state as any, ...extra }).eq("num", num);
+  const { error } = await sb.from("invoices").update({ state: state as any, ...extra }).eq("id", invoiceId);
   if (error) throw error;
 }
 
@@ -1110,6 +1298,7 @@ export function subscribeToChanges(onChange: () => void): () => void {
     .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_visits" }, onChange)
     .subscribe();
   return () => { sb.removeChannel(channel); };
 }

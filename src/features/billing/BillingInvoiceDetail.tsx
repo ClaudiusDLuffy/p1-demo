@@ -27,7 +27,10 @@ export default function BillingInvoiceDetail(props: any) {
   const lines = invoice.lines || [];
   const sourceInvoices = invoice.sourceInvoices || [];
   const canDelete = ["manager", "dispatcher", "back_office"].includes(currentUser?.role || "");
-  const canEdit = canDelete && invoice.state === "draft";
+  const canEdit = canDelete
+    && ["draft", "submitted"].includes(invoice.state)
+    && !invoice.qboInvoiceId
+    && !invoice.qboSyncedAt;
 
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
@@ -37,7 +40,7 @@ export default function BillingInvoiceDetail(props: any) {
           {canEdit && (
             <button onClick={onEdit} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Ico d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" size={13} color="currentColor" />
-              Edit draft
+              Edit invoice
             </button>
           )}
           <button onClick={onDownloadPdf} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -107,6 +110,10 @@ export default function BillingInvoiceDetail(props: any) {
               <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{invoice.terms || "Net 30"}</span>
               <span style={{ color: T.muted }}>Work order</span><span className="mono" style={{ color: invoice.wot ? T.accent : T.subtle }}>{invoice.wot || "Standalone"}</span>
               <span style={{ color: T.muted }}>Status</span><span><Badge conf={INV_STATE[invoice.state]} small /></span>
+              <span style={{ color: T.muted }}>Tax jurisdiction</span>
+              <span className="mono" style={{ color: invoice.taxState ? T.ink : T.subtle }}>
+                {invoice.taxState || "-"}{invoice.taxRate != null ? ` (${(Number(invoice.taxRate) * 100).toFixed(3)}%)` : ""}
+              </span>
             </div>
           </div>
         </div>
@@ -150,7 +157,10 @@ export default function BillingInvoiceDetail(props: any) {
               <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
                 <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
                 <div style={{ color: T.inkSoft, fontWeight: 500 }}>{line.type}</div>
-                <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>{line.desc}</div>
+                <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>
+                  {line.desc}
+                  {line.isTaxable && <span style={{ display: "inline-block", marginLeft: 7, fontSize: 9, color: T.accent, fontWeight: 700 }}>TAXABLE</span>}
+                </div>
                 <div className="mono" style={{ textAlign: "right", color: T.muted }}>{line.qty}</div>
                 <div className="mono" style={{ textAlign: "right", color: T.muted }}>{fmt(line.rate)}</div>
                 <div className="mono" style={{ textAlign: "right", fontWeight: 600, color: T.ink }}>{fmt(Math.round(line.amount * 100) / 100)}</div>

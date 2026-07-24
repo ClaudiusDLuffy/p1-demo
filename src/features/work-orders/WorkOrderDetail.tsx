@@ -15,6 +15,7 @@ import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import { computeSlaState } from "../../lib/slaConfig";
+import { timezoneForWorkOrder } from "../../lib/billingRules";
 import { getSlaAgingStyle, getWorkOrderDateMeta } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
 
@@ -30,16 +31,23 @@ const CapitalFlagModal = dynamic(
 // ETA is stored as an ISO timestamp (timestamptz). Render it in the user's
 // locale. Falls through to the raw string for any legacy non-ISO value so
 // historic rows still display.
-const formatEta = (v: any): string => {
+const formatEta = (v: any, workOrder?: any): string => {
   if (!v) return "";
   const s = String(v);
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+  return d.toLocaleString("en-US", {
+    timeZone: timezoneForWorkOrder(workOrder),
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
+  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // The single-invoice "Approve (on behalf of AFM)" button on the WO actions
   // row is gone — multi-invoice approvals happen per-row in the invoice
@@ -60,9 +68,9 @@ export default function WorkOrderDetail(props: any) {
     }
   };
   const viewInvoice = (inv: any) => {
-    if (!inv?.num || !setSelectedInvoice) return;
+    if (!inv?.id || !setSelectedInvoice) return;
     setInvoiceMenuId(null);
-    setSelectedInvoice(inv.num);
+    setSelectedInvoice(inv.id);
     setSelectedWO(null);
     setAiNote(null);
     setPage("invoices");
@@ -309,12 +317,11 @@ export default function WorkOrderDetail(props: any) {
                         {[
                           { l: "Line of Service", v: woData.lineOfService || "Not set" },
                           { l: "NTE", v: fmt(woData.nte) },
-                          { l: "ETA", v: formatEta(woData.eta) || "Not set" },
+                          { l: "ETA", v: formatEta(woData.eta, woData) || "Not set" },
                           { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
                           { l: "Start time", v: woData.startTime || "Not started" },
-                          // AFM name + email are hidden from contractors so a field tech
-                          // can't contact the AFM directly — staff roles still see them.
-                          ...(isManager ? [{ l: "AFM", v: woData.afm || "—" }] : []),
+                          // Contractors may see the AFM name, but contact details remain staff-only.
+                          { l: "AFM", v: woData.afm || "—" },
                           { l: "Asset model", v: woData.assetModel || "Not captured" },
                           { l: "Serial #", v: woData.assetSerial || "Not captured" },
                           ...(isManager ? [{ l: "AFM email", v: woData.afmEmail || "—" }] : []),
@@ -407,8 +414,8 @@ export default function WorkOrderDetail(props: any) {
                           </button>
                         </>
                       )}
-                      {/* Job-progress actions (Pause / Close complete) — parallel
-                          to invoicing. Shown at WIP for everyone (staff preserved),
+                      {/* Job-progress actions are parallel to invoicing.
+                           Shown at WIP for everyone (staff preserved),
                           and for a contractor any time the job is still open and not
                           already paused, so submitting an invoice (which flips the WO
                           to pending_approval) no longer hides them. Resume covers the
@@ -422,9 +429,11 @@ export default function WorkOrderDetail(props: any) {
                             {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
                           </button>
                           {isManager && woData.status === "wip" && <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>}
-                          <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
-                            {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Closing...</> : "Close complete"}
-                          </button>
+                          {!isManager && (
+                            <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
+                              {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Mark work complete"}
+                            </button>
+                          )}
                         </>
                       )}
                       {woData.status === "capital" && isManager && (
@@ -882,6 +891,34 @@ export default function WorkOrderDetail(props: any) {
                                   {e.syncedToSevenElevenAt ? "Updated in 7-Eleven" : "Needs 7-Eleven update"}
                                 </label>
                               )}
+                              {isManager && e.id && (staffEntered || e.isStaffOverride || e.requiresContractorAttention) && (
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, marginLeft: e.requiresSevenElevenSync ? 7 : 0, padding: "5px 8px", borderRadius: 8, background: e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#DCFCE7" : T.surfaceSoft, border: `1px solid ${e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#22C55E66" : T.borderSoft}`, color: e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#166534" : T.muted, fontSize: 10, fontWeight: 700, cursor: isLoading("contractorAttention_" + e.id) ? "wait" : "pointer" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!e.requiresContractorAttention}
+                                    disabled={isLoading("contractorAttention_" + e.id)}
+                                    onChange={(event) => doMarkContractorAttention(woData.id, e.id, event.target.checked)}
+                                    style={{ width: 14, height: 14, accentColor: "#16A34A", cursor: "inherit" }}
+                                  />
+                                  {e.contractorAcknowledgedAt
+                                    ? "Contractor acknowledged"
+                                    : e.requiresContractorAttention
+                                      ? "Needs contractor action"
+                                      : "Request contractor action"}
+                                </label>
+                              )}
+                              {!isManager && e.requiresContractorAttention && (
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, padding: "6px 9px", borderRadius: 8, background: e.contractorAcknowledgedAt ? T.surfaceSoft : "#DCFCE7", border: `1px solid ${e.contractorAcknowledgedAt ? T.borderSoft : "#22C55E66"}`, color: e.contractorAcknowledgedAt ? T.muted : "#166534", fontSize: 10, fontWeight: 700, cursor: isLoading("contractorAck_" + e.id) ? "wait" : "pointer" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!e.contractorAcknowledgedAt}
+                                    disabled={!!e.contractorAcknowledgedAt || isLoading("contractorAck_" + e.id)}
+                                    onChange={(event) => doAcknowledgeContractorAttention(woData.id, e.id, event.target.checked)}
+                                    style={{ width: 14, height: 14, accentColor: "#16A34A", cursor: "inherit" }}
+                                  />
+                                  {e.contractorAcknowledgedAt ? "Reviewed" : "Needs your attention"}
+                                </label>
+                              )}
                             </div>
                             {canDelete && (
                               <div style={{ position: "relative", flexShrink: 0 }}>
@@ -971,7 +1008,7 @@ export default function WorkOrderDetail(props: any) {
                     {woData.eta && (
                       <div className="card" style={{ padding: 18, marginBottom: 14, background: T.warnSoft, borderColor: `${T.warn}33` }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn, marginBottom: 6 }}>ETA</div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: "#73560C" }}>{formatEta(woData.eta)}</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#73560C" }}>{formatEta(woData.eta, woData)}</div>
                         <div style={{ fontSize: 10, color: T.warn, marginTop: 4 }}>Auto-notify if not checked in</div>
                       </div>
                     )}

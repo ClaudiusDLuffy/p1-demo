@@ -20,13 +20,8 @@ const todayIso = () => {
   return `${year}-${month}-${day}`;
 };
 
-// Rates start EMPTY so the contractor enters their own number; Truck Charge
-// is the one exception — editable default of 60. (Per-contractor profile
-// rates are reserved for Phase 2 and intentionally not read here.)
-const initialLines = () => [
-  { type: "Truck Charge", desc: "Truck charge", qty: 1, rate: P1_BUSINESS.defaultTruckCharge },
-  { type: "Labor", desc: "", qty: 1, rate: undefined },
-];
+// Contractors explicitly add only the line types needed for this invoice.
+const initialLines = () => [];
 
 export default function InvoiceCreateModal(props: any) {
   const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts = [] } = props;
@@ -45,6 +40,7 @@ export default function InvoiceCreateModal(props: any) {
   const [pdfLineStatus, setPdfLineStatus] = useState<"idle" | "detected" | "none">("idle");
   const [pdfLinesReviewed, setPdfLinesReviewed] = useState(false);
   const pdfParseAttempt = useRef(0);
+  const numTouchedRef = useRef(false);
   const existingInvoiceId = resumeDraft?.id || null;
   // Tracks whether the user has touched the # field — if so we trust their
   // value (and surface a friendly toast if it collides). If untouched, the
@@ -87,6 +83,7 @@ export default function InvoiceCreateModal(props: any) {
     if (modal !== "createInvoice") return;
     let cancelled = false;
     pdfParseAttempt.current += 1;
+    numTouchedRef.current = false;
     setNumTouched(false);
     setPdfFile(null);
     setPdfError("");
@@ -97,6 +94,8 @@ export default function InvoiceCreateModal(props: any) {
     // next-number from the DB so the user sees a non-colliding suggestion
     // immediately; falls back to blank if the lookup fails.
     if (resumeDraft) {
+      numTouchedRef.current = true;
+      setNumTouched(true);
       const resumeUploadOnly = !!resumeDraft.pdfStoragePath
         && (!!resumeDraft.pdfIsOriginal || (resumeDraft.lines || []).length === 0);
       setPdfParseStatus(resumeUploadOnly ? "detected" : "idle");
@@ -145,7 +144,7 @@ export default function InvoiceCreateModal(props: any) {
             // setValue is part of RHF; pull it from the hook indirectly via reset.
             // The simplest non-invasive approach: only set if user hasn't touched.
             // (Closure check via ref-like flag.)
-            if (!numTouched) {
+            if (!numTouchedRef.current) {
               // Use reset to write only `num`, preserving the rest.
               reset((cur: any) => ({ ...cur, num: suggested }));
             }
@@ -178,14 +177,28 @@ export default function InvoiceCreateModal(props: any) {
   const isContractor = currentUser?.role === "contractor";
   const over = !isContractor && (woData.nte || 0) > 0 && projectedSpend > woData.nte;
   const close = () => {
+    const today = todayIso();
     pdfParseAttempt.current += 1;
-    setModal(null);
+    numTouchedRef.current = false;
+    setNumTouched(false);
+    reset({
+      num: "",
+      invoiceDate: today,
+      serviceDate: today,
+      terms: "Net 30",
+      tax: "",
+      cme: "",
+      uploadOnly: false,
+      uploadedTotal: "",
+      lines: initialLines(),
+    });
     resetNewInv();
     setPdfFile(null);
     setPdfError("");
     setPdfParseStatus("idle");
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
+    setModal(null);
   };
   const clearPendingPdf = (error = "") => {
     pdfParseAttempt.current += 1;
@@ -232,7 +245,7 @@ export default function InvoiceCreateModal(props: any) {
   };
 
   return (
-    <Modal onClose={close} title="Create invoice" width={820}>
+    <Modal onClose={close} title="Create invoice" width={820} closeOnBackdrop={false}>
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {woData.id}</div>
 
@@ -258,7 +271,7 @@ export default function InvoiceCreateModal(props: any) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => setNumTouched(true) })} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } })} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
@@ -482,6 +495,14 @@ export default function InvoiceCreateModal(props: any) {
                   try {
                     const parsed = await parseInvoicePdf(file);
                     if (pdfParseAttempt.current !== attempt) return;
+                    if (parsed.invoiceNumber && !numTouchedRef.current) {
+                      setValue("num", parsed.invoiceNumber, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      });
+                      numTouchedRef.current = true;
+                      setNumTouched(true);
+                    }
                     const parsedLines = (parsed.lines || []).map(line => ({
                       type: line.type || "Other",
                       desc: line.desc,
