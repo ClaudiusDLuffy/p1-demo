@@ -28,6 +28,15 @@ const BillingLineSchema = z.object({
   markupPercent: z.number().min(0).max(999).optional().nullable(),
 });
 
+const OptionalTaxAmountSchema = z.preprocess(
+  value => {
+    if (value === "" || value == null) return undefined;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? value : parsed;
+  },
+  z.number().finite().nonnegative("Sales tax must be zero or greater").optional(),
+);
+
 const BillingInvoiceSchema = z.object({
   num: z.string().min(1, "Invoice number is required"),
   invoiceDate: z.string().min(1, "Invoice date is required"),
@@ -39,6 +48,7 @@ const BillingInvoiceSchema = z.object({
   terms: z.string().min(1),
   cme: z.string().optional(),
   taxState: z.string().max(2).optional(),
+  salesTaxOverride: OptionalTaxAmountSchema,
   state: z.enum(["draft", "submitted"]),
   lines: z.array(BillingLineSchema).min(1, "At least one line item is required"),
 });
@@ -144,6 +154,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       terms: "Net 30",
       cme: "",
       taxState: "",
+      salesTaxOverride: "",
       state: "submitted",
       lines: [],
     },
@@ -156,6 +167,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const invoiceDate = watch("invoiceDate");
   const serviceDate = watch("serviceDate");
   const taxState = String(watch("taxState") || "").toUpperCase();
+  const salesTaxOverride = watch("salesTaxOverride");
 
   const activeWorkOrders = useMemo(
     () => (workOrders || []).filter((wo: any) =>
@@ -214,7 +226,14 @@ export default function BillingInvoiceCreateModal(props: any) {
     (sum: number, line: any) => sum + (line?.isTaxable ? amount(line) : 0),
     0,
   );
-  const salesTax = taxRate == null ? 0 : money(taxableSubtotal * taxRate);
+  const hasSalesTaxOverride = salesTaxOverride !== ""
+    && salesTaxOverride != null
+    && Number.isFinite(Number(salesTaxOverride))
+    && Number(salesTaxOverride) >= 0;
+  const automaticSalesTax = taxRate == null ? 0 : money(taxableSubtotal * taxRate);
+  const salesTax = hasSalesTaxOverride
+    ? money(Number(salesTaxOverride))
+    : automaticSalesTax;
   const total = subtotal + salesTax;
 
   const sourceOwnerById = useMemo(() => {
@@ -315,6 +334,9 @@ export default function BillingInvoiceCreateModal(props: any) {
       terms: editingInvoice?.terms || "Net 30",
       cme: editingInvoice?.cme || "",
       taxState: editingInvoice?.taxState || "",
+      salesTaxOverride: editingInvoice?.taxRate == null && Number(editingInvoice?.salesTax || 0) > 0
+        ? Number(editingInvoice.salesTax)
+        : "",
       state: editingInvoice?.state === "draft" ? "draft" : "submitted",
       lines: editingInvoice?.lines?.length
         ? editingInvoice.lines.map((line: any) => ({
@@ -382,7 +404,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     if (previousWorkOrderId.current === selectedWorkOrderId) return;
     previousWorkOrderId.current = selectedWorkOrderId || "";
     setSelectedSourceIds([]);
-  }, [selectedWorkOrderId]);
+    setValue("salesTaxOverride", "", { shouldDirty: true });
+  }, [selectedWorkOrderId, setValue]);
 
   const discardAndClose = () => {
     const today = todayIso();
@@ -400,6 +423,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       terms: "Net 30",
       cme: "",
       taxState: "",
+      salesTaxOverride: "",
       state: "submitted",
       lines: [],
     });
@@ -494,7 +518,11 @@ export default function BillingInvoiceCreateModal(props: any) {
       (sum: number, line: any) => sum + (line.isTaxable ? amount(line) : 0),
       0,
     );
-    if (taxableAmount > 0 && !activeTaxRate) {
+    const hasManualTax = data.salesTaxOverride !== ""
+      && data.salesTaxOverride != null
+      && Number.isFinite(Number(data.salesTaxOverride))
+      && Number(data.salesTaxOverride) >= 0;
+    if (taxableAmount > 0 && !activeTaxRate && !hasManualTax) {
       fire?.(`No configured sales-tax rate for ${data.taxState || "this store state"}`);
       return;
     }
@@ -818,13 +846,16 @@ export default function BillingInvoiceCreateModal(props: any) {
                 style={{ width: 100, padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, textTransform: "uppercase" }}
               />
             </label>
-            <div style={{ fontSize: 11, color: taxRateLoadError || (taxableSubtotal > 0 && !activeTaxRate) ? T.danger : T.subtle, marginTop: 6, maxWidth: 380 }}>
-              {taxRateLoadError
-                || (activeTaxRate
-                  ? `${(taxRate * 100).toFixed(3)}% configured for ${taxState}. Tax applies only to checked lines.`
-                  : taxableSubtotal > 0
-                    ? `No active tax rate configured for ${taxState || "this state"}.`
-                    : "Check each taxable line. Building-attached service defaults to exempt; parts default taxable.")}
+            <div style={{ fontSize: 11, color: !hasSalesTaxOverride && (taxRateLoadError || (taxableSubtotal > 0 && !activeTaxRate)) ? T.danger : T.subtle, marginTop: 6, maxWidth: 380 }}>
+              {hasSalesTaxOverride
+                ? "Manual sales tax is applied. Clear the amount to return to automatic state-rate calculation."
+                : taxRateLoadError
+                  ? `${taxRateLoadError} Enter the sales tax manually to continue.`
+                  : activeTaxRate
+                    ? `${(taxRate * 100).toFixed(3)}% configured for ${taxState}. Tax applies only to checked lines.`
+                    : taxableSubtotal > 0
+                      ? `No active tax rate configured for ${taxState || "this state"}. Enter the sales tax manually.`
+                      : "Check each taxable line. Building-attached service defaults to exempt; parts default taxable."}
             </div>
           </div>
           <div style={{ width: 300, background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, padding: "14px 16px" }}>
@@ -835,8 +866,32 @@ export default function BillingInvoiceCreateModal(props: any) {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 10, gap: 10 }}>
               <span style={{ color: T.muted }}>Sales tax</span>
-              <span className="mono" style={{ color: T.ink }}>{fmt(salesTax)}</span>
+              <label style={{ position: "relative", width: 112 }}>
+                <span aria-hidden="true" style={{ position: "absolute", left: 9, top: 7, color: T.subtle }}>$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  {...register("salesTaxOverride")}
+                  placeholder={automaticSalesTax.toFixed(2)}
+                  aria-label="Sales tax amount"
+                  style={{ width: "100%", padding: "6px 8px 6px 20px", borderRadius: 7, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, textAlign: "right" }}
+                />
+              </label>
             </div>
+            <div style={{ color: T.subtle, fontSize: 10, lineHeight: 1.4, marginTop: -4, marginBottom: 10, textAlign: "right" }}>
+              {hasSalesTaxOverride
+                ? `Manual: ${fmt(salesTax)}`
+                : activeTaxRate
+                  ? `Auto: ${fmt(automaticSalesTax)}`
+                  : "Enter manually or configure a state rate"}
+            </div>
+            {errors.salesTaxOverride && (
+              <div style={{ color: T.danger, fontSize: 10, marginTop: -4, marginBottom: 10, textAlign: "right" }}>
+                {String(errors.salesTaxOverride.message || "Enter a valid tax amount")}
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: `1px solid ${T.border}` }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: T.ink }}>{fmt(Math.round(total * 100) / 100)}</span></div>
           </div>
         </div>

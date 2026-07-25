@@ -207,6 +207,23 @@ async function resolveTax(
     (sum, line) => sum + (line.isTaxable ? line.qty * line.rate : 0),
     0,
   );
+
+  const manualTaxRaw = body.salesTaxOverride;
+  const hasManualTax = manualTaxRaw !== undefined
+    && manualTaxRaw !== null
+    && String(manualTaxRaw).trim() !== "";
+  if (hasManualTax) {
+    const manualTax = Number(manualTaxRaw);
+    if (!Number.isFinite(manualTax) || manualTax < 0) {
+      throw new Error("Sales tax must be zero or greater");
+    }
+    return {
+      taxState: taxState || null,
+      taxRate: null as number | null,
+      salesTax: Math.round(manualTax * 100) / 100,
+    };
+  }
+
   if (taxableSubtotal <= 0) {
     return {
       taxState: taxState || null,
