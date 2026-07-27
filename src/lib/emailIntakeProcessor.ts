@@ -6,7 +6,11 @@ import {
   markEmailRead,
   moveEmailToFolder,
 } from "./graphClient";
-import { parseDispatchEmail, type ParsedWorkOrder } from "./emailParser";
+import {
+  isConfirmedInitialDispatchEmail,
+  parseDispatchEmail,
+  type ParsedWorkOrder,
+} from "./emailParser";
 import { resolveContractor } from "./autoDispatch";
 import { normalizeStateCode, timezoneForWorkOrder } from "./billingRules";
 import { createServerClient } from "./supabase/server";
@@ -201,6 +205,15 @@ export async function processEmail(
   };
 
   let shouldFinishEmail = true;
+
+  if (!isConfirmedInitialDispatchEmail(email)) {
+    result = skippedResult(
+      result,
+      "not a confirmed direct 7-Eleven dispatch; mailbox left unchanged",
+    );
+    await insertLog(email, result);
+    return result;
+  }
 
   try {
     const allowlistReason = stateAllowlistReason(parsed.state);

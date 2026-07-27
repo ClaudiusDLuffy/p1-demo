@@ -43,14 +43,34 @@ const CAPITAL_EMAIL_PATTERN = /\bcapital\b/i;
 const STATUS_UPDATE_PATTERN =
   /\b(?:approved|approval|projected|projection|accepted|assigned|work\s+in\s+progress|completed?|closed?|cancelled|canceled|rejected|revised|updated?|status|state|breach|invoice|mentioned)\b/i;
 const WORK_ORDER_REFERENCE_PATTERN = /\b(?:WOT|FWKD)\d{6,12}\b/i;
+const DEFAULT_DISPATCH_SENDERS = ["7elevenna@service-now.com"] as const;
+
+export function getAllowedDispatchSenders(
+  raw = process.env.EMAIL_INTAKE_ALLOWED_SENDERS || "",
+): ReadonlySet<string> {
+  const configured = raw
+    .split(",")
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(configured.length > 0 ? configured : DEFAULT_DISPATCH_SENDERS);
+}
 
 export function isConfirmedInitialDispatchSubject(subject: string): boolean {
   const normalized = (subject || "").trim();
   if (!normalized || THREAD_PREFIX_PATTERN.test(normalized)) return false;
+  if (!WORK_ORDER_REFERENCE_PATTERN.test(normalized)) return false;
   if (/\bdo\s+not\s+dispatch\b/i.test(normalized)) return false;
   if (NTE_EMAIL_PATTERN.test(normalized) || CAPITAL_EMAIL_PATTERN.test(normalized)) return false;
   if (STATUS_UPDATE_PATTERN.test(normalized)) return false;
   return DISPATCH_PATTERN.test(normalized);
+}
+
+export function isConfirmedInitialDispatchEmail(
+  email: Pick<GraphEmail, "subject" | "from">,
+  allowedSenders = getAllowedDispatchSenders(),
+): boolean {
+  const sender = String(email.from?.emailAddress?.address || "").trim().toLowerCase();
+  return allowedSenders.has(sender) && isConfirmedInitialDispatchSubject(email.subject || "");
 }
 
 export function detectEmailType(subject: string): EmailType {
