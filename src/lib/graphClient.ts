@@ -1,3 +1,5 @@
+import { isConfirmedInitialDispatchEmail } from "./emailParser";
+
 export type GraphEmail = {
   id: string;
   subject: string;
@@ -163,22 +165,9 @@ export async function getUnreadDispatchEmails(accessToken: string): Promise<Grap
   const params = new URLSearchParams({
     "$filter": filter,
     "$select": "id,subject,body,from,receivedDateTime,toRecipients",
-    "$orderby": "receivedDateTime asc",
+    "$orderby": "receivedDateTime desc",
     "$top": String(INTAKE_PAGE_SIZE),
   });
-
-  const isIntakeCandidate = (email: GraphEmail) => {
-    const subject = (email.subject || "").toLowerCase();
-    const from = (email.from?.emailAddress?.address || "").toLowerCase();
-    return (
-      subject.includes("work order") ||
-      subject.includes("wot") ||
-      subject.includes("fwkd") ||
-      from === "7elevenna@service-now.com" ||
-      from === "dispatch@7-eleven.com" ||
-      from === "workorders@7-eleven.com"
-    );
-  };
 
   const queue: GraphEmail[] = [];
   let nextUrl: string | null =
@@ -201,7 +190,7 @@ export async function getUnreadDispatchEmails(accessToken: string): Promise<Grap
       "@odata.nextLink"?: string;
     };
     for (const email of data.value || []) {
-      if (isIntakeCandidate(email)) queue.push(email);
+      if (isConfirmedInitialDispatchEmail(email)) queue.push(email);
       if (queue.length >= INTAKE_BATCH_SIZE) break;
     }
     nextUrl = data["@odata.nextLink"] || null;
