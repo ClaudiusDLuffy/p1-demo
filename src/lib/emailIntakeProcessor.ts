@@ -1,8 +1,8 @@
 import {
   type GraphEmail,
   getAccessToken,
+  getDispatchInboxEmails,
   getOrCreateFolder,
-  getUnreadDispatchEmails,
   markEmailRead,
   moveEmailToFolder,
 } from "./graphClient";
@@ -395,7 +395,7 @@ export async function processEmail(
 export async function runIntakeCycle(): Promise<IntakeResult[]> {
   const accessToken = await getAccessToken();
   const folderId = await getOrCreateFolder(accessToken);
-  const emails = await getUnreadDispatchEmails(accessToken);
+  const emails = await getDispatchInboxEmails(accessToken);
   const results: IntakeResult[] = [];
   for (const email of emails) {
     results.push(await processEmail(email, folderId));
