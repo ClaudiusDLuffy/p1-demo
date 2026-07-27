@@ -1,4 +1,7 @@
-import { isConfirmedInitialDispatchEmail } from "./emailParser";
+import {
+  getAllowedDispatchSenders,
+  isConfirmedInitialDispatchEmail,
+} from "./emailParser";
 
 export type GraphEmail = {
   id: string;
@@ -22,6 +25,8 @@ const GRAPH_REQUEST_TIMEOUT_MS = 15_000;
 const INTAKE_BATCH_SIZE = 25;
 const INTAKE_PAGE_SIZE = 50;
 const INTAKE_MAX_PAGES = 5;
+const DEFAULT_RECOVERY_LOOKBACK_HOURS = 24;
+const MAX_RECOVERY_LOOKBACK_HOURS = 168;
 
 let tokenCache: TokenCache | null = null;
 
@@ -45,6 +50,44 @@ const intakeStartAt = () => {
   }
 
   return date.toISOString();
+};
+
+const intakeRecoveryStartAt = (startAt: string) => {
+  const configuredHours = Number(
+    process.env.EMAIL_INTAKE_RECOVERY_LOOKBACK_HOURS ||
+      DEFAULT_RECOVERY_LOOKBACK_HOURS,
+  );
+  if (!Number.isFinite(configuredHours) || configuredHours <= 0) {
+    throw new Error("EMAIL_INTAKE_RECOVERY_LOOKBACK_HOURS must be a positive number");
+  }
+
+  const lookbackHours = Math.min(configuredHours, MAX_RECOVERY_LOOKBACK_HOURS);
+  const recoveryStart = Date.now() - lookbackHours * 60 * 60 * 1000;
+  return new Date(Math.max(new Date(startAt).getTime(), recoveryStart)).toISOString();
+};
+
+const escapeODataString = (value: string) => value.replace(/'/g, "''");
+
+export const buildDispatchInboxFilter = (
+  since: string,
+  allowedSenders = getAllowedDispatchSenders(),
+  unreadOnly = false,
+) => {
+  const senderFilter = [...allowedSenders]
+    .map(sender => `from/emailAddress/address eq '${escapeODataString(sender)}'`)
+    .join(" or ");
+
+  if (!senderFilter) {
+    throw new Error("At least one email intake sender must be configured");
+  }
+
+  const filters = [
+    `receivedDateTime ge ${since}`,
+    `(${senderFilter})`,
+    "contains(subject,'dispatch')",
+  ];
+  if (unreadOnly) filters.push("isRead eq false");
+  return filters.join(" and ");
 };
 
 const graphHeaders = (accessToken: string) => ({
@@ -154,14 +197,11 @@ export async function getOrCreateFolder(accessToken: string): Promise<string> {
   return created.id;
 }
 
-export async function getUnreadDispatchEmails(accessToken: string): Promise<GraphEmail[]> {
-  const { userEmail } = outlookConfig();
-  if (!accessToken) throw new Error("Graph access token is unavailable");
-  if (!userEmail) throw new Error("OUTLOOK_USER_EMAIL is not configured");
-
-  const since = intakeStartAt();
-  const filter = `receivedDateTime ge ${since} and isRead eq false`;
-
+const fetchDispatchInboxEmails = async (
+  accessToken: string,
+  userEmail: string,
+  filter: string,
+): Promise<GraphEmail[]> => {
   const params = new URLSearchParams({
     "$filter": filter,
     "$select": "id,subject,body,from,receivedDateTime,toRecipients",
@@ -181,9 +221,9 @@ export async function getUnreadDispatchEmails(accessToken: string): Promise<Grap
     const res = await fetchWithTimeout(
       nextUrl,
       { headers: graphHeaders(accessToken) },
-      "Graph unread messages request",
+      "Graph dispatch inbox request",
     );
-    assertResponseOk(res, "Graph unread messages request");
+    assertResponseOk(res, "Graph dispatch inbox request");
 
     const data = await res.json() as {
       value?: GraphEmail[];
@@ -196,7 +236,41 @@ export async function getUnreadDispatchEmails(accessToken: string): Promise<Grap
     nextUrl = data["@odata.nextLink"] || null;
   }
 
-  return queue.sort((a, b) => {
+  return queue;
+};
+
+export async function getDispatchInboxEmails(accessToken: string): Promise<GraphEmail[]> {
+  const { userEmail } = outlookConfig();
+  if (!accessToken) throw new Error("Graph access token is unavailable");
+  if (!userEmail) throw new Error("OUTLOOK_USER_EMAIL is not configured");
+
+  const since = intakeStartAt();
+  const recoverySince = intakeRecoveryStartAt(since);
+  const allowedSenders = getAllowedDispatchSenders();
+  const [unreadEmails, recoveryEmails] = await Promise.all([
+    fetchDispatchInboxEmails(
+      accessToken,
+      userEmail,
+      buildDispatchInboxFilter(since, allowedSenders, true),
+    ),
+    fetchDispatchInboxEmails(
+      accessToken,
+      userEmail,
+      buildDispatchInboxFilter(recoverySince, allowedSenders),
+    ),
+  ]);
+
+  const newestEmails = [...new Map(
+    [...unreadEmails, ...recoveryEmails].map(email => [email.id, email]),
+  ).values()]
+    .sort((a, b) => {
+      const timeDifference =
+        new Date(b.receivedDateTime).getTime() - new Date(a.receivedDateTime).getTime();
+      return timeDifference || b.id.localeCompare(a.id);
+    })
+    .slice(0, INTAKE_BATCH_SIZE);
+
+  return newestEmails.sort((a, b) => {
     const timeDifference =
       new Date(a.receivedDateTime).getTime() - new Date(b.receivedDateTime).getTime();
     return timeDifference || a.id.localeCompare(b.id);
