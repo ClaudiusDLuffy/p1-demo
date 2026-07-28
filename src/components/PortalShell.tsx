@@ -198,11 +198,11 @@ const slaLabel = (wo: any) => {
   return { text: `${Math.floor(s.remainingHours)}h left`, color: T.success, bg: T.successSoft, severity: "safe" };
 };
 
-const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "pending_payment", "closed", "capital"].includes(state);
+const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "closed", "capital"].includes(state);
 const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
-const closingStatuses = ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"];
+const closingStatuses = ["completed", "pending_invoice", "pending_approval", "closed"];
 
-// A Closed & Paid WO lingers on the active board for 24h after closed_at,
+// A closed WO lingers on the active board for 24h after closed_at,
 // then lives only in History. A closed WO with no closed_at is treated as
 // already archived (History only) so the board never lingers on undated rows.
 const CLOSED_LINGER_MS = 24 * 60 * 60 * 1000;
@@ -960,7 +960,6 @@ export default function PortalShell() {
   const [search, setSearch] = useState("");
   const [filterC, setFilterC] = useState("all");
   const [filterP, setFilterP] = useState("all");
-  const [nteQueue, setNteQueue] = useState(false); // "NTE Approval Needed" bucket filter
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
   const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
@@ -993,11 +992,9 @@ export default function PortalShell() {
   const [closeTimeInput, setCloseTimeInput] = useState(() => dateTimeInputPartsInTimeZone().time);
   const [etaDateInput, setEtaDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
   const [etaTimeInput, setEtaTimeInput] = useState("14:00");
-  const [nteInputValue, setNteInputValue] = useState("");
-  const [nteFlagInputValue, setNteFlagInputValue] = useState("");
   // Staff "Edit work order" form. One object mirroring the editable fields;
   // populated from woData when the modal opens, diffed on save.
-  const EMPTY_EDIT_WO = { priority: "", nte: "", store: "", city: "", addr: "", lineOfService: "", businessService: "", category: "", subCategory: "", afm: "", afmEmail: "", summary: "", description: "" };
+  const EMPTY_EDIT_WO = { priority: "", store: "", city: "", addr: "", lineOfService: "", businessService: "", category: "", subCategory: "", afm: "", afmEmail: "", summary: "", description: "" };
   const [editWoForm, setEditWoForm] = useState<any>(EMPTY_EDIT_WO);
   const [startNotesInput, setStartNotesInput] = useState("");
   const [pauseReasonInput, setPauseReasonInput] = useState("");
@@ -1039,7 +1036,7 @@ export default function PortalShell() {
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
-    doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart, doMarkSevenElevenSynced,
@@ -1121,27 +1118,8 @@ export default function PortalShell() {
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
   }, [modal, nextInvNum]);
 
-  // ── Contractor NTE display mask ────────────────────────────────────────
-  // Contractors must never see the real 7-Eleven NTE; they'd bill toward it.
-  // Mask once at this role boundary: clone each WO and override .nte with
-  // the per-contractor display cap from their profile (defaults 1000). The
-  // ORIGINAL workOrders array stays untouched so every staff render, every
-  // mutation (useWorkOrders/useInvoices), and every NTE-flag math path
-  // continues to read the real database value. nteFlagThreshold /
-  // nteFlagged / nteFlagAmount are separate columns and are intentionally
-  // NOT masked — staff bucket logic relies on them.
-  const isContractorRole = currentUser?.role === "contractor";
-  const contractorNteCap = currentUser?.contractorNteDisplay != null ? Number(currentUser.contractorNteDisplay) : 1000;
-  const maskedWorkOrders = useMemo(
-    () => isContractorRole
-      ? workOrders.map((w: any) => ({ ...w, nte: contractorNteCap }))
-      : workOrders,
-    [workOrders, isContractorRole, contractorNteCap]
-  );
+  const maskedWorkOrders = workOrders;
 
-  // Reads from maskedWorkOrders so contractor surfaces inherit the $1,000
-  // mask automatically. For staff the mask is an identity transform, so this
-  // returns the real NTE — keeping the staff editNte/editWO modals correct.
   const woData = useMemo(
     () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
     [maskedWorkOrders, selectedWO]
@@ -1183,11 +1161,8 @@ export default function PortalShell() {
       setEtaDateInput(storeNow.date);
       setEtaTimeInput("14:00");
     }
-    if (modal === "editNte") setNteInputValue(woData.nte || "");
-    if (modal === "editNteFlag") setNteFlagInputValue(woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
     if (modal === "editWO") setEditWoForm({
       priority: woData.priority || "",
-      nte: woData.nte != null ? String(woData.nte) : "",
       store: woData.store || "",
       city: woData.city || "",
       addr: woData.addr || "",
@@ -1262,7 +1237,6 @@ export default function PortalShell() {
     setSelectedBillingInvoice(null);
     setBillingDraftToEdit(null);
     setAiNote(null);
-    setNteQueue(false);
   }, []);
 
   const { data: billingInvoices = [] } = useQuery({
@@ -1312,6 +1286,25 @@ export default function PortalShell() {
       fire(`Delete failed: ${e.message || e}`);
     }
   };
+  const doConvertQuoteToBillingInvoice = async (payload: Record<string, unknown>) => {
+    const result = await billingFetch("/api/billing-invoices", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const invoice = result.invoice;
+    qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
+      if (!invoice?.id) return items || [];
+      return [invoice, ...(items || []).filter((item) => item.id !== invoice.id)];
+    });
+    await qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+    fire(`Invoice #${invoice?.num || ""} draft created`);
+    if (invoice?.id) {
+      setSelectedWO(null);
+      setSelectedBillingInvoice(invoice.id);
+      setPage("billing");
+    }
+    return invoice;
+  };
   const getUser = (id: string) => USERS.find(u => u.id === id);
   const contractorsOnly = useMemo(
     () => USERS.filter(u => u.role === "contractor"),
@@ -1328,9 +1321,6 @@ export default function PortalShell() {
         .includes(q)
     );
   }, [contractorsOnly, reassignSearch]);
-  // Render-side view: inherits the contractor NTE mask via maskedWorkOrders.
-  // For staff this is identity (mask is a no-op), so the stats block below
-  // continues to see the real DB values.
   const myWOs = useMemo(
     () => currentUser?.role === "contractor"
       ? maskedWorkOrders.filter((w: any) => w.contractor === currentUser.id)
@@ -1341,7 +1331,6 @@ export default function PortalShell() {
     () => myWOs.filter(w => {
       // Archived closed jobs (>24h past close) leave the active board -> History only.
       if (isArchivedClosed(w)) return false;
-      if (nteQueue && (!w.nteFlagged || w.status === "closed")) return false;
       if (search) {
         const q = search.trim().toLowerCase();
         const haystack = [
@@ -1359,21 +1348,27 @@ export default function PortalShell() {
       if (filterP !== "all" && w.priority !== filterP) return false;
       return true;
     }),
-    [myWOs, nteQueue, search, filterC, filterP]
+    [myWOs, search, filterC, filterP]
   );
   const statusCounts = useMemo(() => {
     const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
+    const openIds = new Set(openWOs.map(w => w.id));
+    const openValue = invoices.reduce(
+      (sum, invoice) =>
+        openIds.has(invoice.wot) && !["draft", "rejected"].includes(invoice.state)
+          ? sum + Number(invoice.total || 0)
+          : sum,
+      0,
+    );
     return {
       openWOs,
       openCount: openWOs.length,
-      openValue: openWOs.reduce((s, w) => s + (w.nte || 0), 0),
+      openValue,
       p1Count: workOrders.filter(w => w.priority === "p1" && activeStatuses.includes(w.status)).length,
       p1Unassigned: workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length,
       capitalCount: workOrders.filter(w => w.status === "capital").length,
       completedCount: workOrders.filter(w => w.status === "completed").length,
       pendAppr: workOrders.filter(w => w.status === "pending_approval").length,
-      awaitingPayment: workOrders.filter(w => w.status === "pending_payment").length,
-      nteFlaggedCount: workOrders.filter(w => w.nteFlagged && w.status !== "closed").length,
       closedWOs: workOrders.filter(w => w.status === "closed"),
       slaAtRisk: workOrders.filter(w => {
         if (!activeStatuses.includes(w.status)) return false;
@@ -1391,10 +1386,10 @@ export default function PortalShell() {
         return s && s.remainingHours <= 0;
       }).length,
     };
-  }, [workOrders]);
+  }, [invoices, workOrders]);
   const {
     openWOs, openCount, openValue, p1Count, p1Unassigned, capitalCount,
-    completedCount, pendAppr, awaitingPayment, nteFlaggedCount,
+    completedCount, pendAppr,
     closedWOs, slaAtRisk, slaBreached
   } = statusCounts;
   // Realtime subscription propagates the same change to other clients within ~200ms.
@@ -1454,7 +1449,6 @@ export default function PortalShell() {
       afm: (newWO.afm || "").trim(),
       afmEmail: (newWO.afmEmail || "").trim(),
       functionalStatus: contractor ? "Dispatched" : "New",
-      nte: parseFloat(newWO.nte) || 0,
       dispatchedAt,
       source: "manual",
     };
@@ -1920,7 +1914,7 @@ export default function PortalShell() {
         </div>
 
         <div className="content-pad" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}>
-          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} awaitingPayment={awaitingPayment} nteFlaggedCount={nteFlaggedCount} nav={nav} setNteQueue={setNteQueue} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} search={search} setSearch={setSearch} />
+          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} nav={nav} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} search={search} setSearch={setSearch} />
 
           <WorkOrderList
             page={page}
@@ -1933,17 +1927,12 @@ export default function PortalShell() {
             contractorsOnly={contractorsOnly}
             filterP={filterP}
             setFilterP={setFilterP}
-            nteQueue={nteQueue}
-            setNteQueue={setNteQueue}
             filteredWOs={filteredWOs}
             slaLabel={slaLabel}
             setSelectedWO={setSelectedWO}
             setAiNote={setAiNote}
             setPage={setPage}
             getUser={getUser}
-            fmt={fmt}
-            invoices={invoices}
-            USERS={USERS}
           />
 
           <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
@@ -1994,7 +1983,80 @@ export default function PortalShell() {
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <WorkOrderDetail page={page} selectedWO={selectedWO} woData={woData} workOrders={maskedWorkOrders} invoices={invoices} technicians={technicians} USERS={USERS} modal={modal} isManager={isManager} setSelectedWO={setSelectedWO} setSelectedInvoice={setSelectedInvoice} setAiNote={setAiNote} setPage={setPage} slaLabel={slaLabel} slaRemaining={slaRemaining} fmt={fmt} getUser={getUser} contractorsOnly={contractorsOnly} doAssign={doAssign} setReassignTarget={setReassignTarget} setModal={setModal} doCapitalFlag={doCapitalFlag} doCapitalDecline={doCapitalDecline} doMoveToInvoice={doMoveToInvoice} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doCloseWO={doCloseWO} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} openCreateInvoice={openCreateInvoice} pdfBusy={pdfBusy} activityMenuId={activityMenuId} setActivityMenuId={setActivityMenuId} setPendingDelete={setPendingDelete} currentUser={currentUser} fire={fire} aiNote={aiNote} aiEnhancing={aiEnhancing} doAiEnhance={doAiEnhance} noteText={noteText} setNoteText={setNoteText} doPostNote={doPostNote} doSetTechnician={doSetTechnician} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} doDeleteActivity={doDeleteActivity} doSetEta={doSetEta} doEditNte={doEditNte} doEditNteFlag={doEditNteFlag} doStartWork={doStartWork} doPauseWork={doPauseWork} doCloseComplete={doCloseComplete} doMarkSevenElevenSynced={doMarkSevenElevenSynced} doMarkContractorAttention={doMarkContractorAttention} doAcknowledgeContractorAttention={doAcknowledgeContractorAttention} startDateInput={startDateInput} setStartDateInput={setStartDateInput} startTimeInput={startTimeInput} setStartTimeInput={setStartTimeInput} pauseDateInput={pauseDateInput} setPauseDateInput={setPauseDateInput} pauseTimeInput={pauseTimeInput} setPauseTimeInput={setPauseTimeInput} loadingStates={loadingStates} woParts={woParts} doAddPart={doAddPart} doUpdatePart={doUpdatePart} doDeletePart={doDeletePart} />
+          <WorkOrderDetail
+            page={page}
+            selectedWO={selectedWO}
+            woData={woData}
+            workOrders={maskedWorkOrders}
+            invoices={invoices}
+            billingInvoices={billingInvoices}
+            technicians={technicians}
+            USERS={USERS}
+            modal={modal}
+            isManager={isManager}
+            setSelectedWO={setSelectedWO}
+            setSelectedInvoice={setSelectedInvoice}
+            setAiNote={setAiNote}
+            setPage={setPage}
+            slaLabel={slaLabel}
+            slaRemaining={slaRemaining}
+            fmt={fmt}
+            getUser={getUser}
+            contractorsOnly={contractorsOnly}
+            doAssign={doAssign}
+            setReassignTarget={setReassignTarget}
+            setModal={setModal}
+            doCapitalFlag={doCapitalFlag}
+            doCapitalDecline={doCapitalDecline}
+            doMoveToInvoice={doMoveToInvoice}
+            doApproveInvoice={doApproveInvoice}
+            doMarkPaid={doMarkPaid}
+            doCloseWO={doCloseWO}
+            doDownloadInvoice={doDownloadInvoice}
+            doDeleteInvoice={doDeleteInvoice}
+            doRejectInvoice={doRejectInvoice}
+            openCreateInvoice={openCreateInvoice}
+            onConvertQuote={doConvertQuoteToBillingInvoice}
+            pdfBusy={pdfBusy}
+            activityMenuId={activityMenuId}
+            setActivityMenuId={setActivityMenuId}
+            setPendingDelete={setPendingDelete}
+            currentUser={currentUser}
+            fire={fire}
+            aiNote={aiNote}
+            aiEnhancing={aiEnhancing}
+            doAiEnhance={doAiEnhance}
+            noteText={noteText}
+            setNoteText={setNoteText}
+            doPostNote={doPostNote}
+            doSetTechnician={doSetTechnician}
+            imageErrors={imageErrors}
+            setImageErrors={setImageErrors}
+            setLightbox={setLightbox}
+            doAddPhotos={doAddPhotos}
+            doRemovePhoto={doRemovePhoto}
+            doDeleteActivity={doDeleteActivity}
+            doSetEta={doSetEta}
+            doStartWork={doStartWork}
+            doPauseWork={doPauseWork}
+            doCloseComplete={doCloseComplete}
+            doMarkSevenElevenSynced={doMarkSevenElevenSynced}
+            doMarkContractorAttention={doMarkContractorAttention}
+            doAcknowledgeContractorAttention={doAcknowledgeContractorAttention}
+            startDateInput={startDateInput}
+            setStartDateInput={setStartDateInput}
+            startTimeInput={startTimeInput}
+            setStartTimeInput={setStartTimeInput}
+            pauseDateInput={pauseDateInput}
+            setPauseDateInput={setPauseDateInput}
+            pauseTimeInput={pauseTimeInput}
+            setPauseTimeInput={setPauseTimeInput}
+            loadingStates={loadingStates}
+            woParts={woParts}
+            doAddPart={doAddPart}
+            doUpdatePart={doUpdatePart}
+            doDeletePart={doDeletePart}
+          />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
         </div>
@@ -2243,47 +2305,12 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "markPaid" && woData && (() => {
-        // Multi-invoice safe: act on a SPECIFIC invoice (the earliest
-        // approved-but-unpaid one on this WO). If there are multiple, the
-        // user should use the per-invoice "Mark paid" on the WO detail.
-        const approved = invoices.filter((i: any) => i.wot === woData.id && i.state === "approved").sort((a: any, b: any) => (a.num || "").localeCompare(b.num || ""));
-        const target = approved[0] || null;
-        return (
-          <Modal onClose={() => setModal(null)} title="Mark paid" width={420}>
-            <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-              {target
-                ? <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{target.num}</span> paid?{approved.length > 1 ? ` ${approved.length - 1} other approved invoice${approved.length - 1 === 1 ? "" : "s"} on this WO will stay unpaid — use the per-invoice action to mark them.` : " The WO will move to Closed once every invoice is paid."}</>
-                : <>No approved invoice ready to pay. Use the per-invoice actions on the WO detail.</>}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-              <button
-                onClick={async () => {
-                  if (!target) { setModal(null); return; }
-                  setModalLoading(true);
-                  try {
-                    await doMarkPaid(target.id);
-                    setModal(null);
-                  } finally {
-                    setModalLoading(false);
-                  }
-                }}
-                disabled={modalLoading || !target}
-                className="btn-primary"
-                style={{ ...modalActionStyle, opacity: !target ? 0.5 : (modalActionStyle as any).opacity }}
-              >{modalLoading ? <><BtnSpinner />Processing...</> : "Mark paid"}</button>
-            </div>
-          </Modal>
-        );
-      })()}
-
       {modal === "closeWO" && woData && (() => {
-        const unpaid = invoices.filter((i: any) => i.wot === woData.id && (i.state === "submitted" || i.state === "revised" || i.state === "approved")).length;
+        const notHandedOff = invoices.filter((i: any) => i.wot === woData.id && (i.state === "submitted" || i.state === "revised" || i.state === "approved")).length;
         return (
           <Modal onClose={() => setModal(null)} title="Close work order" width={460}>
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It moves to History after the 24h linger, the NTE flag clears, and contractors can no longer add invoices.{unpaid > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{unpaid} invoice{unpaid === 1 ? " is" : "s are"} still unpaid.</strong> Closing won't pay them — you can still mark them paid after the WO is closed, or Reopen if needed.</> : null}
+              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It moves to History after the 24h linger, and contractors can no longer add invoices.{notHandedOff > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{notHandedOff} invoice{notHandedOff === 1 ? " has" : "s have"} not been sent to QuickBooks.</strong> The work order can still close; invoice handoff remains available separately.</> : null}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -2309,7 +2336,7 @@ export default function PortalShell() {
       {modal === "reopen" && woData && (
         <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board, leaves History, and the NTE-flag bucket recovers it if applicable. Invoice states are untouched — staff can resume Mark paid or add more invoices.
+            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board and leaves History. Invoice states are untouched, so staff can continue billing or add more invoices.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -2360,7 +2387,6 @@ export default function PortalShell() {
         const saveEdit = async () => {
           const orig: any = {
             priority: woData.priority || "",
-            nte: woData.nte != null ? Number(woData.nte) : 0,
             store: woData.store || "", city: woData.city || "", addr: woData.addr || "",
             lineOfService: woData.lineOfService || "", businessService: woData.businessService || "",
             category: woData.category || "", subCategory: woData.subCategory || "",
@@ -2395,11 +2421,6 @@ export default function PortalShell() {
             patch.responseBreachAt = b.responseBreachAt?.toISOString() ?? null;
             patch.resolutionBreachAt = b.resolutionBreachAt?.toISOString() ?? null;
           }
-          const nextNte = editWoForm.nte === "" ? 0 : parseFloat(editWoForm.nte);
-          if (isFinite(nextNte) && nextNte >= 0 && nextNte !== orig.nte) {
-            patch.nte = nextNte;
-            entries.push(`NTE changed from ${fmt(orig.nte)} to ${fmt(nextNte)} by ${currentUser.name}.`);
-          }
           if (entries.length === 0) { fire("No changes to save"); setModal(null); return; }
           setModalLoading(true);
           try {
@@ -2420,7 +2441,6 @@ export default function PortalShell() {
                 <Field label="Priority"><Sel value={editWoForm.priority} onChange={set("priority")}>
                   {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
                 </Sel></Field>
-                <Field label="NTE ($)"><Input type="number" step="0.01" value={editWoForm.nte} onChange={set("nte")} placeholder="e.g. 1500" /></Field>
               </div>
               <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <Field label="Store Number"><Input value={editWoForm.store} onChange={set("store")} /></Field>
@@ -2452,46 +2472,6 @@ export default function PortalShell() {
           </Modal>
         );
       })()}
-
-      {modal === "editNte" && woData && (
-        <Modal onClose={() => setModal(null)} title={woData.nte > 0 ? "Edit NTE" : "Add NTE"} width={420}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
-            Update the Not-To-Exceed cap for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Contractors can still submit invoices over NTE - the system flags overage but won't block.
-          </div>
-          <Field label="NTE ($)">
-            <Input type="number" step="0.01" value={nteInputValue} onChange={(e: any) => setNteInputValue(e.target.value)} placeholder="e.g. 1500" />
-          </Field>
-          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => {
-              const v = parseFloat(nteInputValue);
-              if (!isFinite(v) || v < 0) { fire("Enter a non-negative number"); return; }
-              doEditNte(woData.id, v, woData.nte || 0);
-              setModal(null);
-            }} className="btn-primary">Save</button>
-          </div>
-        </Modal>
-      )}
-
-      {modal === "editNteFlag" && woData && (
-        <Modal onClose={() => setModal(null)} title="Edit NTE flag threshold" width={420}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
-            Early-warning threshold for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. When a submitted invoice total reaches this amount, the work order is flagged for NTE approval. Default is {fmt(900)} (a buffer below 7-Eleven's {fmt(1300)} hard cap).
-          </div>
-          <Field label="Flag threshold ($)">
-            <Input type="number" step="0.01" value={nteFlagInputValue} onChange={(e: any) => setNteFlagInputValue(e.target.value)} placeholder="e.g. 900" />
-          </Field>
-          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button onClick={() => {
-              const v = parseFloat(nteFlagInputValue);
-              if (!isFinite(v) || v < 0) { fire("Enter a non-negative number"); return; }
-              doEditNteFlag(woData.id, v, woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900);
-              setModal(null);
-            }} className="btn-primary">Save</button>
-          </div>
-        </Modal>
-      )}
 
       {modal === "startWork" && woData && (
         <Modal onClose={() => setModal(null)} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>

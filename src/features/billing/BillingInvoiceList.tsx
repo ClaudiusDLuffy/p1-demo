@@ -3,14 +3,15 @@
 
 import { useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
-import { T, INV_STATE } from "../../lib/constants";
+import { Ico } from "../../components/ui/Ico";
+import { T, STAFF_INV_STATE } from "../../lib/constants";
 
 const tabs = [
   { id: "all", label: "All" },
   { id: "draft", label: "Draft" },
-  { id: "submitted", label: "Submitted" },
+  { id: "submitted", label: "Submitted to 7-Eleven" },
   { id: "approved", label: "Approved" },
-  { id: "paid", label: "Paid" },
+  { id: "paid", label: "Sent to QuickBooks" },
 ];
 
 export default function BillingInvoiceList(props: any) {
@@ -22,12 +23,29 @@ export default function BillingInvoiceList(props: any) {
     fmt,
   } = props;
   const [tab, setTab] = useState("all");
+  const [search, setSearch] = useState("");
 
   const visibleInvoices = useMemo(
     () => (invoices || [])
       .filter((invoice: any) => invoice.invoiceType === "staff")
-      .filter((invoice: any) => tab === "all" || invoice.state === tab),
-    [invoices, tab],
+      .filter((invoice: any) => tab === "all" || invoice.state === tab)
+      .filter((invoice: any) => {
+        const query = search.trim().toLowerCase();
+        if (!query) return true;
+        return [
+          invoice.num,
+          invoice.wot,
+          invoice.store,
+          invoice.storeAddr,
+          invoice.cme,
+          ...(invoice.sourceInvoices || []).map((source: any) => source.num),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      }),
+    [invoices, search, tab],
   );
 
   if (page !== "billing") return null;
@@ -68,7 +86,22 @@ export default function BillingInvoiceList(props: any) {
             </button>
           ))}
         </div>
-        <button onClick={onCreate} className="btn-primary billing-create-button">+ Create Invoice</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: "1 1 300px", justifyContent: "flex-end" }}>
+          <label style={{ position: "relative", flex: "1 1 220px", maxWidth: 340 }}>
+            <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", display: "flex", color: T.subtle, pointerEvents: "none" }}>
+              <Ico d="M21 21l-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" size={15} color="currentColor" />
+            </span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search invoices"
+              aria-label="Search billing invoices"
+              style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
+            />
+          </label>
+          <button onClick={onCreate} className="btn-primary billing-create-button">+ Create Invoice</button>
+        </div>
       </div>
 
       <div className="desktop-only-table">
@@ -110,14 +143,14 @@ export default function BillingInvoiceList(props: any) {
                   </td>
                   <td style={{ padding: "13px 14px" }}>{invoice.store ? `#${invoice.store}` : "-"}</td>
                   <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(Math.round(invoice.total || 0))}</td>
-                  <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[invoice.state]} small /></td>
+                  <td style={{ padding: "13px 14px" }}><Badge conf={STAFF_INV_STATE[invoice.state]} small /></td>
                 </tr>
               ))}
             </tbody>
           </table>
           {visibleInvoices.length === 0 && (
             <div style={{ textAlign: "center", padding: "44px 20px", color: T.subtle, fontSize: 13 }}>
-              No P1 to 7-Eleven invoices yet. Create your first invoice above.
+              {search ? "No billing invoices match your search." : "No P1 to 7-Eleven invoices yet. Create your first invoice above."}
             </div>
           )}
         </div>
@@ -141,7 +174,7 @@ export default function BillingInvoiceList(props: any) {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
-              <Badge conf={INV_STATE[invoice.state]} small />
+              <Badge conf={STAFF_INV_STATE[invoice.state]} small />
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 4 }}>
               Store #{invoice.store || "-"}
@@ -158,7 +191,7 @@ export default function BillingInvoiceList(props: any) {
         ))}
         {visibleInvoices.length === 0 && (
           <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
-            No P1 to 7-Eleven invoices yet. Create your first invoice above.
+            {search ? "No billing invoices match your search." : "No P1 to 7-Eleven invoices yet. Create your first invoice above."}
           </div>
         )}
       </div>

@@ -24,7 +24,7 @@ const todayIso = () => {
 const initialLines = () => [];
 
 export default function InvoiceCreateModal(props: any) {
-  const { modal, woData, invoices, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts = [] } = props;
+  const { modal, woData, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts = [] } = props;
   // Parts on this WO that have been received (and so are billable) — feeds
   // the "Add from parts list" button below the line items grid. Description
   // + qty pre-fill only; the contractor types their own rate.
@@ -158,24 +158,8 @@ export default function InvoiceCreateModal(props: any) {
     };
   }, [modal, reset, resumeDraft, nextInvNumFromDb]);
 
-  const priorSpend = useMemo(
-    () => {
-      if (!woData) return 0;
-      return invoices.reduce((s, i) => i.wot === woData.id && i.state !== "draft" ? s + (i.total || 0) : s, 0);
-    },
-    [invoices, woData]
-  );
-
   if (modal !== "createInvoice" || !woData) return null;
 
-  const projectedSpend = priorSpend + total;
-  // Contractors never see over/under-NTE warnings — the WO.nte they see is
-  // already the masked display cap (per-contractor profile column). Showing
-  // "exceeds NTE" against the masked $1k would either bait them past it or
-  // confuse them, and the staff-side flag still fires off the REAL DB value
-  // (see useInvoices.ts belt+suspenders). Banner gated to staff only.
-  const isContractor = currentUser?.role === "contractor";
-  const over = !isContractor && (woData.nte || 0) > 0 && projectedSpend > woData.nte;
   const close = () => {
     const today = todayIso();
     pdfParseAttempt.current += 1;
@@ -319,7 +303,7 @@ export default function InvoiceCreateModal(props: any) {
               <div key={field.id} className="inv-line-row" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
                 <div className="mono inv-num" style={{ fontSize: 12, color: T.subtle, paddingTop: 10 }}>{i + 1}</div>
                 <Sel {...register(`lines.${i}.type` as const)} defaultValue={field.type} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, outline: "none" }}>{LINE_TYPES.map(t => <option key={t}>{t}</option>)}</Sel>
-                <textarea {...register(`lines.${i}.desc` as const)} placeholder={line.type === "Labor" ? "What was done on site..." : line.type === "Parts/Hardware" ? "Part description" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
+                <textarea {...register(`lines.${i}.desc` as const)} placeholder={line.type === "Labor" ? "What was done on site..." : line.type === "Parts/Hardware" ? "Part description" : /^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
                 {/* Mobile-only field labels — hidden inline so the desktop grid
                     (direct-children columns) is untouched; CSS reveals them. */}
                 <span className="inv-mlabel" style={{ display: "none" }}>Qty</span>
@@ -335,7 +319,7 @@ export default function InvoiceCreateModal(props: any) {
         </div>
         {errors.lines && (
           <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
-            Check the highlighted line items — each line needs a description, a qty, and a rate (remove lines you don't need).
+            Check the highlighted line items. Every line needs a quantity and rate; travel descriptions are optional.
           </div>
         )}
         <div className="inv-add-btns" style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
@@ -386,17 +370,12 @@ export default function InvoiceCreateModal(props: any) {
                 <input type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
               </div>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: over ? T.danger : T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
             {uploadOnly && uploadedTotal > 0 && !uploadedLinesMatchTotal && (
               <div style={{ fontSize: 11, color: T.warn, lineHeight: 1.45, marginTop: 8, textAlign: "right" }}>
                 Lines differ from the PDF total by {fmt(uploadedLineDifference)}. Review before confirming.
               </div>
             )}
-            <div style={{ fontSize: 11, color: over ? T.danger : T.muted, marginTop: 8, textAlign: "right" }}>
-              {isContractor
-                ? (priorSpend > 0 ? `Running total ${fmt(projectedSpend)} - prior invoices ${fmt(priorSpend)}` : `Running total ${fmt(projectedSpend)}`)
-                : ((woData.nte || 0) > 0 ? (over ? `Total spend would be ${fmt(projectedSpend)} - exceeds NTE by ${fmt(projectedSpend - woData.nte)}` : `${fmt(woData.nte - projectedSpend)} under NTE (${fmt(woData.nte)})${priorSpend > 0 ? ` - prior invoices ${fmt(priorSpend)}` : ""}`) : "No NTE set on this work order")}
-            </div>
           </div>
         </div>
         </div>
@@ -446,13 +425,6 @@ export default function InvoiceCreateModal(props: any) {
                 + Enter line items manually
               </button>
             )}
-          </div>
-        )}
-
-        {over && (
-          <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}55`, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 10 }}>
-            <div style={{ fontSize: 18, lineHeight: 1 }}>!</div>
-            <div style={{ flex: 1, fontSize: 12, color: "#73560C", lineHeight: 1.55 }}><div style={{ fontWeight: 700, color: T.warn, marginBottom: 2 }}>This invoice will push the total to {fmt(projectedSpend)} - exceeds the {fmt(woData.nte)} NTE.</div>You can still submit. Be ready to justify the overage.</div>
           </div>
         )}
 

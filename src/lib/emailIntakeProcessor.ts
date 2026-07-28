@@ -13,6 +13,7 @@ import {
 } from "./emailParser";
 import { resolveContractor } from "./autoDispatch";
 import { normalizeStateCode, timezoneForWorkOrder } from "./billingRules";
+import { intakeStateBlockReason } from "./intakeStatePolicy";
 import { createServerClient } from "./supabase/server";
 import { sendDispatchNotification } from "./notificationService";
 import type { Database } from "./supabase/database.types";
@@ -43,36 +44,12 @@ type WorkOrderMatch = {
   archived: boolean;
 };
 
-const getAllowedIntakeStates = () => {
-  const raw = process.env.EMAIL_INTAKE_ALLOWED_STATES;
-  if (!raw) return null;
-
-  const states = raw
-    .split(",")
-    .map(state => state.trim().toUpperCase())
-    .filter(Boolean);
-
-  if (states.length === 0 || states.includes("ALL") || states.includes("*")) {
-    return null;
-  }
-
-  return states;
-};
-
 const stateAllowlistReason = (state: string | null) => {
-  const allowedStates = getAllowedIntakeStates();
-  if (!allowedStates) return null;
-
-  const normalizedState = state?.trim().toUpperCase() || "";
-  if (!normalizedState) {
-    return `state missing; allowed intake states: ${allowedStates.join(", ")}`;
-  }
-
-  if (!allowedStates.includes(normalizedState)) {
-    return `state ${normalizedState} not in allowed intake states: ${allowedStates.join(", ")}`;
-  }
-
-  return null;
+  return intakeStateBlockReason(
+    state,
+    process.env.EMAIL_INTAKE_ALLOWED_STATES,
+    process.env.EMAIL_INTAKE_TEXAS_ENABLED,
+  );
 };
 
 const compactPatch = (parsed: ParsedWorkOrder) => {
@@ -297,6 +274,7 @@ export async function processEmail(
                 incidentId: parsed.incidentId,
                 storeNumber: parsed.storeNumber,
                 city: parsed.city,
+                state: parsed.state,
                 address: parsed.address,
                 priority: parsed.priority || "p2",
                 summary: parsed.summary,

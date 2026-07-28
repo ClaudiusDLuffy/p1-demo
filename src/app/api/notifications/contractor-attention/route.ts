@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-import { sendDispatchNotification } from "../../../../lib/notificationService";
+import { sendContractorPortalPing } from "../../../../lib/notificationService";
 import { createServerClient } from "../../../../lib/supabase/server";
 import type { Database } from "../../../../lib/supabase/database.types";
 
@@ -17,8 +17,7 @@ const anonClient = () =>
   );
 
 const getBearerToken = (req: NextRequest) => {
-  const auth = req.headers.get("authorization") || "";
-  const match = auth.match(/^Bearer\s+(.+)$/i);
+  const match = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
   return match?.[1] || "";
 };
 
@@ -27,15 +26,14 @@ async function requireStaff(req: NextRequest) {
   if (!token) return { error: jsonError("Unauthorized", 401) };
 
   const auth = anonClient();
-  const { data: authData, error: authError } = await auth.auth.getUser(token);
-  const user = authData.user;
-  if (authError || !user) return { error: jsonError("Unauthorized", 401) };
+  const { data, error } = await auth.auth.getUser(token);
+  if (error || !data.user) return { error: jsonError("Unauthorized", 401) };
 
   const sb = createServerClient();
   const { data: profile, error: profileError } = await sb
     .from("profiles")
-    .select("id, role")
-    .eq("id", user.id)
+    .select("id,role")
+    .eq("id", data.user.id)
     .maybeSingle();
 
   if (profileError) return { error: jsonError(profileError.message, 500) };
@@ -43,67 +41,67 @@ async function requireStaff(req: NextRequest) {
     return { error: jsonError("Forbidden", 403) };
   }
 
-  return { sb, user, profile };
+  return { sb };
 }
-
-const mapWorkOrder = (wo: any) => ({
-  id: wo.id,
-  incidentId: wo.incident_id,
-  storeNumber: wo.store_number,
-  city: wo.city,
-  state: wo.store_state,
-  address: wo.address,
-  priority: wo.priority,
-  summary: wo.summary,
-  description: wo.description,
-});
 
 export async function POST(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
 
-  let body: any = {};
+  let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    body = await req.json() as Record<string, unknown>;
   } catch {
     return jsonError("Invalid JSON body", 400);
   }
 
   const workOrderId = String(body.workOrderId || "").trim();
-  const overrideContractorId = body.contractorId ? String(body.contractorId).trim() : "";
-  if (!workOrderId) return jsonError("workOrderId is required", 400);
+  const activityId = String(body.activityId || "").trim();
+  if (!workOrderId || !activityId) {
+    return jsonError("workOrderId and activityId are required", 400);
+  }
 
-  const { sb } = auth;
-  const { data: wo, error: woError } = await (sb as any)
+  const { data: activity, error: activityError } = await auth.sb
+    .from("activities")
+    .select("id,work_order_id,requires_contractor_attention,deleted_at")
+    .eq("id", activityId)
+    .eq("work_order_id", workOrderId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (activityError) return jsonError(activityError.message, 500);
+  if (!activity?.requires_contractor_attention) {
+    return jsonError("Contractor attention request not found", 404);
+  }
+
+  const { data: workOrder, error: workOrderError } = await auth.sb
     .from("work_orders")
-    .select("id,incident_id,store_number,city,store_state,address,priority,summary,description,contractor_id,deleted_at")
+    .select("contractor_id")
     .eq("id", workOrderId)
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (woError) return jsonError(woError.message, 500);
-  if (!wo) return jsonError("Work order not found", 404);
+  if (workOrderError) return jsonError(workOrderError.message, 500);
+  if (!workOrder?.contractor_id) {
+    return jsonError("Work order is not assigned to a contractor", 400);
+  }
 
-  const contractorId = overrideContractorId || wo.contractor_id;
-  if (!contractorId) return jsonError("Work order is not assigned to a contractor", 400);
-
-  const { data: contractor, error: contractorError } = await sb
+  const { data: contractor, error: contractorError } = await auth.sb
     .from("profiles")
-    .select("id,email,name,company")
-    .eq("id", contractorId)
+    .select("email")
+    .eq("id", workOrder.contractor_id)
     .maybeSingle();
 
   if (contractorError) return jsonError(contractorError.message, 500);
   if (!contractor?.email) return jsonError("Contractor email not found", 400);
 
   try {
-    await sendDispatchNotification({
-      workOrder: mapWorkOrder(wo),
-      contractorEmail: contractor.email,
-      contractorName: contractor.company || contractor.name || "Contractor",
-    });
-  } catch (err) {
-    return jsonError(err instanceof Error ? err.message : "Notification send failed", 500);
+    await sendContractorPortalPing(contractor.email);
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Notification send failed",
+      500,
+    );
   }
 
   return NextResponse.json({ success: true });

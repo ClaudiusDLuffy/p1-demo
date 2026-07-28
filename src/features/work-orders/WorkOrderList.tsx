@@ -10,9 +10,11 @@ import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import {
+  getWorkOrderActionReasons,
   getSlaAgingStyle,
   getWorkOrderDateMeta,
   sortWorkOrders,
+  workOrderNeedsAction,
   type WorkOrderSortKey,
 } from "../../lib/workOrderView";
 
@@ -28,34 +30,35 @@ export default function WorkOrderList(props: any) {
     contractorsOnly,
     filterP,
     setFilterP,
-    nteQueue,
-    setNteQueue,
     filteredWOs,
     slaLabel,
     setSelectedWO,
     setAiNote,
     setPage,
     getUser,
-    fmt,
-    invoices,
   } = props;
 
   const [listPage, setListPage] = useState(1);
   const [sortBy, setSortBy] = useState<WorkOrderSortKey>(isManager ? "sla_due" : "newest");
+  const [viewMode, setViewMode] = useState<"recent" | "needs_action">("recent");
   const [hideClosed, setHideClosed] = useState(true);
   const [pagingBusy, setPagingBusy] = useState<"prev" | "next" | null>(null);
   const pageSize = 10;
 
-  const tableWOs = useMemo(
-    () => sortWorkOrders(
+  const tableWOs = useMemo(() => {
+    const sorted = sortWorkOrders(
       filteredWOs.filter((w: any) =>
         w.status !== "capital"
-        && (!isManager || !hideClosed || w.status !== "closed"),
+        && (!isManager || !hideClosed || w.status !== "closed")
+        && (viewMode !== "needs_action" || workOrderNeedsAction(w, isManager)),
       ),
       sortBy,
-    ),
-    [filteredWOs, hideClosed, isManager, sortBy],
-  );
+    );
+
+    return sorted.sort((a: any, b: any) =>
+      Number(workOrderNeedsAction(b, isManager)) - Number(workOrderNeedsAction(a, isManager))
+    );
+  }, [filteredWOs, hideClosed, isManager, sortBy, viewMode]);
   const hiddenClosedCount = isManager && hideClosed
     ? filteredWOs.filter((w: any) => w.status === "closed").length
     : 0;
@@ -69,7 +72,7 @@ export default function WorkOrderList(props: any) {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, filterC, filterP, nteQueue, sortBy, hideClosed]);
+  }, [search, filterC, filterP, sortBy, hideClosed, viewMode]);
 
   useEffect(() => {
     setListPage((prev) => Math.min(prev, totalPages));
@@ -135,6 +138,41 @@ export default function WorkOrderList(props: any) {
       {page === "work_orders" && !selectedWO && (
         <div style={{ animation: "fadeUp 0.3s" }}>
           <div className="filter-bar" style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
+            <div
+              role="group"
+              aria-label="Work order view"
+              style={{ display: "inline-flex", padding: 3, border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceSoft }}
+            >
+              {([
+                ["recent", "Recent"],
+                ["needs_action", "Needs action"],
+              ] as const).map(([value, label]) => {
+                const active = viewMode === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setViewMode(value)}
+                    style={{
+                      minHeight: 34,
+                      padding: "7px 12px",
+                      border: 0,
+                      borderRadius: 6,
+                      background: active ? T.surface : "transparent",
+                      color: active ? T.ink : T.muted,
+                      boxShadow: active ? "0 1px 2px rgba(31,30,28,0.12)" : "none",
+                      fontFamily: "inherit",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
             <input
               value={search}
               onChange={(e: any) => setSearch(e.target.value)}
@@ -168,9 +206,8 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls{hiddenClosedCount > 0 ? ` (${hiddenClosedCount})` : ""}
               </label>
             )}
-            {nteQueue && <span style={{ fontSize: 11, fontWeight: 700, color: T.warn, background: T.warnSoft, padding: "5px 12px", borderRadius: 20, border: `1px solid ${T.warn}33` }}>NTE Approval Needed</span>}
-            {(filterC !== "all" || filterP !== "all" || search || nteQueue) && (
-              <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); setNteQueue(false); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            {(filterC !== "all" || filterP !== "all" || search || viewMode !== "recent") && (
+              <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); setViewMode("recent"); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}
@@ -181,8 +218,8 @@ export default function WorkOrderList(props: any) {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.surfaceSoft }}>
-                    {["WO#", "INC#", "Store", "Summary", "Priority", "Status", "Contractor", "Dates", "SLA due", "NTE"].map(h => (
-                      <th key={h} style={{ textAlign: h === "NTE" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>{h}</th>
+                    {["WO#", "INC#", "Store", "Summary", "Priority", "Status", "Contractor", "Dates", "SLA due"].map(h => (
+                      <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -192,11 +229,20 @@ export default function WorkOrderList(props: any) {
                     const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                     const dates = getWorkOrderDateMeta(wo);
                     const aging = getSlaAgingStyle(wo);
+                    const actionReasons = getWorkOrderActionReasons(wo, isManager);
                     return (
                       <tr key={wo.id} onClick={() => { setSelectedWO(wo.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
                         <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>
                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             {wo.id}
+                            {actionReasons.length > 0 && (
+                              <span
+                                title={actionReasons.join(", ")}
+                                style={{ fontFamily: "inherit", fontSize: 9, lineHeight: 1, fontWeight: 800, textTransform: "uppercase", color: T.danger, background: T.dangerSoft, border: `1px solid ${T.danger}33`, borderRadius: 6, padding: "4px 6px", whiteSpace: "nowrap" }}
+                              >
+                                Action required
+                              </span>
+                            )}
                             {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
                             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
@@ -220,7 +266,6 @@ export default function WorkOrderList(props: any) {
                               : (sla ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, width: "fit-content" }}>{sla.text}</span> : null)}
                           </div>
                         </td>
-                        <td className="mono" style={{ padding: "12px 14px", textAlign: "right", fontWeight: 600 }}>{fmt(wo.nte)}</td>
                       </tr>
                     );
                   })}
@@ -235,12 +280,7 @@ export default function WorkOrderList(props: any) {
               const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
               const dates = getWorkOrderDateMeta(wo);
               const aging = getSlaAgingStyle(wo);
-              const cardSpend = invoices
-                ? invoices.reduce((s: number, inv: any) =>
-                  inv.wot === wo.id && inv.state !== "draft" ? s + (inv.total || 0) : s, 0)
-                : 0;
-              const cardNte = wo.nte || 0;
-              const cardOver = cardNte > 0 && cardSpend > cardNte;
+              const actionReasons = getWorkOrderActionReasons(wo, isManager);
 
               return (
                 <div
@@ -265,6 +305,14 @@ export default function WorkOrderList(props: any) {
                   <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>
                       {wo.id}
+                      {actionReasons.length > 0 && (
+                        <span
+                          title={actionReasons.join(", ")}
+                          style={{ fontFamily: "inherit", fontSize: 9, lineHeight: 1, fontWeight: 800, textTransform: "uppercase", color: T.danger, background: T.dangerSoft, border: `1px solid ${T.danger}33`, borderRadius: 6, padding: "4px 6px" }}
+                        >
+                          Action required
+                        </span>
+                      )}
                       {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
                       {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                     </span>
@@ -292,9 +340,6 @@ export default function WorkOrderList(props: any) {
                       {wo.contractor ? getUser(wo.contractor)?.name || "Assigned" : "Unassigned"}
                     </span>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      {cardOver && (
-                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: T.danger, color: "#fff" }}>OVER NTE</span>
-                      )}
                       {hasNewSla
                         ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} responseMetAt={wo.startTimeRaw} size="sm" />
                         : sla

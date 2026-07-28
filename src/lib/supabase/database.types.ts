@@ -27,6 +27,7 @@ export type Database = {
           event_key: string
           id: string
           is_staff_override: boolean
+          is_staff_only: boolean
           override_for_contractor_id: string | null
           requires_7eleven_sync: boolean
           requires_contractor_attention: boolean
@@ -48,6 +49,7 @@ export type Database = {
           event_key?: string
           id?: string
           is_staff_override?: boolean
+          is_staff_only?: boolean
           override_for_contractor_id?: string | null
           requires_7eleven_sync?: boolean
           requires_contractor_attention?: boolean
@@ -69,6 +71,7 @@ export type Database = {
           event_key?: string
           id?: string
           is_staff_override?: boolean
+          is_staff_only?: boolean
           override_for_contractor_id?: string | null
           requires_7eleven_sync?: boolean
           requires_contractor_attention?: boolean

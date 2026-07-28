@@ -50,7 +50,8 @@ export const STATUS = {
   completed: { label: "Completed", color: T.success, bg: T.successSoft, ring: "#CFDED3" },
   pending_invoice: { label: "Pending Invoice", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
   pending_approval: { label: "Pending Approval", color: T.muted, bg: T.borderSoft, ring: T.border },
-  pending_payment: { label: "Pending Payment", color: "#0E7C7B", bg: "#E0F2F1", ring: "#B2DFDB" },
+  // Compatibility alias for rows created before the payment stage was retired.
+  pending_payment: { label: "Pending Invoice", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
   closed: { label: "Closed", color: T.subtle, bg: T.borderSoft, ring: T.border },
 };
 
@@ -69,7 +70,12 @@ export const INV_STATE = {
   approved: { label: "Approved", color: T.success, bg: T.successSoft },
   rejected: { label: "Rejected", color: T.danger, bg: T.dangerSoft },
   revised: { label: "Revised", color: T.warn, bg: T.warnSoft },
-  paid: { label: "Paid", color: T.success, bg: T.successSoft },
+  paid: { label: "Sent to QuickBooks", color: T.success, bg: T.successSoft },
+};
+
+export const STAFF_INV_STATE = {
+  ...INV_STATE,
+  submitted: { ...INV_STATE.submitted, label: "Submitted to 7-Eleven" },
 };
 
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

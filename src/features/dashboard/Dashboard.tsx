@@ -7,7 +7,7 @@ import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useMemo } from "react";
 
 export default function Dashboard(props: any) {
-  const { page, isManager, openValue, openCount, openWOs, workOrders, p1Count, p1Unassigned, slaAtRisk, slaBreached, capitalCount, awaitingPayment, nteFlaggedCount, nav, setNteQueue, doAutoAssign, filteredWOs, activeStatuses, closingStatuses, invoices, USERS, getUser, slaLabel, setSelectedWO, setAiNote, setPage, fmt, search, setSearch } = props;
+  const { page, isManager, openValue, openCount, openWOs, workOrders, p1Count, p1Unassigned, slaAtRisk, slaBreached, capitalCount, nav, doAutoAssign, filteredWOs, activeStatuses, closingStatuses, invoices, USERS, getUser, slaLabel, setSelectedWO, setAiNote, setPage, fmt, search, setSearch } = props;
   const p1SavedHours = useMemo(
     () => (workOrders.reduce((s, w) => s + (w.activities?.length || 0), 0) * 2.3 / 60).toFixed(1),
     [workOrders]
@@ -40,7 +40,7 @@ export default function Dashboard(props: any) {
               )}
 
               {/* Hero + stats */}
-              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
+              <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 16, marginBottom: 36 }}>
                 <div className="card card-hover stat-hero" style={{ background: `linear-gradient(135deg, ${T.accentSoft} 0%, ${T.warnSoft} 100%)`, padding: "28px 32px", animation: "fadeUp 0.4s both", cursor: "pointer", position: "relative", overflow: "hidden", border: `1px solid ${T.accentRing}` }} onClick={() => nav("work_orders")}>
                   <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: `radial-gradient(circle, ${T.accent}15, transparent 70%)` }} />
                   <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 14 }}>Revenue at risk</div>
@@ -61,8 +61,6 @@ export default function Dashboard(props: any) {
                   { label: "P1 Critical", value: p1Count, color: T.danger, sub: `${p1Unassigned} unassigned`, bg: T.dangerSoft, onClick: () => nav("work_orders") },
                   { label: "SLA at risk", value: slaAtRisk, color: T.warn, sub: "Needs status update", bg: T.warnSoft, onClick: () => nav("work_orders") },
                   { label: "Capital", value: capitalCount, color: T.violet, sub: "Pending equipment", bg: T.violetSoft, onClick: () => nav("capital") },
-                  { label: "Awaiting Payment", value: awaitingPayment, color: "#0E7C7B", sub: "Approved · unpaid", bg: "#E0F2F1", onClick: () => nav("work_orders") },
-                  { label: "NTE Approval Needed", value: nteFlaggedCount, color: T.warn, sub: "Invoice ≥ flag threshold", bg: T.warnSoft, onClick: () => { nav("work_orders"); setNteQueue(true); } },
                 ].map((s, i) => (
                   <div key={i} className="card card-hover" style={{ background: s.bg, padding: "22px 24px", animation: `fadeUp 0.4s ${(i + 1) * 0.06}s both`, cursor: "pointer" }} onClick={s.onClick}>
                     <div style={{ fontSize: 11, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 12 }}>{s.label}</div>

@@ -11,15 +11,7 @@ import { getSlaAgingStyle, getWorkOrderDateMeta, sortWorkOrders } from "../../li
 import { useMemo } from "react";
 
 export default function KanbanBoard(props: any) {
-  const { filteredWOs, activeStatuses, closingStatuses, invoices, USERS, workOrders, getUser, slaLabel, setSelectedWO, setAiNote, setPage, isManager } = props;
-  const spendByWo = useMemo(() => {
-    const totals: Record<string, number> = {};
-    for (const i of invoices) {
-      if (i.state === "draft") continue;
-      totals[i.wot] = (totals[i.wot] || 0) + (i.total || 0);
-    }
-    return totals;
-  }, [invoices]);
+  const { filteredWOs, activeStatuses, closingStatuses, getUser, slaLabel, setSelectedWO, setAiNote, setPage, isManager } = props;
   const cardsByStatus = useMemo(() => {
     const grouped: Record<string, any[]> = {};
     for (const w of filteredWOs) {
@@ -37,12 +29,6 @@ export default function KanbanBoard(props: any) {
     const sla = slaLabel(wo);
     const dates = getWorkOrderDateMeta(wo);
     const aging = getSlaAgingStyle(wo);
-    // NTE pill — quick-glance budget signal. Sums every non-draft invoice for
-    // the WO so multi-invoice work orders surface overage early.
-    const cardSpend = spendByWo[wo.id] || 0;
-    const cardNte = wo.nte || 0;
-    const cardOver = cardNte > 0 && cardSpend > cardNte;
-    const nteShort = cardNte >= 1000 ? `$${(cardNte / 1000).toFixed(cardNte % 1000 === 0 ? 0 : 1)}K` : `$${cardNte}`;
     return (
       <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer", borderColor: aging.ring || st?.ring || T.borderSoft }}>
         <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: st?.color || pr?.color || T.subtle }} />
@@ -67,13 +53,6 @@ export default function KanbanBoard(props: any) {
           </div>
         </div>
         {wo.technicianOnJob && <div style={{ fontSize: 10, color: T.subtle, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><Ico d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" size={10} color={T.subtle} />{wo.technicianOnJob}</div>}
-        {cardNte > 0 && (
-          <div style={{ marginTop: 6 }}>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.4, padding: "2px 7px", borderRadius: 10, background: cardOver ? T.danger : T.borderSoft, color: cardOver ? "#fff" : T.muted, border: cardOver ? "none" : `1px solid ${T.border}` }}>
-              {cardOver ? "OVER NTE" : `NTE ${nteShort}`}
-            </span>
-          </div>
-        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, gap: 6 }}>
           <span style={{ fontWeight: 600, color: wo.contractor ? T.inkSoft : T.subtle }}>{wo.contractor ? getUser(wo.contractor)?.name.split(" ")[0] : "Unassigned"}</span>
           {(wo.responseBreachAt || wo.resolutionBreachAt)

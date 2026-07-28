@@ -64,6 +64,7 @@ const USERS: Seed[] = [
   { email: "buriakmw@gmail.com", name: "Mykola Buriak", initials: "MB", role: "contractor", phone: "941-412-5494", company: "Talneglobaltrans LLC", territory: "Tampa, FL", trades: ["slurpee", "beverage"], color: "#5B4B8A" },
   { email: "plumbingdayornight@gmail.com", name: "Anytime Plumbing", initials: "AP", role: "contractor", phone: "813-792-2264", company: "Anytime Plumbing of Central Florida, Inc", territory: "Tampa, FL", trades: ["plumbing"], color: "#C15F3C" },
   { email: "matt@beardsrefrigeration.com", name: "Matt Beard", initials: "MB", role: "contractor", company: "Beards Refrigeration, LLC", territory: "Dallas, TX", trades: ["slurpee"], color: "#DC2626" },
+  { email: "AMGservice01@outlook.com", name: "Anderson Mechanical", initials: "AM", role: "contractor", company: "Anderson Mechanical", territory: "Dallas, TX", trades: ["ems"], color: "#0F766E" },
   // Roster completion from Jeremy's rate table — display name = company
   // (no known contact person). No quick-access buttons; no tech seed.
   { email: "craigfassroofing@p1pros.com", name: "Craig Fass Roofing, LLC", initials: "CF", role: "contractor", company: "Craig Fass Roofing, LLC", trades: ["roofing"], color: "#B45309" },

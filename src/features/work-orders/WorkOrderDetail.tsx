@@ -16,7 +16,11 @@ import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
-import { getSlaAgingStyle, getWorkOrderDateMeta } from "../../lib/workOrderView";
+import {
+  getSlaAgingStyle,
+  getWorkOrderDateMeta,
+  getWorkOrderProgressSteps,
+} from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
 
 const WorkReportForm = dynamic(
@@ -25,6 +29,10 @@ const WorkReportForm = dynamic(
 );
 const CapitalFlagModal = dynamic(
   () => import("./CapitalFlagModal"),
+  { ssr: false }
+);
+const QuoteCalculator = dynamic(
+  () => import("./QuoteCalculator"),
   { ssr: false }
 );
 
@@ -46,13 +54,18 @@ const formatEta = (v: any, workOrder?: any): string => {
   });
 };
 
+const isStaffBillingActivity = (activity: any) => {
+  const text = String(activity?.text || "");
+  return activity?.isStaffOnly
+    || activity?.eventKey === "staff_billing"
+    || /^P1 invoice #[^ ]+ (?:created|updated|draft updated)/i.test(text)
+    || text === "7-Eleven portal updated. Moved to pending invoice.";
+};
+
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doEditNte, doEditNteFlag, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
-  // The single-invoice "Approve (on behalf of AFM)" button on the WO actions
-  // row is gone — multi-invoice approvals happen per-row in the invoice
-  // group below. Keep a noop fallback for any callsite that still expects
-  // the prop.
+  // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [deletingInvId, setDeletingInvId] = useState<string | null>(null);
@@ -78,6 +91,12 @@ export default function WorkOrderDetail(props: any) {
   const storeHistory = useMemo(
     () => woData ? workOrders.filter(w => w.store === woData.store && w.id !== woData.id) : [],
     [workOrders, woData]
+  );
+  const visibleActivities = useMemo(
+    () => (woData?.activities || []).filter(
+      (activity: any) => isManager || !isStaffBillingActivity(activity),
+    ),
+    [isManager, woData?.activities],
   );
   const sameCategory = useMemo(
     () => woData ? storeHistory.filter(w => w.category === woData.category).length : 0,
@@ -131,11 +150,6 @@ export default function WorkOrderDetail(props: any) {
     () => woData ? invoices.filter(i => i.wot === woData.id) : [],
     [invoices, woData]
   );
-  const currentSpend = useMemo(
-    // NTE spend excludes rejected too — a rejected invoice isn't a real charge.
-    () => woInvoices.filter(i => i.state !== "rejected").reduce((s, i) => s + (i.total || 0), 0),
-    [woInvoices]
-  );
   const canInvoice = isManager
     ? false
     : currentUser?.contractorTier === "direct" || currentUser?.contractorTier === null;
@@ -159,12 +173,6 @@ export default function WorkOrderDetail(props: any) {
           {/* ═════ WO DETAIL ═════ */}
           {(page === "work_orders" || page === "wo_detail" || page === "history") && selectedWO && woData && (() => {
             const repeatCount = storeHistory.length;
-            // Current spend = sum of every non-draft invoice on the work order
-            // (matches what the AFM sees when reviewing).
-            const nte = woData.nte || 0;
-            const nteBreach = currentSpend > nte && currentSpend > 0 && nte > 0;
-            const nteHeadroom = nte - currentSpend;
-            const ntePercent = nte > 0 ? (currentSpend / nte) * 100 : 0;
             const sla = slaLabel(woData);
             const slaR = slaRemaining(woData);
             const sla2 = computeSlaState(woData.responseBreachAt, woData.resolutionBreachAt, woData.startTimeRaw);
@@ -245,28 +253,6 @@ export default function WorkOrderDetail(props: any) {
                     </div>
                   </div>
                 )}
-                {/* Contractors never see over/under-NTE banners (Lindsay
-                    2026-06-16) — they see a masked $1,000 NTE and a neutral
-                    total only, no red/green flags. Staff continue to see both. */}
-                {isManager && nteBreach && (
-                  <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ fontSize: 20 }}>⚠️</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 12 }}>Spend exceeds NTE by {fmt(currentSpend - nte)}</div>
-                      <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Invoiced {fmt(currentSpend)} vs authorized {fmt(nte)} — requires AFM approval / justification.</div>
-                    </div>
-                  </div>
-                )}
-                {isManager && !nteBreach && currentSpend > 0 && (
-                  <div className="card" style={{ background: T.successSoft, border: `1px solid ${T.success}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ fontSize: 18 }}>✓</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: T.success, fontSize: 12 }}>Within budget — {fmt(nteHeadroom)} under NTE</div>
-                      <div style={{ fontSize: 11, color: "#2F5B3C", marginTop: 2 }}>Invoiced {fmt(currentSpend)} of {fmt(nte)} authorized.</div>
-                    </div>
-                  </div>
-                )}
-
                 <div className="detail-two-col" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
                   <div>
                     {/* Header card */}
@@ -316,7 +302,6 @@ export default function WorkOrderDetail(props: any) {
                       <div className="detail-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 18 }}>
                         {[
                           { l: "Line of Service", v: woData.lineOfService || "Not set" },
-                          { l: "NTE", v: fmt(woData.nte) },
                           { l: "ETA", v: formatEta(woData.eta, woData) || "Not set" },
                           { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
                           { l: "Start time", v: woData.startTime || "Not started" },
@@ -333,57 +318,6 @@ export default function WorkOrderDetail(props: any) {
                         ))}
                       </div>
                     </div>
-
-                    {/* NTE summary — visible on every WO. Edit in-place. No hard stop on overage.
-                        Contractors see a neutral card (no over-budget colors/badges):
-                        masked NTE value, neutral running total, neutral progress bar
-                        clamped to 100% with no red overflow. Staff continue to see
-                        red/green styling driven by nteBreach against the real NTE. */}
-                    {(() => {
-                      const showBreach = isManager && nteBreach;
-                      return (
-                    <div className="card" style={{ padding: 18, marginBottom: 16, background: showBreach ? T.dangerSoft : T.surface, border: showBreach ? `1px solid ${T.danger}33` : `1px solid ${T.borderSoft}` }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>NTE</div>
-                          <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: T.ink }}>{nte > 0 ? fmt(nte) : "Not set"}</div>
-                          {showBreach && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: T.danger, padding: "2px 8px", borderRadius: 10, letterSpacing: 0.4 }}>EXCEEDS NTE</span>}
-                        </div>
-                        {isManager && (
-                          <button onClick={() => setModal("editNte")} className="btn-soft" style={{ padding: "6px 12px", fontSize: 11 }}>{nte > 0 ? "Edit" : "Add NTE"}</button>
-                        )}
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: T.muted, marginBottom: 8 }}>
-                        <span>Current spend: <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{fmt(currentSpend)}</span></span>
-                        {isManager && <span style={{ color: showBreach ? T.danger : T.muted, fontWeight: showBreach ? 700 : 500 }}>{nte > 0 ? `${Math.round(ntePercent)}% of NTE` : "No NTE set"}</span>}
-                      </div>
-                      {/* Progress bar — staff see red/warn/success + red overflow when
-                          over NTE. Contractors see a neutral single fill clamped at
-                          100% with no overflow segment. */}
-                      <div style={{ height: 8, borderRadius: 4, background: T.borderSoft, overflow: "hidden", display: "flex" }}>
-                        <div style={{ width: `${Math.min(100, ntePercent)}%`, height: "100%", background: isManager ? (ntePercent > 90 ? T.danger : ntePercent > 75 ? T.warn : T.success) : T.accent, transition: "width 300ms ease" }} />
-                        {isManager && ntePercent > 100 && (
-                          <div style={{ width: `${Math.min(100, ntePercent - 100)}%`, height: "100%", background: T.danger, opacity: 0.55 }} />
-                        )}
-                      </div>
-                      {woInvoices.length > 0 && (
-                        <div style={{ fontSize: 10, color: T.subtle, marginTop: 8 }}>
-                          {woInvoices.length} invoice{woInvoices.length !== 1 ? "s" : ""} on file
-                        </div>
-                      )}
-                      {/* NTE early-warning flag threshold ($900 default, editable by
-                          staff). Separate from the actual NTE above. */}
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle }}>NTE flag at</span>
-                          <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt(woData.nteFlagThreshold != null ? woData.nteFlagThreshold : 900)}</span>
-                          {woData.nteFlagged && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: T.warn, padding: "2px 8px", borderRadius: 10, letterSpacing: 0.3 }}>NTE APPROVAL NEEDED{woData.nteFlagAmount != null ? ` · ${fmt(woData.nteFlagAmount)}` : ""}</span>}
-                        </div>
-                        {isManager && <button onClick={() => setModal("editNteFlag")} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit flag</button>}
-                      </div>
-                    </div>
-                      );
-                    })()}
 
                     {/* Actions */}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
@@ -422,7 +356,7 @@ export default function WorkOrderDetail(props: any) {
                           paused (parts) state below. */}
                       {(
                         (!isManager && jobOpen && !["assigned", "parts", "completed"].includes(woData.status))
-                        || (isManager && ["wip", "pending_invoice", "pending_approval", "pending_payment"].includes(woData.status))
+                        || (isManager && ["wip", "pending_invoice", "pending_approval"].includes(woData.status))
                       ) && (
                         <>
                           <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
@@ -456,15 +390,8 @@ export default function WorkOrderDetail(props: any) {
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
                       {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
-                      {woData.status === "pending_payment" && isManager && (
-                        <button onClick={() => setModal("markPaid")} disabled={isLoading("markPaid_" + woData.id)} className="btn-primary" style={loadingStyle("markPaid_" + woData.id)}>
-                          {isLoading("markPaid_" + woData.id) ? <><BtnSpinner />Processing...</> : "Mark paid and close"}
-                        </button>
-                      )}
                       {/* Manual close — staff judgement decides when the job is done.
-                          Paying invoices no longer auto-closes the WO (capital jobs
-                          run for weeks while invoices land). Closing stamps closed_at,
-                          clears the NTE flag, and starts the 24h linger to History. */}
+                          QuickBooks handoff does not auto-close capital jobs. */}
                       {isManager && woData.status !== "closed" && (
                         <button onClick={() => setModal("closeWO")} disabled={isLoading("closeWO_" + woData.id)} className="btn-primary" style={loadingStyle("closeWO_" + woData.id)}>
                           {isLoading("closeWO_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close work order"}
@@ -501,7 +428,7 @@ export default function WorkOrderDetail(props: any) {
                           .sort((a: any, b: any) => (a.invoiceDate || "").localeCompare(b.invoiceDate || ""))
                           .map((inv: any, idx: number) => {
                             const isMyDraft = inv.state === "draft" && (inv.contractor === currentUser?.id || isManager);
-                            const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Paid" } as any)[inv.state] || inv.state;
+                            const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Sent to QuickBooks" } as any)[inv.state] || inv.state;
                             const stateColor = (
                               inv.state === "paid" ? T.success :
                               inv.state === "approved" ? T.accent :
@@ -555,7 +482,7 @@ export default function WorkOrderDetail(props: any) {
                                       disabled={rowBusy || isLoading("markPaid_" + inv.id)}
                                       className="btn-primary wo-invoice-action"
                                       style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
-                                    >{rowBusy || isLoading("markPaid_" + inv.id) ? <><BtnSpinner />…</> : "Mark paid"}</button>
+                                    >{rowBusy || isLoading("markPaid_" + inv.id) ? <><BtnSpinner />…</> : "Sent to QuickBooks"}</button>
                                   )}
                                   {isManager && (
                                     <button onClick={() => setDeletingInvId(inv.id)} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
@@ -585,7 +512,7 @@ export default function WorkOrderDetail(props: any) {
                                           </>
                                         )}
                                         {isManager && inv.state === "approved" && (
-                                          <button onClick={() => { setInvoiceMenuId(null); setMarkingPaidInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Mark paid</button>
+                                          <button onClick={() => { setInvoiceMenuId(null); setMarkingPaidInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Sent to QuickBooks</button>
                                         )}
                                         {isManager && (
                                           <button onClick={() => { setInvoiceMenuId(null); setDeletingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Delete</button>
@@ -628,9 +555,9 @@ export default function WorkOrderDetail(props: any) {
                       if (!inv) return null;
                       const isBusy = busyInvId === inv.id || isLoading("markPaid_" + inv.id);
                       return (
-                        <Modal onClose={() => { if (!isBusy) setMarkingPaidInvId(null); }} title="Mark invoice paid" width={420}>
+                        <Modal onClose={() => { if (!isBusy) setMarkingPaidInvId(null); }} title="Send invoice to QuickBooks" width={420}>
                           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                            Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as paid?
+                            Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as sent to QuickBooks?
                           </div>
                           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                             <button onClick={() => setMarkingPaidInvId(null)} disabled={isBusy} className="btn-soft">Cancel</button>
@@ -647,7 +574,7 @@ export default function WorkOrderDetail(props: any) {
                               disabled={isBusy}
                               className="btn-primary"
                               style={{ padding: "10px 18px", opacity: isBusy ? 0.7 : 1, cursor: isBusy ? "default" : "pointer" }}
-                            >{isBusy ? <><BtnSpinner />Marking...</> : "Mark paid"}</button>
+                            >{isBusy ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
                           </div>
                         </Modal>
                       );
@@ -746,9 +673,9 @@ export default function WorkOrderDetail(props: any) {
                     {/* Completion Record — the self-contained closure file. Shown
                         on completed/closed jobs; identical from the board and History
                         (same detail component). */}
-                    {(["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status) || woData.assetModel || woData.resolutionCode) && (() => {
-                      const closeAct = (woData.activities || []).find((a: any) => /marked paid by /i.test(a.text || ""));
-                      const closedBy = closeAct ? (closeAct.text.match(/marked paid by ([^.]+)/i)?.[1]?.trim() || null) : null;
+                    {(["completed", "pending_invoice", "pending_approval", "closed"].includes(woData.status) || woData.assetModel || woData.resolutionCode) && (() => {
+                      const closeAct = visibleActivities.find((a: any) => /(?:sent to QuickBooks|marked paid) by /i.test(a.text || ""));
+                      const closedBy = closeAct ? (closeAct.text.match(/(?:sent to QuickBooks|marked paid) by ([^.]+)/i)?.[1]?.trim() || null) : null;
                       const rec = [
                         { l: "Equipment make", v: woData.assetMake || "—" },
                         { l: "Asset model", v: woData.assetModel || "—" },
@@ -790,7 +717,7 @@ export default function WorkOrderDetail(props: any) {
                     {/* Activity */}
                     <div className="card" style={{ padding: 22 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activities?.length || 0}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {visibleActivities.length}</div>
                         {isManager && (
                           <div className="desktop-only-activity-action" style={{ alignItems: "center", gap: 8 }}>
                             <button type="button" className="btn-soft" onClick={copyWorkOrderNumber} style={{ padding: "7px 12px", fontSize: 11 }}>
@@ -854,7 +781,7 @@ export default function WorkOrderDetail(props: any) {
                           )}
                         </div>
                       )}
-                      {(woData.activities || []).map((e: any, i: number) => {
+                      {visibleActivities.map((e: any, i: number) => {
                         const canDelete = !!e.id && e.type !== "system" && !!e.authorId && (isManager || e.authorId === currentUser.id);
                         const menuOpen = activityMenuId === e.id;
                         const staffEntered = ["manager", "dispatcher", "back_office"].includes(e.enteredByRole);
@@ -1014,36 +941,7 @@ export default function WorkOrderDetail(props: any) {
                     )}
                     <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Progress</div>
-                      {/* Job-progress only. Invoicing is multi-step and ongoing — the
-                          invoice panel below shows each invoice's state, so it isn't
-                          repeated here. Each step keys off the actual WO data field
-                          that proves the milestone happened, AND is gated by every
-                          prior step also being done so steps can't light up out of
-                          order (the bug you saw: Completed green while Asset
-                          captured was empty). */}
-                      {(() => {
-                        const reachedCompleted = ["completed", "pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status);
-                        const trackedSyncUpdates = (woData.activities || []).filter((activity: any) => activity.requiresSevenElevenSync);
-                        const reachedPortalUpdated = trackedSyncUpdates.length > 0
-                          ? trackedSyncUpdates.every((activity: any) => !!activity.syncedToSevenElevenAt)
-                          : ["pending_invoice", "pending_approval", "pending_payment", "closed"].includes(woData.status);
-                        const assetCaptured = !!(woData.assetMake && woData.assetModel && woData.assetSerial);
-                        const rawSteps = [
-                          { label: "Created", cond: true },
-                          { label: "Dispatched + ETA", cond: !!woData.dispatchedAt && !!woData.eta },
-                          { label: "Work started", cond: !!woData.startTime },
-                          { label: "Asset captured", cond: assetCaptured },
-                          { label: "Completed", cond: reachedCompleted && assetCaptured },
-                          { label: "7-Eleven updated", cond: reachedPortalUpdated },
-                          { label: "Closed", cond: !!woData.closedAt },
-                        ];
-                        let prevDone = true;
-                        return rawSteps.map((s) => {
-                          const done = !!s.cond && prevDone;
-                          if (!done) prevDone = false;
-                          return { label: s.label, done };
-                        });
-                      })().map((s, i, a) => (
+                      {getWorkOrderProgressSteps(woData, visibleActivities).map((s, i, a) => (
                         <div key={i} style={{ display: "flex", gap: 12, position: "relative" }}>
                           {i < a.length - 1 && <div style={{ position: "absolute", left: 9, top: 20, width: 2, height: 20, background: s.done && a[i + 1]?.done ? T.success : T.borderSoft }} />}
                           <div style={{ width: 20, height: 20, borderRadius: "50%", border: s.done ? "none" : `2px solid ${T.border}`, background: s.done ? T.success : T.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1060,6 +958,16 @@ export default function WorkOrderDetail(props: any) {
                         status / tracking / return date inline. Legacy yellow
                         card is the fallback when there are no rows yet (old
                         WOs that only have part_needed/part_eta scalars). */}
+                    {isManager && onConvertQuote && (
+                      <QuoteCalculator
+                        workOrder={woData}
+                        contractorInvoices={invoices}
+                        billingInvoices={billingInvoices}
+                        fmt={fmt}
+                        fire={fire}
+                        onConvert={onConvertQuote}
+                      />
+                    )}
                     {myParts.length > 0 ? (
                       <PartsPanel
                         woId={woData.id}

@@ -7,7 +7,7 @@ import { T, PRIORITY } from "../../lib/constants";
 import { useMemo } from "react";
 
 export default function CapitalProjects(props: any) {
-  const { page, isManager, capitalCount, workOrders, setSelectedWO, setPage, setAiNote, getUser, fmt } = props;
+  const { page, isManager, capitalCount, workOrders, setSelectedWO, setPage, setAiNote, getUser } = props;
   const capitalWOs = useMemo(
     () => workOrders.filter(w => w.status === "capital"),
     [workOrders]
@@ -33,14 +33,10 @@ export default function CapitalProjects(props: any) {
                     </div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
                     <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>{wo.summary || "—"}</div>
-                    <div className="mobile-card-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>
+                    <div style={{ paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>
                       <div>
                         <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>Equipment</div>
                         <div style={{ fontSize: 12, fontWeight: 500 }}>{wo.partNeeded || "TBD"}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 3 }}>NTE</div>
-                        <div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{fmt(wo.nte)}</div>
                       </div>
                     </div>
                     <div style={{ fontSize: 11, color: T.subtle, marginTop: 10 }}>Contractor: {getUser(wo.contractor)?.name}</div>
