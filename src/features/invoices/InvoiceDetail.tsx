@@ -65,7 +65,7 @@ export default function InvoiceDetail(props: any) {
                           className="btn-primary"
                           style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["approveInvoice_" + inv.id] || approving ? 0.7 : 1, cursor: loadingStates["approveInvoice_" + inv.id] || approving ? "default" : "pointer" }}
                         >
-                          {loadingStates["approveInvoice_" + inv.id] || approving ? <><BtnSpinner />Approving...</> : "Approve (on behalf of AFM)"}
+                          {loadingStates["approveInvoice_" + inv.id] || approving ? <><BtnSpinner />Approving...</> : "Approve"}
                         </button>
                         <button onClick={() => setRejecting(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
                       </>
@@ -76,7 +76,7 @@ export default function InvoiceDetail(props: any) {
                         disabled={loadingStates["markPaid_" + inv.id] || markingPaid}
                         className="btn-primary"
                         style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["markPaid_" + inv.id] || markingPaid ? 0.7 : 1, cursor: loadingStates["markPaid_" + inv.id] || markingPaid ? "default" : "pointer" }}
-                      >{loadingStates["markPaid_" + inv.id] || markingPaid ? <><BtnSpinner />Marking...</> : "Mark paid"}</button>
+                      >{loadingStates["markPaid_" + inv.id] || markingPaid ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
                     )}
                     {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
                     {isManager && (
@@ -87,7 +87,7 @@ export default function InvoiceDetail(props: any) {
                 {confirmApprove && (
                   <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} title={`Approve invoice #${inv.num}`} width={440}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                      Approve this invoice on behalf of the AFM? This updates only invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>. The work order advances only when all live invoices are approved or paid.
+                      Approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This updates only this invoice. The work order advances only when all live invoices are approved or sent to QuickBooks.
                     </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                       <button onClick={() => setConfirmApprove(false)} disabled={approving} className="btn-soft">Cancel</button>
@@ -109,9 +109,9 @@ export default function InvoiceDetail(props: any) {
                   </Modal>
                 )}
                 {confirmMarkPaid && (
-                  <Modal onClose={() => { if (!markingPaid) setConfirmMarkPaid(false); }} title={`Mark invoice #${inv.num} paid`} width={440}>
+                  <Modal onClose={() => { if (!markingPaid) setConfirmMarkPaid(false); }} title={`Send invoice #${inv.num} to QuickBooks`} width={440}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                      Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as paid? This records payment for this invoice only.
+                      Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as sent to QuickBooks? This records the handoff for this invoice only.
                     </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                       <button onClick={() => setConfirmMarkPaid(false)} disabled={markingPaid} className="btn-soft">Cancel</button>
@@ -128,7 +128,7 @@ export default function InvoiceDetail(props: any) {
                         disabled={markingPaid || loadingStates["markPaid_" + inv.id]}
                         className="btn-primary"
                         style={{ padding: "10px 18px", opacity: markingPaid || loadingStates["markPaid_" + inv.id] ? 0.7 : 1, cursor: markingPaid || loadingStates["markPaid_" + inv.id] ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
-                      >{markingPaid || loadingStates["markPaid_" + inv.id] ? <><BtnSpinner />Marking...</> : "Mark paid"}</button>
+                      >{markingPaid || loadingStates["markPaid_" + inv.id] ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
                     </div>
                   </Modal>
                 )}
@@ -343,11 +343,6 @@ export default function InvoiceDetail(props: any) {
                         <span style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Total</span>
                         <span className="display" style={{ fontSize: 26, color: T.ink, letterSpacing: -0.5 }}>{fmt(Math.round(inv.total * 100) / 100)}</span>
                       </div>
-                      {wo && isManager && (
-                        <div style={{ fontSize: 11, color: inv.total > wo.nte ? T.danger : T.success, textAlign: "right", marginTop: 4 }}>
-                          {inv.total > wo.nte ? `Exceeds NTE by ${fmt(inv.total - wo.nte)}` : `${fmt(wo.nte - inv.total)} under NTE`}
-                        </div>
-                      )}
                     </div>
                   </div>
 

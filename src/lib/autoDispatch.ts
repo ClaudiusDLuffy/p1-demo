@@ -10,19 +10,25 @@ type DispatchRule = {
 
 const DISPATCH_RULES: DispatchRule[] = [
   {
-    territory: ["Dallas", "DFW", "Texas", "TX"],
+    territory: ["Dallas", "DFW"],
     trades: ["hvac", "refrigeration"],
     contractorEmail: "scrcdallastexas@gmail.com",
     contractorName: "Derek Starnes",
   },
   {
-    territory: ["Dallas", "DFW", "Texas", "TX"],
+    territory: ["Dallas", "DFW"],
     trades: ["slurpee", "beverage"],
     contractorEmail: "matt@beardsrefrigeration.com",
     contractorName: "Matt Beard",
   },
   {
-    territory: ["Houston", "Texas", "TX"],
+    territory: ["Dallas", "DFW"],
+    trades: ["ems"],
+    contractorEmail: "AMGservice01@outlook.com",
+    contractorName: "Anderson Mechanical",
+  },
+  {
+    territory: ["Houston"],
     trades: ["hvac", "refrigeration", "ice"],
     contractorEmail: "service@archerref.com",
     contractorName: "Archer Refrigeration",
@@ -54,6 +60,7 @@ export const detectDispatchTrade = (parsed: ParsedWorkOrder): string | null => {
   const category = normalize(parsed.category);
 
   if (lineOfService.includes("frozen beverage") || businessService.includes("slurpee")) return "slurpee";
+  if (lineOfService.includes("ems") || businessService.includes("ems")) return "ems";
   if (lineOfService.includes("hvac") || category.includes("hvac") || businessService.includes("hvac")) return "hvac";
   if (lineOfService.includes("refrigeration") || businessService.includes("refrigeration")) return "refrigeration";
   if (lineOfService.includes("ice") || category.includes("ice")) return "ice";
@@ -71,7 +78,25 @@ export const detectDispatchTerritory = (parsed: ParsedWorkOrder): string[] => {
   if (parsedState === "fl") return ["Florida", "FL"];
   if (parsedState === "va" || parsedCity === "virginia beach") return ["Virginia", "VA", "Virginia Beach"];
   if (["houston", "league city", "stafford"].includes(parsedCity)) return ["Houston"];
-  if (["fort worth", "dallas", "irving", "justin"].includes(parsedCity)) return ["Dallas", "DFW"];
+  if ([
+    "addison",
+    "arlington",
+    "carrollton",
+    "dallas",
+    "denton",
+    "fort worth",
+    "frisco",
+    "garland",
+    "grand prairie",
+    "irving",
+    "justin",
+    "mckinney",
+    "mesquite",
+    "plano",
+    "richardson",
+  ].includes(parsedCity)) {
+    return ["Dallas", "DFW"];
+  }
   if (parsedState === "tx") return ["Texas", "TX"];
   return [parsed.city, parsed.state].filter(Boolean) as string[];
 };
@@ -103,7 +128,7 @@ export async function resolveContractor(
     const { data, error } = await sb
       .from("profiles")
       .select("id,email,name")
-      .eq("email", rule.contractorEmail)
+      .ilike("email", rule.contractorEmail)
       .maybeSingle();
 
     if (error) {

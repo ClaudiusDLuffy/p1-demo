@@ -258,6 +258,16 @@ export function defaultLineTaxable(type: unknown, description: unknown): boolean
   return false;
 }
 
+export function taxRateFromPercent(value: unknown): number | null {
+  if (value == null || String(value).trim() === "") return null;
+
+  const percent = Number(value);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+    throw new Error("Tax rate must be between 0% and 100%");
+  }
+  return percent / 100;
+}
+
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
 function localClockParts(date: Date, timeZone: string) {

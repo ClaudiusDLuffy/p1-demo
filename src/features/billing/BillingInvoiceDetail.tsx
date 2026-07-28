@@ -6,7 +6,7 @@ import { Badge } from "../../components/ui/Badge";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { Ico } from "../../components/ui/Ico";
 import { Modal } from "../../components/ui/Modal";
-import { T, INV_STATE, P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
+import { T, STAFF_INV_STATE, P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -109,7 +109,7 @@ export default function BillingInvoiceDetail(props: any) {
               <span style={{ color: T.muted }}>Due date</span><span className="mono" style={{ color: T.ink }}>{invoice.dueDate || "-"}</span>
               <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{invoice.terms || "Net 30"}</span>
               <span style={{ color: T.muted }}>Work order</span><span className="mono" style={{ color: invoice.wot ? T.accent : T.subtle }}>{invoice.wot || "Standalone"}</span>
-              <span style={{ color: T.muted }}>Status</span><span><Badge conf={INV_STATE[invoice.state]} small /></span>
+              <span style={{ color: T.muted }}>Status</span><span><Badge conf={STAFF_INV_STATE[invoice.state]} small /></span>
               <span style={{ color: T.muted }}>Tax jurisdiction</span>
               <span className="mono" style={{ color: invoice.taxState ? T.ink : T.subtle }}>
                 {invoice.taxState || "-"}{invoice.taxRate != null ? ` (${(Number(invoice.taxRate) * 100).toFixed(3)}%)` : ""}

@@ -68,7 +68,7 @@ export default function useInvoices({ currentUser, fire }: any) {
   const computeWoStatusFromInvoices = (woId: string, all: any[]) => {
     const list = all.filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
     if (list.length === 0) return null;
-    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_payment";
+    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_invoice";
     return "pending_approval";
   };
 
@@ -101,14 +101,14 @@ export default function useInvoices({ currentUser, fire }: any) {
     }
     const validLines = requireFullLines
       ? (draft.lines || []).filter((l: any) =>
-          l.desc
+          (l.desc || /^(travel|truck charge)$/i.test(String(l.type || "")))
           && Number(l.qty) > 0
           && Number.isFinite(Number(l.rate))
           && Number(l.rate) >= 0,
         )
       : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
     if (!uploadOnly && requireFullLines && validLines.length === 0) {
-      fire("Add at least one line item with description, qty, and rate"); return null;
+      fire("Add at least one line item with qty and rate. Travel descriptions are optional."); return null;
     }
     const uploadedTotal = Number(draft.uploadedTotal || 0);
     if (uploadOnly && requireFullLines && (!Number.isFinite(uploadedTotal) || uploadedTotal <= 0)) {
@@ -126,8 +126,8 @@ export default function useInvoices({ currentUser, fire }: any) {
     return { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly };
   };
 
-  // Save (or re-save) an invoice as a DRAFT — does NOT advance the WO, skips
-  // PDF upload + NTE flag. Resuming a draft and saving again hits the same
+  // Save (or re-save) an invoice as a DRAFT — does not advance the WO or
+  // upload a generated PDF. Resuming a draft and saving again hits the same
   // path with `existingInvoiceId` set so we update in place.
   // Collision-aware toast. `result` is what the db layer returned, which
   // carries the resolved num and (if the user typed a colliding one) the
@@ -200,20 +200,6 @@ export default function useInvoices({ currentUser, fire }: any) {
     const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ true);
     if (!payload) return false;
     const { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly } = payload;
-    // NTE early-warning flag: if this invoice total reaches the WO's flag
-    // threshold (default $900), flag the WO so it lands in Mandy's "NTE
-    // Approval Needed" queue. Dollar-based, separate from the actual-NTE
-    // overage highlight. Only ever sets the flag on (never auto-clears).
-    //
-    // BELT + SUSPENDERS — the staff bucket must fire off the REAL DB value.
-    // Read nteFlagThreshold directly from the React-Query cache (unmasked)
-    // and fall back to the wo prop, so any future display mask on the
-    // contractor side can't accidentally swallow the staff flag write.
-    const cached = (qc.getQueryData(WORK_ORDERS_KEY) as any[] | undefined)?.find(w => w.id === wo.id);
-    const flagThreshold = (cached?.nteFlagThreshold ?? wo.nteFlagThreshold) != null
-      ? (cached?.nteFlagThreshold ?? wo.nteFlagThreshold)
-      : 900;
-    const shouldFlag = total >= flagThreshold;
     const userTypedNum = !!draft.num;
     try {
       let header: any;
@@ -241,10 +227,6 @@ export default function useInvoices({ currentUser, fire }: any) {
         );
         finalNum = header.num || finalNum;
         collidedFrom = header._collidedFrom || null;
-      }
-      if (shouldFlag) {
-        try { await updateWorkOrder(wo.id, { nteFlagged: true, nteFlagAmount: total }); }
-        catch (e: any) { fire(`NTE flag not saved: ${e.message || e}`); }
       }
       // Use the RESOLVED number for the PDF too — otherwise the stored bytes
       // would label the file with the colliding number the user originally
@@ -374,9 +356,8 @@ export default function useInvoices({ currentUser, fire }: any) {
   };
 
   // Staff-only reject with a reason. Same gating pattern as delete. Does
-  // NOT advance the WO — rejected invoices are simply excluded from the
-  // "is everything approved?" check, which means a WO with one rejected +
-  // one approved invoice will sit at pending_payment (per the billing rule).
+  // NOT advance the WO. Rejected invoices are excluded from the
+  // "is everything approved?" check.
   const doRejectInvoice = async (inv: any, reason: string) => {
     const trimmed = (reason || "").trim();
     if (!trimmed) { fire("Enter a rejection reason"); return false; }

@@ -7,6 +7,7 @@ type DispatchNotificationInput = {
     store?: string | null;
     storeNumber?: string | null;
     city?: string | null;
+    state?: string | null;
     addr?: string | null;
     address?: string | null;
     priority?: string | null;
@@ -30,6 +31,15 @@ const ownerEmails = () =>
     .split(",")
     .map(email => email.trim())
     .filter(Boolean);
+
+const isProOpsAssignment = (
+  contractorEmail?: string | null,
+  contractorName?: string | null,
+) =>
+  /pro[\s-]*ops/i.test(String(contractorName || ""))
+  || ["pro.ops.inc@gmail.com", "service@pro-opsinc.com"].includes(
+    String(contractorEmail || "").trim().toLowerCase(),
+  );
 
 const portalUrl = () =>
   process.env.PORTAL_URL || "https://www.p1prosportal.com";
@@ -84,7 +94,12 @@ export async function sendDispatchNotification(input: DispatchNotificationInput)
   }
 
   const { workOrder, contractorEmail, contractorName } = input;
-  const contractorRecipients = contractorEmail ? [contractorEmail] : [];
+  const contractorRecipients = [...new Set([
+    ...(contractorEmail ? [contractorEmail] : []),
+    ...(isProOpsAssignment(contractorEmail, contractorName)
+      ? ["service@pro-opsinc.com"]
+      : []),
+  ])];
   const internalRecipients = ownerEmails();
 
   if (contractorRecipients.length) {
@@ -97,11 +112,29 @@ export async function sendDispatchNotification(input: DispatchNotificationInput)
   }
 
   if (internalRecipients.length) {
+    const stateLabel = String(workOrder.state || "").trim().toUpperCase();
     await sendEmail(
       accessToken,
       internalRecipients,
-      `New VA Call Dispatched - ${workOrder.id}`,
+      `New ${stateLabel ? `${stateLabel} ` : ""}Call Dispatched - ${workOrder.id}`,
       buildOwnerBody(workOrder, contractorName),
     );
   }
+}
+
+export async function sendContractorPortalPing(contractorEmail: string) {
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    throw new Error("Missing Graph access token");
+  }
+
+  await sendEmail(
+    accessToken,
+    [contractorEmail],
+    "Notification waiting in the P1 Pros Portal",
+    `You have a notification waiting in the P1 Pros Portal.
+
+Log in to review it:
+${portalUrl()}`,
+  );
 }

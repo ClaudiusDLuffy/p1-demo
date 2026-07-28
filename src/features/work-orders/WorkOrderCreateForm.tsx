@@ -30,7 +30,7 @@ export default function WorkOrderCreateForm(props: any) {
     defaultValues: {
       wot: "", incidentId: "", store: "", city: "", addr: "",
       afm: "", afmEmail: "", lineOfService: "", businessService: "",
-      category: "", subCategory: "", priority: "", nte: "",
+      category: "", subCategory: "", priority: "",
       assign: "", summary: "", description: "",
     } as any,
   });
@@ -102,13 +102,10 @@ export default function WorkOrderCreateForm(props: any) {
             <Field label="Category"><Input {...register("category")} placeholder="" /></Field>
             <Field label="Sub Category"><Input {...register("subCategory")} placeholder="" /></Field>
           </div>
-          <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Priority"><Sel {...register("priority", { setValueAs: v => v === "" ? undefined : v })}>
-              <option value="">P4 Minor (default)</option>
-              {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
-            </Sel></Field>
-            <Field label="NTE ($)"><Input type="number" {...register("nte")} placeholder="" /></Field>
-          </div>
+          <Field label="Priority"><Sel {...register("priority", { setValueAs: v => v === "" ? undefined : v })}>
+            <option value="">P4 Minor (default)</option>
+            {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
+          </Sel></Field>
           <Field label="Assign to contractor"><Sel {...register("assign")}>
             <option value="">Leave unassigned</option>
             {contractorsOnly.map(u => <option key={u.id} value={u.id} data-sub={u.company || ""} data-search={`${u.name || ""} ${u.company || ""}`}>{u.name}</option>)}

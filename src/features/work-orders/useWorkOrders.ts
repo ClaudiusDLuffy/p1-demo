@@ -87,6 +87,7 @@ export default function useWorkOrders({
     staffOverride = false,
     eventKey?: string,
     requiresSevenElevenSync = false,
+    staffOnly = false,
   ) => ({
     author: type === "system" ? "System" : currentUser.name,
     time: dateNow(),
@@ -94,6 +95,7 @@ export default function useWorkOrders({
     type,
     enteredByRole: currentUser?.role || "system",
     isStaffOverride: staffOverride,
+    isStaffOnly: staffOnly,
     overrideForContractorId: null,
     eventKey: eventKey || (type === "system" ? "system" : "note"),
     eventData: {},
@@ -531,21 +533,28 @@ export default function useWorkOrders({
     try {
     const text = "7-Eleven portal updated. Moved to pending invoice.";
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: "pending_invoice" }, localActivity(text, "system"));
+    patchLocalWO(
+      woId,
+      { status: "pending_invoice" },
+      localActivity(text, "system", false, "staff_billing", false, true),
+    );
     fire("Moved to Pending Invoice");
     await dbCall(async () => {
       await updateWorkOrder(woId, { status: "pending_invoice" });
-      await insertActivity(woId, "System", text, "system");
+      await insertActivity(woId, "System", text, "system", {
+        eventKey: "staff_billing",
+        staffOnly: true,
+      });
     }, "Update failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("moveToInvoice_" + woId, false);
     }
   };
 
-  // Multi-invoice rule (billing team, revised 2026-06-15):
-  // - WO advances to pending_payment when every non-draft, non-rejected
-  //   invoice is approved or paid (drafts + rejected ignored).
-  // - Paying invoices NEVER closes the WO. Capital jobs run for weeks with
+  // Multi-invoice rule:
+  // - WO returns to pending_invoice when every non-draft, non-rejected
+  //   invoice is approved or sent to QuickBooks (drafts + rejected ignored).
+  // - QuickBooks handoff NEVER closes the WO. Capital jobs run for weeks with
   //   the contractor sending more invoices as work continues; a person
   //   decides when the job is actually done (manual "Close work order"
   //   button below). This helper therefore never returns "closed".
@@ -553,7 +562,7 @@ export default function useWorkOrders({
   const computeWoStatusFromInvoices = (woId: string, override?: any[]) => {
     const list = (override ?? invoices).filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
     if (list.length === 0) return null;
-    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_payment";
+    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_invoice";
     return "pending_approval";
   };
 
@@ -571,18 +580,18 @@ export default function useWorkOrders({
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
     const nextInvoices = invoices.map((i: any) => i.id === invoiceId ? { ...i, state: "approved" } : i);
     const nextWoStatus = computeWoStatusFromInvoices(inv.wot, nextInvoices);
-    const woText = nextWoStatus === "pending_payment"
-      ? `All invoices on this work order are approved — moved to Pending Payment.`
+    const woText = nextWoStatus === "pending_invoice"
+      ? `All contractor invoices are approved — ready for P1 billing.`
       : null;
     setInvoices(nextInvoices);
     const localUpdates: any = {};
     if (nextWoStatus) localUpdates.status = nextWoStatus;
-    patchLocalWO(inv.wot, localUpdates, localActivity(`Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system"));
+    patchLocalWO(inv.wot, localUpdates, localActivity(`Invoice #${inv.num} approved by ${currentUser.name}.`, "system"));
     if (woText) patchLocalWO(inv.wot, {}, localActivity(woText, "system"));
-    fire(nextWoStatus === "pending_payment" ? "All invoices approved — Pending Payment" : `Invoice #${inv.num} approved`);
+    fire(nextWoStatus === "pending_invoice" ? "All contractor invoices approved — Pending Invoice" : `Invoice #${inv.num} approved`);
     await dbCall(async () => {
       await updateInvoiceState(inv.id, "approved");
-      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved on behalf of AFM by ${currentUser.name}.`, "system");
+      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved by ${currentUser.name}.`, "system");
       if (nextWoStatus) {
         await updateWorkOrder(inv.wot, { status: nextWoStatus });
         if (woText) await insertActivity(inv.wot, "System", woText, "system");
@@ -596,7 +605,8 @@ export default function useWorkOrders({
     }
   };
 
-  // Per-invoice mark paid. Flips the one invoice to 'paid' and recomputes WO
+  // Per-invoice QuickBooks handoff. The internal 'paid' value is retained for
+  // database compatibility while the portal presents "Sent to QuickBooks".
   // status. The WO is NEVER auto-closed here — capital jobs receive
   // additional invoices for weeks after payments start landing, so closing
   // is an explicit staff decision via doCloseWO below.
@@ -613,15 +623,15 @@ export default function useWorkOrders({
     setInvoices(nextInvoices);
     const localPatch: any = {};
     if (nextWoStatus) localPatch.status = nextWoStatus;
-    patchLocalWO(inv.wot, localPatch, localActivity(`Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system"));
-    fire(`Invoice #${inv.num} marked paid`);
+    patchLocalWO(inv.wot, localPatch, localActivity(`Invoice #${inv.num} sent to QuickBooks by ${currentUser.name}.`, "system"));
+    fire(`Invoice #${inv.num} sent to QuickBooks`);
     await dbCall(async () => {
       await updateInvoiceState(inv.id, "paid", { paid_at: paidAt });
-      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} marked paid by ${currentUser.name}.`, "system");
+      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} sent to QuickBooks by ${currentUser.name}.`, "system");
       if (nextWoStatus) {
         await updateWorkOrder(inv.wot, { status: nextWoStatus });
       }
-    }, "Mark paid failed", () => {
+    }, "QuickBooks handoff failed", () => {
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
@@ -630,21 +640,19 @@ export default function useWorkOrders({
     }
   };
 
-  // Staff-only: explicit "this job is done" decision. Stamps closed_at,
-  // clears the NTE flag, drops the WO into the 24h linger / History
-  // bucket. Independent of invoice payment state — capital jobs can be
-  // closed with unpaid invoices and vice versa; staff judgement decides.
+  // Staff-only: explicit "this job is done" decision. Stamps closed_at and
+  // drops the WO into the 24h linger / History bucket.
   const doCloseWO = async (woId: string) => {
     setLoading("closeWO_" + woId, true);
     try {
     const closedAt = new Date().toISOString();
     const text = `Work order closed by ${currentUser.name}.`;
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: "closed", closedAt, nteFlagged: false }, localActivity(text, "system"));
+    patchLocalWO(woId, { status: "closed", closedAt }, localActivity(text, "system"));
     fire("Work order closed");
     await dbCall(async () => {
       await closeWorkOrderVisit(woId, closedAt);
-      await updateWorkOrder(woId, { status: "closed", closedAt, nteFlagged: false });
+      await updateWorkOrder(woId, { status: "closed", closedAt });
       await insertActivity(woId, currentUser.name, text, "system");
     }, "Close failed", () => restoreWorkOrders(woSnapshot));
     } finally {
@@ -657,12 +665,12 @@ export default function useWorkOrders({
   // staff decision (not "all invoices paid"), reopening does NOT touch
   // invoice states — a closed WO can have any mix (paid, approved,
   // submitted, none). We just clear closed_at and recompute WO status from
-  // whatever invoices currently exist; defaults to pending_payment when
-  // there are none, matching the pre-close convention.
+  // whatever invoices currently exist; defaults to pending_invoice when
+  // there are none.
   const doReopen = async (woId: string) => {
     setLoading("reopen_" + woId, true);
     try {
-    const nextWoStatus = computeWoStatusFromInvoices(woId, invoices) || "pending_payment";
+    const nextWoStatus = computeWoStatusFromInvoices(woId, invoices) || "pending_invoice";
     const text = `Work order reopened by ${currentUser.name}.`;
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { status: nextWoStatus, closedAt: null }, localActivity(text, "system"));
@@ -712,36 +720,6 @@ export default function useWorkOrders({
     } finally {
       setLoading("editWO_" + woId, false);
     }
-  };
-
-  // Manager-side NTE override. Soft cap — no hard stop, contractors can still
-  // submit invoices that exceed it (per Jeremy's May 1 directive).
-  const doEditNte = async (woId: string, newNte: number, prevNte: number) => {
-    const text = `NTE updated by ${currentUser.name}: ${fmt(prevNte)} → ${fmt(newNte)}.`;
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { nte: newNte }, localActivity(text, "system"));
-    fire(`NTE set to ${fmt(newNte)}`);
-    await dbCall(async () => {
-      await updateWorkOrder(woId, { nte: newNte });
-      await insertActivity(woId, currentUser.name, text, "system");
-    }, "NTE save failed", () => restoreWorkOrders(snapshot));
-  };
-
-  // Edit the per-WO NTE early-warning threshold (staff only). If the WO is
-  // already flagged and the new threshold is now above current spend, clear
-  // the flag so the review queue stays accurate.
-  const doEditNteFlag = async (woId: string, newThreshold: number, prevThreshold: number) => {
-    const wo = workOrders.find(w => w.id === woId);
-    const spend = invoices.reduce((s, i) => i.wot === woId && i.state !== "draft" ? s + (i.total || 0) : s, 0);
-    const stillFlagged = spend >= newThreshold;
-    const text = `NTE flag threshold updated by ${currentUser.name}: ${fmt(prevThreshold)} → ${fmt(newThreshold)}.`;
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { nteFlagThreshold: newThreshold, nteFlagged: stillFlagged, nteFlagAmount: stillFlagged ? (wo?.nteFlagAmount ?? spend) : null }, localActivity(text, "system"));
-    fire(`NTE flag set to ${fmt(newThreshold)}`);
-    await dbCall(async () => {
-      await updateWorkOrder(woId, { nteFlagThreshold: newThreshold, nteFlagged: stillFlagged, nteFlagAmount: stillFlagged ? (wo?.nteFlagAmount ?? spend) : null });
-      await insertActivity(woId, currentUser.name, text, "system");
-    }, "NTE flag save failed", () => restoreWorkOrders(snapshot));
   };
 
   const doCapitalFlag = async (
@@ -947,6 +925,27 @@ export default function useWorkOrders({
     }
   };
 
+  const notifyContractorAttention = async (workOrderId: string, activityId: string) => {
+    const sb = supabase();
+    const { data } = await sb.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new Error("Authentication session is unavailable");
+
+    const res = await fetch("/api/notifications/contractor-attention", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ workOrderId, activityId }),
+    });
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      throw new Error(payload.error || res.statusText || "Email request failed");
+    }
+  };
+
   const patchContractorAttention = (
     woId: string,
     activityId: string,
@@ -984,7 +983,16 @@ export default function useWorkOrders({
         contractorAcknowledgedBy: null,
       });
       invalidateWorkOrders();
-      fire(required ? "Contractor attention requested" : "Contractor attention cleared");
+      if (required) {
+        try {
+          await notifyContractorAttention(woId, activityId);
+          fire("Contractor attention requested and portal email sent");
+        } catch (emailError: any) {
+          fire(`Attention saved, but email failed: ${emailError.message || emailError}`);
+        }
+      } else {
+        fire("Contractor attention cleared");
+      }
     } catch (e: any) {
       fire(`Contractor attention update failed: ${e.message || e}`);
     } finally {
@@ -1023,7 +1031,7 @@ export default function useWorkOrders({
     doAssign, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
-    doEditWorkOrder, doEditNte, doEditNteFlag, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
     doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart,

@@ -1,5 +1,3 @@
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-
 export type InvoiceTotalExtraction = {
   total: number | null;
   confidence: "high" | "medium" | "none";
@@ -94,6 +92,23 @@ export function findInvoiceNumber(text: string): InvoiceNumberExtraction {
     }
   }
 
+  const invoiceHeader = /\binvoice\s*(?:number|no\.?|num\.?|#)(?=\s|:|$)/i;
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    if (!invoiceHeader.test(lines[index])) continue;
+
+    const invoiceNumber = lines[index + 1]
+      .split(/\s+/)
+      .map(normalizeInvoiceNumberCandidate)
+      .find((candidate): candidate is string => !!candidate);
+    if (invoiceNumber) {
+      return {
+        invoiceNumber,
+        invoiceNumberConfidence: "high",
+        matchedNumberLabel: "invoice header",
+      };
+    }
+  }
+
   const bare = /^\s*invoice\s*[:=-]?\s+([A-Z0-9][A-Z0-9._/-]{0,63})\b/i;
   for (const line of lines) {
     const match = line.match(bare);
@@ -103,6 +118,19 @@ export function findInvoiceNumber(text: string): InvoiceNumberExtraction {
         invoiceNumber,
         invoiceNumberConfidence: "medium",
         matchedNumberLabel: "invoice",
+      };
+    }
+  }
+
+  const jobNumber = /\bjob\s*(number|no\.?|#)\s*(?:[:#=-]\s*)?([A-Z0-9][A-Z0-9._/-]{0,63})\b/i;
+  for (const line of lines) {
+    const match = line.match(jobNumber);
+    const invoiceNumber = match ? normalizeInvoiceNumberCandidate(match[2]) : null;
+    if (invoiceNumber) {
+      return {
+        invoiceNumber,
+        invoiceNumberConfidence: "medium",
+        matchedNumberLabel: `job ${match![1].toLowerCase()}`,
       };
     }
   }
@@ -158,10 +186,12 @@ const buildRows = (items: PositionedText[]) => {
 
 const inferLineType = (description: string): InvoiceLineExtraction["type"] => {
   const value = description.toLowerCase();
+  if (/^(?:commercial\s+)?labou?r\b/.test(value)) return "Labor";
+  if (/^(?:misc\.?\s+)?materials?\b/.test(value)) return "Parts/Hardware";
   if (/\b(freight|shipping|delivery|postage|courier)\b/.test(value)) return "Shipping";
   if (/\b(truck|trip charge|vehicle charge|mileage|mobilization)\b/.test(value)) return "Truck Charge";
   if (
-    /\b(part|hardware|motor|compressor|condenser|evaporator|fan|gasket|filter|belt|bearing|valve|relay|contactor|thermostat|refrigerant|r-?410a|r-?22|wire|fuse)\b/.test(value)
+    /\b(part|material|hardware|electrical|motor|compressor|condenser|evaporator|fan|gasket|filter|belt|bearing|valve|relay|contactor|thermostat|refrigerant|r-?410a|r-?22|wire|fuse)\b/.test(value)
   ) {
     return "Parts/Hardware";
   }
@@ -189,7 +219,7 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
   const rows = buildRows(items);
   const headerIndex = rows.findIndex(row => {
     const text = rowText(row).toLowerCase();
-    const hasDescription = /\b(description|item|service|product)\b/.test(text);
+    const hasDescription = /\b(description|items?|services?|products?|materials?)\b/.test(text);
     const hasAmount = /\b(amount|extended|line total|total)\b/.test(text);
     const hasNumericColumn = /\b(qty|quantity|hours?|units?|rate|unit price|price|unit cost)\b/.test(text);
     return hasDescription && hasAmount && hasNumericColumn;
@@ -199,7 +229,7 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
   const header = rows[headerIndex];
   const descriptionHeader = findHeaderColumn(
     header,
-    /\b(description|item(?:\s*\/\s*service)?|service|product)\b/i,
+    /\b(description|items?(?:\s*\/\s*services?)?|services?|products?|materials?)\b/i,
   );
   const qtyHeader = findHeaderColumn(header, /\b(qty|quantity|hours?|units?)\b/i);
   const rateHeader = findHeaderColumn(header, /\b(rate|unit price|price|unit cost)\b/i);
@@ -234,6 +264,13 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
     ) {
       break;
     }
+    if (
+      /\b(description|items?|services?|products?|materials?)\b/.test(normalized)
+      && /\b(amount|extended|line total|total)\b/.test(normalized)
+      && /\b(qty|quantity|hours?|units?|rate|unit price|price|unit cost)\b/.test(normalized)
+    ) {
+      continue;
+    }
 
     const descriptionItems = row.items.filter(item => item.x < descriptionEnd);
     const qtyItems = qtyHeader
@@ -247,7 +284,12 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
     const description = joinCell(descriptionItems);
     const amount = parseMoney(joinCell(amountItems));
     if (amount == null || amount <= 0) {
-      if (description && extracted.length > 0 && !/\b(page|invoice|continued)\b/i.test(description)) {
+      if (
+        description
+        && extracted.length > 0
+        && row.y > 40
+        && !/\b(page|invoice|continued)\b|https?:\/\/|\b\d+\s+of\s+\d+\b/i.test(description)
+      ) {
         extracted[extracted.length - 1].desc = `${extracted[extracted.length - 1].desc} ${description}`.trim();
         extracted[extracted.length - 1].type = inferLineType(extracted[extracted.length - 1].desc);
       }
@@ -334,6 +376,13 @@ export function findInvoiceTotal(text: string): InvoiceTotalExtraction {
 }
 
 export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<InvoicePdfExtraction> {
+  const canvas = await import("@napi-rs/canvas");
+  Object.assign(globalThis, {
+    DOMMatrix: globalThis.DOMMatrix ?? canvas.DOMMatrix,
+    ImageData: globalThis.ImageData ?? canvas.ImageData,
+    Path2D: globalThis.Path2D ?? canvas.Path2D,
+  });
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loadingTask = getDocument({
     data,
     disableFontFace: true,

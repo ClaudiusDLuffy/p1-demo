@@ -15,7 +15,7 @@ export default function InvoiceList(props: any) {
     { id: "revised", l: "Revised", m: "Rev" },
     { id: "rejected", l: "Rejected", m: "Rej" },
     { id: "approved", l: "Approved", m: "Appr" },
-    { id: "paid", l: "Paid", m: "Paid" },
+    { id: "paid", l: "Sent to QuickBooks", m: "Sent to QB" },
   ];
   const visibleInvoices = useMemo(
     () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))

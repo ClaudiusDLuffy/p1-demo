@@ -1,7 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "../../../lib/supabase/server";
-import { normalizeStateCode } from "../../../lib/billingRules";
+import {
+  normalizeStateCode,
+  taxRateFromPercent,
+} from "../../../lib/billingRules";
 import type { Database } from "../../../lib/supabase/database.types";
 
 const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
@@ -176,7 +179,7 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
       };
     })
     .filter(line =>
-      line.description
+      (line.description || /^(travel|truck charge)$/i.test(line.type))
       && line.qty > 0
       && line.rate > 0
       && (line.sourceUnitCost == null || line.sourceUnitCost >= 0)
@@ -221,6 +224,15 @@ async function resolveTax(
       taxState: taxState || null,
       taxRate: null as number | null,
       salesTax: Math.round(manualTax * 100) / 100,
+    };
+  }
+
+  const manualTaxRate = taxRateFromPercent(body.taxRateOverride);
+  if (manualTaxRate != null) {
+    return {
+      taxState: taxState || null,
+      taxRate: manualTaxRate,
+      salesTax: Math.round(taxableSubtotal * manualTaxRate * 100) / 100,
     };
   }
 
@@ -533,6 +545,8 @@ export async function POST(req: NextRequest) {
           text: `P1 invoice #${mappedInvoice.num} created${sourceText}.`,
           type: "system",
           is_staff_override: false,
+          is_staff_only: true,
+          event_key: "staff_billing",
         });
       if (activityError) {
         console.error("Billing activity audit insert failed", activityError);
@@ -733,6 +747,8 @@ export async function PATCH(req: NextRequest) {
           text: `P1 invoice #${desiredNum} ${action}.`,
           type: "system",
           is_staff_override: false,
+          is_staff_only: true,
+          event_key: "staff_billing",
         });
       if (activityError) {
         console.error("Billing draft activity audit insert failed", activityError);

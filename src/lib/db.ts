@@ -285,6 +285,7 @@ const mapActivity = (a: any, timeZone?: string) => ({
   type: a.type,
   enteredByRole: a.entered_by_role || "system",
   isStaffOverride: !!a.is_staff_override,
+  isStaffOnly: !!a.is_staff_only,
   overrideForContractorId: a.override_for_contractor_id || null,
   eventKey: a.event_key || (a.type === "system" ? "system" : "note"),
   eventData: a.event_data || {},
@@ -576,6 +577,7 @@ export async function closeWorkOrderVisit(
 
 export type ActivityAuditOptions = {
   staffOverride?: boolean;
+  staffOnly?: boolean;
   overrideForContractorId?: string | null;
   eventKey?: string;
   eventData?: Json;
@@ -620,6 +622,7 @@ export async function insertActivity(
     text,
     type,
     is_staff_override: !!audit.staffOverride,
+    is_staff_only: !!audit.staffOnly,
     override_for_contractor_id: audit.staffOverride
       ? audit.overrideForContractorId || null
       : null,
