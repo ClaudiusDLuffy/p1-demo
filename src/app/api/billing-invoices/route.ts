@@ -5,6 +5,7 @@ import {
   normalizeStateCode,
   taxRateFromPercent,
 } from "../../../lib/billingRules";
+import { normalizeStaffBillingLineType } from "../../../lib/staffBilling";
 import type { Database } from "../../../lib/supabase/database.types";
 
 const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
@@ -69,7 +70,7 @@ async function requireStaff(req: NextRequest) {
 
 const mapLine = (line: any) => ({
   id: line.id,
-  type: line.type,
+  type: normalizeStaffBillingLineType(line.type),
   desc: line.description || "",
   description: line.description || "",
   qty: Number(line.qty || 0),
@@ -164,7 +165,7 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
         ? null
         : Number(line.markupPercent);
       return {
-        type: String(line.type || "Other").trim(),
+        type: normalizeStaffBillingLineType(line.type),
         description: String(line.desc || line.description || "").trim(),
         qty: Number(line.qty || 0),
         rate: Number(line.rate || 0),
@@ -289,6 +290,140 @@ const lineRowsForInvoice = (
   markup_percent: line.markupPercent,
 }));
 
+type BillingFinalization = {
+  contractorInvoicesClosed: number;
+  workOrderClosed: boolean;
+  visitsClosed: number;
+};
+
+const emptyBillingFinalization = (): BillingFinalization => ({
+  contractorInvoicesClosed: 0,
+  workOrderClosed: false,
+  visitsClosed: 0,
+});
+
+async function finalizeSubmittedBilling(
+  sb: ReturnType<typeof createServerClient>,
+  {
+    workOrderId,
+    sourceInvoiceIds,
+    actorId,
+  }: {
+    workOrderId: string | null;
+    sourceInvoiceIds: string[];
+    actorId: string;
+  },
+): Promise<BillingFinalization> {
+  if (!workOrderId) return emptyBillingFinalization();
+
+  const finalizedAt = new Date().toISOString();
+  const { data: workOrder, error: workOrderError } = await sb
+    .from("work_orders")
+    .select("id, status, closed_at")
+    .eq("id", workOrderId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (workOrderError) throw workOrderError;
+  if (!workOrder) throw new Error("Linked work order was not found");
+
+  let contractorInvoicesClosed = 0;
+  if (sourceInvoiceIds.length > 0) {
+    const { data: sourceInvoices, error: sourceError } = await sb
+      .from("invoices")
+      .select("id, state, paid_at")
+      .in("id", sourceInvoiceIds)
+      .eq("invoice_type", "contractor")
+      .is("deleted_at", null);
+
+    if (sourceError) throw sourceError;
+    if ((sourceInvoices || []).length !== sourceInvoiceIds.length) {
+      throw new Error("One or more linked contractor invoices could not be finalized");
+    }
+
+    const sourceIdsToClose = (sourceInvoices || [])
+      .filter(invoice => invoice.state !== "paid" || !invoice.paid_at)
+      .map(invoice => invoice.id);
+
+    if (sourceIdsToClose.length > 0) {
+      const { data: closedInvoices, error: closeInvoicesError } = await sb
+        .from("invoices")
+        .update({
+          state: "paid",
+          paid_at: finalizedAt,
+          updated_at: finalizedAt,
+        })
+        .in("id", sourceIdsToClose)
+        .eq("invoice_type", "contractor")
+        .is("deleted_at", null)
+        .select("id");
+
+      if (closeInvoicesError) throw closeInvoicesError;
+      if ((closedInvoices || []).length !== sourceIdsToClose.length) {
+        throw new Error("Not all linked contractor invoices could be finalized");
+      }
+      contractorInvoicesClosed = closedInvoices.length;
+    }
+  }
+
+  const { data: closedVisits, error: closeVisitsError } = await sb
+    .from("work_order_visits")
+    .update({
+      check_out_at: finalizedAt,
+      checked_out_by: actorId,
+      updated_at: finalizedAt,
+    })
+    .eq("work_order_id", workOrderId)
+    .is("check_out_at", null)
+    .select("id");
+
+  if (closeVisitsError) throw closeVisitsError;
+
+  const workOrderNeedsClose = workOrder.status !== "closed" || !workOrder.closed_at;
+  if (workOrderNeedsClose) {
+    const { data: closedWorkOrder, error: closeWorkOrderError } = await sb
+      .from("work_orders")
+      .update({
+        status: "closed",
+        closed_at: workOrder.closed_at || finalizedAt,
+        updated_at: finalizedAt,
+      })
+      .eq("id", workOrderId)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle();
+
+    if (closeWorkOrderError) throw closeWorkOrderError;
+    if (!closedWorkOrder) throw new Error("Linked work order could not be closed");
+  }
+
+  return {
+    contractorInvoicesClosed,
+    workOrderClosed: workOrderNeedsClose,
+    visitsClosed: (closedVisits || []).length,
+  };
+}
+
+const billingFinalizationText = (finalization: BillingFinalization) => {
+  const closed: string[] = [];
+  if (finalization.contractorInvoicesClosed > 0) {
+    closed.push(
+      `${finalization.contractorInvoicesClosed} contractor invoice${
+        finalization.contractorInvoicesClosed === 1 ? "" : "s"
+      } closed`,
+    );
+  }
+  if (finalization.workOrderClosed) closed.push("work order closed");
+  if (finalization.visitsClosed > 0) {
+    closed.push(
+      `${finalization.visitsClosed} open visit${
+        finalization.visitsClosed === 1 ? "" : "s"
+      } ended`,
+    );
+  }
+  return closed.length > 0 ? ` ${closed.join("; ")}.` : "";
+};
+
 async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
   const [invoiceRes, contractorRes, lineRes, sourceRes] = await Promise.all([
     (sb as any)
@@ -379,7 +514,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const targetState = body.state === "draft" ? "draft" : "submitted";
-    const sourceInvoiceIds = Array.from(new Set(
+    const sourceInvoiceIds: string[] = Array.from(new Set<string>(
       (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
         .map((id: unknown) => String(id || "").trim())
         .filter(Boolean),
@@ -525,6 +660,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const finalization = targetState === "submitted"
+      ? await finalizeSubmittedBilling(auth.sb, {
+          workOrderId: String(body.workOrderId || "").trim() || null,
+          sourceInvoiceIds,
+          actorId: auth.user.id,
+        })
+      : emptyBillingFinalization();
+
     const sourceInvoices = sourceInvoiceIds.length > 0
       ? await loadStaffInvoices(auth.sb).then((items: any[]) =>
           items.find(item => item.id === inserted.id)?.sourceInvoices || [],
@@ -536,13 +679,16 @@ export async function POST(req: NextRequest) {
       const sourceText = sourceInvoiceIds.length > 0
         ? ` from ${sourceInvoiceIds.length} contractor invoice${sourceInvoiceIds.length === 1 ? "" : "s"}`
         : "";
+      const actionText = targetState === "submitted"
+        ? `submitted to 7-Eleven${sourceText}.`
+        : `created${sourceText}.`;
       const { error: activityError } = await (auth.sb as any)
         .from("activities")
         .insert({
           work_order_id: body.workOrderId,
           author_id: auth.user.id,
           author_name: auth.profile.name || "P1 staff",
-          text: `P1 invoice #${mappedInvoice.num} created${sourceText}.`,
+          text: `P1 invoice #${mappedInvoice.num} ${actionText}${billingFinalizationText(finalization)}`,
           type: "system",
           is_staff_override: false,
           is_staff_only: true,
@@ -560,6 +706,7 @@ export async function POST(req: NextRequest) {
         sourceInvoiceIds,
         ...sourceMetrics(sourceInvoices, mappedInvoice.subtotal),
       },
+      finalization,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create billing invoice";
@@ -578,7 +725,7 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const targetState = body.state === "submitted" ? "submitted" : "draft";
     const workOrderId = String(body.workOrderId || "").trim() || null;
-    const sourceInvoiceIds = Array.from(new Set(
+    const sourceInvoiceIds: string[] = Array.from(new Set<string>(
       (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
         .map((sourceId: unknown) => String(sourceId || "").trim())
         .filter(Boolean),
@@ -736,15 +883,31 @@ export async function PATCH(req: NextRequest) {
       if (sourceInsertError) throw sourceInsertError;
     }
 
+    const finalization = targetState === "submitted"
+      ? await finalizeSubmittedBilling(auth.sb, {
+          workOrderId,
+          sourceInvoiceIds,
+          actorId: auth.user.id,
+        })
+      : emptyBillingFinalization();
+
     if (workOrderId) {
-      const action = targetState === "submitted" ? "updated" : "draft updated";
+      const wasFinalized = finalization.contractorInvoicesClosed > 0
+        || finalization.workOrderClosed
+        || finalization.visitsClosed > 0;
+      const action = targetState === "submitted"
+        && (existing.state !== "submitted" || wasFinalized)
+        ? "submitted to 7-Eleven"
+        : targetState === "submitted"
+          ? "updated"
+          : "draft updated";
       const { error: activityError } = await (auth.sb as any)
         .from("activities")
         .insert({
           work_order_id: workOrderId,
           author_id: auth.user.id,
           author_name: auth.profile.name || "P1 staff",
-          text: `P1 invoice #${desiredNum} ${action}.`,
+          text: `P1 invoice #${desiredNum} ${action}.${billingFinalizationText(finalization)}`,
           type: "system",
           is_staff_override: false,
           is_staff_only: true,
@@ -759,7 +922,7 @@ export async function PATCH(req: NextRequest) {
     const invoice = refreshed.find((item: any) => item.id === id);
     if (!invoice) throw new Error("Updated invoice could not be reloaded");
 
-    return NextResponse.json({ invoice });
+    return NextResponse.json({ invoice, finalization });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update billing invoice";
     return jsonError(message, 500);

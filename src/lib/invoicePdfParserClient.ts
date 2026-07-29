@@ -21,24 +21,33 @@ export type ParsedInvoicePdf = {
 };
 
 export async function parseInvoicePdf(file: File): Promise<ParsedInvoicePdf> {
-  const { data: { session } } = await supabase().auth.getSession();
-  if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await fetch("/api/invoice-pdf/parse-total", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${session.access_token}` },
-    body: formData,
-  });
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(payload.error || "Could not read the invoice");
+  if (file.size === 0) throw new Error("PDF file is empty");
+  if (file.size > 5 * 1024 * 1024) throw new Error("PDF must be 5 MB or smaller");
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+    throw new Error("File must be a PDF");
   }
 
-  return payload as ParsedInvoicePdf;
+  const { extractInvoiceDataFromPdf } = await import("./invoicePdfParser");
+  return extractInvoiceDataFromPdf(new Uint8Array(await file.arrayBuffer()));
+}
+
+export async function parseStoredInvoicePdf(storagePath: string): Promise<ParsedInvoicePdf> {
+  const { data: pdf, error } = await supabase()
+    .storage
+    .from("invoice-pdfs")
+    .download(storagePath);
+
+  if (error) {
+    throw new Error(`Could not download the stored invoice PDF: ${error.message}`);
+  }
+  if (!pdf) {
+    throw new Error("The stored invoice PDF was empty");
+  }
+
+  const name = storagePath.split("/").pop() || "invoice.pdf";
+  return parseInvoicePdf(new File([pdf], name, {
+    type: pdf.type || "application/pdf",
+  }));
 }
 
 export const parseInvoicePdfTotal = parseInvoicePdf;

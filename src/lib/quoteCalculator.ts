@@ -1,4 +1,5 @@
 import { defaultLineTaxable } from "./billingRules";
+import { normalizeStaffBillingLineType } from "./staffBilling";
 
 export type QuoteCalculatorLine = {
   id: string;
@@ -22,14 +23,7 @@ export const roundMoney = (value: number) =>
 export const isQuotePartsLine = (type: unknown) =>
   /part|hardware|material/i.test(String(type || ""));
 
-export const normalizeQuoteLineType = (type: unknown) => {
-  const value = String(type || "").trim();
-  if (/^labor$/i.test(value)) return "Labor";
-  if (/part|hardware|material/i.test(value)) return "Parts/Hardware";
-  if (/travel|truck/i.test(value)) return "Truck Charge";
-  if (/shipping|freight/i.test(value)) return "Shipping";
-  return "Other";
-};
+export const normalizeQuoteLineType = normalizeStaffBillingLineType;
 
 const finiteNonNegative = (value: unknown, fallback = 0) => {
   const parsed = Number(value);

@@ -184,9 +184,6 @@ export const getWorkOrderActionReasons = (
     if (wo.hasPendingSevenElevenSync || Number(wo.pendingSevenElevenSyncCount || 0) > 0) {
       reasons.push("7-Eleven update pending");
     }
-
-    const due = getSlaDueTime(wo);
-    if (due && due - Date.now() <= 2 * 60 * 60 * 1000) reasons.push("SLA action");
   } else if (
     wo.hasPendingContractorAttention
     || Number(wo.pendingContractorAttentionCount || 0) > 0

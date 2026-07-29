@@ -43,6 +43,16 @@ test("closed work orders never remain action-required", () => {
   );
 });
 
+test("an overdue SLA does not make an otherwise active work order action-required", () => {
+  assert.deepEqual(
+    getWorkOrderActionReasons({
+      status: "wip",
+      resolutionBreachAt: "2026-07-25T13:26:00.000Z",
+    }, true),
+    [],
+  );
+});
+
 test("started work advances progress even when no ETA was entered", () => {
   assert.deepEqual(
     getWorkOrderProgressSteps({
