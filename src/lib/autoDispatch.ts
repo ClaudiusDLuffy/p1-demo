@@ -18,8 +18,8 @@ const DISPATCH_RULES: DispatchRule[] = [
   {
     territory: ["Dallas", "DFW"],
     trades: ["slurpee", "beverage"],
-    contractorEmail: "matt@beardsrefrigeration.com",
-    contractorName: "Matt Beard",
+    contractorEmail: "matthew@beardsrefrigeration.com",
+    contractorName: "Matthew Beard",
   },
   {
     territory: ["Dallas", "DFW"],
@@ -31,7 +31,7 @@ const DISPATCH_RULES: DispatchRule[] = [
     territory: ["Houston"],
     trades: ["hvac", "refrigeration", "ice"],
     contractorEmail: "service@archerref.com",
-    contractorName: "Archer Refrigeration",
+    contractorName: "Chris Archer",
   },
   {
     territory: ["Virginia", "VA", "Virginia Beach"],
