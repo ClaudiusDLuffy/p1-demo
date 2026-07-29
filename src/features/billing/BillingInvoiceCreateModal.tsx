@@ -8,13 +8,17 @@ import { z } from "zod";
 import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { Sel } from "../../components/ui/Sel";
-import { T, LINE_TYPES, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
+import { T, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
 import {
   calculateTrips,
   defaultLineTaxable,
   stateCodeFromWorkOrder,
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
+import {
+  normalizeStaffBillingLineType,
+  STAFF_BILLING_LINE_TYPES,
+} from "../../lib/staffBilling";
 import { supabase } from "../../lib/supabase/client";
 
 const BillingLineSchema = z.object({
@@ -93,12 +97,6 @@ const addDays = (iso: string, days: number) => {
 const amount = (line: any) => (Number(line?.qty) || 0) * (Number(line?.rate) || 0);
 const money = (value: number) => Math.round(value * 100) / 100;
 const isPartsLine = (type: unknown) => /part|hardware|material/i.test(String(type || ""));
-const normalizeLineType = (type: string) => {
-  if ((LINE_TYPES as readonly string[]).includes(type)) return type;
-  if (type === "Travel") return "Truck Charge";
-  if (type === "Parts") return "Parts/Hardware";
-  return "Other";
-};
 
 const QUICK_ADD_PRESETS = [
   { label: "Field Wiring Kit", type: "Parts/Hardware", rate: 52 },
@@ -393,7 +391,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       state: editingInvoice?.state === "draft" ? "draft" : "submitted",
       lines: editingInvoice?.lines?.length
         ? editingInvoice.lines.map((line: any) => ({
-            type: normalizeLineType(line.type || "Other"),
+            type: normalizeStaffBillingLineType(line.type),
             desc: line.desc || line.description || "",
             qty: Number(line.qty || 1),
             rate: Number(line.rate || 0),
@@ -527,7 +525,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         }];
       }
       return invoice.lines.map((line: any) => ({
-        type: normalizeLineType(line.type || "Other"),
+        type: normalizeStaffBillingLineType(line.type),
         desc: line.desc || line.description || "Contractor service",
         qty: Number(line.qty || 1),
         sourceInvoiceLineId: line.id || null,
@@ -831,7 +829,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                   }}
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink }}
                 >
-                  {LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  {STAFF_BILLING_LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </Sel>
                 <textarea {...register(`lines.${i}.desc` as const)} placeholder={/^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
                 <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
@@ -876,7 +874,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
         {errors.lines && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a quantity and rate. Descriptions are optional only for travel.</div>}
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-          {["Labor", "Parts/Hardware", "Truck Charge", "Other"].map(type => (
+          {["Labor", "Parts/Hardware", "Travel", "Other"].map(type => (
             <button key={type} type="button" onClick={() => append({ type, desc: "", qty: 1, rate: undefined, isTaxable: defaultLineTaxable(type, "") })} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ {type}</button>
           ))}
         </div>

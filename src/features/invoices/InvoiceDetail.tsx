@@ -9,7 +9,7 @@ import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/cons
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
   // Contractor perspective flips the invoice framing to FROM = their company,
   // BILL TO = P1 Pros (they have no 7-Eleven access). Staff keep the
   // 7-Eleven framing — that's the document P1 posts after review.
@@ -52,6 +52,10 @@ export default function InvoiceDetail(props: any) {
                     <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
                       <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
                       {pdfBusy ? "Preparing…" : "Download PDF"}
+                    </button>
+                    <button onClick={() => doDownloadInvoiceCsv(inv)} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
+                      Download CSV
                     </button>
                     {/* Multi-invoice: every action is per-invoice (inv.id).
                         Approving here updates ONE invoice; the WO advances

@@ -24,6 +24,8 @@ export type InvoicePdfExtraction = InvoiceTotalExtraction & InvoiceNumberExtract
   lineConfidence: "high" | "medium" | "none";
 };
 
+type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
+
 type TotalCandidate = {
   amount: number;
   score: number;
@@ -375,14 +377,22 @@ export function findInvoiceTotal(text: string): InvoiceTotalExtraction {
   return { total: null, confidence: "none", matchedLabel: null };
 }
 
-export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<InvoicePdfExtraction> {
+async function loadPdfJs(): Promise<PdfJsModule> {
+  if (typeof window !== "undefined") {
+    return import("pdfjs-dist/webpack.mjs");
+  }
+
   const canvas = await import("@napi-rs/canvas");
   Object.assign(globalThis, {
     DOMMatrix: globalThis.DOMMatrix ?? canvas.DOMMatrix,
     ImageData: globalThis.ImageData ?? canvas.ImageData,
     Path2D: globalThis.Path2D ?? canvas.Path2D,
   });
-  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  return import("pdfjs-dist/legacy/build/pdf.mjs");
+}
+
+export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<InvoicePdfExtraction> {
+  const { getDocument } = await loadPdfJs();
   const loadingTask = getDocument({
     data,
     disableFontFace: true,

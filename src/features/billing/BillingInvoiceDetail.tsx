@@ -7,6 +7,7 @@ import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { Ico } from "../../components/ui/Ico";
 import { Modal } from "../../components/ui/Modal";
 import { T, STAFF_INV_STATE, P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
+import { normalizeStaffBillingLineType } from "../../lib/staffBilling";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -14,6 +15,7 @@ export default function BillingInvoiceDetail(props: any) {
     onBack,
     onEdit,
     onDownloadPdf,
+    onDownloadCsv,
     onDelete,
     onOpenContractorInvoice,
     currentUser,
@@ -46,6 +48,10 @@ export default function BillingInvoiceDetail(props: any) {
           <button onClick={onDownloadPdf} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
             Download PDF
+          </button>
+          <button onClick={onDownloadCsv} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
+            Download CSV
           </button>
           {canDelete && <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>}
         </div>
@@ -156,7 +162,7 @@ export default function BillingInvoiceDetail(props: any) {
             {lines.map((line: any, i: number) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
                 <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
-                <div style={{ color: T.inkSoft, fontWeight: 500 }}>{line.type}</div>
+                <div style={{ color: T.inkSoft, fontWeight: 500 }}>{normalizeStaffBillingLineType(line.type)}</div>
                 <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>
                   {line.desc}
                   {line.isTaxable && <span style={{ display: "inline-block", marginLeft: 7, fontSize: 9, color: T.accent, fontWeight: 700 }}>TAXABLE</span>}
@@ -172,7 +178,7 @@ export default function BillingInvoiceDetail(props: any) {
               <div key={i} style={{ padding: "14px 0", borderBottom: `1px solid ${T.borderSoft}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: T.ink }}>{i + 1}. {line.type}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.ink }}>{i + 1}. {normalizeStaffBillingLineType(line.type)}</div>
                     <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>{line.desc}</div>
                   </div>
                   <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(Math.round(line.amount * 100) / 100)}</div>

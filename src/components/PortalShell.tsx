@@ -1074,7 +1074,7 @@ export default function PortalShell() {
     nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
-    doDownloadInvoice, doDeleteInvoice, doRejectInvoice,
+    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, fire });
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
@@ -1274,6 +1274,24 @@ export default function PortalShell() {
       fire(`Invoice ${invoice.num} downloaded`);
     } catch (e: any) {
       fire(`Download failed: ${e.message || e}`);
+    }
+  };
+  const doDownloadBillingInvoiceCsv = async (invoice: any) => {
+    try {
+      let exportInvoice = invoice;
+      if ((invoice.lines || []).length === 0) {
+        const payload = await billingFetch("/api/billing-invoices");
+        const refreshed = (payload.invoices || []).find(
+          (candidate: any) => candidate.id === invoice.id,
+        );
+        if (refreshed) exportInvoice = refreshed;
+      }
+
+      const { downloadStaffInvoiceCsv } = await import("../lib/invoiceCsv");
+      downloadStaffInvoiceCsv(exportInvoice);
+      fire(`Invoice ${invoice.num} CSV downloaded`);
+    } catch (e: any) {
+      fire(`CSV download failed: ${e.message || e}`);
     }
   };
   const doDeleteBillingInvoice = async (invoice: any) => {
@@ -1943,7 +1961,7 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDownloadInvoiceCsv={doDownloadInvoiceCsv} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           {isManager && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
@@ -1972,6 +1990,7 @@ export default function PortalShell() {
                 setModal("createBillingInvoice");
               }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
+              onDownloadCsv={() => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv(selectedBillingInvoiceData)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
               onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.id); setPage("invoices"); }}
               currentUser={currentUser}
@@ -2661,6 +2680,8 @@ export default function PortalShell() {
                 : [invoice, ...(items || [])];
             });
             qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+            qc.invalidateQueries({ queryKey: INVOICES_KEY });
+            qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
             if (invoice?.id) setSelectedBillingInvoice(invoice.id);
           }}
           fire={fire}
