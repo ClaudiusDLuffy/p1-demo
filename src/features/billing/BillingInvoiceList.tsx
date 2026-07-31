@@ -3,32 +3,52 @@
 
 import { useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
-import { T, STAFF_INV_STATE } from "../../lib/constants";
+import { T, INV_STATE, STAFF_INV_STATE } from "../../lib/constants";
 
 const tabs = [
   { id: "all", label: "All" },
   { id: "draft", label: "Draft" },
-  { id: "submitted", label: "Submitted to 7-Eleven" },
-  { id: "approved", label: "Approved" },
-  { id: "paid", label: "Sent to QuickBooks" },
+  { id: "submitted", label: "Please send to 7-Eleven" },
+  { id: "approved", label: "Sent to 7-Eleven" },
+  { id: "recently_approved", label: "Recently Approved" },
 ];
 
 export default function BillingInvoiceList(props: any) {
   const {
     page,
+    currentUser,
     invoices,
+    contractorInvoices,
     setSelectedBillingInvoice,
     onCreate,
+    onCreateFromApproved,
     fmt,
   } = props;
   const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
+  const controller = String(currentUser?.email || "").trim().toLowerCase()
+    === "emilyb@phospitality.com";
+  const showingRecentlyApproved = tab === "recently_approved";
+  const sourceOwnerById = useMemo(() => {
+    const owners = new Map<string, any>();
+    for (const invoice of invoices || []) {
+      for (const sourceId of invoice.sourceInvoiceIds || []) {
+        owners.set(sourceId, invoice);
+      }
+    }
+    return owners;
+  }, [invoices]);
 
   const visibleInvoices = useMemo(
-    () => (invoices || [])
-      .filter((invoice: any) => invoice.invoiceType === "staff")
-      .filter((invoice: any) => tab === "all" || invoice.state === tab)
+    () => (showingRecentlyApproved ? contractorInvoices || [] : invoices || [])
+      .filter((invoice: any) => showingRecentlyApproved
+        ? invoice.invoiceType === "contractor" && invoice.state === "approved"
+        : invoice.invoiceType === "staff")
+      .filter((invoice: any) =>
+        showingRecentlyApproved || tab === "all" || invoice.state === tab,
+      )
       .filter((invoice: any) => {
         const query = search.trim().toLowerCase();
         if (!query) return true;
@@ -38,15 +58,40 @@ export default function BillingInvoiceList(props: any) {
           invoice.store,
           invoice.storeAddr,
           invoice.cme,
+          invoice.territory,
           ...(invoice.sourceInvoices || []).map((source: any) => source.num),
         ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(query);
+      })
+      .sort((a: any, b: any) => {
+        if (!showingRecentlyApproved) return 0;
+        return new Date(b.updatedAt || b.createdAt || 0).getTime()
+          - new Date(a.updatedAt || a.createdAt || 0).getTime();
       }),
-    [invoices, search, tab],
+    [contractorInvoices, invoices, search, showingRecentlyApproved, tab],
   );
+
+  const openInvoice = (invoice: any) => {
+    if (!showingRecentlyApproved) {
+      setSelectedBillingInvoice(invoice.id);
+      return;
+    }
+    const existingBillingInvoice = sourceOwnerById.get(invoice.id);
+    if (existingBillingInvoice) {
+      setSelectedBillingInvoice(existingBillingInvoice.id);
+      return;
+    }
+    if (controller) return;
+    onCreateFromApproved?.(invoice);
+  };
+
+  const canOpenInvoice = (invoice: any) =>
+    !showingRecentlyApproved
+    || sourceOwnerById.has(invoice.id)
+    || !controller;
 
   if (page !== "billing") return null;
 
@@ -100,7 +145,9 @@ export default function BillingInvoiceList(props: any) {
               style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
             />
           </label>
-          <button onClick={onCreate} className="btn-primary billing-create-button">+ Create Invoice</button>
+          {!controller && (
+            <button onClick={onCreate} className="btn-primary billing-create-button">+ Create Invoice</button>
+          )}
         </div>
       </div>
 
@@ -109,7 +156,7 @@ export default function BillingInvoiceList(props: any) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: T.surfaceSoft }}>
-                {["Invoice #", "Date", "Work Order", "Store", "Amount", "Status"].map(h => (
+                {["Invoice #", "Date", "Work Order", "Store", "Territory", "Amount", "Status"].map(h => (
                   <th
                     key={h}
                     style={{
@@ -132,25 +179,41 @@ export default function BillingInvoiceList(props: any) {
               {visibleInvoices.map((invoice: any) => (
                 <tr
                   key={invoice.id}
-                  onClick={() => setSelectedBillingInvoice(invoice.id)}
-                  style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}
+                  onClick={() => openInvoice(invoice)}
+                  style={{
+                    borderBottom: `1px solid ${T.borderSoft}`,
+                    cursor: canOpenInvoice(invoice) ? "pointer" : "default",
+                  }}
                 >
                   <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, color: T.accent }}>#{invoice.num}</td>
                   <td style={{ padding: "13px 14px", color: T.subtle }}>{invoice.date || invoice.invoiceDate}</td>
                   <td style={{ padding: "13px 14px", color: invoice.wot ? T.muted : T.subtle }}>
-                    <div className="mono">{invoice.wot || "Standalone"}</div>
+                    <div className="mono" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      {invoice.wot || "Standalone"}
+                      {invoice.wot && <CopyWorkOrderButton value={invoice.wot} />}
+                    </div>
                     {(invoice.sourceInvoices || []).length > 0 && <div style={{ fontSize: 10, color: T.subtle, marginTop: 3 }}>{invoice.sourceInvoices.length} contractor invoice{invoice.sourceInvoices.length === 1 ? "" : "s"}</div>}
                   </td>
                   <td style={{ padding: "13px 14px" }}>{invoice.store ? `#${invoice.store}` : "-"}</td>
+                  <td style={{ padding: "13px 14px", color: invoice.territory ? T.ink : T.subtle }}>{invoice.territory || "-"}</td>
                   <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(Math.round(invoice.total || 0))}</td>
-                  <td style={{ padding: "13px 14px" }}><Badge conf={STAFF_INV_STATE[invoice.state]} small /></td>
+                  <td style={{ padding: "13px 14px" }}>
+                    <Badge conf={showingRecentlyApproved ? INV_STATE.approved : STAFF_INV_STATE[invoice.state]} small />
+                    {showingRecentlyApproved && sourceOwnerById.has(invoice.id) && (
+                      <div style={{ fontSize: 9, color: T.subtle, marginTop: 4 }}>Already in Billing</div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {visibleInvoices.length === 0 && (
             <div style={{ textAlign: "center", padding: "44px 20px", color: T.subtle, fontSize: 13 }}>
-              {search ? "No billing invoices match your search." : "No P1 to 7-Eleven invoices yet. Create your first invoice above."}
+              {search
+                ? "No billing invoices match your search."
+                : showingRecentlyApproved
+                  ? "No approved contractor invoices are available."
+                  : "No P1 to 7-Eleven invoices yet. Create your first invoice above."}
             </div>
           )}
         </div>
@@ -161,20 +224,20 @@ export default function BillingInvoiceList(props: any) {
           <div
             key={invoice.id}
             className="mobile-card"
-            onClick={() => setSelectedBillingInvoice(invoice.id)}
+            onClick={() => openInvoice(invoice)}
             style={{
               background: "#fff",
               borderRadius: 12,
               border: `1px solid ${T.borderSoft}`,
               padding: "14px 16px",
               marginBottom: 10,
-              cursor: "pointer",
+              cursor: canOpenInvoice(invoice) ? "pointer" : "default",
               boxShadow: "0 1px 3px rgba(31,30,28,0.06)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
-              <Badge conf={STAFF_INV_STATE[invoice.state]} small />
+              <Badge conf={showingRecentlyApproved ? INV_STATE.approved : STAFF_INV_STATE[invoice.state]} small />
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 4 }}>
               Store #{invoice.store || "-"}
@@ -182,8 +245,12 @@ export default function BillingInvoiceList(props: any) {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}` }}>
               <span style={{ fontSize: 11, color: T.muted }}>
-                WO: <span className="mono" style={{ color: invoice.wot ? T.accent : T.subtle }}>{invoice.wot || "Standalone"}</span>
+                WO: <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 4, color: invoice.wot ? T.accent : T.subtle }}>
+                  {invoice.wot || "Standalone"}
+                  {invoice.wot && <CopyWorkOrderButton value={invoice.wot} />}
+                </span>
                 {(invoice.sourceInvoices || []).length > 0 && <span> / {invoice.sourceInvoices.length} source{invoice.sourceInvoices.length === 1 ? "" : "s"}</span>}
+                {showingRecentlyApproved && sourceOwnerById.has(invoice.id) && <span> / already in Billing</span>}
               </span>
               <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(Math.round(invoice.total || 0))}</span>
             </div>
@@ -191,7 +258,11 @@ export default function BillingInvoiceList(props: any) {
         ))}
         {visibleInvoices.length === 0 && (
           <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
-            {search ? "No billing invoices match your search." : "No P1 to 7-Eleven invoices yet. Create your first invoice above."}
+            {search
+              ? "No billing invoices match your search."
+              : showingRecentlyApproved
+                ? "No approved contractor invoices are available."
+                : "No P1 to 7-Eleven invoices yet. Create your first invoice above."}
           </div>
         )}
       </div>

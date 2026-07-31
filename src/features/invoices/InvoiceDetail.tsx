@@ -4,6 +4,7 @@
 import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/constants";
 import { useMemo, useState } from "react";
@@ -14,6 +15,9 @@ export default function InvoiceDetail(props: any) {
   // BILL TO = P1 Pros (they have no 7-Eleven access). Staff keep the
   // 7-Eleven framing — that's the document P1 posts after review.
   const contractorView = !isManager;
+  const controller = String(currentUser?.email || "").trim().toLowerCase()
+    === "emilyb@phospitality.com";
+  const canReview = isManager && !controller;
   const contractorName = currentUser?.company || currentUser?.name || "Your company";
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
@@ -61,7 +65,7 @@ export default function InvoiceDetail(props: any) {
                         Approving here updates ONE invoice; the WO advances
                         only when all its non-draft, non-rejected siblings are
                         approved/paid (logic in useWorkOrders). */}
-                    {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                    {canReview && (inv.state === "submitted" || inv.state === "revised") && (
                       <>
                         <button
                           onClick={() => setConfirmApprove(true)}
@@ -83,7 +87,7 @@ export default function InvoiceDetail(props: any) {
                       >{loadingStates["markPaid_" + inv.id] || markingPaid ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
                     )}
                     {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
-                    {isManager && (
+                    {canReview && (
                       <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
                     )}
                   </div>
@@ -231,7 +235,11 @@ export default function InvoiceDetail(props: any) {
                         <span style={{ color: T.muted }}>Invoice date</span><span className="mono" style={{ color: T.ink }}>{inv.invoiceDate}</span>
                         <span style={{ color: T.muted }}>Service date</span><span className="mono" style={{ color: T.ink }}>{inv.serviceDate}</span>
                         <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{inv.terms || "Net 30"}</span>
-                        <span style={{ color: T.muted }}>Work order</span><span className="mono" style={{ color: T.accent }}>{inv.wot}</span>
+                        <span style={{ color: T.muted }}>Work order</span>
+                        <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent }}>
+                          {inv.wot}
+                          {inv.wot && <CopyWorkOrderButton value={inv.wot} />}
+                        </span>
                         <span style={{ color: T.muted }}>CME</span><span className="mono" style={{ color: T.ink }}>{inv.cme || "—"}</span>
                         <span style={{ color: T.muted }}>Status</span><span><Badge conf={INV_STATE[inv.state]} small /></span>
                       </div>

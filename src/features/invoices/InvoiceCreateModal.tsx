@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateInvoiceSchema, CreateInvoiceForm } from "../../lib/schemas";
 import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 import { parseInvoicePdf } from "../../lib/invoicePdfParserClient";
@@ -262,7 +263,13 @@ export default function InvoiceCreateModal(props: any) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
-          <div><div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Work Order #</div><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{woData.id}</div></div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Work Order #</div>
+            <div style={{ minHeight: 42, display: "flex", alignItems: "center", gap: 5, padding: "7px 8px 7px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+              {woData.id}
+              <CopyWorkOrderButton value={woData.id} />
+            </div>
+          </div>
           <div><div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store #</div><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>#{woData.store}</div></div>
         </div>
 
@@ -310,7 +317,7 @@ export default function InvoiceCreateModal(props: any) {
                 <span className="inv-mlabel" style={{ display: "none" }}>Rate</span>
                 <span className="inv-mlabel" style={{ display: "none" }}>Amount</span>
                 <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }} />
-                <input type="number" step="0.01" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+                <input type="number" step="any" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
                 <div className="mono inv-amount" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
                 <button type="button" className="inv-line-remove" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
               </div>

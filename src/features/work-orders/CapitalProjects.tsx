@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import { Badge } from "../../components/ui/Badge";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { T, PRIORITY } from "../../lib/constants";
 import { useMemo } from "react";
@@ -28,7 +29,10 @@ export default function CapitalProjects(props: any) {
                 {capitalWOs.map((wo, i) => (
                   <div key={wo.id} className="card card-hover mobile-card" onClick={() => { setSelectedWO(wo.id); setPage("work_orders"); setAiNote(null); }} style={{ padding: 22, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.06}s both` }}>
                     <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                      <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.violet }}>{wo.id}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.violet }}>{wo.id}</span>
+                        <CopyWorkOrderButton value={wo.id} />
+                      </span>
                       {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
                     </div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>

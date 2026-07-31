@@ -6,7 +6,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   insertInvoice,
   updateInvoiceWithLines,
-  updateInvoiceState,
   updateWorkOrder,
   uploadInvoicePdf,
   downloadInvoicePdfBlob,
@@ -15,7 +14,8 @@ import {
   insertActivity,
   nextInvoiceNumFromDb,
 } from "../../lib/db";
-import { P1_BUSINESS, SEVEN_BILL_TO, LINE_TYPES, MONTHS } from "../../lib/constants";
+import { P1_BUSINESS } from "../../lib/constants";
+import { normalizeInvoiceLineNumbers } from "../../lib/invoiceMath";
 import { WORK_ORDERS_KEY } from "../work-orders/queries";
 import { INVOICES_KEY } from "./queries";
 
@@ -60,18 +60,6 @@ export default function useInvoices({ currentUser, fire }: any) {
   const [newInv, setNewInv] = useState<any>(blankNewInv());
   const resetNewInv = () => setNewInv(blankNewInv());
 
-  // Shared status-recompute used after delete (and as a backstop after
-  // submit-existing of a previously-rejected revision). Mirrors the rule in
-  // useWorkOrders: WO advances when all non-draft, non-rejected invoices
-  // are approved/paid. Never returns "closed" — closing is an explicit
-  // staff decision (doCloseWO), not an invoice-state side effect.
-  const computeWoStatusFromInvoices = (woId: string, all: any[]) => {
-    const list = all.filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
-    if (list.length === 0) return null;
-    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_invoice";
-    return "pending_approval";
-  };
-
   // Persist + upload the system-generated PDF. Shared by submit-new and
   // submit-existing-draft so both paths produce the same artifact in storage.
   const generateAndUploadPdf = async (header: any, draft: any, wo: any, mappedLines: any[], subtotal: number, tax: number, total: number, fullStoreAddr: string) => {
@@ -99,7 +87,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     if (uploadOnly && !hasUploadedPdf) {
       fire("Attach the contractor invoice PDF"); return null;
     }
-    const validLines = requireFullLines
+    const candidateLines = requireFullLines
       ? (draft.lines || []).filter((l: any) =>
           (l.desc || /^(travel|truck charge)$/i.test(String(l.type || "")))
           && Number(l.qty) > 0
@@ -107,6 +95,9 @@ export default function useInvoices({ currentUser, fire }: any) {
           && Number(l.rate) >= 0,
         )
       : (draft.lines || []).filter((l: any) => l.desc || l.qty || l.rate);
+    const validLines = candidateLines.map((line: any) =>
+      normalizeInvoiceLineNumbers(line),
+    );
     if (!uploadOnly && requireFullLines && validLines.length === 0) {
       fire("Add at least one line item with qty and rate. Travel descriptions are optional."); return null;
     }
@@ -117,7 +108,10 @@ export default function useInvoices({ currentUser, fire }: any) {
     const tax = uploadOnly ? 0 : parseFloat(draft.tax) || 0;
     const subtotal = uploadOnly ? Math.max(uploadedTotal, 0) : invSubtotal(validLines);
     const total = uploadOnly ? Math.max(uploadedTotal, 0) : subtotal + tax;
-    const mappedLines = validLines.map((l: any) => ({ ...l, qty: parseFloat(l.qty), rate: parseFloat(l.rate), amount: lineAmount(l) }));
+    const mappedLines = validLines.map((l: any) => ({
+      ...l,
+      amount: lineAmount(l),
+    }));
     const woCity = (wo.city || "").trim();
     const woAddr = (wo.addr || "").trim();
     const fullStoreAddr = !woCity || (woAddr && woAddr.includes(woCity))
@@ -147,7 +141,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ false);
     if (!payload) return false;
     const { validLines, tax, total, fullStoreAddr, uploadOnly } = payload;
-    const userTypedNum = !!draft.num;
+    const userTypedNum = !!draft.userTypedNum;
     try {
       let result: any;
       if (existingInvoiceId) {
@@ -200,7 +194,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ true);
     if (!payload) return false;
     const { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly } = payload;
-    const userTypedNum = !!draft.num;
+    const userTypedNum = !!draft.userTypedNum;
     try {
       let header: any;
       let finalNum: string = draft.num || "";

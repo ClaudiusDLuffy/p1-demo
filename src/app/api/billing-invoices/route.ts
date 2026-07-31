@@ -5,10 +5,12 @@ import {
   normalizeStateCode,
   taxRateFromPercent,
 } from "../../../lib/billingRules";
+import { roundInvoiceNumber } from "../../../lib/invoiceMath";
 import { normalizeStaffBillingLineType } from "../../../lib/staffBilling";
 import type { Database } from "../../../lib/supabase/database.types";
 
 const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
+const CONTROLLER_EMAIL = "emilyb@phospitality.com";
 
 type BillingLineInput = {
   type: string;
@@ -68,6 +70,9 @@ async function requireStaff(req: NextRequest) {
   return { sb, user, profile };
 }
 
+const isController = (user: { email?: string | null }) =>
+  String(user.email || "").trim().toLowerCase() === CONTROLLER_EMAIL;
+
 const mapLine = (line: any) => ({
   id: line.id,
   type: normalizeStaffBillingLineType(line.type),
@@ -123,6 +128,7 @@ const mapInvoice = (invoice: any, lines: any[]) => ({
   taxState: invoice.tax_state || null,
   taxRate: invoice.tax_rate == null ? null : Number(invoice.tax_rate),
   total: Number(invoice.total || 0),
+  territory: invoice.territory || null,
   pdfStoragePath: invoice.pdf_storage_path || null,
   qboInvoiceId: invoice.qbo_invoice_id || null,
   qboSyncedAt: invoice.qbo_synced_at || null,
@@ -134,7 +140,10 @@ const mapInvoice = (invoice: any, lines: any[]) => ({
 
 const sourceMetrics = (sourceInvoices: any[], staffSubtotal: number) => {
   const contractorCost = sourceInvoices.reduce(
-    (sum, invoice) => sum + Number(invoice.total || 0),
+    (sum, invoice) => sum + Number(
+      invoice.subtotal
+      ?? Math.max(Number(invoice.total || 0) - Number(invoice.salesTax || 0), 0),
+    ),
     0,
   );
   const grossProfit = staffSubtotal - contractorCost;
@@ -167,15 +176,15 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
       return {
         type: normalizeStaffBillingLineType(line.type),
         description: String(line.desc || line.description || "").trim(),
-        qty: Number(line.qty || 0),
-        rate: Number(line.rate || 0),
+        qty: roundInvoiceNumber(line.qty),
+        rate: roundInvoiceNumber(line.rate),
         isTaxable: !!line.isTaxable,
         sourceInvoiceLineId: String(line.sourceInvoiceLineId || "").trim() || null,
         sourceUnitCost: sourceUnitCost != null && Number.isFinite(sourceUnitCost)
-          ? sourceUnitCost
+          ? roundInvoiceNumber(sourceUnitCost)
           : null,
         markupPercent: markupPercent != null && Number.isFinite(markupPercent)
-          ? markupPercent
+          ? roundInvoiceNumber(markupPercent)
           : null,
       };
     })
@@ -290,140 +299,6 @@ const lineRowsForInvoice = (
   markup_percent: line.markupPercent,
 }));
 
-type BillingFinalization = {
-  contractorInvoicesClosed: number;
-  workOrderClosed: boolean;
-  visitsClosed: number;
-};
-
-const emptyBillingFinalization = (): BillingFinalization => ({
-  contractorInvoicesClosed: 0,
-  workOrderClosed: false,
-  visitsClosed: 0,
-});
-
-async function finalizeSubmittedBilling(
-  sb: ReturnType<typeof createServerClient>,
-  {
-    workOrderId,
-    sourceInvoiceIds,
-    actorId,
-  }: {
-    workOrderId: string | null;
-    sourceInvoiceIds: string[];
-    actorId: string;
-  },
-): Promise<BillingFinalization> {
-  if (!workOrderId) return emptyBillingFinalization();
-
-  const finalizedAt = new Date().toISOString();
-  const { data: workOrder, error: workOrderError } = await sb
-    .from("work_orders")
-    .select("id, status, closed_at")
-    .eq("id", workOrderId)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (workOrderError) throw workOrderError;
-  if (!workOrder) throw new Error("Linked work order was not found");
-
-  let contractorInvoicesClosed = 0;
-  if (sourceInvoiceIds.length > 0) {
-    const { data: sourceInvoices, error: sourceError } = await sb
-      .from("invoices")
-      .select("id, state, paid_at")
-      .in("id", sourceInvoiceIds)
-      .eq("invoice_type", "contractor")
-      .is("deleted_at", null);
-
-    if (sourceError) throw sourceError;
-    if ((sourceInvoices || []).length !== sourceInvoiceIds.length) {
-      throw new Error("One or more linked contractor invoices could not be finalized");
-    }
-
-    const sourceIdsToClose = (sourceInvoices || [])
-      .filter(invoice => invoice.state !== "paid" || !invoice.paid_at)
-      .map(invoice => invoice.id);
-
-    if (sourceIdsToClose.length > 0) {
-      const { data: closedInvoices, error: closeInvoicesError } = await sb
-        .from("invoices")
-        .update({
-          state: "paid",
-          paid_at: finalizedAt,
-          updated_at: finalizedAt,
-        })
-        .in("id", sourceIdsToClose)
-        .eq("invoice_type", "contractor")
-        .is("deleted_at", null)
-        .select("id");
-
-      if (closeInvoicesError) throw closeInvoicesError;
-      if ((closedInvoices || []).length !== sourceIdsToClose.length) {
-        throw new Error("Not all linked contractor invoices could be finalized");
-      }
-      contractorInvoicesClosed = closedInvoices.length;
-    }
-  }
-
-  const { data: closedVisits, error: closeVisitsError } = await sb
-    .from("work_order_visits")
-    .update({
-      check_out_at: finalizedAt,
-      checked_out_by: actorId,
-      updated_at: finalizedAt,
-    })
-    .eq("work_order_id", workOrderId)
-    .is("check_out_at", null)
-    .select("id");
-
-  if (closeVisitsError) throw closeVisitsError;
-
-  const workOrderNeedsClose = workOrder.status !== "closed" || !workOrder.closed_at;
-  if (workOrderNeedsClose) {
-    const { data: closedWorkOrder, error: closeWorkOrderError } = await sb
-      .from("work_orders")
-      .update({
-        status: "closed",
-        closed_at: workOrder.closed_at || finalizedAt,
-        updated_at: finalizedAt,
-      })
-      .eq("id", workOrderId)
-      .is("deleted_at", null)
-      .select("id")
-      .maybeSingle();
-
-    if (closeWorkOrderError) throw closeWorkOrderError;
-    if (!closedWorkOrder) throw new Error("Linked work order could not be closed");
-  }
-
-  return {
-    contractorInvoicesClosed,
-    workOrderClosed: workOrderNeedsClose,
-    visitsClosed: (closedVisits || []).length,
-  };
-}
-
-const billingFinalizationText = (finalization: BillingFinalization) => {
-  const closed: string[] = [];
-  if (finalization.contractorInvoicesClosed > 0) {
-    closed.push(
-      `${finalization.contractorInvoicesClosed} contractor invoice${
-        finalization.contractorInvoicesClosed === 1 ? "" : "s"
-      } closed`,
-    );
-  }
-  if (finalization.workOrderClosed) closed.push("work order closed");
-  if (finalization.visitsClosed > 0) {
-    closed.push(
-      `${finalization.visitsClosed} open visit${
-        finalization.visitsClosed === 1 ? "" : "s"
-      } ended`,
-    );
-  }
-  return closed.length > 0 ? ` ${closed.join("; ")}.` : "";
-};
-
 async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
   const [invoiceRes, contractorRes, lineRes, sourceRes] = await Promise.all([
     (sb as any)
@@ -477,7 +352,55 @@ async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
   });
 }
 
-const nextStaffInvoiceNum = async (sb: ReturnType<typeof createServerClient>) => {
+async function loadContractorInvoiceSources(
+  sb: ReturnType<typeof createServerClient>,
+  sourceInvoiceIds: string[],
+  controller: boolean,
+) {
+  const { data: invoiceRows, error: invoiceError } = await (sb as any)
+    .from("invoices")
+    .select("*")
+    .in("id", sourceInvoiceIds)
+    .eq("invoice_type", "contractor")
+    .is("deleted_at", null);
+  if (invoiceError) throw invoiceError;
+  if ((invoiceRows || []).length !== sourceInvoiceIds.length) {
+    throw new Error("One or more contractor invoices are invalid");
+  }
+  if (
+    controller
+    && (invoiceRows || []).some((invoice: any) =>
+      !["approved", "paid"].includes(invoice.state)
+    )
+  ) {
+    throw new Error("The controller can only access approved contractor invoices");
+  }
+
+  const { data: lineRows, error: lineError } = await sb
+    .from("invoice_lines")
+    .select("*")
+    .in("invoice_id", sourceInvoiceIds)
+    .order("position");
+  if (lineError) throw lineError;
+
+  const linesByInvoice: Record<string, any[]> = {};
+  for (const line of lineRows || []) {
+    (linesByInvoice[line.invoice_id] ||= []).push(line);
+  }
+  const invoicesById = new Map(
+    (invoiceRows || []).map((invoice: any) => [
+      invoice.id,
+      mapInvoice(invoice, linesByInvoice[invoice.id] || []),
+    ]),
+  );
+  return sourceInvoiceIds
+    .map(id => invoicesById.get(id))
+    .filter(Boolean);
+}
+
+const nextLegacyStaffInvoiceNum = async (
+  sb: ReturnType<typeof createServerClient>,
+) => {
   const { data, error } = await (sb as any)
     .from("invoices")
     .select("num")
@@ -494,11 +417,40 @@ const nextStaffInvoiceNum = async (sb: ReturnType<typeof createServerClient>) =>
   return `P1-${String(maxNum + 1).padStart(5, "0")}`;
 };
 
+const nextStaffInvoiceNum = async (
+  sb: ReturnType<typeof createServerClient>,
+  actorId: string,
+) => {
+  const { data, error } = await (sb as any)
+    .rpc("next_staff_invoice_num", { p_actor_id: actorId });
+  if (error) throw error;
+  return data || nextLegacyStaffInvoiceNum(sb);
+};
+
 export async function GET(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
 
   try {
+    const sourceIdsParam = req.nextUrl.searchParams.get("sourceInvoiceIds");
+    if (sourceIdsParam != null) {
+      const sourceInvoiceIds = Array.from(new Set(
+        sourceIdsParam
+          .split(",")
+          .map(id => id.trim())
+          .filter(Boolean),
+      ));
+      if (sourceInvoiceIds.length === 0) {
+        return jsonError("At least one source invoice id is required", 400);
+      }
+      const invoices = await loadContractorInvoiceSources(
+        auth.sb,
+        sourceInvoiceIds,
+        isController(auth.user),
+      );
+      return NextResponse.json({ invoices });
+    }
+
     const invoices = await loadStaffInvoices(auth.sb);
     return NextResponse.json({ invoices });
   } catch (err) {
@@ -510,6 +462,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
+  if (isController(auth.user)) {
+    return jsonError("The controller cannot create P1 billing invoices", 403);
+  }
 
   try {
     const body = await req.json();
@@ -524,6 +479,7 @@ export async function POST(req: NextRequest) {
 
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
+    if (!String(body.territory || "").trim()) return jsonError("Territory is required", 400);
     if (validLines.length === 0) return jsonError("At least one valid line item is required", 400);
     if (sourceInvoiceIds.length > 0 && !body.workOrderId) {
       return jsonError("A work order is required when contractor invoices are linked", 400);
@@ -578,11 +534,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const subtotal = validLines.reduce((sum, line) => sum + line.qty * line.rate, 0);
+    const subtotal = roundInvoiceNumber(
+      validLines.reduce((sum, line) => sum + line.qty * line.rate, 0),
+    );
     const tax = await resolveTax(auth.sb, body, validLines);
     const salesTax = tax.salesTax;
-    const total = subtotal + salesTax;
-    let desiredNum = String(body.num || "").trim() || await nextStaffInvoiceNum(auth.sb);
+    const total = roundInvoiceNumber(subtotal + salesTax);
+    let desiredNum = await nextStaffInvoiceNum(auth.sb, auth.user.id);
 
     let inserted: any = null;
     let insertError: any = null;
@@ -607,6 +565,7 @@ export async function POST(req: NextRequest) {
           tax_state: tax.taxState,
           tax_rate: tax.taxRate,
           total,
+          territory: String(body.territory || "").trim(),
           created_by: auth.user.id,
         })
         .select()
@@ -620,7 +579,7 @@ export async function POST(req: NextRequest) {
 
       insertError = error;
       if (error.code !== "23505") break;
-      desiredNum = await nextStaffInvoiceNum(auth.sb);
+      desiredNum = await nextStaffInvoiceNum(auth.sb, auth.user.id);
     }
 
     if (insertError || !inserted) throw insertError || new Error("Invoice insert failed");
@@ -660,14 +619,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const finalization = targetState === "submitted"
-      ? await finalizeSubmittedBilling(auth.sb, {
-          workOrderId: String(body.workOrderId || "").trim() || null,
-          sourceInvoiceIds,
-          actorId: auth.user.id,
-        })
-      : emptyBillingFinalization();
-
     const sourceInvoices = sourceInvoiceIds.length > 0
       ? await loadStaffInvoices(auth.sb).then((items: any[]) =>
           items.find(item => item.id === inserted.id)?.sourceInvoices || [],
@@ -680,7 +631,7 @@ export async function POST(req: NextRequest) {
         ? ` from ${sourceInvoiceIds.length} contractor invoice${sourceInvoiceIds.length === 1 ? "" : "s"}`
         : "";
       const actionText = targetState === "submitted"
-        ? `submitted to 7-Eleven${sourceText}.`
+        ? `prepared for 7-Eleven submission${sourceText}.`
         : `created${sourceText}.`;
       const { error: activityError } = await (auth.sb as any)
         .from("activities")
@@ -688,7 +639,7 @@ export async function POST(req: NextRequest) {
           work_order_id: body.workOrderId,
           author_id: auth.user.id,
           author_name: auth.profile.name || "P1 staff",
-          text: `P1 invoice #${mappedInvoice.num} ${actionText}${billingFinalizationText(finalization)}`,
+          text: `P1 invoice #${mappedInvoice.num} ${actionText}`,
           type: "system",
           is_staff_override: false,
           is_staff_only: true,
@@ -706,7 +657,6 @@ export async function POST(req: NextRequest) {
         sourceInvoiceIds,
         ...sourceMetrics(sourceInvoices, mappedInvoice.subtotal),
       },
-      finalization,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create billing invoice";
@@ -717,12 +667,30 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
+  if (isController(auth.user)) {
+    return jsonError("The controller cannot change P1 billing invoices", 403);
+  }
 
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return jsonError("Invoice id is required", 400);
 
   try {
     const body = await req.json();
+    if (body.action === "mark_billed") {
+      const { data: finalization, error: finalizationError } = await (auth.sb as any)
+        .rpc("mark_staff_invoice_billed", {
+          p_invoice_id: id,
+          p_actor_id: auth.user.id,
+        });
+      if (finalizationError) throw finalizationError;
+
+      const refreshed = await loadStaffInvoices(auth.sb);
+      const invoice = refreshed.find((item: any) => item.id === id);
+      if (!invoice) throw new Error("Billed invoice could not be reloaded");
+
+      return NextResponse.json({ invoice, finalization });
+    }
+
     const targetState = body.state === "submitted" ? "submitted" : "draft";
     const workOrderId = String(body.workOrderId || "").trim() || null;
     const sourceInvoiceIds: string[] = Array.from(new Set<string>(
@@ -735,6 +703,7 @@ export async function PATCH(req: NextRequest) {
 
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
+    if (!String(body.territory || "").trim()) return jsonError("Territory is required", 400);
     if (validLines.length === 0) return jsonError("At least one valid line item is required", 400);
     if (sourceInvoiceIds.length > 0 && !workOrderId) {
       return jsonError("A work order is required when contractor invoices are linked", 400);
@@ -808,14 +777,16 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const subtotal = validLines.reduce((sum, line) => sum + line.qty * line.rate, 0);
+    const subtotal = roundInvoiceNumber(
+      validLines.reduce((sum, line) => sum + line.qty * line.rate, 0),
+    );
     const tax = await resolveTax(auth.sb, body, validLines);
     const salesTax = tax.salesTax;
     if (!Number.isFinite(salesTax) || salesTax < 0) {
       return jsonError("Sales tax must be zero or greater", 400);
     }
-    const total = subtotal + salesTax;
-    const desiredNum = String(body.num || "").trim() || existing.num;
+    const total = roundInvoiceNumber(subtotal + salesTax);
+    const desiredNum = existing.num;
     const updatedAt = new Date().toISOString();
 
     const { data: updated, error: updateError } = await (auth.sb as any)
@@ -837,6 +808,7 @@ export async function PATCH(req: NextRequest) {
         tax_state: tax.taxState,
         tax_rate: tax.taxRate,
         total,
+        territory: String(body.territory || "").trim(),
         updated_at: updatedAt,
       })
       .eq("id", id)
@@ -883,21 +855,10 @@ export async function PATCH(req: NextRequest) {
       if (sourceInsertError) throw sourceInsertError;
     }
 
-    const finalization = targetState === "submitted"
-      ? await finalizeSubmittedBilling(auth.sb, {
-          workOrderId,
-          sourceInvoiceIds,
-          actorId: auth.user.id,
-        })
-      : emptyBillingFinalization();
-
     if (workOrderId) {
-      const wasFinalized = finalization.contractorInvoicesClosed > 0
-        || finalization.workOrderClosed
-        || finalization.visitsClosed > 0;
       const action = targetState === "submitted"
-        && (existing.state !== "submitted" || wasFinalized)
-        ? "submitted to 7-Eleven"
+        && existing.state !== "submitted"
+        ? "prepared for 7-Eleven submission"
         : targetState === "submitted"
           ? "updated"
           : "draft updated";
@@ -907,7 +868,7 @@ export async function PATCH(req: NextRequest) {
           work_order_id: workOrderId,
           author_id: auth.user.id,
           author_name: auth.profile.name || "P1 staff",
-          text: `P1 invoice #${desiredNum} ${action}.${billingFinalizationText(finalization)}`,
+          text: `P1 invoice #${desiredNum} ${action}.`,
           type: "system",
           is_staff_override: false,
           is_staff_only: true,
@@ -922,7 +883,7 @@ export async function PATCH(req: NextRequest) {
     const invoice = refreshed.find((item: any) => item.id === id);
     if (!invoice) throw new Error("Updated invoice could not be reloaded");
 
-    return NextResponse.json({ invoice, finalization });
+    return NextResponse.json({ invoice });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update billing invoice";
     return jsonError(message, 500);
@@ -932,6 +893,9 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
+  if (isController(auth.user)) {
+    return jsonError("The controller cannot delete P1 billing invoices", 403);
+  }
 
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return jsonError("Invoice id is required", 400);

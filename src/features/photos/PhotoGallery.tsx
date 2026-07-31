@@ -11,8 +11,41 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   const adding = !!loadingStates["addPhotos_" + woId];
   const removing = !!loadingStates["removePhoto_" + woId];
+
+  const downloadPhoto = async (path: string, url: string, index: number) => {
+    if (!url || downloadingPath) return;
+    setDownloadingPath(path);
+    const extension = String(path).split("?")[0].match(/\.([a-z0-9]{2,5})$/i)?.[1] || "jpg";
+    const filename = `${woId}-photo-${index + 1}.${extension}`;
+    let objectUrl: string | null = null;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Photo download failed (${response.status})`);
+      objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setDownloadingPath(null);
+    }
+  };
 
   useEffect(() => {
     if (!expanded || photos.length === 0) return;
@@ -70,6 +103,38 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
                                       {url
                                         ? <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={() => setImageErrors((prev: any) => ({ ...prev, [path]: true }))} />
                                         : <div style={{ width: "100%", height: "100%", background: T.surfaceSoft, color: T.subtle, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 8 }}>Photo unavailable</div>}
+                                      {url && (
+                                        <button
+                                          type="button"
+                                          disabled={downloadingPath === path}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            void downloadPhoto(path, url, i);
+                                          }}
+                                          title="Download photo"
+                                          aria-label={`Download photo ${i + 1}`}
+                                          style={{
+                                            position: "absolute",
+                                            top: 4,
+                                            left: 4,
+                                            width: 34,
+                                            height: 34,
+                                            borderRadius: "50%",
+                                            background: "rgba(31,30,28,0.8)",
+                                            border: "none",
+                                            color: "#fff",
+                                            cursor: downloadingPath === path ? "default" : "pointer",
+                                            display: "grid",
+                                            placeItems: "center",
+                                            opacity: downloadingPath === path ? 0.7 : 1,
+                                            zIndex: 2,
+                                          }}
+                                        >
+                                          {downloadingPath === path
+                                            ? <span style={{ fontSize: 11 }}>...</span>
+                                            : <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={15} color="currentColor" />}
+                                        </button>
+                                      )}
                                       <button disabled={removing} onClick={e => { e.stopPropagation(); doRemovePhoto(woId, path); }} style={{ position: "absolute", top: 4, right: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(31,30,28,0.8)", border: "none", color: "#fff", fontSize: 16, cursor: removing ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: removing ? 0.7 : 1, zIndex: 2 }}>{removing ? "..." : "x"}</button>
                                     </div>
                                   );

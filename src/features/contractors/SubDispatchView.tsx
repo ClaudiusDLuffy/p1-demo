@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { T, STATUS } from "../../lib/constants";
 
@@ -49,12 +50,15 @@ export default function SubDispatchView(props: any) {
                 return (
                   <tr key={wo.id} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
                     <td style={{ padding: "14px 16px" }}>
-                      <button
-                        onClick={() => { setSelectedWO(wo.id); setAiNote(null); setPage("wo_detail"); }}
-                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
-                      >
-                        <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>{wo.id}</span>
-                      </button>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <button
+                          onClick={() => { setSelectedWO(wo.id); setAiNote(null); setPage("wo_detail"); }}
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                        >
+                          <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>{wo.id}</span>
+                        </button>
+                        <CopyWorkOrderButton value={wo.id} />
+                      </span>
                     </td>
                     <td style={{ padding: "14px 16px", fontSize: 13, color: T.ink }}>
                       {wo.store ? `Store #${wo.store}` : "-"}

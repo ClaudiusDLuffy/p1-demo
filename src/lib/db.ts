@@ -369,10 +369,15 @@ const mapInvoice = (i: any) => ({
   state: i.state,
   subtotal: parseFloat(i.subtotal || 0),
   salesTax: parseFloat(i.sales_tax || 0),
+  taxState: i.tax_state || null,
+  taxRate: i.tax_rate == null ? null : parseFloat(i.tax_rate),
   total: parseFloat(i.total || 0),
+  territory: i.territory || null,
   pdfStoragePath: i.pdf_storage_path || null,
   date: shortMonthDay(i.invoice_date),
   rejectionReason: i.rejection_reason,
+  createdAt: i.created_at,
+  updatedAt: i.updated_at,
 });
 
 // ── INVOICE PDF STORAGE ────────────────────────────────────────────────────
@@ -405,11 +410,21 @@ export async function downloadInvoicePdfBlob(storagePath: string): Promise<Blob>
 }
 
 const mapInvoiceLine = (l: any) => ({
+  id: l.id,
+  position: l.position,
   type: l.type,
   desc: l.description,
   qty: parseFloat(l.qty),
   rate: parseFloat(l.rate),
   amount: parseFloat(l.amount),
+  isTaxable: !!l.is_taxable,
+  sourceInvoiceLineId: l.source_invoice_line_id || null,
+  sourceUnitCost: l.source_unit_cost == null
+    ? null
+    : parseFloat(l.source_unit_cost),
+  markupPercent: l.markup_percent == null
+    ? null
+    : parseFloat(l.markup_percent),
 });
 
 function formatDate(d: string | null): string | null {
@@ -798,6 +813,48 @@ export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
   if (error) throw error;
   // Returns shape { wo: 'FWKD11400001', inc: 'INC24000001' }
   return data;
+}
+
+export async function completeWorkOrderOnce(
+  workOrderId: string,
+  {
+    completedAt,
+    assetMake,
+    assetModel,
+    assetSerial,
+    assetYear,
+    resolutionCode,
+    resolutionNotes,
+    activityText,
+  }: {
+    completedAt: string;
+    assetMake: string;
+    assetModel: string;
+    assetSerial: string;
+    assetYear?: number | null;
+    resolutionCode?: string | null;
+    resolutionNotes?: string | null;
+    activityText: string;
+  },
+): Promise<{ applied: boolean; reason?: string; activityId?: string }> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("complete_work_order_once", {
+    p_work_order_id: workOrderId,
+    p_completed_at: completedAt,
+    p_asset_make: assetMake,
+    p_asset_model: assetModel,
+    p_asset_serial: assetSerial,
+    p_asset_year: assetYear || null,
+    p_resolution_code: resolutionCode || null,
+    p_resolution_notes: resolutionNotes || null,
+    p_activity_text: activityText,
+  });
+  if (error) throw error;
+  return (data || { applied: true }) as {
+    applied: boolean;
+    reason?: string;
+    activityId?: string;
+  };
 }
 
 export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string): Promise<WorkOrder> {

@@ -63,7 +63,7 @@ export const detectDispatchTrade = (parsed: ParsedWorkOrder): string | null => {
   if (lineOfService.includes("ems") || businessService.includes("ems")) return "ems";
   if (lineOfService.includes("hvac") || category.includes("hvac") || businessService.includes("hvac")) return "hvac";
   if (lineOfService.includes("refrigeration") || businessService.includes("refrigeration")) return "refrigeration";
-  if (lineOfService.includes("ice") || category.includes("ice")) return "ice";
+  if (/\bice\b/.test(lineOfService) || /\bice\b/.test(category)) return "ice";
   return null;
 };
 

@@ -7,6 +7,7 @@ import { Sel } from "../../components/ui/Sel";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
 import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import {
@@ -235,6 +236,7 @@ export default function WorkOrderList(props: any) {
                         <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>
                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             {wo.id}
+                            <CopyWorkOrderButton value={wo.id} />
                             {actionReasons.length > 0 && (
                               <span
                                 title={actionReasons.join(", ")}
@@ -305,6 +307,7 @@ export default function WorkOrderList(props: any) {
                   <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>
                       {wo.id}
+                      <CopyWorkOrderButton value={wo.id} />
                       {actionReasons.length > 0 && (
                         <span
                           title={actionReasons.join(", ")}

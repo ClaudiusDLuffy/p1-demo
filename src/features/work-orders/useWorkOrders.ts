@@ -10,7 +10,7 @@ import {
   insertWoPart, updateWoPart, deleteWoPart,
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
-  openWorkOrderVisit, closeWorkOrderVisit,
+  openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
 import {
@@ -507,22 +507,26 @@ export default function useWorkOrders({
     if (assetYear) patch.assetYear = assetYear;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "note", isManager, "job_completed", true));
-    fire("Completed");
-    await dbCall(async () => {
-      await updateWorkOrder(woId, {
-        status: "completed",
-        functionalStatus: "Completed",
+    let completionResult: { applied: boolean; reason?: string } | null = null;
+    const saved = await dbCall(async () => {
+      completionResult = await completeWorkOrderOnce(woId, {
+        completedAt: endIso,
         assetMake: make,
         assetModel: model,
         assetSerial: serial,
         assetYear: assetYear || null,
-        endTime: endIso,
         resolutionCode: resolution || null,
         resolutionNotes: cleanNotes || null,
+        activityText: text,
       });
-      await closeWorkOrderVisit(woId, endIso);
-      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "job_completed", { clockedOutAt: endIso, resolution: resolution || null, closingNotes: cleanNotes || null }));
-    }, "Close failed", () => restoreWorkOrders(snapshot));
+    }, "Close failed", () => restoreWorkOrders(snapshot), invalidateWorkOrders);
+    if (saved && completionResult?.applied === false) {
+      restoreWorkOrders(snapshot);
+      invalidateWorkOrders();
+      fire("Work order was already completed");
+    } else if (saved) {
+      fire("Completed");
+    }
     } finally {
       setLoading("closeComplete_" + woId, false);
     }
@@ -531,14 +535,14 @@ export default function useWorkOrders({
   const doMoveToInvoice = async (woId: string) => {
     setLoading("moveToInvoice_" + woId, true);
     try {
-    const text = "7-Eleven portal updated. Moved to pending invoice.";
+    const text = "7-Eleven portal updated. Moved to Pending 7-Eleven Submission.";
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(
       woId,
       { status: "pending_invoice" },
       localActivity(text, "system", false, "staff_billing", false, true),
     );
-    fire("Moved to Pending Invoice");
+    fire("Moved to Pending 7-Eleven Submission");
     await dbCall(async () => {
       await updateWorkOrder(woId, { status: "pending_invoice" });
       await insertActivity(woId, "System", text, "system", {
@@ -588,7 +592,7 @@ export default function useWorkOrders({
     if (nextWoStatus) localUpdates.status = nextWoStatus;
     patchLocalWO(inv.wot, localUpdates, localActivity(`Invoice #${inv.num} approved by ${currentUser.name}.`, "system"));
     if (woText) patchLocalWO(inv.wot, {}, localActivity(woText, "system"));
-    fire(nextWoStatus === "pending_invoice" ? "All contractor invoices approved — Pending Invoice" : `Invoice #${inv.num} approved`);
+    fire(nextWoStatus === "pending_invoice" ? "All contractor invoices approved - Pending 7-Eleven Submission" : `Invoice #${inv.num} approved`);
     await dbCall(async () => {
       await updateInvoiceState(inv.id, "approved");
       await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved by ${currentUser.name}.`, "system");
@@ -617,7 +621,10 @@ export default function useWorkOrders({
     if (!inv) { fire("Invoice not found"); return; }
     const paidAt = new Date().toISOString();
     const nextInvoices = invoices.map((i: any) => i.id === invoiceId ? { ...i, state: "paid" } : i);
-    const nextWoStatus = computeWoStatusFromInvoices(inv.wot, nextInvoices);
+    const workOrder = workOrders.find((item: any) => item.id === inv.wot);
+    const nextWoStatus = workOrder?.status === "closed"
+      ? null
+      : computeWoStatusFromInvoices(inv.wot, nextInvoices);
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
     setInvoices(nextInvoices);

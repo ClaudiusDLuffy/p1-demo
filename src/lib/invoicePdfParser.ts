@@ -45,6 +45,20 @@ type TextRow = {
   items: PositionedText[];
 };
 
+type InvoiceTableColumns = {
+  descriptionEnd: number;
+  qtyEnd: number;
+  amountStart: number;
+  hasQtyColumn: boolean;
+  hasRateColumn: boolean;
+};
+
+type InvoicePageLineResult = {
+  lines: InvoiceLineExtraction[];
+  columns: InvoiceTableColumns | null;
+  tableEnded: boolean;
+};
+
 const MONEY_CAPTURE = String.raw`(\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})\)?)`;
 
 const parseMoney = (raw: string) => {
@@ -217,7 +231,10 @@ const parseQuantity = (raw: string) => {
   return Number.isFinite(value) && value > 0 ? value : null;
 };
 
-function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] {
+function extractLinesFromPage(
+  items: PositionedText[],
+  continuedColumns: InvoiceTableColumns | null = null,
+): InvoicePageLineResult {
   const rows = buildRows(items);
   const headerIndex = rows.findIndex(row => {
     const text = rowText(row).toLowerCase();
@@ -226,44 +243,59 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
     const hasNumericColumn = /\b(qty|quantity|hours?|units?|rate|unit price|price|unit cost)\b/.test(text);
     return hasDescription && hasAmount && hasNumericColumn;
   });
-  if (headerIndex < 0) return [];
+  let columns = continuedColumns;
 
-  const header = rows[headerIndex];
-  const descriptionHeader = findHeaderColumn(
-    header,
-    /\b(description|items?(?:\s*\/\s*services?)?|services?|products?|materials?)\b/i,
-  );
-  const qtyHeader = findHeaderColumn(header, /\b(qty|quantity|hours?|units?)\b/i);
-  const rateHeader = findHeaderColumn(header, /\b(rate|unit price|price|unit cost)\b/i);
-  const amountHeader = findHeaderColumn(
-    header,
-    /\b(amount|extended|line total|total)\b/i,
-    true,
-  );
-  if (!descriptionHeader || !amountHeader || amountHeader.x <= descriptionHeader.x) return [];
+  if (headerIndex >= 0) {
+    const header = rows[headerIndex];
+    const descriptionHeader = findHeaderColumn(
+      header,
+      /\b(description|items?(?:\s*\/\s*services?)?|services?|products?|materials?)\b/i,
+    );
+    const qtyHeader = findHeaderColumn(header, /\b(qty|quantity|hours?|units?)\b/i);
+    const rateHeader = findHeaderColumn(header, /\b(rate|unit price|price|unit cost)\b/i);
+    const amountHeader = findHeaderColumn(
+      header,
+      /\b(amount|extended|line total|total)\b/i,
+      true,
+    );
+    if (!descriptionHeader || !amountHeader || amountHeader.x <= descriptionHeader.x) {
+      return { lines: [], columns: continuedColumns, tableEnded: false };
+    }
 
-  const orderedNumericHeaders = [qtyHeader, rateHeader, amountHeader]
-    .filter((item): item is PositionedText => !!item)
-    .sort((a, b) => a.x - b.x);
-  const firstNumericX = orderedNumericHeaders[0]?.x ?? amountHeader.x;
-  const descriptionEnd = (descriptionHeader.x + firstNumericX) / 2;
-  const qtyEnd = qtyHeader
-    ? (qtyHeader.x + (rateHeader?.x ?? amountHeader.x)) / 2
-    : descriptionEnd;
-  const amountStart = rateHeader
-    ? (rateHeader.x + amountHeader.x) / 2
-    : qtyHeader
-      ? qtyEnd
+    const orderedNumericHeaders = [qtyHeader, rateHeader, amountHeader]
+      .filter((item): item is PositionedText => !!item)
+      .sort((a, b) => a.x - b.x);
+    const firstNumericX = orderedNumericHeaders[0]?.x ?? amountHeader.x;
+    const descriptionEnd = (descriptionHeader.x + firstNumericX) / 2;
+    const qtyEnd = qtyHeader
+      ? (qtyHeader.x + (rateHeader?.x ?? amountHeader.x)) / 2
       : descriptionEnd;
+    const amountStart = rateHeader
+      ? (rateHeader.x + amountHeader.x) / 2
+      : qtyHeader
+        ? qtyEnd
+        : descriptionEnd;
+    columns = {
+      descriptionEnd,
+      qtyEnd,
+      amountStart,
+      hasQtyColumn: !!qtyHeader,
+      hasRateColumn: !!rateHeader,
+    };
+  }
+
+  if (!columns) return { lines: [], columns: null, tableEnded: false };
 
   const extracted: InvoiceLineExtraction[] = [];
-  for (let index = headerIndex + 1; index < rows.length; index += 1) {
+  let tableEnded = false;
+  for (let index = Math.max(headerIndex + 1, 0); index < rows.length; index += 1) {
     const row = rows[index];
     const fullText = rowText(row);
     const normalized = fullText.toLowerCase();
     if (
       /^(?:sub\s*total|sales\s+tax|tax(?:\s*\(|\s*:|\s+\d|$)|total\s+due|amount\s+due|balance\s+due|grand\s+total|invoice\s+total|work\s+summary|payment\s+terms)\b/.test(normalized)
     ) {
+      tableEnded = true;
       break;
     }
     if (
@@ -274,14 +306,14 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
       continue;
     }
 
-    const descriptionItems = row.items.filter(item => item.x < descriptionEnd);
-    const qtyItems = qtyHeader
-      ? row.items.filter(item => item.x >= descriptionEnd && item.x < qtyEnd)
+    const descriptionItems = row.items.filter(item => item.x < columns.descriptionEnd);
+    const qtyItems = columns.hasQtyColumn
+      ? row.items.filter(item => item.x >= columns.descriptionEnd && item.x < columns.qtyEnd)
       : [];
-    const rateItems = rateHeader
-      ? row.items.filter(item => item.x >= qtyEnd && item.x < amountStart)
+    const rateItems = columns.hasRateColumn
+      ? row.items.filter(item => item.x >= columns.qtyEnd && item.x < columns.amountStart)
       : [];
-    const amountItems = row.items.filter(item => item.x >= amountStart);
+    const amountItems = row.items.filter(item => item.x >= columns.amountStart);
 
     const description = joinCell(descriptionItems);
     const amount = parseMoney(joinCell(amountItems));
@@ -324,7 +356,7 @@ function extractLinesFromPage(items: PositionedText[]): InvoiceLineExtraction[] 
     });
   }
 
-  return extracted;
+  return { lines: extracted, columns, tableEnded };
 }
 
 export function findInvoiceTotal(text: string): InvoiceTotalExtraction {
@@ -406,6 +438,7 @@ export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<Invoi
     const pageRowText: string[] = [];
     const lines: InvoiceLineExtraction[] = [];
     const pageLimit = Math.min(pdf.numPages, 25);
+    let continuedColumns: InvoiceTableColumns | null = null;
 
     for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
@@ -421,7 +454,9 @@ export async function extractInvoiceDataFromPdf(data: Uint8Array): Promise<Invoi
       const text = positionedItems.map(item => `${item.text} `).join("");
       pageText.push(text);
       pageRowText.push(buildRows(positionedItems).map(rowText).join("\n"));
-      lines.push(...extractLinesFromPage(positionedItems));
+      const pageLines = extractLinesFromPage(positionedItems, continuedColumns);
+      lines.push(...pageLines.lines);
+      continuedColumns = pageLines.tableEnded ? null : pageLines.columns;
     }
 
     const total = findInvoiceTotal(pageText.join("\n").slice(0, 250_000));
