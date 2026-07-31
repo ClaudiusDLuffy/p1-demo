@@ -15,23 +15,68 @@ export type StaffInvoiceCsvInput = {
   num?: unknown;
   wot?: unknown;
   workOrderId?: unknown;
-  salesTax?: unknown;
-  sales_tax?: unknown;
+  store?: unknown;
+  storeNumber?: unknown;
+  invoiceDate?: unknown;
+  invoiceDateRaw?: unknown;
+  serviceDate?: unknown;
+  serviceDateRaw?: unknown;
+  dueDate?: unknown;
+  dueDateRaw?: unknown;
+  terms?: unknown;
+  taxRate?: unknown;
+  tax_rate?: unknown;
+  taxState?: unknown;
+  tax_state?: unknown;
+  territory?: unknown;
   lines?: StaffInvoiceCsvLine[];
 };
 
 export type StaffInvoiceCsvRow = {
-  lineItem: string;
+  invoiceNumber: string;
+  customer: string;
+  subCustomer: string;
+  terms: string;
+  invoiceDate: string;
+  serviceDate: string;
+  dueDate: string;
+  location: string;
+  shippingTo: string;
+  storeNumber: string;
+  memo: string;
+  messageOnInvoice: string;
+  workOrderNumber: string;
+  productService: string;
   description: string;
-  qty: number;
+  quantity: number;
   rate: number;
   amount: number;
-  taxable: boolean;
-  tax: number;
-  total: number;
+  taxRate: string;
+  className: string;
 };
 
-type LineItemNormalizer = (value: unknown) => string;
+const HEADERS = [
+  "Invoice Number",
+  "*Customer",
+  "Sub Customer",
+  "Terms",
+  "*Invoice Date",
+  "*Service Date",
+  "Due Date",
+  "Location",
+  "Shipping To",
+  "Store Number",
+  "Memo",
+  "Message on Invoice",
+  "Work Order #",
+  "*Product/Service",
+  "Description",
+  "Quantity",
+  "Rate",
+  "*Amount",
+  "Tax Rate",
+  "Class",
+] as const;
 
 const roundMoney = (value: number) =>
   Math.round((value + Number.EPSILON) * 100) / 100;
@@ -41,111 +86,110 @@ const finiteNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const moneyCents = (value: unknown) =>
-  Math.max(0, Math.round(finiteNumber(value) * 100));
+const formatDate = (value: unknown) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
 
-const allocateTaxCents = (rows: StaffInvoiceCsvRow[], taxCents: number) => {
-  const allocations = rows.map(() => 0);
-  const taxableIndexes = rows
-    .map((row, index) => ({ row, index }))
-    .filter(({ row }) => row.taxable && row.amount > 0)
-    .map(({ index }) => index);
-  const taxableCents = taxableIndexes.reduce(
-    (sum, index) => sum + moneyCents(rows[index].amount),
-    0,
-  );
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${Number(iso[2])}/${Number(iso[3])}/${iso[1]}`;
 
-  if (taxCents <= 0 || taxableIndexes.length === 0 || taxableCents <= 0) {
-    return allocations;
-  }
+  const us = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) return `${Number(us[1])}/${Number(us[2])}/${us[3]}`;
 
-  let allocated = 0;
-  taxableIndexes.forEach((rowIndex, taxableIndex) => {
-    const isLast = taxableIndex === taxableIndexes.length - 1;
-    const cents = isLast
-      ? taxCents - allocated
-      : Math.floor(
-          taxCents * moneyCents(rows[rowIndex].amount) / taxableCents,
-        );
-    allocations[rowIndex] = cents;
-    allocated += cents;
-  });
-
-  return allocations;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
 };
 
-const preserveInvoiceLineType = (value: unknown) =>
-  String(value || "").trim() || "Other";
+const territoryFromState = (value: unknown) => {
+  const state = String(value || "").trim().toUpperCase();
+  if (state === "VA") return "Virginia";
+  if (state === "TX") return "Texas";
+  if (state === "FL") return "Florida";
+  return "";
+};
+
+const taxRateText = (invoice: StaffInvoiceCsvInput, taxable: boolean) => {
+  if (!taxable) return "";
+  const raw = invoice.taxRate ?? invoice.tax_rate;
+  if (raw === "" || raw == null) return "";
+  const rate = finiteNumber(raw);
+  if (rate <= 0) return "";
+  const percent = rate <= 1 ? rate * 100 : rate;
+  return `${Number(percent.toFixed(4))}%`;
+};
+
+const storeNumber = (invoice: StaffInvoiceCsvInput) =>
+  String(invoice.store ?? invoice.storeNumber ?? "").trim();
 
 function buildInvoiceCsvRows(
   invoice: StaffInvoiceCsvInput,
-  normalizeLineItem: LineItemNormalizer,
 ): StaffInvoiceCsvRow[] {
-  const rows: StaffInvoiceCsvRow[] = (invoice.lines || []).map(line => {
-    const qty = Math.max(0, finiteNumber(line.qty));
-    const rate = Math.max(0, finiteNumber(line.rate));
-    const calculatedAmount = qty * rate;
-    const suppliedAmount = finiteNumber(line.amount);
-    const amount = roundMoney(
-      suppliedAmount > 0 ? suppliedAmount : calculatedAmount,
-    );
-
-    return {
-      lineItem: normalizeLineItem(line.type),
-      description: String(line.desc ?? line.description ?? "").trim(),
-      qty,
-      rate: roundMoney(rate),
-      amount,
-      taxable: Boolean(line.isTaxable ?? line.is_taxable),
-      tax: 0,
-      total: amount,
-    };
-  });
-
-  if (rows.length === 0) {
+  const lines = invoice.lines || [];
+  if (lines.length === 0) {
     throw new Error("No invoice line items are available to export");
   }
 
-  const taxCents = moneyCents(invoice.salesTax ?? invoice.sales_tax);
-  const allocations = allocateTaxCents(rows, taxCents);
-  const allocatedTaxCents = allocations.reduce((sum, cents) => sum + cents, 0);
+  const store = storeNumber(invoice);
+  const shippingTo = store ? `7-ELEVEN STORE - ${store}` : "";
+  const invoiceNumber = String(invoice.num || "").trim();
+  const workOrderNumber = String(
+    invoice.wot ?? invoice.workOrderId ?? "",
+  ).trim();
+  const territory = String(invoice.territory || "").trim()
+    || territoryFromState(invoice.taxState ?? invoice.tax_state);
 
-  const rowsWithTax = rows.map((row, index) => {
-    const tax = allocations[index] / 100;
+  return lines.map((line, index) => {
+    const quantity = Math.max(0, finiteNumber(line.qty));
+    const rate = Math.max(0, finiteNumber(line.rate));
+    const suppliedAmount = finiteNumber(line.amount);
+    const lineAmount = roundMoney(
+      suppliedAmount > 0 ? suppliedAmount : quantity * rate,
+    );
+    const taxable = Boolean(line.isTaxable ?? line.is_taxable);
+    const first = index === 0;
+
     return {
-      ...row,
-      tax,
-      total: roundMoney(row.amount + tax),
+      invoiceNumber,
+      customer: first ? "7-Eleven Inc" : "",
+      subCustomer: first ? shippingTo : "",
+      terms: first ? String(invoice.terms || "Net 30").trim() : "",
+      invoiceDate: first
+        ? formatDate(invoice.invoiceDateRaw ?? invoice.invoiceDate)
+        : "",
+      serviceDate: first
+        ? formatDate(invoice.serviceDateRaw ?? invoice.serviceDate)
+        : "",
+      dueDate: first
+        ? formatDate(invoice.dueDateRaw ?? invoice.dueDate)
+        : "",
+      location: first ? territory : "",
+      shippingTo: first ? shippingTo : "",
+      storeNumber: first ? store : "",
+      memo: "",
+      messageOnInvoice: "",
+      workOrderNumber: first ? workOrderNumber : "",
+      productService: normalizeStaffBillingLineType(line.type),
+      description: String(line.desc ?? line.description ?? "").trim(),
+      quantity,
+      rate: roundMoney(rate),
+      amount: lineAmount,
+      taxRate: taxRateText(invoice, taxable),
+      className: "",
     };
   });
-
-  if (taxCents > allocatedTaxCents) {
-    const tax = (taxCents - allocatedTaxCents) / 100;
-    rowsWithTax.push({
-      lineItem: "Sales Tax",
-      description: "Invoice-level sales tax",
-      qty: 1,
-      rate: 0,
-      amount: 0,
-      taxable: false,
-      tax,
-      total: tax,
-    });
-  }
-
-  return rowsWithTax;
 }
 
 export function invoiceCsvRows(
   invoice: StaffInvoiceCsvInput,
 ): StaffInvoiceCsvRow[] {
-  return buildInvoiceCsvRows(invoice, preserveInvoiceLineType);
+  return buildInvoiceCsvRows(invoice);
 }
 
 export function staffInvoiceCsvRows(
   invoice: StaffInvoiceCsvInput,
 ): StaffInvoiceCsvRow[] {
-  return buildInvoiceCsvRows(invoice, normalizeStaffBillingLineType);
+  return buildInvoiceCsvRows(invoice);
 }
 
 const protectSpreadsheetText = (value: string) =>
@@ -156,35 +200,38 @@ const escapeCsvCell = (value: string) => {
   return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
 };
 
-const quantityText = (value: number) =>
+const numberText = (value: number) =>
   Number(value.toFixed(4)).toString();
 
-const generateCsv = (rows: StaffInvoiceCsvRow[]) => {
-  const header = [
-    "line item",
-    "description",
-    "qty",
-    "rate",
-    "amount",
-    "taxable",
-    "tax",
-    "total",
-  ];
-  const cells = rows.map(row => [
-    protectSpreadsheetText(row.lineItem),
-    protectSpreadsheetText(row.description),
-    quantityText(row.qty),
-    row.rate.toFixed(2),
-    row.amount.toFixed(2),
-    row.taxable ? "Yes" : "No",
-    row.tax.toFixed(2),
-    row.total.toFixed(2),
-  ]);
+const rowCells = (row: StaffInvoiceCsvRow) => [
+  row.invoiceNumber,
+  row.customer,
+  row.subCustomer,
+  row.terms,
+  row.invoiceDate,
+  row.serviceDate,
+  row.dueDate,
+  row.location,
+  row.shippingTo,
+  row.storeNumber,
+  row.memo,
+  row.messageOnInvoice,
+  row.workOrderNumber,
+  row.productService,
+  row.description,
+  numberText(row.quantity),
+  numberText(row.rate),
+  numberText(row.amount),
+  row.taxRate,
+  row.className,
+];
 
-  return [header, ...cells]
-    .map(row => row.map(escapeCsvCell).join(","))
+const generateCsv = (rows: StaffInvoiceCsvRow[]) =>
+  [HEADERS, ...rows.map(rowCells)]
+    .map(row => row
+      .map(value => escapeCsvCell(protectSpreadsheetText(String(value))))
+      .join(","))
     .join("\r\n");
-};
 
 export function generateInvoiceCsv(invoice: StaffInvoiceCsvInput): string {
   return generateCsv(invoiceCsvRows(invoice));

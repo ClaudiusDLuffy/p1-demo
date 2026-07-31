@@ -48,10 +48,10 @@ export const STATUS = {
   parts: { label: "Awaiting Parts", color: T.warn, bg: T.warnSoft, ring: "#EED9A6" },
   capital: { label: "Capital Replacement", color: "#5B4B8A", bg: "#EDE9F5", ring: "#D4C9E8" },
   completed: { label: "Completed", color: T.success, bg: T.successSoft, ring: "#CFDED3" },
-  pending_invoice: { label: "Pending Invoice", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
+  pending_invoice: { label: "Pending 7-Eleven Submission", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
   pending_approval: { label: "Pending Approval", color: T.muted, bg: T.borderSoft, ring: T.border },
   // Compatibility alias for rows created before the payment stage was retired.
-  pending_payment: { label: "Pending Invoice", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
+  pending_payment: { label: "Pending 7-Eleven Submission", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
   closed: { label: "Closed", color: T.subtle, bg: T.borderSoft, ring: T.border },
 };
 
@@ -75,7 +75,8 @@ export const INV_STATE = {
 
 export const STAFF_INV_STATE = {
   ...INV_STATE,
-  submitted: { ...INV_STATE.submitted, label: "Submitted to 7-Eleven" },
+  submitted: { ...INV_STATE.submitted, label: "Please send to 7-Eleven" },
+  approved: { ...INV_STATE.approved, label: "Sent to 7-Eleven" },
 };
 
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

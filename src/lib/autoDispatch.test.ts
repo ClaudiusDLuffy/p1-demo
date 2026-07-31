@@ -72,3 +72,22 @@ test("retains Slurpee as the dedicated frozen beverage route", () => {
     "slurpee",
   );
 });
+
+test("matches ice as a standalone trade without matching the end of service", () => {
+  assert.equal(
+    detectDispatchTrade(parsed({
+      lineOfService: "Food Service",
+      businessService: "Hot food",
+      category: "Roller grill",
+    })),
+    null,
+  );
+  assert.equal(
+    detectDispatchTrade(parsed({
+      lineOfService: "Ice",
+      businessService: "Ice merchandiser",
+      category: "Ice machine",
+    })),
+    "ice",
+  );
+});

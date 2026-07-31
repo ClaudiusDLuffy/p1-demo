@@ -7,8 +7,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
+import { Ico } from "../../components/ui/Ico";
 import { Sel } from "../../components/ui/Sel";
-import { T, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
+import { PRIORITY, T, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
 import {
   calculateTrips,
   defaultLineTaxable,
@@ -16,6 +17,8 @@ import {
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
 import {
+  importedStaffBillingRate,
+  isStaffBillingPartsLine,
   normalizeStaffBillingLineType,
   STAFF_BILLING_LINE_TYPES,
 } from "../../lib/staffBilling";
@@ -69,6 +72,7 @@ const BillingInvoiceSchema = z.object({
   serviceDate: z.string().optional(),
   dueDate: z.string().optional(),
   workOrderId: z.string().optional(),
+  territory: z.string().trim().min(1, "Territory is required"),
   storeNumber: z.string().min(1, "Store number is required"),
   storeAddress: z.string().optional(),
   terms: z.string().min(1),
@@ -96,7 +100,29 @@ const addDays = (iso: string, days: number) => {
 
 const amount = (line: any) => (Number(line?.qty) || 0) * (Number(line?.rate) || 0);
 const money = (value: number) => Math.round(value * 100) / 100;
-const isPartsLine = (type: unknown) => /part|hardware|material/i.test(String(type || ""));
+const KNOWN_TERRITORIES = ["Virginia", "Texas", "Florida"] as const;
+const CONTROLLER_EMAIL = "emilyb@phospitality.com";
+const STAFF_INVOICE_SERIES: Record<string, { prefix: string; start: number }> = {
+  "lynzy@p1pros.com": { prefix: "P1-L-", start: 1000 },
+  "mandy@p1pros.com": { prefix: "P1-M-", start: 2000 },
+  "lynette@p1pros.com": { prefix: "P1-N-", start: 3000 },
+};
+
+const territoryFromState = (state: unknown) => {
+  const code = String(state || "").trim().toUpperCase();
+  if (code === "VA") return "Virginia";
+  if (code === "TX") return "Texas";
+  if (code === "FL") return "Florida";
+  return "";
+};
+
+const QUICK_ADD_LINES = [
+  { label: "Labor", type: "Labor", desc: "", rate: 110 },
+  { label: "OT Labor", type: "OT Labor", desc: "", rate: 165 },
+  { label: "Parts", type: "Parts/Hardware", desc: "", rate: undefined },
+  { label: "Travel", type: "Travel", desc: "", rate: 110 },
+  { label: "Refrigerant", type: "Parts/Hardware", desc: "Refrigerant", rate: 35 },
+] as const;
 
 const QUICK_ADD_PRESETS = [
   { label: "Field Wiring Kit", type: "Parts/Hardware", rate: 52 },
@@ -120,7 +146,19 @@ const dateInTimeZone = (value: string | null | undefined, timeZone: string) => {
   return `${get("year")}-${get("month")}-${get("day")}`;
 };
 
-const nextStaffNum = (invoices: any[]) => {
+const nextStaffNum = (invoices: any[], currentUser: any) => {
+  const email = String(currentUser?.email || "").trim().toLowerCase();
+  const series = STAFF_INVOICE_SERIES[email];
+  if (series) {
+    const maxNum = (invoices || []).reduce((max: number, invoice: any) => {
+      const value = String(invoice.num || "");
+      if (!value.startsWith(series.prefix)) return max;
+      const n = Number(value.slice(series.prefix.length));
+      return Number.isInteger(n) && n >= series.start && n > max ? n : max;
+    }, series.start - 1);
+    return `${series.prefix}${maxNum + 1}`;
+  }
+
   const maxNum = (invoices || []).reduce((max: number, invoice: any) => {
     const match = String(invoice.num || "").match(/^P1-(\d+)$/i);
     const n = match ? parseInt(match[1], 10) : 0;
@@ -132,26 +170,33 @@ const nextStaffNum = (invoices: any[]) => {
 export default function BillingInvoiceCreateModal(props: any) {
   const {
     modal,
+    currentUser,
     workOrders,
     contractorInvoices,
     billingInvoices,
     editingInvoice,
+    initialSourceInvoiceId,
     onClose,
     onCreated,
     fire,
     fmt,
   } = props;
   const [submitting, setSubmitting] = useState(false);
+  const [pullingLines, setPullingLines] = useState(false);
   const [woSearch, setWoSearch] = useState("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [partsMarkup, setPartsMarkup] = useState("25");
-  const [targetMargin, setTargetMargin] = useState("30");
+  const [customTerritory, setCustomTerritory] = useState(false);
+  const [draggingLine, setDraggingLine] = useState<number | null>(null);
+  const [sourceSnapshots, setSourceSnapshots] = useState<Record<string, any>>({});
   const [taxRates, setTaxRates] = useState<any[]>([]);
   const [taxRateLoadError, setTaxRateLoadError] = useState("");
   const initializedFor = useRef<string | null>(null);
   const previousInvoiceDate = useRef("");
   const previousWorkOrderId = useRef("");
   const isEditing = !!editingInvoice?.id;
+  const controller = String(currentUser?.email || "").trim().toLowerCase()
+    === CONTROLLER_EMAIL;
 
   const {
     register,
@@ -171,6 +216,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       serviceDate: "",
       dueDate: addDays(todayIso(), 30),
       workOrderId: "",
+      territory: "",
       storeNumber: "",
       storeAddress: "",
       terms: "Net 30",
@@ -183,10 +229,11 @@ export default function BillingInvoiceCreateModal(props: any) {
     },
   });
 
-  const { fields, append, remove, replace } = useFieldArray({ control, name: "lines" });
+  const { fields, append, remove, replace, move } = useFieldArray({ control, name: "lines" });
   const lines = watch("lines") || [];
   const subtotal = lines.reduce((sum: number, line: any) => sum + amount(line), 0);
   const selectedWorkOrderId = watch("workOrderId");
+  const territory = String(watch("territory") || "");
   const invoiceDate = watch("invoiceDate");
   const serviceDate = watch("serviceDate");
   const taxState = String(watch("taxState") || "").toUpperCase();
@@ -285,38 +332,38 @@ export default function BillingInvoiceCreateModal(props: any) {
     () => (contractorInvoices || []).filter((invoice: any) =>
       invoice.wot === selectedWorkOrderId
       && invoice.state !== "draft"
-      && invoice.state !== "rejected",
+      && invoice.state !== "rejected"
+      && (!controller || ["approved", "paid"].includes(invoice.state)),
     ),
-    [contractorInvoices, selectedWorkOrderId],
+    [contractorInvoices, controller, selectedWorkOrderId],
   );
 
   const selectedSourceInvoices = useMemo(
     () => availableSourceInvoices.filter((invoice: any) =>
       selectedSourceIds.includes(invoice.id),
-    ),
-    [availableSourceInvoices, selectedSourceIds],
+    ).map((invoice: any) => sourceSnapshots[invoice.id] || invoice),
+    [availableSourceInvoices, selectedSourceIds, sourceSnapshots],
   );
 
   const contractorCost = selectedSourceInvoices.reduce(
-    (sum: number, invoice: any) => sum + Number(invoice.total || 0),
+    (sum: number, invoice: any) => sum + Number(
+      invoice.subtotal
+      ?? Math.max(Number(invoice.total || 0) - Number(invoice.salesTax || 0), 0),
+    ),
     0,
   );
-  const selectedPartsCost = selectedSourceInvoices.reduce(
-    (invoiceSum: number, invoice: any) =>
-      invoiceSum + (invoice.lines || []).reduce(
-        (lineSum: number, line: any) =>
-          lineSum + (isPartsLine(line.type) ? amount(line) : 0),
-        0,
-      ),
-    0,
-  );
-  const parsedPartsMarkup = Number(partsMarkup);
-  const partsMarkupAmount = Number.isFinite(parsedPartsMarkup)
-    ? money(selectedPartsCost * parsedPartsMarkup / 100)
-    : 0;
-  const costAfterPartsMarkup = contractorCost + partsMarkupAmount;
-  const actualMargin = subtotal > 0 && costAfterPartsMarkup > 0
-    ? ((subtotal - costAfterPartsMarkup) / subtotal) * 100
+  const partsMarkupAmount = lines.reduce((sum: number, line: any) => {
+    if (
+      !isStaffBillingPartsLine(line.type)
+      || line.sourceUnitCost == null
+    ) return sum;
+    return sum + Math.max(
+      (Number(line.rate) - Number(line.sourceUnitCost)) * Number(line.qty || 0),
+      0,
+    );
+  }, 0);
+  const actualMargin = subtotal > 0 && contractorCost > 0
+    ? ((subtotal - contractorCost) / subtotal) * 100
     : null;
 
   const workOrderOptions = useMemo(() => {
@@ -362,21 +409,32 @@ export default function BillingInvoiceCreateModal(props: any) {
     }
     const initializationKey = editingInvoice?.id
       ? `edit:${editingInvoice.id}`
-      : "create";
+      : `create:${initialSourceInvoiceId || ""}`;
     if (initializedFor.current === initializationKey) return;
     initializedFor.current = initializationKey;
 
     const today = todayIso();
     const initialInvoiceDate = editingInvoice?.invoiceDateRaw || today;
-    const initialWorkOrderId = editingInvoice?.wot || "";
+    const initialSourceInvoice = (contractorInvoices || []).find(
+      (invoice: any) => invoice.id === initialSourceInvoiceId,
+    );
+    const initialWorkOrderId = editingInvoice?.wot || initialSourceInvoice?.wot || "";
     previousInvoiceDate.current = initialInvoiceDate;
     previousWorkOrderId.current = initialWorkOrderId;
     reset({
-      num: editingInvoice?.num || nextStaffNum(billingInvoices),
+      num: editingInvoice?.num || nextStaffNum(billingInvoices, currentUser),
       invoiceDate: initialInvoiceDate,
       serviceDate: editingInvoice?.serviceDateRaw || "",
       dueDate: editingInvoice?.dueDateRaw || addDays(initialInvoiceDate, 30),
       workOrderId: initialWorkOrderId,
+      territory: editingInvoice?.territory
+        || territoryFromState(
+          editingInvoice?.taxState
+          || stateCodeFromWorkOrder(
+            activeWorkOrders.find((item: any) => item.id === initialWorkOrderId),
+          ),
+        )
+        || "",
       storeNumber: editingInvoice?.store || "",
       storeAddress: editingInvoice?.storeAddr || "",
       terms: editingInvoice?.terms || "Net 30",
@@ -407,12 +465,31 @@ export default function BillingInvoiceCreateModal(props: any) {
         : [],
     });
     setWoSearch("");
-    setSelectedSourceIds(editingInvoice?.sourceInvoiceIds || []);
+    setSelectedSourceIds(
+      editingInvoice?.sourceInvoiceIds
+      || (initialSourceInvoice?.id ? [initialSourceInvoice.id] : []),
+    );
+    setSourceSnapshots(Object.fromEntries(
+      (editingInvoice?.sourceInvoices || []).map((invoice: any) => [
+        invoice.id,
+        invoice,
+      ]),
+    ));
     setPartsMarkup("25");
-    setTargetMargin(editingInvoice?.marginPercent != null
-      ? Number(editingInvoice.marginPercent).toFixed(1)
-      : "30");
-  }, [billingInvoices, editingInvoice, modal, reset]);
+    setCustomTerritory(
+      !!editingInvoice?.territory
+      && !KNOWN_TERRITORIES.includes(editingInvoice.territory),
+    );
+  }, [
+    activeWorkOrders,
+    billingInvoices,
+    contractorInvoices,
+    currentUser,
+    editingInvoice,
+    initialSourceInvoiceId,
+    modal,
+    reset,
+  ]);
 
   useEffect(() => {
     if (!invoiceDate) return;
@@ -429,6 +506,11 @@ export default function BillingInvoiceCreateModal(props: any) {
     setValue("storeAddress", wo.addr || "", { shouldDirty: true });
     const storeState = stateCodeFromWorkOrder(wo);
     setValue("taxState", storeState, { shouldDirty: true });
+    setValue("territory", territoryFromState(storeState), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setCustomTerritory(false);
     const latestVisitClockOut = [...(wo.visits || [])]
       .filter((visit: any) => visit?.checkOutAt)
       .sort((a: any, b: any) =>
@@ -456,6 +538,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     if (previousWorkOrderId.current === selectedWorkOrderId) return;
     previousWorkOrderId.current = selectedWorkOrderId || "";
     setSelectedSourceIds([]);
+    setSourceSnapshots({});
     setValue("taxRateOverride", "", { shouldDirty: true });
     setValue("salesTaxOverride", "", { shouldDirty: true });
   }, [selectedWorkOrderId, setValue]);
@@ -471,6 +554,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       serviceDate: "",
       dueDate: addDays(today, 30),
       workOrderId: "",
+      territory: "",
       storeNumber: "",
       storeAddress: "",
       terms: "Net 30",
@@ -484,8 +568,10 @@ export default function BillingInvoiceCreateModal(props: any) {
     clearErrors();
     setWoSearch("");
     setSelectedSourceIds([]);
+    setSourceSnapshots({});
     setPartsMarkup("25");
-    setTargetMargin("30");
+    setCustomTerritory(false);
+    setDraggingLine(null);
     onClose?.();
   };
 
@@ -499,14 +585,9 @@ export default function BillingInvoiceCreateModal(props: any) {
       : [...current, invoiceId]);
   };
 
-  const pullSourceLines = () => {
-    if (selectedSourceInvoices.length === 0) {
+  const pullSourceLines = async () => {
+    if (selectedSourceIds.length === 0) {
       fire?.("Select at least one contractor invoice");
-      return;
-    }
-    const margin = Number(targetMargin);
-    if (!Number.isFinite(margin) || margin < 0 || margin >= 100) {
-      fire?.("Target margin must be between 0 and 99.99 percent");
       return;
     }
     const partMarkupPercent = Number(partsMarkup);
@@ -514,55 +595,76 @@ export default function BillingInvoiceCreateModal(props: any) {
       fire?.("Parts markup must be between 0 and 999 percent");
       return;
     }
-    const sourceLines = selectedSourceInvoices.flatMap((invoice: any) => {
-      if ((invoice.lines || []).length === 0) {
-        return [{
-          type: "Other",
-          desc: "Contracted service",
-          qty: 1,
-          sourceInvoiceLineId: null,
-          sourceUnitCost: Number(invoice.total || 0),
-        }];
+    setPullingLines(true);
+    try {
+      const sb = supabase();
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Missing session");
+
+      const params = new URLSearchParams({
+        sourceInvoiceIds: selectedSourceIds.join(","),
+      });
+      const response = await fetch(`/api/billing-invoices?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Contractor invoice lines could not be loaded");
       }
-      return invoice.lines.map((line: any) => ({
-        type: normalizeStaffBillingLineType(line.type),
-        desc: line.desc || line.description || "Contractor service",
-        qty: Number(line.qty || 1),
-        sourceInvoiceLineId: line.id || null,
-        sourceUnitCost: Number(line.rate || 0),
+
+      const freshInvoices = payload.invoices || [];
+      setSourceSnapshots(current => ({
+        ...current,
+        ...Object.fromEntries(
+          freshInvoices.map((invoice: any) => [invoice.id, invoice]),
+        ),
       }));
-    });
+      const sourceLines = freshInvoices.flatMap((invoice: any) => {
+        if ((invoice.lines || []).length === 0) {
+          return [{
+            type: "Other",
+            desc: "Contracted service",
+            qty: 1,
+            sourceInvoiceLineId: null,
+            sourceUnitCost: Number(
+              invoice.subtotal
+              ?? Math.max(Number(invoice.total || 0) - Number(invoice.salesTax || 0), 0),
+            ),
+          }];
+        }
+        return invoice.lines.map((line: any) => ({
+          type: normalizeStaffBillingLineType(line.type),
+          desc: line.desc || line.description || "Contractor service",
+          qty: Number(line.qty || 1),
+          sourceInvoiceLineId: line.id || null,
+          sourceUnitCost: Number(line.rate || 0),
+        }));
+      });
 
-    const sourceCost = sourceLines.reduce(
-      (sum: number, line: any) => sum + line.qty * line.sourceUnitCost,
-      0,
-    );
-    const partsCost = sourceLines
-      .filter((line: any) => isPartsLine(line.type))
-      .reduce(
-        (sum: number, line: any) => sum + line.qty * line.sourceUnitCost,
-        0,
-      );
-    const partsMultiplier = 1 + partMarkupPercent / 100;
-    const costAfterParts = sourceCost + partsCost * (partsMultiplier - 1);
-    const overallMarginMultiplier = margin >= 100
-      ? 1
-      : 1 / (1 - margin / 100);
-
-    const imported = sourceLines.map((line: any) => {
-      const parts = isPartsLine(line.type);
-      const multiplier = (parts ? partsMultiplier : 1) * overallMarginMultiplier;
-      return {
-        ...line,
-        rate: money(line.sourceUnitCost * multiplier),
-        markupPercent: money((multiplier - 1) * 100),
-        isTaxable: defaultLineTaxable(line.type, line.desc),
-      };
-    });
-    replace(imported);
-    clearErrors("lines");
-    setTimeout(() => void trigger("lines"), 0);
-    fire?.(`Pulled ${imported.length} line item${imported.length === 1 ? "" : "s"}`);
+      const imported = sourceLines.map((line: any) => {
+        const parts = isStaffBillingPartsLine(line.type);
+        return {
+          ...line,
+          rate: importedStaffBillingRate(
+            line.type,
+            line.sourceUnitCost,
+            partMarkupPercent,
+          ),
+          markupPercent: parts ? partMarkupPercent : null,
+          isTaxable: defaultLineTaxable(line.type, line.desc),
+        };
+      });
+      replace(imported);
+      clearErrors("lines");
+      setTimeout(() => void trigger("lines"), 0);
+      fire?.(`Pulled ${imported.length} line item${imported.length === 1 ? "" : "s"}`);
+    } catch (error: any) {
+      fire?.(`Pull lines failed: ${error.message || error}`);
+    } finally {
+      setPullingLines(false);
+    }
   };
 
   const submit = async (data: any, state: "draft" | "submitted") => {
@@ -610,7 +712,7 @@ export default function BillingInvoiceCreateModal(props: any) {
 
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "Billing invoice save failed");
-      fire?.(`Invoice #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "submitted"}`);
+      fire?.(`Invoice #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
       onCreated?.(payload.invoice);
       discardAndClose();
     } catch (err: any) {
@@ -647,13 +749,13 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num")} readOnly title="Assigned automatically when the invoice is created" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
         </div>
 
-        <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+        <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr 0.8fr", gap: 10, marginBottom: 16 }}>
           <div>
             <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Search work order</span>
             <input value={woSearch} onChange={(e: any) => setWoSearch(e.target.value)} placeholder="WO number, store, city, keyword" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13, marginBottom: 8 }} />
@@ -687,15 +789,51 @@ export default function BillingInvoiceCreateModal(props: any) {
             </Sel>
           </div>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store number</span><input {...register("storeNumber")} placeholder="Required" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.storeNumber ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.storeNumber && <span style={{ fontSize: 11, color: T.danger }}>{errors.storeNumber.message}</span>}</label>
+          <label>
+            <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Territory</span>
+            <Sel
+              value={customTerritory ? "__new__" : territory}
+              onChange={(event: any) => {
+                if (event.target.value === "__new__") {
+                  setCustomTerritory(true);
+                  setValue("territory", "", { shouldDirty: true, shouldValidate: true });
+                  return;
+                }
+                setCustomTerritory(false);
+                setValue("territory", event.target.value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                });
+              }}
+              aria-label="Invoice territory"
+              style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
+            >
+              <option value="">Select territory</option>
+              {KNOWN_TERRITORIES.map(item => <option key={item} value={item}>{item}</option>)}
+              <option value="__new__">+ Add new territory</option>
+            </Sel>
+            {customTerritory ? (
+              <input
+                {...register("territory")}
+                autoFocus
+                placeholder="Territory name"
+                style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 12 }}
+              />
+            ) : (
+              <input type="hidden" {...register("territory")} />
+            )}
+            {errors.territory && <span style={{ display: "block", fontSize: 11, color: T.danger, marginTop: 4 }}>{String(errors.territory.message)}</span>}
+          </label>
         </div>
 
-        {selectedWorkOrder?.priority === "p1" && (
-          <div role="status" style={{ padding: "11px 14px", marginBottom: 14, borderRadius: 9, border: `1px solid ${T.warn}55`, background: T.warnSoft, color: T.ink, fontSize: 12, fontWeight: 700 }}>
-            P1 priority: overtime work is approved. Review the trip summary before billing.
+        {selectedWorkOrder && (
+          <div role="status" style={{ padding: "11px 14px", marginBottom: 14, borderRadius: 9, border: `1px solid ${selectedWorkOrder.priority === "p1" ? `${T.warn}55` : T.borderSoft}`, background: selectedWorkOrder.priority === "p1" ? T.warnSoft : T.surfaceSoft, color: T.ink, fontSize: 12, fontWeight: 700 }}>
+            Priority: {PRIORITY[selectedWorkOrder.priority]?.label || String(selectedWorkOrder.priority || "Not set")}
+            {selectedWorkOrder.priority === "p1" ? " - overtime work is approved. Review the trip summary before billing." : ""}
           </div>
         )}
 
-        {selectedWorkOrderId && (
+        {selectedWorkOrder?.priority === "p1" && (
           <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, padding: 14, marginBottom: 16, background: T.surface }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: selectedTrips.length ? 10 : 0 }}>
               <div>
@@ -749,11 +887,9 @@ export default function BillingInvoiceCreateModal(props: any) {
                     <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.subtle, marginBottom: 4 }}>Parts markup %</span>
                     <input type="number" min="0" max="999" step="0.1" value={partsMarkup} onChange={(e: any) => setPartsMarkup(e.target.value)} style={{ width: 92, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12 }} />
                   </label>
-                  <label>
-                    <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.subtle, marginBottom: 4 }}>Overall margin %</span>
-                    <input type="number" min="0" max="99.99" step="0.1" value={targetMargin} onChange={(e: any) => setTargetMargin(e.target.value)} style={{ width: 92, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12 }} />
-                  </label>
-                  <button type="button" onClick={pullSourceLines} className="btn-primary" style={{ padding: "8px 12px", fontSize: 11 }}>Pull lines + calculate</button>
+                  <button type="button" disabled={pullingLines} onClick={() => void pullSourceLines()} className="btn-primary" style={{ padding: "8px 12px", fontSize: 11, opacity: pullingLines ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                    {pullingLines ? <><BtnSpinner />Pulling...</> : "Pull lines + calculate"}
+                  </button>
                 </div>
               )}
             </div>
@@ -778,12 +914,10 @@ export default function BillingInvoiceCreateModal(props: any) {
               </div>
             )}
             {selectedSourceInvoices.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, marginTop: 12 }} className="billing-source-metrics">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 12 }} className="billing-source-metrics">
                 <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>Contractor cost</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(contractorCost)}</div></div>
                 <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>Parts markup</div><div className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.accent }}>+{fmt(partsMarkupAmount)}</div></div>
-                <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>After parts</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(costAfterPartsMarkup)}</div></div>
                 <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>P1 subtotal</div><div className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{fmt(subtotal)}</div></div>
-                <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 700 }}>Overall margin</div><div className="mono" style={{ fontSize: 13, fontWeight: 700, color: actualMargin == null ? T.subtle : actualMargin >= Number(targetMargin) - 0.1 ? T.success : T.danger }}>{actualMargin == null ? "-" : `${actualMargin.toFixed(1)}%`}</div></div>
               </div>
             )}
           </div>
@@ -797,8 +931,8 @@ export default function BillingInvoiceCreateModal(props: any) {
 
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
-          <div className="billing-line-head" style={{ display: "grid", gridTemplateColumns: "110px minmax(180px, 1fr) 58px 82px 74px 66px 92px 28px", gap: 8, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
-            <div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Markup</div><div style={{ textAlign: "center" }}>Taxable</div><div style={{ textAlign: "right" }}>Amount</div><div />
+          <div className="billing-line-head" style={{ display: "grid", gridTemplateColumns: "28px 110px minmax(180px, 1fr) 58px 82px 74px 66px 92px 28px", gap: 8, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
+            <div /><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Markup</div><div style={{ textAlign: "center" }}>Taxable</div><div style={{ textAlign: "right" }}>Amount</div><div />
           </div>
           {fields.map((field, i) => {
             const line = lines[i] || field;
@@ -807,7 +941,17 @@ export default function BillingInvoiceCreateModal(props: any) {
               : Number(line.sourceUnitCost);
             const typeRegistration = register(`lines.${i}.type` as const);
             return (
-              <div key={field.id} className="billing-line-row" style={{ display: "grid", gridTemplateColumns: "110px minmax(180px, 1fr) 58px 82px 74px 66px 92px 28px", gap: 8, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
+              <div
+                key={field.id}
+                className="billing-line-row"
+                onDragOver={(event: any) => event.preventDefault()}
+                onDrop={(event: any) => {
+                  event.preventDefault();
+                  if (draggingLine != null && draggingLine !== i) move(draggingLine, i);
+                  setDraggingLine(null);
+                }}
+                style={{ display: "grid", gridTemplateColumns: "28px 110px minmax(180px, 1fr) 58px 82px 74px 66px 92px 28px", gap: 8, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start", background: draggingLine === i ? T.accentSoft : T.surface }}
+              >
                 <input type="hidden" {...register(`lines.${i}.sourceInvoiceLineId` as const)} />
                 <input
                   type="hidden"
@@ -816,25 +960,72 @@ export default function BillingInvoiceCreateModal(props: any) {
                       value === "" || value == null ? null : Number(value),
                   })}
                 />
+                <button
+                  type="button"
+                  draggable
+                  onDragStart={(event: any) => {
+                    setDraggingLine(i);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", String(i));
+                  }}
+                  onDragEnd={() => setDraggingLine(null)}
+                  title="Drag to reorder line"
+                  aria-label={`Drag line ${i + 1} to reorder`}
+                  style={{ width: 28, height: 34, display: "grid", placeItems: "center", padding: 0, border: "none", background: "transparent", color: T.subtle, cursor: "grab" }}
+                >
+                  <Ico d="M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01" size={16} color="currentColor" />
+                </button>
                 <Sel
                   {...typeRegistration}
                   defaultValue={field.type}
                   onChange={(event: any) => {
                     void typeRegistration.onChange(event);
+                    const nextType = normalizeStaffBillingLineType(event.target.value);
                     setValue(
                       `lines.${i}.isTaxable` as const,
-                      defaultLineTaxable(event.target.value, line.desc),
+                      defaultLineTaxable(nextType, line.desc),
                       { shouldDirty: true },
                     );
+                    if (!isStaffBillingPartsLine(nextType)) {
+                      setValue(`lines.${i}.markupPercent` as const, null, {
+                        shouldDirty: true,
+                      });
+                    }
+                    if (["Labor", "OT Labor", "Travel"].includes(nextType)) {
+                      setValue(
+                        `lines.${i}.rate` as const,
+                        importedStaffBillingRate(nextType, sourceUnitCost),
+                        { shouldDirty: true, shouldValidate: true },
+                      );
+                    } else if (
+                      isStaffBillingPartsLine(nextType)
+                      && sourceUnitCost != null
+                    ) {
+                      const markup = Number(partsMarkup);
+                      setValue(
+                        `lines.${i}.markupPercent` as const,
+                        Number.isFinite(markup) ? markup : 25,
+                        { shouldDirty: true },
+                      );
+                      setValue(
+                        `lines.${i}.rate` as const,
+                        importedStaffBillingRate(
+                          nextType,
+                          sourceUnitCost,
+                          Number.isFinite(markup) ? markup : 25,
+                        ),
+                        { shouldDirty: true, shouldValidate: true },
+                      );
+                    }
                   }}
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink }}
                 >
                   {STAFF_BILLING_LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </Sel>
                 <textarea {...register(`lines.${i}.desc` as const)} placeholder={/^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
-                <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
-                <input type="number" step="0.01" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
-                {sourceUnitCost == null ? (
+                <input type="number" min="0.5" step="0.5" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
+                <input type="number" step="any" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
+                {sourceUnitCost == null || !isStaffBillingPartsLine(line.type) ? (
                   <div style={{ paddingTop: 10, textAlign: "right", color: T.subtle, fontSize: 11 }}>-</div>
                 ) : (
                   <label style={{ position: "relative" }}>
@@ -874,8 +1065,25 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
         {errors.lines && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a quantity and rate. Descriptions are optional only for travel.</div>}
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-          {["Labor", "Parts/Hardware", "Travel", "Other"].map(type => (
-            <button key={type} type="button" onClick={() => append({ type, desc: "", qty: 1, rate: undefined, isTaxable: defaultLineTaxable(type, "") })} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ {type}</button>
+          {QUICK_ADD_LINES.map(item => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => append({
+                type: item.type,
+                desc: item.desc,
+                qty: 1,
+                rate: item.rate,
+                isTaxable: defaultLineTaxable(item.type, item.desc),
+                sourceInvoiceLineId: null,
+                sourceUnitCost: null,
+                markupPercent: null,
+              })}
+              className="btn-soft"
+              style={{ padding: "7px 12px", fontSize: 11 }}
+            >
+              + {item.label}{item.rate == null ? "" : ` ${fmt(item.rate)}`}
+            </button>
           ))}
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap", paddingTop: 10, borderTop: `1px solid ${T.borderSoft}` }}>
@@ -889,6 +1097,9 @@ export default function BillingInvoiceCreateModal(props: any) {
                 qty: 1,
                 rate: preset.rate,
                 isTaxable: true,
+                sourceInvoiceLineId: null,
+                sourceUnitCost: null,
+                markupPercent: null,
               })}
               className="btn-soft"
               style={{ padding: "7px 12px", fontSize: 11 }}
@@ -1007,6 +1218,12 @@ export default function BillingInvoiceCreateModal(props: any) {
                 {String(errors.salesTaxOverride.message || "Enter a valid tax amount")}
               </div>
             )}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0 10px", borderTop: `1px solid ${T.borderSoft}` }}>
+              <span style={{ color: T.muted }}>Profit margin (pre-tax)</span>
+              <span className="mono" style={{ fontWeight: 700, color: actualMargin == null ? T.subtle : actualMargin >= 30 ? T.success : T.warn }}>
+                {actualMargin == null ? "-" : `${actualMargin.toFixed(1)}%`}
+              </span>
+            </div>
             <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: `1px solid ${T.border}` }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: T.ink }}>{fmt(Math.round(total * 100) / 100)}</span></div>
           </div>
         </div>

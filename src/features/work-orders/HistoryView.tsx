@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import { T } from "../../lib/constants";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { DatePickerField } from "../../components/ui/DateTimePicker";
 
@@ -89,15 +90,27 @@ export default function HistoryView(props: any) {
                 const woTotal = sumInvoicesFor(w.id);
                 const woInvCount = (invoices ?? []).filter((i: any) => i.wot === w.id && i.state !== "draft" && i.state !== "rejected").length;
                 return (
-                  <button
+                  <div
                     key={w.id}
                     onClick={() => { setSelectedWO(w.id); setAiNote(null); }}
+                    onKeyDown={(event: any) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedWO(w.id);
+                        setAiNote(null);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                     className="card"
                     style={{ padding: 16, textAlign: "left", border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer" }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
                       <div>
-                        <div className="mono" style={{ fontSize: 12, color: T.accent, fontWeight: 700 }}>{w.id}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <div className="mono" style={{ fontSize: 12, color: T.accent, fontWeight: 700 }}>{w.id}</div>
+                          <CopyWorkOrderButton value={w.id} />
+                        </div>
                         <div style={{ fontSize: 15, color: T.ink, fontWeight: 700, marginTop: 4 }}>{w.summary || "Closed work order"}</div>
                       </div>
                       <span style={{ fontSize: 11, color: T.success, background: T.successSoft, borderRadius: 999, padding: "4px 8px", fontWeight: 700 }}>Closed</span>
@@ -108,7 +121,7 @@ export default function HistoryView(props: any) {
                       <div>Closed <strong style={{ color: T.ink }}>{w.closedAt ? new Date(w.closedAt).toLocaleDateString() : "-"}</strong></div>
                       <div>Total <strong style={{ color: T.ink }}>{fmt(woTotal)}</strong>{woInvCount > 1 ? <span style={{ color: T.subtle, fontWeight: 400 }}> · {woInvCount} invoices</span> : null}</div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -133,7 +146,10 @@ export default function HistoryView(props: any) {
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>{w.id}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>
+                  {w.id}
+                  <CopyWorkOrderButton value={w.id} />
+                </span>
                 <span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt(invTotalFor(w.id))}</span>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 4 }}>

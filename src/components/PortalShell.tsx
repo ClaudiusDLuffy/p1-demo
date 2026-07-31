@@ -19,6 +19,7 @@ import { Avatar } from "./ui/Avatar";
 import { Field } from "./ui/Field";
 import { Ico } from "./ui/Ico";
 import { BtnSpinner, BtnSpinnerDark } from "./ui/BtnSpinner";
+import { CopyWorkOrderButton } from "./ui/CopyWorkOrderButton";
 import LoginForm from "../features/auth/LoginForm";
 import useAuth from "../features/auth/useAuth";
 import useWorkOrders from "../features/work-orders/useWorkOrders";
@@ -440,6 +441,30 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     min-width: 0 !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
+  }
+  .kanban-card-head {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+    gap: 7px !important;
+  }
+  .kanban-card-id-row {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    flex-wrap: wrap !important;
+  }
+  .kanban-card-flags {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    justify-content: flex-start !important;
+  }
+  .kanban-card-status {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    line-height: 1.2 !important;
+    text-align: left !important;
   }
   .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 10px !important; width: 100% !important; max-width: 100% !important; }
   .kanban-active { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; max-width: 100% !important; overflow-x: hidden !important; }
@@ -963,6 +988,7 @@ export default function PortalShell() {
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
   const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
+  const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
   const [histContractor, setHistContractor] = useState("all");
@@ -1236,6 +1262,7 @@ export default function PortalShell() {
     setSelectedWO(null);
     setSelectedBillingInvoice(null);
     setBillingDraftToEdit(null);
+    setBillingSourceToStart(null);
     setAiNote(null);
   }, []);
 
@@ -1302,6 +1329,29 @@ export default function PortalShell() {
       fire(`Invoice #${invoice.num} deleted`);
     } catch (e: any) {
       fire(`Delete failed: ${e.message || e}`);
+    }
+  };
+  const doMarkBillingInvoiceBilled = async (invoice: any) => {
+    try {
+      const payload = await billingFetch(
+        `/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ action: "mark_billed" }),
+        },
+      );
+      qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) =>
+        (items || []).map(item => item.id === invoice.id ? payload.invoice : item),
+      );
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      ]);
+      fire(`Invoice #${invoice.num} sent to 7-Eleven; work order closed`);
+    } catch (e: any) {
+      fire(`Billing update failed: ${e.message || e}`);
+      throw e;
     }
   };
   const doConvertQuoteToBillingInvoice = async (payload: Record<string, unknown>) => {
@@ -1968,8 +2018,18 @@ export default function PortalShell() {
               page={page}
               currentUser={currentUser}
               invoices={billingInvoices}
+              contractorInvoices={invoices}
               setSelectedBillingInvoice={setSelectedBillingInvoice}
-              onCreate={() => { setBillingDraftToEdit(null); setModal("createBillingInvoice"); }}
+              onCreate={() => {
+                setBillingDraftToEdit(null);
+                setBillingSourceToStart(null);
+                setModal("createBillingInvoice");
+              }}
+              onCreateFromApproved={(invoice: any) => {
+                setBillingDraftToEdit(null);
+                setBillingSourceToStart(invoice.id);
+                setModal("createBillingInvoice");
+              }}
               fmt={fmt}
             />
           )}
@@ -1987,10 +2047,12 @@ export default function PortalShell() {
                   || selectedBillingInvoiceData.qboSyncedAt
                 ) return;
                 setBillingDraftToEdit(selectedBillingInvoiceData);
+                setBillingSourceToStart(null);
                 setModal("createBillingInvoice");
               }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onDownloadCsv={() => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv(selectedBillingInvoiceData)}
+              onMarkBilled={() => selectedBillingInvoiceData && doMarkBillingInvoiceBilled(selectedBillingInvoiceData)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
               onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.id); setPage("invoices"); }}
               currentUser={currentUser}
@@ -2303,7 +2365,8 @@ export default function PortalShell() {
       {modal === "deleteWO" && woData && (
         <Modal onClose={() => setModal(null)} title="Delete work order?" width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            This will remove WOT <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{woData.id}</span> from all views. This action can be undone by an admin via the database.
+            This will remove WOT <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{woData.id}</span>{" "}
+            <CopyWorkOrderButton value={woData.id} /> from all views. This action can be undone by an admin via the database.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -2329,7 +2392,8 @@ export default function PortalShell() {
         return (
           <Modal onClose={() => setModal(null)} title="Close work order" width={460}>
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It moves to History after the 24h linger, and contractors can no longer add invoices.{notHandedOff > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{notHandedOff} invoice{notHandedOff === 1 ? " has" : "s have"} not been sent to QuickBooks.</strong> The work order can still close; invoice handoff remains available separately.</> : null}
+              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
+              <CopyWorkOrderButton value={woData.id} />? It moves to History after the 24h linger, and contractors can no longer add invoices.{notHandedOff > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{notHandedOff} invoice{notHandedOff === 1 ? " has" : "s have"} not been sent to QuickBooks.</strong> The work order can still close; invoice handoff remains available separately.</> : null}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -2355,7 +2419,8 @@ export default function PortalShell() {
       {modal === "reopen" && woData && (
         <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>? It returns to the active board and leaves History. Invoice states are untouched, so staff can continue billing or add more invoices.
+            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
+            <CopyWorkOrderButton value={woData.id} />? It returns to the active board and leaves History. Invoice states are untouched, so staff can continue billing or add more invoices.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -2453,7 +2518,8 @@ export default function PortalShell() {
         return (
           <Modal onClose={() => setModal(null)} title="Edit work order" width={620}>
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
-              Editing <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. Status, contractor assignment, and timestamps have their own actions and aren't edited here. Each change is logged.
+              Editing <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
+              <CopyWorkOrderButton value={woData.id} />. Status, contractor assignment, and timestamps have their own actions and aren't edited here. Each change is logged.
             </div>
             <div style={{ display: "grid", gap: 14 }}>
               <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -2670,7 +2736,12 @@ export default function PortalShell() {
           contractorInvoices={invoices}
           billingInvoices={billingInvoices}
           editingInvoice={billingDraftToEdit}
-          onClose={() => { setModal(null); setBillingDraftToEdit(null); }}
+          initialSourceInvoiceId={billingSourceToStart}
+          onClose={() => {
+            setModal(null);
+            setBillingDraftToEdit(null);
+            setBillingSourceToStart(null);
+          }}
           onCreated={(invoice: any) => {
             qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
               if (!invoice?.id) return items || [];
@@ -2683,6 +2754,7 @@ export default function PortalShell() {
             qc.invalidateQueries({ queryKey: INVOICES_KEY });
             qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
             if (invoice?.id) setSelectedBillingInvoice(invoice.id);
+            setBillingSourceToStart(null);
           }}
           fire={fire}
           fmt={fmt}

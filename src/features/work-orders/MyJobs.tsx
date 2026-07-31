@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import { Badge } from "../../components/ui/Badge";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useMemo, useState } from "react";
@@ -82,6 +83,7 @@ export default function MyJobs(props: any) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                         <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.accent }}>{wo.id}</span>
+                        <CopyWorkOrderButton value={wo.id} />
                         <Badge conf={PRIORITY[wo.priority]} small />
                         {hasNewSla
                           ? <SlaBadge responseBreachAt={wo.responseBreachAt} resolutionBreachAt={wo.resolutionBreachAt} responseMetAt={wo.startTimeRaw} size="sm" />

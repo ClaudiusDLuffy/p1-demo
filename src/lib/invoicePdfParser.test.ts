@@ -99,13 +99,57 @@ test("extracts each item from a multi-line invoice PDF", async () => {
   assert.equal(
     generateInvoiceCsv({
       num: parsed.invoiceNumber,
+      wot: "WOT0909771",
+      store: "23995",
+      invoiceDateRaw: "2026-07-30",
+      serviceDateRaw: "2026-07-29",
+      territory: "Virginia",
       lines: parsed.lines,
     }),
     [
-      "line item,description,qty,rate,amount,taxable,tax,total",
-      "Labor,Labor service,2,80.00,160.00,No,0.00,160.00",
-      "Parts/Hardware,Replacement filter,1,50.00,50.00,No,0.00,50.00",
+      "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Class",
+      "INV-100,7-Eleven Inc,7-ELEVEN STORE - 23995,Net 30,7/30/2026,7/29/2026,,Virginia,7-ELEVEN STORE - 23995,23995,,,WOT0909771,Labor,Labor service,2,80,160,,",
+      "INV-100,,,,,,,,,,,,,Parts/Hardware,Replacement filter,1,50,50,,",
     ].join("\r\n"),
+  );
+});
+
+test("continues extracting line items when a second page omits the table header", async () => {
+  const document = new jsPDF();
+  document.text("JOB #4347", 20, 20);
+  document.text("Description", 20, 40);
+  document.text("Qty", 100, 40);
+  document.text("Rate", 125, 40);
+  document.text("Amount", 160, 40);
+  document.text("Labor", 20, 50);
+  document.text("3", 100, 50);
+  document.text("80.00", 125, 50);
+  document.text("240.00", 160, 50);
+
+  document.addPage();
+  document.text("Condenser fan motor", 20, 30);
+  document.text("1", 100, 30);
+  document.text("120.00", 125, 30);
+  document.text("120.00", 160, 30);
+  document.text("Subtotal 360.00", 130, 50);
+  document.text("Total Due 360.00", 130, 60);
+
+  const parsed = await extractInvoiceDataFromPdf(
+    new Uint8Array(document.output("arraybuffer")),
+  );
+
+  assert.equal(parsed.invoiceNumber, "4347");
+  assert.deepEqual(
+    parsed.lines.map(line => ({
+      desc: line.desc,
+      qty: line.qty,
+      rate: line.rate,
+      amount: line.amount,
+    })),
+    [
+      { desc: "Labor", qty: 3, rate: 80, amount: 240 },
+      { desc: "Condenser fan motor", qty: 1, rate: 120, amount: 120 },
+    ],
   );
 });
 

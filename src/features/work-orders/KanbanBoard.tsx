@@ -5,6 +5,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Ico } from "../../components/ui/Ico";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
 import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { getSlaAgingStyle, getWorkOrderDateMeta, sortWorkOrders } from "../../lib/workOrderView";
@@ -32,15 +33,16 @@ export default function KanbanBoard(props: any) {
     return (
       <div key={wo.id} className="kcard" onClick={() => { setSelectedWO(wo.id); setAiNote(null); if (!isManager) setPage("wo_detail"); else setPage("work_orders"); }} style={{ position: "relative", padding: "12px 14px 12px 16px", borderRadius: 12, marginBottom: 8, cursor: "pointer", borderColor: aging.ring || st?.ring || T.borderSoft }}>
         <div style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, background: st?.color || pr?.color || T.subtle }} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="kanban-card-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, minWidth: 0 }}>
+          <span className="kanban-card-id-row" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, maxWidth: "100%", flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.subtle, letterSpacing: 0.2 }}>{wo.id}</span>
+            <CopyWorkOrderButton value={wo.id} />
             {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
           </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: st?.color, background: st?.bg, border: `1px solid ${st?.ring || st?.color}55`, borderRadius: 10, padding: "2px 6px" }}>{st?.label}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: pr?.color }}>{pr?.short}</span>
+          <div className="kanban-card-flags" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0, maxWidth: "100%" }}>
+            <span className="kanban-card-status" style={{ fontSize: 10, fontWeight: 700, color: st?.color, background: st?.bg, border: `1px solid ${st?.ring || st?.color}55`, borderRadius: 10, padding: "2px 6px", maxWidth: "100%", boxSizing: "border-box", lineHeight: 1.2 }}>{st?.label}</span>
+            <span className="kanban-card-priority" style={{ fontSize: 11, fontWeight: 700, color: pr?.color, flexShrink: 0 }}>{pr?.short}</span>
           </div>
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 3 }}>{wo.store ? `Store #${wo.store}` : wo.id}</div>

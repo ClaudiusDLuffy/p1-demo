@@ -7,26 +7,58 @@ import {
   staffInvoiceCsvRows,
 } from "./invoiceCsv";
 
-test("exports the requested columns and normalizes Truck Charge to Travel", () => {
+const HEADER = "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Class";
+
+test("matches the supplied SaasAnt layout with one row per line item", () => {
   const csv = generateStaffInvoiceCsv({
-    num: "P1-00042",
-    wot: "WOT0909771",
-    salesTax: 8.25,
+    num: "P1-00013",
+    wot: "WOT0898256",
+    store: "33662",
+    terms: "Net 30",
+    invoiceDateRaw: "2026-07-28",
+    serviceDateRaw: "2026-07-27",
+    territory: "Texas",
     lines: [
       {
         type: "Truck Charge",
-        description: "Trip, \"north\"",
+        description: "",
         qty: 1,
-        rate: 25,
-        amount: 25,
-        isTaxable: false,
+        rate: 110,
       },
       {
-        type: "Materials",
+        type: "Labor",
+        description: "Arrived onsite,\nreplaced transformer.",
+        qty: 3,
+        rate: 110,
+      },
+    ],
+  });
+
+  assert.equal(
+    csv,
+    [
+      HEADER,
+      "P1-00013,7-Eleven Inc,7-ELEVEN STORE - 33662,Net 30,7/28/2026,7/27/2026,,Texas,7-ELEVEN STORE - 33662,33662,,,WOT0898256,Travel,,1,110,110,,",
+      "P1-00013,,,,,,,,,,,,,Labor,\"Arrived onsite,\nreplaced transformer.\",3,110,330,,",
+    ].join("\r\n"),
+  );
+});
+
+test("uses the same SaasAnt format for contractor invoice downloads", () => {
+  const csv = generateInvoiceCsv({
+    num: "4347",
+    wot: "WOT0909771",
+    store: "23995",
+    invoiceDate: "07/30/2026",
+    serviceDate: "07/29/2026",
+    taxState: "VA",
+    taxRate: 0.06,
+    lines: [
+      {
+        type: "Parts",
         description: "Replacement board",
         qty: 2,
         rate: 50,
-        amount: 100,
         isTaxable: true,
       },
     ],
@@ -35,32 +67,8 @@ test("exports the requested columns and normalizes Truck Charge to Travel", () =
   assert.equal(
     csv,
     [
-      "line item,description,qty,rate,amount,taxable,tax,total",
-      "Travel,\"Trip, \"\"north\"\"\",1,25.00,25.00,No,0.00,25.00",
-      "Parts/Hardware,Replacement board,2,50.00,100.00,Yes,8.25,108.25",
-    ].join("\r\n"),
-  );
-});
-
-test("preserves contractor line-item names on regular invoice exports", () => {
-  const csv = generateInvoiceCsv({
-    num: "6501",
-    wot: "WOT0909771",
-    lines: [
-      {
-        type: "Truck Charge",
-        description: "Service travel",
-        qty: 1,
-        rate: 25,
-      },
-    ],
-  });
-
-  assert.equal(
-    csv,
-    [
-      "line item,description,qty,rate,amount,taxable,tax,total",
-      "Truck Charge,Service travel,1,25.00,25.00,No,0.00,25.00",
+      HEADER,
+      "4347,7-Eleven Inc,7-ELEVEN STORE - 23995,Net 30,7/30/2026,7/29/2026,,Virginia,7-ELEVEN STORE - 23995,23995,,,WOT0909771,Parts/Hardware,Replacement board,2,50,100,6%,",
     ].join("\r\n"),
   );
 });
@@ -70,63 +78,27 @@ test("does not silently replace missing invoice items with one total row", () =>
     () => generateInvoiceCsv({
       num: "6502",
       wot: "WOT0908035",
-      salesTax: 12,
       lines: [],
     }),
     /No invoice line items are available to export/,
   );
 });
 
-test("does not silently replace missing Billing items with one total row", () => {
-  assert.throws(
-    () => generateStaffInvoiceCsv({
-      num: "P1-00043",
-      workOrderId: "WOT0908035",
-      salesTax: 9,
-      lines: [],
-    }),
-    /No invoice line items are available to export/,
-  );
-});
-
-test("allocates invoice tax across taxable lines without changing the total", () => {
+test("exposes first-row metadata and normalized product names", () => {
   const rows = staffInvoiceCsvRows({
-    salesTax: 1,
+    num: "P1-L-1000",
+    storeNumber: "100",
     lines: [
-      { type: "Parts", qty: 1, rate: 10, isTaxable: true },
-      { type: "Parts", qty: 1, rate: 20, isTaxable: true },
-      { type: "Labor", qty: 1, rate: 30, isTaxable: false },
+      { type: "Truck Charge", qty: 1, rate: 110 },
+      { type: "OT Labor", qty: 0.5, rate: 165 },
     ],
   });
 
-  assert.equal(
-    rows.reduce((sum, row) => sum + row.tax, 0),
-    1,
-  );
-  assert.equal(
-    rows.reduce((sum, row) => sum + row.total, 0),
-    61,
-  );
-});
-
-test("keeps a manual invoice tax visible when no line is taxable", () => {
-  const rows = staffInvoiceCsvRows({
-    salesTax: 3.5,
-    lines: [
-      { type: "Labor", qty: 1, rate: 100, isTaxable: false },
-    ],
-  });
-
-  assert.deepEqual(rows[1], {
-    lineItem: "Sales Tax",
-    description: "Invoice-level sales tax",
-    qty: 1,
-    rate: 0,
-    amount: 0,
-    taxable: false,
-    tax: 3.5,
-    total: 3.5,
-  });
+  assert.equal(rows[0].customer, "7-Eleven Inc");
+  assert.equal(rows[0].productService, "Travel");
+  assert.equal(rows[1].customer, "");
+  assert.equal(rows[1].productService, "OT Labor");
+  assert.equal(rows[1].quantity, 0.5);
 });
 
 test("builds a stable CSV filename", () => {

@@ -273,6 +273,7 @@ export type Database = {
           subtotal: number | null
           tax_rate: number | null
           tax_state: string | null
+          territory: string | null
           terms: string | null
           total: number | null
           updated_at: string | null
@@ -303,6 +304,7 @@ export type Database = {
           subtotal?: number | null
           tax_rate?: number | null
           tax_state?: string | null
+          territory?: string | null
           terms?: string | null
           total?: number | null
           updated_at?: string | null
@@ -333,6 +335,7 @@ export type Database = {
           subtotal?: number | null
           tax_rate?: number | null
           tax_state?: string | null
+          territory?: string | null
           terms?: string | null
           total?: number | null
           updated_at?: string | null
@@ -602,6 +605,35 @@ export type Database = {
             foreignKeyName: "state_sales_tax_rates_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_invoice_number_series: {
+        Row: {
+          next_number: number
+          prefix: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          next_number: number
+          prefix: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          next_number?: number
+          prefix?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_invoice_number_series_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -1099,8 +1131,34 @@ export type Database = {
         Args: { p_activity_id: string }
         Returns: undefined
       }
+      complete_work_order_once: {
+        Args: {
+          p_activity_text: string
+          p_asset_make: string
+          p_asset_model: string
+          p_asset_serial: string
+          p_asset_year: number | null
+          p_completed_at: string
+          p_resolution_code: string | null
+          p_resolution_notes: string | null
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
+      mark_staff_invoice_billed: {
+        Args: {
+          p_actor_id: string
+          p_invoice_id: string
+        }
+        Returns: Json
+      }
+      is_invoice_controller: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
       next_contractor_invoice_num: { Args: never; Returns: string }
+      next_staff_invoice_num: {
+        Args: { p_actor_id: string }
+        Returns: string
+      }
       set_activity_contractor_attention: {
         Args: { p_activity_id: string; p_required: boolean }
         Returns: undefined

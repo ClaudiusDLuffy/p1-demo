@@ -2,12 +2,15 @@
 // @ts-nocheck
 
 import { Badge } from "../../components/ui/Badge";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { T, INV_STATE } from "../../lib/constants";
 import { useMemo } from "react";
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt } = props;
   const currentUserId = currentUser?.id ?? null;
+  const controller = String(currentUser?.email || "").trim().toLowerCase()
+    === "emilyb@phospitality.com";
   const invoiceTabs = [
     { id: "all", l: "All", m: "All" },
     { id: "draft", l: "Draft", m: "Draft" },
@@ -20,8 +23,9 @@ export default function InvoiceList(props: any) {
   const visibleInvoices = useMemo(
     () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))
       .filter(i => (i.invoiceType || "contractor") === "contractor")
+      .filter(i => !controller || ["approved", "paid"].includes(i.state))
       .filter(i => invTab === "all" ? true : i.state === invTab),
-    [isManager, invoices, currentUserId, invTab]
+    [controller, isManager, invoices, currentUserId, invTab]
   );
   return (
     <>
@@ -53,7 +57,12 @@ export default function InvoiceList(props: any) {
                     {visibleInvoices.map(inv => (
                       <tr key={inv.id} onClick={() => setSelectedInvoice(inv.id)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
                         <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
-                        <td className="mono" style={{ padding: "13px 14px", fontSize: 11, color: T.muted }}>{inv.wot}</td>
+                        <td style={{ padding: "13px 14px" }}>
+                          <span className="mono" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted }}>
+                            {inv.wot}
+                            {inv.wot && <CopyWorkOrderButton value={inv.wot} />}
+                          </span>
+                        </td>
                         {isManager && <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>}
                         <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[inv.state]} small /></td>
                         <td style={{ padding: "13px 14px", color: T.subtle }}>{inv.date}</td>
@@ -99,7 +108,10 @@ export default function InvoiceList(props: any) {
                     )}
                     <div className="mobile-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}` }}>
                       <span style={{ fontSize: 11, color: T.muted }}>
-                        WO: <span style={{ fontFamily: "monospace", color: T.accent }}>{inv.wot}</span>
+                        WO: <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "monospace", color: T.accent }}>
+                          {inv.wot}
+                          {inv.wot && <CopyWorkOrderButton value={inv.wot} />}
+                        </span>
                       </span>
                       <span style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: T.ink }}>
                         {fmt(Math.round(inv.total))}

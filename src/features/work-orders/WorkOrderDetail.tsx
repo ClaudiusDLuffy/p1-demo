@@ -12,6 +12,7 @@ import { Avatar } from "../../components/ui/Avatar";
 import { Field } from "../../components/ui/Field";
 import { Ico } from "../../components/ui/Ico";
 import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
+import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import { computeSlaState } from "../../lib/slaConfig";
@@ -32,7 +33,7 @@ const CapitalFlagModal = dynamic(
   { ssr: false }
 );
 const QuoteCalculator = dynamic(
-  () => import("./QuoteCalculator"),
+  () => import("./QuoteCalculatorWorkspace"),
   { ssr: false }
 );
 
@@ -58,8 +59,8 @@ const isStaffBillingActivity = (activity: any) => {
   const text = String(activity?.text || "");
   return activity?.isStaffOnly
     || activity?.eventKey === "staff_billing"
-    || /^P1 invoice #[^ ]+ (?:created|updated|draft updated)/i.test(text)
-    || text === "7-Eleven portal updated. Moved to pending invoice.";
+    || /^P1 invoice #[^ ]+ (?:created|updated|draft updated|prepared|billed)/i.test(text)
+    || /^7-Eleven portal updated\. Moved to (?:pending invoice|Pending 7-Eleven Submission)\.$/i.test(text);
 };
 
 export default function WorkOrderDetail(props: any) {
@@ -259,6 +260,10 @@ export default function WorkOrderDetail(props: any) {
                     <div className="card" style={{ padding: 24, marginBottom: 16 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
                         <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>{woData.id}</span>
+                        <CopyWorkOrderButton
+                          value={woData.id}
+                          onCopied={() => fire(`Work order ${woData.id} copied`)}
+                        />
                         {woData.incidentId && <span style={{ color: T.subtle, fontSize: 12 }}>/</span>}
                         {woData.incidentId && <span className="mono" style={{ fontSize: 11, color: T.muted }}>{woData.incidentId}</span>}
                       </div>
@@ -382,7 +387,7 @@ export default function WorkOrderDetail(props: any) {
                       )}
                       {woData.status === "completed" && isManager && (
                         <button onClick={() => doMoveToInvoice(woData.id)} disabled={isLoading("moveToInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("moveToInvoice_" + woData.id)}>
-                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated to pending invoice"}
+                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated - pending 7-Eleven submission"}
                         </button>
                       )}
                       {/* Multi-invoice: a contractor can keep adding invoices for
@@ -961,6 +966,7 @@ export default function WorkOrderDetail(props: any) {
                     {isManager && onConvertQuote && (
                       <QuoteCalculator
                         workOrder={woData}
+                        userId={currentUser?.id}
                         contractorInvoices={invoices}
                         billingInvoices={billingInvoices}
                         fmt={fmt}
