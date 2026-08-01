@@ -10,6 +10,7 @@ import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
+import { stateCodeFromWorkOrder } from "../../lib/billingRules";
 import {
   getWorkOrderActionReasons,
   getSlaAgingStyle,
@@ -42,13 +43,23 @@ export default function WorkOrderList(props: any) {
   const [listPage, setListPage] = useState(1);
   const [sortBy, setSortBy] = useState<WorkOrderSortKey>(isManager ? "sla_due" : "newest");
   const [viewMode, setViewMode] = useState<"recent" | "needs_action">("recent");
+  const [filterState, setFilterState] = useState("all");
   const [hideClosed, setHideClosed] = useState(true);
   const [pagingBusy, setPagingBusy] = useState<"prev" | "next" | null>(null);
   const pageSize = 10;
 
+  const stateFilteredWOs = useMemo(
+    () => filterState === "all"
+      ? filteredWOs
+      : filteredWOs.filter((workOrder: Record<string, unknown>) =>
+          stateCodeFromWorkOrder(workOrder) === filterState
+        ),
+    [filteredWOs, filterState],
+  );
+
   const tableWOs = useMemo(() => {
     const sorted = sortWorkOrders(
-      filteredWOs.filter((w: any) =>
+      stateFilteredWOs.filter((w: any) =>
         w.status !== "capital"
         && (!isManager || !hideClosed || w.status !== "closed")
         && (viewMode !== "needs_action" || workOrderNeedsAction(w, isManager)),
@@ -59,9 +70,9 @@ export default function WorkOrderList(props: any) {
     return sorted.sort((a: any, b: any) =>
       Number(workOrderNeedsAction(b, isManager)) - Number(workOrderNeedsAction(a, isManager))
     );
-  }, [filteredWOs, hideClosed, isManager, sortBy, viewMode]);
+  }, [stateFilteredWOs, hideClosed, isManager, sortBy, viewMode]);
   const hiddenClosedCount = isManager && hideClosed
-    ? filteredWOs.filter((w: any) => w.status === "closed").length
+    ? stateFilteredWOs.filter((w: any) => w.status === "closed").length
     : 0;
 
   const totalPages = Math.max(1, Math.ceil(tableWOs.length / pageSize));
@@ -73,7 +84,7 @@ export default function WorkOrderList(props: any) {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, filterC, filterP, sortBy, hideClosed, viewMode]);
+  }, [search, filterC, filterP, filterState, sortBy, hideClosed, viewMode]);
 
   useEffect(() => {
     setListPage((prev) => Math.min(prev, totalPages));
@@ -186,6 +197,17 @@ export default function WorkOrderList(props: any) {
                 {contractorsOnly.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </Sel>
             )}
+            <Sel
+              value={filterState}
+              onChange={(e: { target: { value: string } }) => setFilterState(e.target.value)}
+              aria-label="Filter work orders by state"
+              style={{ width: 180, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}
+            >
+              <option value="all">All states</option>
+              <option value="VA">Virginia</option>
+              <option value="TX">Texas</option>
+              <option value="FL">Florida</option>
+            </Sel>
             <Sel value={filterP} onChange={(e: any) => setFilterP(e.target.value)} style={{ width: 180, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
               <option value="all">All priorities</option>
               {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
@@ -207,8 +229,8 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls{hiddenClosedCount > 0 ? ` (${hiddenClosedCount})` : ""}
               </label>
             )}
-            {(filterC !== "all" || filterP !== "all" || search || viewMode !== "recent") && (
-              <button onClick={() => { setFilterC("all"); setFilterP("all"); setSearch(""); setViewMode("recent"); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            {(filterC !== "all" || filterP !== "all" || filterState !== "all" || search || viewMode !== "recent") && (
+              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}

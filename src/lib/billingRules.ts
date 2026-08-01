@@ -144,8 +144,10 @@ export function stateCodeFromWorkOrder(workOrder: WorkOrderLocation): string {
     .join(", ")
     .toUpperCase();
 
-  const codeMatch = text.match(/(?:^|[\s,])([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?(?:$|[\s,])/);
-  if (codeMatch?.[1] && STATE_TIMEZONES[codeMatch[1]]) return codeMatch[1];
+  const codeMatches = text.matchAll(/(?:^|[\s,])([A-Z]{2})(?=$|[\s,])/g);
+  for (const match of codeMatches) {
+    if (match[1] && STATE_TIMEZONES[match[1]]) return match[1];
+  }
 
   for (const [name, code] of Object.entries(STATE_NAMES)) {
     if (text.includes(name)) return code;
