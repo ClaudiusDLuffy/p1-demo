@@ -15,12 +15,13 @@ const workOrder = {
 test("alerts staff and service inbox when a call needs assignment", () => {
   const plan = createDispatchNotificationPlan(
     { workOrder, contractorAssigned: false },
-    ["lynzy@p1pros.com"],
+    ["lynzy@p1pros.com", "landryd@phospitality.com"],
   );
 
   assert.deepEqual(plan.contractorRecipients, []);
   assert.deepEqual(plan.internalRecipients, [
     "lynzy@p1pros.com",
+    "landryd@phospitality.com",
     "service@p1pros.com",
   ]);
   assert.equal(plan.ownerSubject, "New TX Call Needs Assignment - WOT0000001");
@@ -36,13 +37,32 @@ test("keeps assignment emails scoped to the assigned contractor", () => {
       contractorEmail: "pro.ops.inc@gmail.com",
       contractorName: "Pro-Ops",
     },
-    ["lynzy@p1pros.com"],
+    ["lynzy@p1pros.com", "landryd@phospitality.com"],
   );
 
   assert.deepEqual(plan.contractorRecipients, [
     "pro.ops.inc@gmail.com",
     "service@pro-opsinc.com",
   ]);
-  assert.deepEqual(plan.internalRecipients, ["lynzy@p1pros.com"]);
+  assert.deepEqual(plan.internalRecipients, [
+    "lynzy@p1pros.com",
+    "landryd@phospitality.com",
+  ]);
   assert.equal(plan.ownerSubject, "New VA Call Dispatched - WOT0000001");
+});
+
+test("deduplicates repeated configured owner emails", () => {
+  const plan = createDispatchNotificationPlan(
+    { workOrder, contractorAssigned: false },
+    [
+      "lynzy@p1pros.com",
+      "landryd@phospitality.com",
+      "landryd@phospitality.com",
+    ],
+  );
+
+  assert.equal(
+    plan.internalRecipients.filter(email => email === "landryd@phospitality.com").length,
+    1,
+  );
 });

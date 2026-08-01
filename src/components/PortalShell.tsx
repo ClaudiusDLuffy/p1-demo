@@ -1045,7 +1045,11 @@ export default function PortalShell() {
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const notesSeenInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
-  const { data: workOrdersData, isLoading: woLoading } = useWorkOrdersQuery(isAuthenticated);
+  const {
+    data: workOrdersData,
+    isLoading: woLoading,
+    isSuccess: workOrdersLoaded,
+  } = useWorkOrdersQuery(isAuthenticated);
   const { data: profilesData } = useProfilesQuery(isAuthenticated);
   const { data: invoicesData } = useInvoicesQuery(isAuthenticated);
   const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
@@ -1150,6 +1154,13 @@ export default function PortalShell() {
     () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
     [maskedWorkOrders, selectedWO]
   );
+
+  useEffect(() => {
+    if (isManager || !workOrdersLoaded || !selectedWO || woData) return;
+    setSelectedWO(null);
+    setAiNote(null);
+    setPage("my_jobs");
+  }, [isManager, selectedWO, setAiNote, setPage, setSelectedWO, woData, workOrdersLoaded]);
 
   useEffect(() => {
     if (!isManager || !selectedWO || !woData?.hasUnreadNotes || !woData?.latestNoteAt) return;
@@ -1524,11 +1535,20 @@ export default function PortalShell() {
     const assignedText = contractor ? `Assigned to ${contractorName} by ${currentUser.name}.` : null;
     // Optimistic local insert (with both activity entries).
     const optimisticActivities = [localActivity(createdText, "system")];
-    if (assignedText) optimisticActivities.unshift(localActivity(assignedText, "system"));
+    if (assignedText) {
+      optimisticActivities.unshift(
+        localActivity(assignedText, "system", false, "work_order_assignment", false, true),
+      );
+    }
     setWorkOrders(prev => [{ ...wo, age: "now", activities: optimisticActivities, photos: [] }, ...prev]);
     try {
       await insertWorkOrder(wo, createdText, "System");
-      if (assignedText) await insertActivity(wot, "System", assignedText, "system");
+      if (assignedText) {
+        await insertActivity(wot, "System", assignedText, "system", {
+          staffOnly: true,
+          eventKey: "work_order_assignment",
+        });
+      }
       if (contractor) {
         await notificationFetch("/api/notifications/dispatch", {
           workOrderId: wot,

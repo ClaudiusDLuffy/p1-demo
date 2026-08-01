@@ -615,6 +615,9 @@ function inferActivityEventKey(text: string, type: "note" | "system" | "ai"): st
   if (/photo removed/.test(value)) return "photo_removed";
   if (/eta set/.test(value)) return "eta_updated";
   if (/technician on job/.test(value)) return "technician_updated";
+  if (/^reassigned from /.test(value)) return "work_order_reassigned";
+  if (/^(?:dispatched|assigned) to /.test(value)) return "work_order_assignment";
+  if (/^work order unassigned by /.test(value)) return "work_order_unassigned";
   if (/dispatched|assigned|unassigned/.test(value)) return "assignment";
   if (/moved to|status|reopened|closed/.test(value)) return "status_change";
   return type === "system" ? "system" : "note";
@@ -740,7 +743,13 @@ export async function unassignWorkOrder(workOrderId: string, authorName: string)
     dispatched_at: null,
   }).eq("id", workOrderId);
   if (error) throw error;
-  await insertActivity(workOrderId, "System", `Work order unassigned by ${authorName}.`, "system");
+  await insertActivity(
+    workOrderId,
+    "System",
+    `Work order unassigned by ${authorName}.`,
+    "system",
+    { staffOnly: true, eventKey: "work_order_unassigned" },
+  );
 }
 
 // Swaps contractor_id, keeps status as 'assigned', preserves the original
@@ -765,6 +774,15 @@ export async function reassignWorkOrder(
     "System",
     `Reassigned from ${oldContractorName || "Unassigned"} to ${newContractorName} by ${authorName}.`,
     "system",
+    {
+      staffOnly: true,
+      eventKey: "work_order_reassigned",
+      eventData: {
+        previousContractor: oldContractorName || "Unassigned",
+        newContractor: newContractorName,
+        reassignedBy: authorName,
+      },
+    },
   );
 }
 

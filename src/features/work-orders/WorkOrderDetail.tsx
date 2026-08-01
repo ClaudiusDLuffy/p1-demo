@@ -21,6 +21,7 @@ import {
   getSlaAgingStyle,
   getWorkOrderDateMeta,
   getWorkOrderProgressSteps,
+  isInternalWorkOrderActivity,
 } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
 
@@ -55,14 +56,6 @@ const formatEta = (v: any, workOrder?: any): string => {
   });
 };
 
-const isStaffBillingActivity = (activity: any) => {
-  const text = String(activity?.text || "");
-  return activity?.isStaffOnly
-    || activity?.eventKey === "staff_billing"
-    || /^P1 invoice #[^ ]+ (?:created|updated|draft updated|prepared|billed)/i.test(text)
-    || /^7-Eleven portal updated\. Moved to (?:pending invoice|Pending 7-Eleven Submission)\.$/i.test(text);
-};
-
 export default function WorkOrderDetail(props: any) {
   const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
@@ -95,7 +88,7 @@ export default function WorkOrderDetail(props: any) {
   );
   const visibleActivities = useMemo(
     () => (woData?.activities || []).filter(
-      (activity: any) => isManager || !isStaffBillingActivity(activity),
+      (activity: any) => isManager || !isInternalWorkOrderActivity(activity),
     ),
     [isManager, woData?.activities],
   );
@@ -308,7 +301,7 @@ export default function WorkOrderDetail(props: any) {
                         {[
                           { l: "Line of Service", v: woData.lineOfService || "Not set" },
                           { l: "ETA", v: formatEta(woData.eta, woData) || "Not set" },
-                          { l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" },
+                          ...(isManager ? [{ l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" }] : []),
                           { l: "Start time", v: woData.startTime || "Not started" },
                           // Contractors may see the AFM name, but contact details remain staff-only.
                           { l: "AFM", v: woData.afm || "—" },
