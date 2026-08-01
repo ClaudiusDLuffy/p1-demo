@@ -4,6 +4,7 @@ import {
   getAllowedDispatchSenders,
   isConfirmedInitialDispatchEmail,
   isConfirmedInitialDispatchSubject,
+  parseDispatchEmail,
 } from "./emailParser";
 
 const dispatchSubject =
@@ -78,4 +79,27 @@ test("supports an explicit sender allowlist without broadening the default", () 
     true,
   );
   assert.equal(isConfirmedInitialDispatchEmail(envelope(dispatchSubject), senders), false);
+});
+
+test("parses store numbers from nonstandard Texas store labels", () => {
+  const parsed = parseDispatchEmail({
+    ...envelope(dispatchSubject),
+    id: "texas-dispatch",
+    body: {
+      contentType: "text",
+      content: [
+        "Store Location: BCP STORE - 42073",
+        "Store Address: 100 Main St, Dallas, TX, US, 75001",
+        "Priority: P1 - Critical",
+        "Short description: Walk-in cooler not holding temperature",
+      ].join("\n"),
+    },
+    receivedDateTime: "2026-08-02T00:49:00+08:00",
+    toRecipients: [],
+  });
+
+  assert.equal(parsed.storeLocation, "BCP STORE - 42073");
+  assert.equal(parsed.storeNumber, "42073");
+  assert.equal(parsed.state, "TX");
+  assert.equal(parsed.parseConfidence, "high");
 });

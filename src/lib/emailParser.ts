@@ -154,8 +154,12 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
     /^Incident:\s*(INC\S+)/m,
     /\b(INC\d{6,12})\b/i,
   ]);
-  const storeNumber = firstMatch(body, [/^Store Location:\s*7-ELEVEN STORE\s*-\s*(\d+)/m]);
-  const storeLocation = firstMatch(body, [/^Store Location:\s*(.+?)(?=\r?\n)/m]);
+  const storeLocation = firstMatch(body, [
+    /^Store\s+Location\s*:\s*(.+?)(?=\r?\n|$)/im,
+  ]);
+  const storeNumber = firstMatch(storeLocation || "", [
+    /(\d{3,12})\s*$/,
+  ]);
   const address = firstMatch(body, [/^Store Address:\s*(.+?)(?=\r?\n)/m]);
   const addressParts = parseAddressParts(address);
   const priorityRaw = firstMatch(body, [/^Priority:\s*(P[1-5])\s*-/m]);
