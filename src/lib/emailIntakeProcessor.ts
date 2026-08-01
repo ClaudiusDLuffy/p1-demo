@@ -205,7 +205,12 @@ export async function processEmail(
       if (!parsed.wotId) {
         result = skippedResult(result, "initial dispatch is missing a WOT number");
       } else if (parsed.parseConfidence !== "high") {
-        result = skippedResult(result, "initial dispatch is missing required store data");
+        shouldFinishEmail = false;
+        result = {
+          ...result,
+          action: "failed",
+          reason: "initial dispatch store number could not be parsed; mailbox left unchanged",
+        };
       } else if (allowlistReason) {
         result = skippedResult(result, allowlistReason);
       } else {
