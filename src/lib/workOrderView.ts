@@ -35,6 +35,28 @@ export type WorkOrderProgressActivity = {
   syncedToSevenElevenAt?: string | null;
 };
 
+export type WorkOrderActivityVisibility = {
+  isStaffOnly?: boolean | null;
+  eventKey?: string | null;
+  text?: string | null;
+};
+
+export const isInternalWorkOrderActivity = (
+  activity?: WorkOrderActivityVisibility | null,
+) => {
+  const text = String(activity?.text || "");
+  return Boolean(activity?.isStaffOnly)
+    || activity?.eventKey === "staff_billing"
+    || activity?.eventKey === "work_order_reassigned"
+    || activity?.eventKey === "work_order_assignment"
+    || activity?.eventKey === "work_order_unassigned"
+    || /^Reassigned from .+ to .+ by .+\.$/i.test(text)
+    || /^(?:Dispatched|Assigned) to .+\.$/i.test(text)
+    || /^Work order unassigned by .+\.$/i.test(text)
+    || /^P1 invoice #[^ ]+ (?:created|updated|draft updated|prepared|billed)/i.test(text)
+    || /^7-Eleven portal updated\. Moved to (?:pending invoice|Pending 7-Eleven Submission)\.$/i.test(text);
+};
+
 const priorityRank: Record<string, number> = {
   p1: 1,
   p2: 2,

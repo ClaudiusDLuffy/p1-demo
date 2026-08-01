@@ -144,11 +144,18 @@ export default function useWorkOrders({
     const dispatchedAt = new Date().toISOString();
     const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" }, localActivity(text, "system"));
+    patchLocalWO(
+      woId,
+      { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" },
+      localActivity(text, "system", false, "work_order_assignment", false, true),
+    );
     fire(`Dispatched to ${c.name}`);
     const ok = await dbCall(async () => {
       await updateWorkOrder(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" });
-      await insertActivity(woId, "System", text, "system");
+      await insertActivity(woId, "System", text, "system", {
+        staffOnly: true,
+        eventKey: "work_order_assignment",
+      });
     }, "Dispatch failed", () => restoreWorkOrders(snapshot));
     if (ok) await notifyDispatch(woId, contractorId);
     } finally {
@@ -162,7 +169,11 @@ export default function useWorkOrders({
     const wo = workOrders.find(w => w.id === woId);
     const text = `Work order unassigned by ${currentUser.name}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: "unassigned", contractor: null, eta: null, dispatchedAt: null, functionalStatus: "New" }, localActivity(text, "system"));
+    patchLocalWO(
+      woId,
+      { status: "unassigned", contractor: null, eta: null, dispatchedAt: null, functionalStatus: "New" },
+      localActivity(text, "system", false, "work_order_unassigned", false, true),
+    );
     fire("Work order unassigned");
     await dbCall(async () => {
       await unassignWorkOrder(woId, currentUser.name);
@@ -205,7 +216,11 @@ export default function useWorkOrders({
     try {
     const text = `Reassigned from ${oldName} to ${newC.name} by ${currentUser.name}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { contractor: newContractorId, status: "assigned", functionalStatus: "Dispatched" }, localActivity(text, "system"));
+    patchLocalWO(
+      woId,
+      { contractor: newContractorId, status: "assigned", functionalStatus: "Dispatched" },
+      localActivity(text, "system", false, "work_order_reassigned", false, true),
+    );
     fire(`Reassigned to ${newC.name}`);
     const ok = await dbCall(async () => {
       await reassignWorkOrder(woId, newContractorId, oldName, newC.name, currentUser.name);

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   getWorkOrderActionReasons,
   getWorkOrderProgressSteps,
+  isInternalWorkOrderActivity,
   workOrderNeedsAction,
 } from "./workOrderView";
 
@@ -67,5 +68,45 @@ test("started work advances progress even when no ETA was entered", () => {
       { label: "Work started", done: true },
       { label: "Asset captured", done: false },
     ],
+  );
+});
+
+test("reassignment activity is private even for legacy rows", () => {
+  assert.equal(
+    isInternalWorkOrderActivity({
+      text: "Reassigned from Pro-Ops to Derek Starnes by P1 Service.",
+      eventKey: "assignment",
+      isStaffOnly: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isInternalWorkOrderActivity({
+      text: "Assignment changed.",
+      eventKey: "work_order_reassigned",
+    }),
+    true,
+  );
+});
+
+test("identity-bearing assignment activity is private", () => {
+  assert.equal(
+    isInternalWorkOrderActivity({
+      text: "Dispatched to Pro-Ops.",
+      eventKey: "assignment",
+      isStaffOnly: false,
+    }),
+    true,
+  );
+});
+
+test("ordinary operational activity remains contractor-visible", () => {
+  assert.equal(
+    isInternalWorkOrderActivity({
+      text: "Checked in and started work.",
+      eventKey: "check_in",
+      isStaffOnly: false,
+    }),
+    false,
   );
 });
