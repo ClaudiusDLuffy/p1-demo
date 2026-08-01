@@ -26,10 +26,10 @@ export function intakeStateBlockReason(
   const normalizedState = String(state || "").trim().toUpperCase();
   const allowedStates = parseAllowedIntakeStates(allowedStatesRaw);
 
-  // Texas routing can be prepared and deployed without activating production
-  // intake. Enabling it requires both the allowlist and this explicit switch.
+  // Texas intake can be prepared and deployed without activating production.
+  // Enabling it requires both the allowlist and this explicit switch.
   if (normalizedState === "TX" && !enabled(texasEnabledRaw)) {
-    return "state TX routing is prepared but not enabled";
+    return "state TX intake is not enabled";
   }
 
   if (!allowedStates) return null;

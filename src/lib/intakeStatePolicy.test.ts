@@ -12,7 +12,7 @@ test("normalizes and deduplicates configured intake states", () => {
 test("keeps Texas disabled even when it is present in the state allowlist", () => {
   assert.equal(
     intakeStateBlockReason("TX", "VA,TX", undefined),
-    "state TX routing is prepared but not enabled",
+    "state TX intake is not enabled",
   );
 });
 

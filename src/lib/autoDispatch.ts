@@ -1,5 +1,6 @@
 import { createServerClient } from "./supabase/server";
 import type { ParsedWorkOrder } from "./emailParser";
+import { normalizeStateCode } from "./billingRules";
 
 type DispatchRule = {
   territory: string[];
@@ -54,6 +55,9 @@ const containsAny = (text: string, values: string[]) => {
 
 const normalize = (value: string | null | undefined) => (value || "").trim().toLowerCase();
 
+export const requiresManualContractorAssignment = (parsed: ParsedWorkOrder) =>
+  normalizeStateCode(parsed.state) === "TX";
+
 export const detectDispatchTrade = (parsed: ParsedWorkOrder): string | null => {
   const lineOfService = normalize(parsed.lineOfService);
   const businessService = normalize(parsed.businessService);
@@ -104,6 +108,10 @@ export const detectDispatchTerritory = (parsed: ParsedWorkOrder): string[] => {
 export async function resolveContractor(
   parsed: ParsedWorkOrder,
 ): Promise<{ contractorId: string | null; contractorEmail?: string | null; contractorName?: string | null; reason: string }> {
+  if (requiresManualContractorAssignment(parsed)) {
+    return { contractorId: null, reason: "manual assignment required for TX" };
+  }
+
   const territoryText = detectDispatchTerritory(parsed).join(" ");
   const trade = detectDispatchTrade(parsed);
   const tradeText = trade || "";

@@ -14,9 +14,12 @@ type DispatchNotificationInput = {
     summary?: string | null;
     description?: string | null;
   };
+  contractorAssigned?: boolean;
   contractorEmail?: string | null;
   contractorName?: string | null;
 };
+
+const SERVICE_INBOX = "service@p1pros.com";
 
 const PRIORITY_LABELS: Record<string, string> = {
   p1: "P1 Critical",
@@ -72,8 +75,11 @@ ${portalUrl()}`;
 
 const buildOwnerBody = (
   workOrder: DispatchNotificationInput["workOrder"],
+  contractorAssigned: boolean,
   contractorName?: string | null,
-) => `A new work order has been dispatched${contractorName ? ` to ${contractorName}` : ""}.
+) => `${contractorAssigned
+  ? `A new work order has been dispatched${contractorName ? ` to ${contractorName}` : ""}.`
+  : "A new work order is waiting for contractor assignment."}
 
 Work Order: ${workOrder.id}
 Incident: ${workOrder.incidentId || "Not captured"}
@@ -86,6 +92,38 @@ Issue: ${issueLabel(workOrder)}
 Log in to view details:
 ${portalUrl()}`;
 
+export const createDispatchNotificationPlan = (
+  input: DispatchNotificationInput,
+  configuredOwnerEmails: string[] = ownerEmails(),
+) => {
+  const { workOrder, contractorEmail, contractorName } = input;
+  const contractorAssigned = input.contractorAssigned
+    ?? Boolean(contractorEmail || contractorName);
+  const contractorRecipients = contractorAssigned
+    ? [...new Set([
+        ...(contractorEmail ? [contractorEmail] : []),
+        ...(isProOpsAssignment(contractorEmail, contractorName)
+          ? ["service@pro-opsinc.com"]
+          : []),
+      ])]
+    : [];
+  const internalRecipients = [...new Set([
+    ...configuredOwnerEmails,
+    ...(!contractorAssigned ? [SERVICE_INBOX] : []),
+  ])];
+  const stateLabel = String(workOrder.state || "").trim().toUpperCase();
+
+  return {
+    contractorAssigned,
+    contractorRecipients,
+    internalRecipients,
+    ownerSubject: contractorAssigned
+      ? `New ${stateLabel ? `${stateLabel} ` : ""}Call Dispatched - ${workOrder.id}`
+      : `New ${stateLabel ? `${stateLabel} ` : ""}Call Needs Assignment - ${workOrder.id}`,
+    ownerBody: buildOwnerBody(workOrder, contractorAssigned, contractorName),
+  };
+};
+
 export async function sendDispatchNotification(input: DispatchNotificationInput) {
   const accessToken = await getAccessToken();
   if (!accessToken) {
@@ -93,31 +131,24 @@ export async function sendDispatchNotification(input: DispatchNotificationInput)
     return;
   }
 
-  const { workOrder, contractorEmail, contractorName } = input;
-  const contractorRecipients = [...new Set([
-    ...(contractorEmail ? [contractorEmail] : []),
-    ...(isProOpsAssignment(contractorEmail, contractorName)
-      ? ["service@pro-opsinc.com"]
-      : []),
-  ])];
-  const internalRecipients = ownerEmails();
+  const { workOrder } = input;
+  const plan = createDispatchNotificationPlan(input);
 
-  if (contractorRecipients.length) {
+  if (plan.contractorRecipients.length) {
     await sendEmail(
       accessToken,
-      contractorRecipients,
+      plan.contractorRecipients,
       `New Work Order Assigned - ${workOrder.id}`,
       buildContractorBody(workOrder),
     );
   }
 
-  if (internalRecipients.length) {
-    const stateLabel = String(workOrder.state || "").trim().toUpperCase();
+  if (plan.internalRecipients.length) {
     await sendEmail(
       accessToken,
-      internalRecipients,
-      `New ${stateLabel ? `${stateLabel} ` : ""}Call Dispatched - ${workOrder.id}`,
-      buildOwnerBody(workOrder, contractorName),
+      plan.internalRecipients,
+      plan.ownerSubject,
+      plan.ownerBody,
     );
   }
 }

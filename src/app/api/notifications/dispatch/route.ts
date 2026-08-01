@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
   try {
     await sendDispatchNotification({
       workOrder: mapWorkOrder(wo),
+      contractorAssigned: true,
       contractorEmail: contractor.email,
       contractorName: contractor.company || contractor.name || "Contractor",
     });
