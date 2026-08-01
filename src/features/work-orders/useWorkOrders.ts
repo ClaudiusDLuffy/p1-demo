@@ -14,6 +14,7 @@ import {
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
 import {
+  stateCodeFromWorkOrder,
   storeLocalDateTimeToIso,
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
@@ -789,11 +790,13 @@ export default function useWorkOrders({
   const doAutoAssign = async () => {
     const unassigned = workOrders.filter(w => w.status === "unassigned");
     if (unassigned.length === 0) { fire("No unassigned calls"); return; }
-    let count = 0, skipped = 0;
+    let count = 0;
+    let skipped = unassigned.filter(w => stateCodeFromWorkOrder(w) === "TX").length;
     const dispatchedAt = new Date().toISOString();
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     let hadError = false;
     const ops = unassigned.map(async w => {
+      if (stateCodeFromWorkOrder(w) === "TX") return;
       const trades = SERVICE_TO_TRADES(w.businessService || "", w.category || "");
       const matched = contractorFor(w.city, trades, USERS);
       if (!matched) { skipped++; return; }

@@ -267,23 +267,22 @@ export async function processEmail(
           if (error) throw error;
           await saveAfmContact(workOrderId, parsed.afmEmail);
 
-          if (contractor.contractorId) {
-            await sendDispatchNotification({
-              workOrder: {
-                id: workOrderId,
-                incidentId: parsed.incidentId,
-                storeNumber: parsed.storeNumber,
-                city: parsed.city,
-                state: parsed.state,
-                address: parsed.address,
-                priority: parsed.priority || "p2",
-                summary: parsed.summary,
-                description: parsed.description,
-              },
-              contractorEmail: contractor.contractorEmail,
-              contractorName: contractor.contractorName,
-            }).catch(err => console.error("Dispatch notification failed", err));
-          }
+          await sendDispatchNotification({
+            workOrder: {
+              id: workOrderId,
+              incidentId: parsed.incidentId,
+              storeNumber: parsed.storeNumber,
+              city: parsed.city,
+              state: parsed.state,
+              address: parsed.address,
+              priority: parsed.priority || "p2",
+              summary: parsed.summary,
+              description: parsed.description,
+            },
+            contractorAssigned: Boolean(contractor.contractorId),
+            contractorEmail: contractor.contractorEmail,
+            contractorName: contractor.contractorName,
+          }).catch(err => console.error("Dispatch notification failed", err));
 
           result = {
             ...result,

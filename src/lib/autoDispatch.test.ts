@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   detectDispatchTerritory,
   detectDispatchTrade,
+  requiresManualContractorAssignment,
+  resolveContractor,
 } from "./autoDispatch";
 import type { ParsedWorkOrder } from "./emailParser";
 
@@ -60,6 +62,27 @@ test("does not treat every Texas city as DFW", () => {
       address: "100 Main St, Austin, TX",
     })),
     ["Texas", "TX"],
+  );
+});
+
+test("requires manual assignment for every Texas call", async () => {
+  const texasCalls = [
+    parsed({ city: "Dallas", lineOfService: "HVAC" }),
+    parsed({ city: "Houston", lineOfService: "Refrigeration" }),
+    parsed({ city: "Fort Worth", lineOfService: "EMS" }),
+  ];
+
+  for (const workOrder of texasCalls) {
+    assert.equal(requiresManualContractorAssignment(workOrder), true);
+    assert.deepEqual(await resolveContractor(workOrder), {
+      contractorId: null,
+      reason: "manual assignment required for TX",
+    });
+  }
+
+  assert.equal(
+    requiresManualContractorAssignment(parsed({ state: "VA", city: "Virginia Beach" })),
+    false,
   );
 });
 
