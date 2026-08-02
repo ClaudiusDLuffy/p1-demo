@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DayPicker } from "react-day-picker";
 import { format, parseISO } from "date-fns";
 import "react-day-picker/style.css";
 import { T } from "../../lib/constants";
+import { getFloatingPanelPosition, type FloatingPanelPosition } from "../../lib/floatingPanel";
 import { Sel } from "./Sel";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -48,6 +49,22 @@ const toTimeValue = (hour12: number, minute: number, period: string) => {
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const yearOptions = Array.from({ length: 41 }, (_, i) => new Date().getFullYear() - 20 + i);
 
+type DatePickerFieldProps = {
+  value?: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  placement?: "bottom" | "top" | "right";
+  mobileYOffset?: number;
+  desktopYOffset?: number;
+  avoidDesktopBottomCut?: boolean;
+};
+
+type TimePickerFieldProps = {
+  value?: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+};
+
 const pickerCss = `
 .p1-picker-popover {
   position: fixed;
@@ -55,13 +72,6 @@ const pickerCss = `
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   box-sizing: border-box;
-}
-@media(max-width: 768px) {
-  .p1-picker-popover {
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-  }
 }
 .p1-date-picker .rdp-root {
   --rdp-accent-color: ${T.accent};
@@ -115,16 +125,12 @@ const pickerCss = `
 }
 `;
 
-export function DatePickerField({ value, onChange, placeholder = "Select date", placement = "bottom", mobileYOffset = 0, desktopYOffset = 0, avoidDesktopBottomCut = false }: any) {
+export function DatePickerField({ value, onChange, placeholder = "Select date", placement = "bottom", mobileYOffset = 0, desktopYOffset = 0 }: DatePickerFieldProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<any>(null);
+  const [pos, setPos] = useState<FloatingPanelPosition | null>(null);
   const selected = parseDateValue(value);
   const [month, setMonth] = useState<Date>(selected || new Date());
-
-  useEffect(() => {
-    if (selected) setMonth(selected);
-  }, [value]);
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -139,53 +145,16 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
     const updatePosition = () => {
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(318, window.innerWidth - 32);
-      if (window.innerWidth <= 768) {
-        const height = 382;
-        const below = rect.bottom + 8;
-        const above = rect.top - height - 8;
-        const top = below + height <= window.innerHeight - 16
-          ? below
-          : Math.max(16, above);
-        setPos({
-          width,
-          left: "50%",
-          top: top + mobileYOffset,
-          bottom: undefined,
-          transform: "translateX(-50%)",
-        });
-        return;
-      }
-      const center = rect.left + rect.width / 2;
-      const left = Math.min(Math.max(center, width / 2 + 16), window.innerWidth - width / 2 - 16);
-      const height = 382;
-      if (placement === "right") {
-        const preferredLeft = rect.right + 8;
-        const fallbackLeft = rect.left - width - 8;
-        const leftEdge = preferredLeft + width <= window.innerWidth - 16
-          ? preferredLeft
-          : Math.max(16, fallbackLeft);
-        const top = Math.min(Math.max(rect.top + desktopYOffset, 16), Math.max(16, window.innerHeight - height - 16));
-        setPos({
-          width,
-          left: leftEdge,
-          top,
-          bottom: undefined,
-          transform: "none",
-        });
-        return;
-      }
-      const requestedTop = placement === "top" ? undefined : rect.bottom + 6;
-      const adjustedTop = requestedTop == null || !avoidDesktopBottomCut
-        ? undefined
-        : Math.min(requestedTop, Math.max(16, window.innerHeight - height - 16));
-      setPos({
-        width,
-        left,
-        top: adjustedTop ?? requestedTop,
-        bottom: placement === "top" ? window.innerHeight - rect.top + 6 : undefined,
-        transform: "translateX(-50%)",
-      });
+      const isMobile = window.innerWidth <= 768;
+      setPos(getFloatingPanelPosition({
+        trigger: rect,
+        panelWidth: 318,
+        panelHeight: 430,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        preferredPlacement: isMobile ? "bottom" : placement,
+        offsetY: isMobile ? mobileYOffset : placement === "right" ? desktopYOffset : 0,
+      }));
     };
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -194,14 +163,17 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [open, placement, mobileYOffset, desktopYOffset, avoidDesktopBottomCut]);
+  }, [open, placement, mobileYOffset, desktopYOffset]);
 
   return (
     <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}>
       <style>{pickerCss}</style>
       <button
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={() => {
+          if (!open && selected) setMonth(selected);
+          setOpen(current => !current);
+        }}
         style={{
           width: "100%",
           minHeight: 44,
@@ -234,8 +206,9 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
             width: pos.width,
             left: pos.left,
             top: pos.top,
-            bottom: pos.bottom,
-            transform: pos.transform,
+            maxHeight: pos.maxHeight,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
             padding: 12,
             borderRadius: 14,
             border: `1px solid ${T.border}`,
@@ -247,7 +220,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
             <Sel
               value={String(month.getMonth())}
-              onChange={(e: any) => setMonth(new Date(month.getFullYear(), Number(e.target.value), 1))}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setMonth(new Date(month.getFullYear(), Number(e.target.value), 1))}
               optionAlign="center"
               valueAlign="center"
               style={{ minHeight: 38, padding: "8px 10px", borderRadius: 10, fontSize: 12 }}
@@ -256,7 +229,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
             </Sel>
             <Sel
               value={String(month.getFullYear())}
-              onChange={(e: any) => setMonth(new Date(Number(e.target.value), month.getMonth(), 1))}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setMonth(new Date(Number(e.target.value), month.getMonth(), 1))}
               optionAlign="center"
               valueAlign="center"
               style={{ minHeight: 38, padding: "8px 10px", borderRadius: 10, fontSize: 12 }}
@@ -285,12 +258,12 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
   );
 }
 
-export function TimePickerField({ value, onChange, placeholder = "Select time" }: any) {
+export function TimePickerField({ value, onChange, placeholder = "Select time" }: TimePickerFieldProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const hourListRef = useRef<HTMLDivElement | null>(null);
   const minuteListRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<any>(null);
+  const [pos, setPos] = useState<FloatingPanelPosition | null>(null);
   const { hour12, minute, period } = useMemo(() => timeParts(value), [value]);
   const displayValue = formatTimeLabel(value);
   const updatePart = (next: Partial<{ hour12: number; minute: number; period: string }>) => {
@@ -310,25 +283,13 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
     const updatePosition = () => {
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(320, window.innerWidth - 32);
-      if (window.innerWidth <= 768) {
-        const height = 270;
-        const below = rect.bottom + 8;
-        const above = rect.top - height - 8;
-        const top = below + height <= window.innerHeight - 16
-          ? below
-          : Math.max(16, above);
-        setPos({
-          width,
-          left: "50%",
-          top,
-          transform: "translateX(-50%)",
-        });
-        return;
-      }
-      const center = rect.left + rect.width / 2;
-      const left = Math.min(Math.max(center, width / 2 + 16), window.innerWidth - width / 2 - 16);
-      setPos({ width, left, top: rect.bottom + 6, transform: "translateX(-50%)" });
+      setPos(getFloatingPanelPosition({
+        trigger: rect,
+        panelWidth: 320,
+        panelHeight: 270,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      }));
     };
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -387,8 +348,8 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
             width: pos.width,
             left: pos.left,
             top: pos.top,
-            transform: pos.transform,
-            overflowY: "hidden",
+            maxHeight: pos.maxHeight,
+            overflowY: "auto",
             overflowX: "hidden",
             padding: 10,
             borderRadius: 14,
