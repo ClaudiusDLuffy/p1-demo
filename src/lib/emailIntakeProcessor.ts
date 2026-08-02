@@ -16,6 +16,12 @@ import { normalizeStateCode, timezoneForWorkOrder } from "./billingRules";
 import { intakeStateBlockReason } from "./intakeStatePolicy";
 import { createServerClient } from "./supabase/server";
 import { sendDispatchNotification } from "./notificationService";
+import {
+  chooseIntakeWorkOrderMatch,
+  type IntakeWorkOrderMatch,
+  type WorkOrderMatchCandidate,
+} from "./emailIntakeMatching";
+import { intakeErrorMessage } from "./intakeError";
 import type { Database } from "./supabase/database.types";
 
 type WorkOrderInsert = Database["public"]["Tables"]["work_orders"]["Insert"];
@@ -37,11 +43,6 @@ export type IntakeResult = {
   parseConfidence: "high" | "medium" | "low";
   contractorAssigned: string | null;
   processedAt: string;
-};
-
-type WorkOrderMatch = {
-  id: string;
-  archived: boolean;
 };
 
 const stateAllowlistReason = (state: string | null) => {
@@ -87,10 +88,10 @@ const saveAfmContact = async (workOrderId: string, afmEmail: string | null) => {
   if (error) throw error;
 };
 
-const findWorkOrderMatch = async (parsed: ParsedWorkOrder): Promise<WorkOrderMatch | null> => {
+const findWorkOrderMatch = async (parsed: ParsedWorkOrder): Promise<IntakeWorkOrderMatch | null> => {
   const sb = createServerClient();
   const ids = [...new Set([parsed.wotId, parsed.fwkdId].filter(Boolean) as string[])];
-  let archivedMatch: WorkOrderMatch | null = null;
+  const candidates: WorkOrderMatchCandidate[] = [];
 
   for (const id of ids) {
     const { data, error } = await sb
@@ -102,15 +103,16 @@ const findWorkOrderMatch = async (parsed: ParsedWorkOrder): Promise<WorkOrderMat
     if (error) {
       throw new Error(`Work order lookup failed for ${id}: ${error.message}`);
     }
-    if (data?.id && !data.deleted_at) {
-      return { id: data.id, archived: false };
-    }
-    if (data?.id && !archivedMatch) {
-      archivedMatch = { id: data.id, archived: true };
+    if (data?.id) {
+      candidates.push({
+        id: data.id,
+        deletedAt: data.deleted_at,
+        matchedBy: "work_order_id",
+      });
     }
   }
 
-  return archivedMatch;
+  return chooseIntakeWorkOrderMatch(candidates);
 };
 
 const addSystemActivity = async (workOrderId: string, text: string) => {
@@ -353,7 +355,7 @@ export async function processEmail(
     result = {
       ...result,
       action: "failed",
-      reason: err instanceof Error ? err.message : "unknown processing error",
+      reason: intakeErrorMessage(err, "unknown processing error"),
     };
   }
 
@@ -361,7 +363,7 @@ export async function processEmail(
     try {
       await finishEmail(email, folderId);
     } catch (err) {
-      const finishReason = err instanceof Error ? err.message : "unknown mailbox finalization error";
+      const finishReason = intakeErrorMessage(err, "unknown mailbox finalization error");
       console.error("Email intake mailbox finalization failed", finishReason);
       result = {
         ...result,

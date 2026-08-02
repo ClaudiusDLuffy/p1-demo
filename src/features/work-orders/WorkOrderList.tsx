@@ -271,7 +271,19 @@ export default function WorkOrderList(props: any) {
                             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
                         </td>
-                        <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>{wo.incidentId || "-"}</td>
+                        <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            {wo.incidentId || "-"}
+                            {isManager && wo.incidentReuse && (
+                              <span
+                                title={`Also used by ${wo.incidentReuse.relatedWorkOrderIds.join(", ")}`}
+                                style={{ fontFamily: "inherit", fontSize: 9, fontWeight: 800, color: T.warn, background: T.warnSoft, border: `1px solid ${T.warn}44`, borderRadius: 6, padding: "3px 5px", whiteSpace: "nowrap" }}
+                              >
+                                Reused INC
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td style={{ padding: "12px 14px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "-"}</td>
                         <td style={{ padding: "12px 14px", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "-"}</td>
                         <td style={{ padding: "12px 14px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
@@ -350,6 +362,16 @@ export default function WorkOrderList(props: any) {
                     {wo.store ? `Store #${wo.store}` : wo.id}
                     {wo.city ? <span style={{ fontWeight: 400, color: T.muted, fontSize: 12 }}> · {wo.city}</span> : null}
                   </div>
+                  {isManager && wo.incidentReuse && (
+                    <div style={{ marginBottom: 6 }}>
+                      <span
+                        title={`Incident also used by ${wo.incidentReuse.relatedWorkOrderIds.join(", ")}`}
+                        style={{ display: "inline-flex", fontFamily: "inherit", fontSize: 9, fontWeight: 800, color: T.warn, background: T.warnSoft, border: `1px solid ${T.warn}44`, borderRadius: 6, padding: "3px 5px", whiteSpace: "nowrap" }}
+                      >
+                        Reused INC
+                      </span>
+                    </div>
+                  )}
                   <div className="mobile-card-summary" style={{ fontSize: 12, color: T.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {wo.summary || "No summary"}
                   </div>
