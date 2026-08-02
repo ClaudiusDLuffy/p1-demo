@@ -1145,6 +1145,15 @@ export type Database = {
         }
         Returns: Json
       }
+      get_incident_reuse_warnings: {
+        Args: never
+        Returns: {
+          crosses_state: boolean
+          incident_id: string
+          related_work_order_ids: string[]
+          work_order_id: string
+        }[]
+      }
       mark_staff_invoice_billed: {
         Args: {
           p_actor_id: string

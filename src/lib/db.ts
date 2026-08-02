@@ -93,18 +93,20 @@ const mapProfile = (p: any) => ({
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
   // Pull WOs + activities + photos + visit boundaries, then stitch together.
-  const [woRes, actRes, photoRes, visitRes, afmContactRes] = await Promise.all([
+  const [woRes, actRes, photoRes, visitRes, afmContactRes, incidentReuseRes] = await Promise.all([
     sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("photos").select("*"),
     (sb as any).from("work_order_visits").select("*").order("check_in_at", { ascending: true }),
     sb.from("work_order_afm_contacts").select("work_order_id, afm_email"),
+    sb.rpc("get_incident_reuse_warnings"),
   ]);
   if (woRes.error) throw woRes.error;
   if (actRes.error) throw actRes.error;
   if (photoRes.error) throw photoRes.error;
   if (visitRes.error) throw visitRes.error;
   if (afmContactRes.error) throw afmContactRes.error;
+  if (incidentReuseRes.error) throw incidentReuseRes.error;
 
   const timeZoneByWo = Object.fromEntries(
     (woRes.data || []).map(workOrder => [
@@ -145,6 +147,16 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
       contact.afm_email || null,
     ]),
   );
+  const incidentReuseByWo = Object.fromEntries(
+    (incidentReuseRes.data || []).map(warning => [
+      warning.work_order_id,
+      {
+        incidentId: warning.incident_id,
+        relatedWorkOrderIds: warning.related_work_order_ids || [],
+        crossesState: warning.crosses_state,
+      },
+    ]),
+  );
 
   const mapped = (woRes.data || []).map(wo => {
     const activities = actsByWo[wo.id] || [];
@@ -162,6 +174,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
 
     return {
       ...mapWO(wo),
+      incidentReuse: incidentReuseByWo[wo.id] || null,
       afmEmail: afmEmailByWo[wo.id] || null,
       activities,
       latestNoteAt,

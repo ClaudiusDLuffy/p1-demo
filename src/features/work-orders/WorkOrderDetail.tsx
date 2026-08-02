@@ -177,6 +177,21 @@ export default function WorkOrderDetail(props: any) {
                 <button onClick={() => { setSelectedWO(null); setAiNote(null); if (!isManager) setPage("my_jobs"); }} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
 
                 {/* Alert stack — two-breach SLA replaces the single-deadline view */}
+                {isManager && woData.incidentReuse && (
+                  <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 20, color: T.warn, fontWeight: 800 }}>!</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: "#73560C", fontSize: 13 }}>
+                        Reused incident number
+                      </div>
+                      <div style={{ fontSize: 11, color: "#73560C", marginTop: 2 }}>
+                        {woData.incidentId} also appears on {woData.incidentReuse.relatedWorkOrderIds.join(", ")}.
+                        {woData.incidentReuse.crossesState ? " The work orders span different states." : ""}
+                        {" "}Treat each WOT as a separate call and verify the incident reference before updating 7-Eleven.
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {sla2 && (sla2.responseBreached || sla2.resolutionBreached) && (
                   <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 22 }}>🚨</div>

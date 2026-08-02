@@ -1506,8 +1506,7 @@ export default function PortalShell() {
     const contractorName = contractor ? getUser(contractor)?.name : null;
     const dispatchedAt = contractor ? new Date().toISOString() : null;
     // Priority defaults to P4 (standard) when left blank. Text fields default
-    // to "" so the UI renders cleanly; incidentId stays null when blank
-    // because incident_id carries a UNIQUE constraint ('' would collide).
+    // to "" so the UI renders cleanly; a missing incident remains null.
     const priority = newWO.priority || "p4";
     const incidentId = (newWO.incidentId || "").trim() || null;
     const wo = {
