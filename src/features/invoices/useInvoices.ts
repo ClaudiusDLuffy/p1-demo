@@ -13,6 +13,7 @@ import {
   rejectInvoice,
   insertActivity,
   nextInvoiceNumFromDb,
+  correctContractorInvoiceTotal,
 } from "../../lib/db";
 import { P1_BUSINESS } from "../../lib/constants";
 import { normalizeInvoiceLineNumbers } from "../../lib/invoiceMath";
@@ -392,13 +393,37 @@ export default function useInvoices({ currentUser, fire }: any) {
     }
   };
 
+  const doCorrectInvoiceTotal = async (
+    inv: any,
+    correctedTotal: number,
+    reason?: string,
+  ) => {
+    if (!Number.isFinite(correctedTotal) || correctedTotal <= 0) {
+      fire("Enter a corrected total greater than zero");
+      return false;
+    }
+
+    try {
+      await correctContractorInvoiceTotal(inv.id, correctedTotal, reason);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      ]);
+      fire(`Invoice #${inv.num} total corrected to $${correctedTotal.toFixed(2)}`);
+      return true;
+    } catch (e: any) {
+      fire(`Total correction failed: ${e.message || e}`);
+      return false;
+    }
+  };
+
   return {
     newInv, setNewInv,
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice,
+    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal,
     lineAmount, invSubtotal, invTotal,
   };
 }

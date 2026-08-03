@@ -13,7 +13,10 @@ import {
 } from "./emailParser";
 import { resolveContractor } from "./autoDispatch";
 import { normalizeStateCode, timezoneForWorkOrder } from "./billingRules";
-import { intakeStateBlockReason } from "./intakeStatePolicy";
+import {
+  intakeStateActivationDecision,
+  intakeStateBlockReason,
+} from "./intakeStatePolicy";
 import { createServerClient } from "./supabase/server";
 import { sendDispatchNotification } from "./notificationService";
 import {
@@ -50,6 +53,17 @@ const stateAllowlistReason = (state: string | null) => {
     state,
     process.env.EMAIL_INTAKE_ALLOWED_STATES,
     process.env.EMAIL_INTAKE_TEXAS_ENABLED,
+  );
+};
+
+const stateActivationDecision = (
+  state: string | null,
+  receivedAt: string | null,
+) => {
+  return intakeStateActivationDecision(
+    state,
+    receivedAt,
+    process.env.EMAIL_INTAKE_FLORIDA_START_AT,
   );
 };
 
@@ -216,88 +230,104 @@ export async function processEmail(
       } else if (allowlistReason) {
         result = skippedResult(result, allowlistReason);
       } else {
-        const sb = createServerClient();
-        const match = await findWorkOrderMatch(parsed);
+        const activationDecision = stateActivationDecision(
+          parsed.state,
+          email.receivedDateTime,
+        );
 
-        if (match?.archived) {
-          result = skippedResult(
-            result,
-            "initial dispatch matched an archived work order; archived row was not recreated",
-            match.id,
-          );
-        } else if (match) {
-          const { error } = await sb
-            .from("work_orders")
-            .update(compactPatch(parsed))
-            .eq("id", match.id)
-            .is("deleted_at", null);
-
-          if (error) throw error;
-          await saveAfmContact(match.id, parsed.afmEmail);
+        if (activationDecision.action === "hold") {
+          shouldFinishEmail = false;
           result = {
             ...result,
-            action: "updated",
-            workOrderId: match.id,
-            reason: "existing active work order refreshed from initial dispatch",
+            action: "failed",
+            reason: activationDecision.reason,
           };
+        } else if (activationDecision.action === "skip") {
+          result = skippedResult(result, activationDecision.reason);
         } else {
-          const contractor = await resolveContractor(parsed);
-          const workOrderId = parsed.wotId;
-          const row: WorkOrderInsert = {
-            id: workOrderId,
-            store_number: parsed.storeNumber,
-            summary: parsed.summary,
-            description: parsed.description,
-            priority: parsed.priority || "p2",
-            status: contractor.contractorId ? "assigned" : "unassigned",
-            functional_status: "New",
-            contractor_id: contractor.contractorId,
-            afm_name: parsed.afmName,
-            afm_email: null,
-            city: parsed.city,
-            address: parsed.address,
-            store_state: normalizeStateCode(parsed.state) || null,
-            store_timezone: timezoneForWorkOrder({ storeState: parsed.state }),
-            nte: parsed.nte || 0,
-            line_of_service: parsed.lineOfService,
-            business_service: parsed.businessService,
-            category: parsed.category,
-            sub_category: parsed.subCategory,
-            incident_id: parsed.incidentId,
-            source: "email_intake",
-            dispatched_at: email.receivedDateTime || processedAt,
-            sla_started_at: email.receivedDateTime || processedAt,
-            created_at: processedAt,
-          };
+          const sb = createServerClient();
+          const match = await findWorkOrderMatch(parsed);
 
-          const { error } = await sb.from("work_orders").insert(row);
-          if (error) throw error;
-          await saveAfmContact(workOrderId, parsed.afmEmail);
+          if (match?.archived) {
+            result = skippedResult(
+              result,
+              "initial dispatch matched an archived work order; archived row was not recreated",
+              match.id,
+            );
+          } else if (match) {
+            const { error } = await sb
+              .from("work_orders")
+              .update(compactPatch(parsed))
+              .eq("id", match.id)
+              .is("deleted_at", null);
 
-          await sendDispatchNotification({
-            workOrder: {
+            if (error) throw error;
+            await saveAfmContact(match.id, parsed.afmEmail);
+            result = {
+              ...result,
+              action: "updated",
+              workOrderId: match.id,
+              reason: "existing active work order refreshed from initial dispatch",
+            };
+          } else {
+            const contractor = await resolveContractor(parsed);
+            const workOrderId = parsed.wotId;
+            const row: WorkOrderInsert = {
               id: workOrderId,
-              incidentId: parsed.incidentId,
-              storeNumber: parsed.storeNumber,
-              city: parsed.city,
-              state: parsed.state,
-              address: parsed.address,
-              priority: parsed.priority || "p2",
+              store_number: parsed.storeNumber,
               summary: parsed.summary,
               description: parsed.description,
-            },
-            contractorAssigned: Boolean(contractor.contractorId),
-            contractorEmail: contractor.contractorEmail,
-            contractorName: contractor.contractorName,
-          }).catch(err => console.error("Dispatch notification failed", err));
+              priority: parsed.priority || "p2",
+              status: contractor.contractorId ? "assigned" : "unassigned",
+              functional_status: "New",
+              contractor_id: contractor.contractorId,
+              afm_name: parsed.afmName,
+              afm_email: null,
+              city: parsed.city,
+              address: parsed.address,
+              store_state: normalizeStateCode(parsed.state) || null,
+              store_timezone: timezoneForWorkOrder({ storeState: parsed.state }),
+              nte: parsed.nte || 0,
+              line_of_service: parsed.lineOfService,
+              business_service: parsed.businessService,
+              category: parsed.category,
+              sub_category: parsed.subCategory,
+              incident_id: parsed.incidentId,
+              source: "email_intake",
+              dispatched_at: email.receivedDateTime || processedAt,
+              sla_started_at: email.receivedDateTime || processedAt,
+              created_at: processedAt,
+            };
 
-          result = {
-            ...result,
-            action: "created",
-            workOrderId,
-            reason: contractor.reason,
-            contractorAssigned: contractor.contractorId,
-          };
+            const { error } = await sb.from("work_orders").insert(row);
+            if (error) throw error;
+            await saveAfmContact(workOrderId, parsed.afmEmail);
+
+            await sendDispatchNotification({
+              workOrder: {
+                id: workOrderId,
+                incidentId: parsed.incidentId,
+                storeNumber: parsed.storeNumber,
+                city: parsed.city,
+                state: parsed.state,
+                address: parsed.address,
+                priority: parsed.priority || "p2",
+                summary: parsed.summary,
+                description: parsed.description,
+              },
+              contractorAssigned: Boolean(contractor.contractorId),
+              contractorEmail: contractor.contractorEmail,
+              contractorName: contractor.contractorName,
+            }).catch(err => console.error("Dispatch notification failed", err));
+
+            result = {
+              ...result,
+              action: "created",
+              workOrderId,
+              reason: contractor.reason,
+              contractorAssigned: contractor.contractorId,
+            };
+          }
         }
       }
     } else if (

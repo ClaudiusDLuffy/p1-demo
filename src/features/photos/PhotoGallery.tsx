@@ -50,6 +50,7 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
   useEffect(() => {
     if (!expanded || photos.length === 0) return;
     let mounted = true;
+    const objectUrls: string[] = [];
     setResolving(true);
     const resolve = async () => {
       const urls: Record<string, string> = {};
@@ -61,7 +62,10 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
           }
           try {
             const url = await getPhotoUrl(path);
-            if (url) urls[path] = url;
+            if (url) {
+              urls[path] = url;
+              if (url.startsWith("blob:")) objectUrls.push(url);
+            }
           } catch {
             // Missing storage objects render as placeholders below.
           }
@@ -70,23 +74,35 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
       if (mounted) {
         setSignedUrls(urls);
         setResolving(false);
+      } else {
+        for (const url of objectUrls) URL.revokeObjectURL(url);
       }
     };
     resolve();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      for (const url of objectUrls) URL.revokeObjectURL(url);
+    };
   }, [expanded, photos]);
 
   return (
     <>
                     {/* Photos */}
                     <div className="card" style={{ padding: 22, marginBottom: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos{(photos?.length || 0) > 0 ? ` (${photos.length})` : ""}</div>
-                        <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 14px", opacity: adding ? 0.7 : 1 }}>
-                          <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
-                          {adding ? <><BtnSpinnerDark />Uploading...</> : "Add photos"}
-                          <input type="file" accept="image/*" multiple capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
-                        </label>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
+                            <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
+                            {adding ? <><BtnSpinnerDark />Uploading...</> : "Take photo"}
+                            <input type="file" accept="image/*" capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
+                          </label>
+                          <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
+                            <Ico d="M4 5h16v14H4zM4 15l4-4 4 4 2-2 6 6M15 9h.01" size={13} />
+                            Choose photos
+                            <input type="file" accept="image/*" multiple disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
+                          </label>
+                        </div>
                       </div>
                       {(photos || []).length === 0
                         ? <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: T.subtle, background: T.surfaceSoft, borderRadius: 10, border: `1px dashed ${T.border}` }}>No photos yet. Add site pics, asset tags, part numbers, completed work.</div>

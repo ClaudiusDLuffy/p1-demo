@@ -57,7 +57,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
@@ -154,6 +154,8 @@ export default function WorkOrderDetail(props: any) {
   // pending_approval, which previously hid these). Capital is excluded (it has
   // its own staff flow). Pausing/closing never touches existing invoices.
   const jobOpen = !["closed", "capital"].includes(woData?.status);
+  const invoiceController = String(currentUser?.email || "").trim().toLowerCase()
+    === "emilyb@phospitality.com";
   const isLoading = (key: string) => !!loadingStates[key];
   const loadingStyle = (key: string) => ({
     opacity: isLoading(key) ? 0.7 : 1,
@@ -334,6 +336,18 @@ export default function WorkOrderDetail(props: any) {
 
                     {/* Actions */}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                      {woData.status === "unassigned" && isManager && !invoiceController && (
+                        <button
+                          onClick={() => doStraightToBilling(woData.id)}
+                          disabled={isLoading("straightToBilling_" + woData.id)}
+                          className="btn-accent"
+                          style={loadingStyle("straightToBilling_" + woData.id)}
+                        >
+                          {isLoading("straightToBilling_" + woData.id)
+                            ? <><BtnSpinnerDark />Moving...</>
+                            : "Straight to Billing"}
+                        </button>
+                      )}
                       {/* Quick-assign shows the FULL contractor list (same source as
                           the Create WO dropdown) so no contractor is unreachable. */}
                       {woData.status === "unassigned" && isManager && contractorsOnly.map(c => (
@@ -642,6 +656,72 @@ export default function WorkOrderDetail(props: any) {
                     {/* Technician on Job — contractor picks who was on site (text
                         snapshot, optional). Staff see it read-only. Locked at closed
                         (Completion Record carries it then). */}
+                    {isManager && (woData.assignmentHistory || []).length > 0 && (
+                      <div className="card" style={{ padding: 18, marginBottom: 16 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>
+                          Prior assignment history
+                        </div>
+                        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, marginBottom: 12 }}>
+                          Staff-only archive. Contractors cannot query these records or prior assignment artifacts.
+                        </div>
+                        {(woData.assignmentHistory || []).map((assignment: any) => {
+                          const snapshot = assignment.workflowSnapshot || {};
+                          const priorContractor = getUser(assignment.contractorId);
+                          const nextContractor = assignment.nextContractorId
+                            ? getUser(assignment.nextContractorId)
+                            : null;
+                          const details = [
+                            ["ETA", snapshot.eta],
+                            ["Started", snapshot.startTime],
+                            ["Completed", snapshot.endTime],
+                            ["Technician", snapshot.technicianOnJob],
+                            ["Equipment make", snapshot.assetMake],
+                            ["Asset model", snapshot.assetModel],
+                            ["Serial number", snapshot.assetSerial],
+                            ["Asset year", snapshot.assetYear],
+                            ["Resolution", snapshot.resolutionCode],
+                            ["Part needed", snapshot.partNeeded],
+                            ["Part ETA", snapshot.partEta],
+                            ["Invoice total", snapshot.invoiceTotal != null ? fmt(Number(snapshot.invoiceTotal)) : null],
+                            ["Repair quote", snapshot.repairQuote != null ? fmt(Number(snapshot.repairQuote)) : null],
+                            ["Install quote", snapshot.installQuote != null ? fmt(Number(snapshot.installQuote)) : null],
+                          ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+                          return (
+                            <details key={assignment.id} style={{ borderTop: `1px solid ${T.borderSoft}`, padding: "12px 0" }}>
+                              <summary style={{ cursor: "pointer", color: T.ink, fontSize: 12, fontWeight: 700 }}>
+                                {priorContractor?.company || priorContractor?.name || "Former contractor"}
+                                {nextContractor ? ` to ${nextContractor.company || nextContractor.name}` : " to Unassigned"}
+                                <span style={{ color: T.subtle, fontWeight: 500, marginLeft: 8 }}>
+                                  {new Date(assignment.assignmentEndedAt).toLocaleString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                    hour: "numeric",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              </summary>
+                              {details.length > 0 && (
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 12 }}>
+                                  {details.map(([label, value]) => (
+                                    <div key={String(label)}>
+                                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle, marginBottom: 2 }}>{label}</div>
+                                      <div style={{ fontSize: 12, color: T.inkSoft, overflowWrap: "anywhere" }}>{String(value)}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {(snapshot.resolutionNotes || snapshot.capitalNotes) && (
+                                <div style={{ marginTop: 12, color: T.inkSoft, fontSize: 12, lineHeight: 1.5 }}>
+                                  {snapshot.resolutionNotes || snapshot.capitalNotes}
+                                </div>
+                              )}
+                            </details>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {woData.status !== "closed" && (() => {
                       const isDispatchTier = currentUser?.contractorTier === "mr_freeze";
                       const isDirectTier = currentUser?.contractorTier === "direct" || currentUser?.contractorTier == null;

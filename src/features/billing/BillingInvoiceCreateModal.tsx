@@ -106,6 +106,7 @@ const STAFF_INVOICE_SERIES: Record<string, { prefix: string; start: number }> = 
   "lynzy@p1pros.com": { prefix: "P1-L-", start: 1000 },
   "mandy@p1pros.com": { prefix: "P1-M-", start: 2000 },
   "lynette@p1pros.com": { prefix: "P1-N-", start: 3000 },
+  "landryd@phospitality.com": { prefix: "P1-D-", start: 4000 },
 };
 
 const territoryFromState = (state: unknown) => {
@@ -176,6 +177,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     billingInvoices,
     editingInvoice,
     initialSourceInvoiceId,
+    initialWorkOrderId,
     onClose,
     onCreated,
     fire,
@@ -409,7 +411,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     }
     const initializationKey = editingInvoice?.id
       ? `edit:${editingInvoice.id}`
-      : `create:${initialSourceInvoiceId || ""}`;
+      : `create:${initialSourceInvoiceId || ""}:${initialWorkOrderId || ""}`;
     if (initializedFor.current === initializationKey) return;
     initializedFor.current = initializationKey;
 
@@ -418,20 +420,23 @@ export default function BillingInvoiceCreateModal(props: any) {
     const initialSourceInvoice = (contractorInvoices || []).find(
       (invoice: any) => invoice.id === initialSourceInvoiceId,
     );
-    const initialWorkOrderId = editingInvoice?.wot || initialSourceInvoice?.wot || "";
+    const resolvedInitialWorkOrderId = editingInvoice?.wot
+      || initialSourceInvoice?.wot
+      || initialWorkOrderId
+      || "";
     previousInvoiceDate.current = initialInvoiceDate;
-    previousWorkOrderId.current = initialWorkOrderId;
+    previousWorkOrderId.current = resolvedInitialWorkOrderId;
     reset({
       num: editingInvoice?.num || nextStaffNum(billingInvoices, currentUser),
       invoiceDate: initialInvoiceDate,
       serviceDate: editingInvoice?.serviceDateRaw || "",
       dueDate: editingInvoice?.dueDateRaw || addDays(initialInvoiceDate, 30),
-      workOrderId: initialWorkOrderId,
+      workOrderId: resolvedInitialWorkOrderId,
       territory: editingInvoice?.territory
         || territoryFromState(
           editingInvoice?.taxState
           || stateCodeFromWorkOrder(
-            activeWorkOrders.find((item: any) => item.id === initialWorkOrderId),
+            activeWorkOrders.find((item: any) => item.id === resolvedInitialWorkOrderId),
           ),
         )
         || "",
@@ -487,6 +492,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     currentUser,
     editingInvoice,
     initialSourceInvoiceId,
+    initialWorkOrderId,
     modal,
     reset,
   ]);

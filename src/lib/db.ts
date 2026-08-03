@@ -86,6 +86,7 @@ const mapProfile = (p: any) => ({
   defaultLaborRate: p.default_labor_rate ?? null,
   defaultTruckRate: p.default_truck_rate ?? null,
   defaultPartsMarkup: p.default_parts_markup ?? 0,
+  isAssignable: p.is_assignable !== false,
 });
 
 // ── WORK ORDERS ─────────────────────────────────────────────────────────────
@@ -93,13 +94,17 @@ const mapProfile = (p: any) => ({
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
   // Pull WOs + activities + photos + visit boundaries, then stitch together.
-  const [woRes, actRes, photoRes, visitRes, afmContactRes, incidentReuseRes] = await Promise.all([
+  const [woRes, actRes, photoRes, visitRes, afmContactRes, incidentReuseRes, assignmentHistoryRes] = await Promise.all([
     sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("photos").select("*"),
     (sb as any).from("work_order_visits").select("*").order("check_in_at", { ascending: true }),
     sb.from("work_order_afm_contacts").select("work_order_id, afm_email"),
     sb.rpc("get_incident_reuse_warnings"),
+    (sb as any)
+      .from("work_order_assignment_history")
+      .select("*")
+      .order("assignment_ended_at", { ascending: false }),
   ]);
   if (woRes.error) throw woRes.error;
   if (actRes.error) throw actRes.error;
@@ -107,6 +112,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
   if (visitRes.error) throw visitRes.error;
   if (afmContactRes.error) throw afmContactRes.error;
   if (incidentReuseRes.error) throw incidentReuseRes.error;
+  if (assignmentHistoryRes.error) throw assignmentHistoryRes.error;
 
   const timeZoneByWo = Object.fromEntries(
     (woRes.data || []).map(workOrder => [
@@ -157,6 +163,19 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
       },
     ]),
   );
+  const assignmentHistoryByWo: Record<string, any[]> = {};
+  for (const assignment of assignmentHistoryRes.data || []) {
+    (assignmentHistoryByWo[assignment.work_order_id] ||= []).push({
+      id: assignment.id,
+      contractorId: assignment.contractor_id,
+      nextContractorId: assignment.next_contractor_id || null,
+      assignmentVersion: assignment.assignment_version,
+      assignmentStartedAt: assignment.assignment_started_at || null,
+      assignmentEndedAt: assignment.assignment_ended_at,
+      assignmentEndedBy: assignment.assignment_ended_by || null,
+      workflowSnapshot: assignment.workflow_snapshot || {},
+    });
+  }
 
   const mapped = (woRes.data || []).map(wo => {
     const activities = actsByWo[wo.id] || [];
@@ -175,6 +194,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     return {
       ...mapWO(wo),
       incidentReuse: incidentReuseByWo[wo.id] || null,
+      assignmentHistory: assignmentHistoryByWo[wo.id] || [],
       afmEmail: afmEmailByWo[wo.id] || null,
       activities,
       latestNoteAt,
@@ -271,6 +291,11 @@ const mapWO = (w: any) => ({
   partNeeded: w.part_needed,
   partEta: w.part_eta,
   source: w.source,
+  billingOnly: !!w.billing_only,
+  billingReadyAt: w.billing_ready_at || null,
+  billingReadyBy: w.billing_ready_by || null,
+  contractorAssignmentStartedAt: w.contractor_assignment_started_at || null,
+  contractorAssignmentVersion: Number(w.contractor_assignment_version || 0),
   staffNotesSeenAt: w.staff_notes_seen_at || null,
   technicianOnJob: w.technician_on_job,
   createdAt: w.created_at,
@@ -408,8 +433,10 @@ export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, bl
     upsert: false,
   });
   if (upErr) throw upErr;
-  const { error: rowErr } = await sb.from("invoices")
-    .update({ pdf_storage_path: path }).eq("id", invoiceId);
+  const { error: rowErr } = await (sb as any).rpc(
+    "attach_contractor_invoice_pdf",
+    { p_invoice_id: invoiceId, p_storage_path: path },
+  );
   if (rowErr) throw rowErr;
   return path;
 }
@@ -452,14 +479,16 @@ function shortMonthDay(d: string | null): string {
 }
 
 // ── PHOTO STORAGE URLs ──────────────────────────────────────────────────────
-// Photos in DB are storage paths. To render them, we need signed URLs.
+// Photos in DB are storage paths. Authenticated downloads enforce storage
+// RLS on every load; blob URLs are revoked when the gallery unmounts.
 export async function getPhotoUrl(path: string): Promise<string | null> {
   if (!path) return null;
   // If it's already a data: URL (legacy in-memory photo), return as-is
   if (path.startsWith("data:") || path.startsWith("http")) return path;
   const sb = supabase();
-  const { data } = await sb.storage.from("photos").createSignedUrl(path, 3600);
-  return data?.signedUrl || null;
+  const { data, error } = await sb.storage.from("photos").download(path);
+  if (error) throw error;
+  return data ? URL.createObjectURL(data) : null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -507,6 +536,9 @@ const WO_FIELD_MAP: Record<string, string> = {
   staffNotesSeenAt: "staff_notes_seen_at",
   storeState: "store_state",
   storeTimezone: "store_timezone",
+  billingOnly: "billing_only",
+  billingReadyAt: "billing_ready_at",
+  billingReadyBy: "billing_ready_by",
 };
 function toDbWoPatch(patch: any): Record<string, any> {
   const out: any = {};
@@ -539,6 +571,16 @@ export async function updateWorkOrder(id: string, patch: any): Promise<any> {
       : await sb.from("work_order_afm_contacts").delete().eq("work_order_id", id);
     if (contactResult.error) throw contactResult.error;
   }
+  return data;
+}
+
+export async function moveWorkOrderStraightToBilling(id: string): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "move_work_order_straight_to_billing",
+    { p_work_order_id: id },
+  );
+  if (error) throw error;
   return data;
 }
 
@@ -1029,6 +1071,7 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
   const baseNum = inv.num && String(inv.num).trim()
     ? String(inv.num).trim()
     : await nextInvoiceNumFromDb();
+  const requestedState = inv.state === "draft" ? "draft" : "submitted";
   const baseRow = {
     work_order_id: inv.wot,
     store_number: inv.store,
@@ -1039,7 +1082,9 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     service_date: inv.serviceDate || null,
     due_date: inv.dueDate || null,
     terms: inv.terms || "Net 30",
-    state: inv.state || "submitted",
+    // Contractor lines remain writable only while the invoice is a draft.
+    // Promote to submitted after all line rows have been saved.
+    state: "draft",
     subtotal,
     sales_tax: salesTax,
     total,
@@ -1075,10 +1120,21 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     const { error: lErr } = await sb.from("invoice_lines").insert(lineRows);
     if (lErr) throw lErr;
   }
+  if (requestedState === "submitted") {
+    const { data: submitted, error: submitError } = await sb
+      .from("invoices")
+      .update({ state: "submitted" })
+      .eq("id", header.id)
+      .eq("state", "draft")
+      .select()
+      .single();
+    if (submitError) throw submitError;
+    header = submitted;
+  }
   // Drafts must NOT touch the parent WO — saving a draft mid-visit can't
   // advance the WO into pending_approval and can't write an audit entry that
   // claims it was submitted. Only the submit path moves the WO forward.
-  const isDraft = (inv.state || "submitted") === "draft";
+  const isDraft = requestedState === "draft";
   if (!isDraft) {
     await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
     await insertActivity(inv.wot, authorName, `Invoice ${finalNum} submitted. Total: $${total.toFixed(2)}.`, "system");
@@ -1115,7 +1171,18 @@ export async function updateInvoiceWithLines(
   if (patch.serviceDate !== undefined) update.service_date = patch.serviceDate || null;
   if (patch.terms) update.terms = patch.terms;
   if (patch.storeAddr !== undefined) update.store_address = patch.storeAddr || null;
-  if (patch.state) update.state = patch.state;
+  const { data: currentInvoice, error: currentInvoiceError } = await sb
+    .from("invoices")
+    .select("num,state")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (currentInvoiceError) throw currentInvoiceError;
+  if (!currentInvoice) throw new Error("Invoice was not found");
+
+  const requestedState = patch.state || currentInvoice.state;
+  const deferSubmission = currentInvoice.state === "draft"
+    && requestedState === "submitted";
+  if (patch.state && !deferSubmission) update.state = patch.state;
   // Preserve contractor-supplied invoice numbers exactly. A conflict within
   // the same contractor is surfaced instead of silently renumbering it.
   let finalNum: string | null = patch.num != null ? String(patch.num).trim() : null;
@@ -1124,11 +1191,7 @@ export async function updateInvoiceWithLines(
   // Pre-flight: read the current invoice's num so we know whether the user
   // is actually changing it. If they're keeping it the same, no collision is
   // possible (it's their own row).
-  let originalNum: string | null = null;
-  if (finalNum != null) {
-    const { data: cur } = await sb.from("invoices").select("num").eq("id", invoiceId).maybeSingle();
-    originalNum = cur?.num ?? null;
-  }
+  const originalNum: string | null = currentInvoice.num ?? null;
   // Try the update. If num collides, regenerate and retry; otherwise leave
   // num out of the update payload and just write the rest.
   let attempts = 0;
@@ -1166,7 +1229,33 @@ export async function updateInvoiceWithLines(
     const { error: lErr } = await sb.from("invoice_lines").insert(rows);
     if (lErr) throw lErr;
   }
+  if (deferSubmission) {
+    const { error: submitError } = await sb
+      .from("invoices")
+      .update({ state: "submitted" })
+      .eq("id", invoiceId)
+      .eq("state", "draft");
+    if (submitError) throw submitError;
+  }
   return { id: invoiceId, num: (finalNum ?? originalNum ?? "") as string, subtotal, salesTax, total, collidedFrom };
+}
+
+export async function correctContractorInvoiceTotal(
+  invoiceId: string,
+  total: number,
+  reason?: string,
+): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "correct_contractor_invoice_total",
+    {
+      p_invoice_id: invoiceId,
+      p_total: total,
+      p_reason: reason?.trim() || null,
+    },
+  );
+  if (error) throw error;
+  return data;
 }
 
 // Reject an invoice with a reason. Staff-only at the UI layer; inv_update

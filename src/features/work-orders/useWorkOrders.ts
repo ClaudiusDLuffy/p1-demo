@@ -11,6 +11,7 @@ import {
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
+  moveWorkOrderStraightToBilling,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
 import {
@@ -218,7 +219,32 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(
       woId,
-      { contractor: newContractorId, status: "assigned", functionalStatus: "Dispatched" },
+      {
+        contractor: newContractorId,
+        status: "assigned",
+        functionalStatus: "Dispatched",
+        dispatchedAt: new Date().toISOString(),
+        eta: null,
+        startTime: null,
+        startTimeRaw: null,
+        endTime: null,
+        endTimeRaw: null,
+        technicianOnJob: null,
+        assetMake: null,
+        assetModel: null,
+        assetSerial: null,
+        assetYear: null,
+        resolutionCode: null,
+        resolutionNotes: null,
+        partNeeded: null,
+        partEta: null,
+        invoiceTotal: null,
+        repairQuote: null,
+        installQuote: null,
+        capitalNotes: null,
+        isCapital: false,
+        capitalStatus: null,
+      },
       localActivity(text, "system", false, "work_order_reassigned", false, true),
     );
     fire(`Reassigned to ${newC.name}`);
@@ -806,14 +832,22 @@ export default function useWorkOrders({
     const unassigned = workOrders.filter(w => w.status === "unassigned");
     if (unassigned.length === 0) { fire("No unassigned calls"); return; }
     let count = 0;
-    let skipped = unassigned.filter(w => stateCodeFromWorkOrder(w) === "TX").length;
+    let skipped = unassigned.filter(w =>
+      ["TX", "FL"].includes(stateCodeFromWorkOrder(w)),
+    ).length;
     const dispatchedAt = new Date().toISOString();
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     let hadError = false;
     const ops = unassigned.map(async w => {
-      if (stateCodeFromWorkOrder(w) === "TX") return;
+      if (["TX", "FL"].includes(stateCodeFromWorkOrder(w))) return;
       const trades = SERVICE_TO_TRADES(w.businessService || "", w.category || "");
-      const matched = contractorFor(w.city, trades, USERS);
+      const matched = contractorFor(
+        w.city,
+        trades,
+        USERS.filter((user: any) =>
+          user.role !== "contractor" || user.isAssignable !== false,
+        ),
+      );
       if (!matched) { skipped++; return; }
       const c = getUser(matched);
       const text = `Auto-dispatched to ${c?.name || matched}. Territory + trade match.`;
@@ -918,6 +952,45 @@ export default function useWorkOrders({
     fire("Photo removed");
     } finally {
       setLoading("removePhoto_" + woId, false);
+    }
+  };
+
+  const doStraightToBilling = async (woId: string) => {
+    const workOrder = workOrders.find(wo => wo.id === woId);
+    if (!workOrder || workOrder.status !== "unassigned") {
+      fire("Only an unassigned work order can go straight to Billing");
+      return false;
+    }
+
+    setLoading("straightToBilling_" + woId, true);
+    const readyAt = new Date().toISOString();
+    const text = "Moved straight to Billing. No contractor was dispatched.";
+    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    patchLocalWO(
+      woId,
+      {
+        status: "pending_invoice",
+        functionalStatus: "Completed",
+        contractor: null,
+        eta: null,
+        dispatchedAt: null,
+        billingOnly: true,
+        billingReadyAt: readyAt,
+        billingReadyBy: currentUser?.id || null,
+      },
+      localActivity(text, "system", false, "straight_to_billing", false, true),
+    );
+
+    try {
+      const ok = await dbCall(
+        () => moveWorkOrderStraightToBilling(woId),
+        "Could not move work order to Billing",
+        () => restoreWorkOrders(snapshot),
+      );
+      if (ok) fire(`${woId} is ready to bill`);
+      return ok;
+    } finally {
+      setLoading("straightToBilling_" + woId, false);
     }
   };
 
@@ -1053,7 +1126,7 @@ export default function useWorkOrders({
     workOrders, setWorkOrders,
     loadingStates,
     patchLocalWO, localActivity, dbCall,
-    doAssign, doUnassign, doDeleteWO, doReassign,
+    doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,

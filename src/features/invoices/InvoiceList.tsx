@@ -3,14 +3,16 @@
 
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { Ico } from "../../components/ui/Ico";
 import { T, INV_STATE } from "../../lib/constants";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt } = props;
   const currentUserId = currentUser?.id ?? null;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
+  const [search, setSearch] = useState("");
   const invoiceTabs = [
     { id: "all", l: "All", m: "All" },
     { id: "draft", l: "Draft", m: "Draft" },
@@ -24,21 +26,59 @@ export default function InvoiceList(props: any) {
     () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))
       .filter(i => (i.invoiceType || "contractor") === "contractor")
       .filter(i => !controller || ["approved", "paid"].includes(i.state))
-      .filter(i => invTab === "all" ? true : i.state === invTab),
-    [controller, isManager, invoices, currentUserId, invTab]
+      .filter(i => invTab === "all" ? true : i.state === invTab)
+      .filter(i => {
+        const query = search.trim().toLowerCase();
+        if (!query) return true;
+        const contractor = getUser(i.contractor);
+        return [
+          i.num,
+          i.wot,
+          i.store,
+          i.storeAddr,
+          i.state,
+          contractor?.name,
+          contractor?.company,
+          ...(i.lines || []).flatMap((line: any) => [
+            line.type,
+            line.desc,
+            line.description,
+          ]),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      }),
+    [controller, currentUserId, getUser, invTab, invoices, isManager, search]
   );
   return (
     <>
           {/* ═════ INVOICES ═════ */}
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
-              <div className="mobile-tabs invoice-tabs" style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `2px solid ${T.borderSoft}` }}>
-                {invoiceTabs.map(t => (
-                  <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>
-                    <span className="tab-full-label">{t.l}</span>
-                    <span className="tab-short-label" style={{ display: "none" }}>{t.m}</span>
-                  </button>
-                ))}
+              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+                <div className="mobile-tabs invoice-tabs" style={{ display: "flex", gap: 0, borderBottom: `2px solid ${T.borderSoft}` }}>
+                  {invoiceTabs.map(t => (
+                    <button key={t.id} onClick={() => setInvTab(t.id)} style={{ padding: "10px 20px", fontSize: 13, fontWeight: invTab === t.id ? 700 : 400, color: invTab === t.id ? T.ink : T.subtle, background: "none", border: "none", borderBottom: invTab === t.id ? `2px solid ${T.ink}` : "2px solid transparent", cursor: "pointer", fontFamily: "inherit", marginBottom: -2 }}>
+                      <span className="tab-full-label">{t.l}</span>
+                      <span className="tab-short-label" style={{ display: "none" }}>{t.m}</span>
+                    </button>
+                  ))}
+                </div>
+                <label style={{ position: "relative", flex: "1 1 220px", maxWidth: 340 }}>
+                  <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", display: "flex", color: T.subtle, pointerEvents: "none" }}>
+                    <Ico d="M21 21l-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" size={15} color="currentColor" />
+                  </span>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search invoices"
+                    aria-label="Search contractor invoices"
+                    style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
+                  />
+                </label>
               </div>
               <div className="desktop-only-table">
               <div className="card table-scroll" style={{ overflow: "hidden" }}>
@@ -73,6 +113,11 @@ export default function InvoiceList(props: any) {
                     ))}
                   </tbody>
                 </table>
+                {visibleInvoices.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
+                    {search ? "No invoices match your search." : "No invoices found"}
+                  </div>
+                )}
               </div>
               </div>
               <div className="mobile-only-cards">
@@ -121,7 +166,7 @@ export default function InvoiceList(props: any) {
                 ))}
                 {visibleInvoices.length === 0 && (
                   <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
-                    No invoices found
+                    {search ? "No invoices match your search." : "No invoices found"}
                   </div>
                 )}
               </div>
