@@ -397,6 +397,7 @@ const mapInvoice = (i: any) => ({
   wot: i.work_order_id,
   store: i.store_number,
   storeAddr: i.store_address,
+  submissionKey: i.submission_key || null,
   contractor: i.contractor_id,
   invoiceType: i.invoice_type || "contractor",
   cme: i.cme,
@@ -1058,7 +1059,7 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
   const { data: { user } } = await sb.auth.getUser();
   // Insert header
   const calculatedSubtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
-  const salesTax = parseFloat(inv.salesTax) || 0;
+  const salesTax = parseFloat(inv.salesTax ?? inv.tax) || 0;
   const hasTotalOverride = inv.totalOverride !== undefined
     && Number.isFinite(Number(inv.totalOverride));
   const total = hasTotalOverride ? Number(inv.totalOverride) : calculatedSubtotal + salesTax;
@@ -1072,6 +1073,57 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     ? String(inv.num).trim()
     : await nextInvoiceNumFromDb();
   const requestedState = inv.state === "draft" ? "draft" : "submitted";
+  if (requestedState === "submitted") {
+    if (!inv.submissionKey) {
+      throw new Error("Invoice submission key is missing. Close and reopen the invoice form.");
+    }
+
+    const rpcLines = lines.map((line) => ({
+      type: line.type || "Other",
+      description: line.desc || line.description || "",
+      qty: parseFloat(line.qty) || 1,
+      rate: parseFloat(line.rate) || 0,
+    }));
+    const { data, error } = await (sb as any).rpc(
+      "submit_contractor_invoice_once",
+      {
+        p_submission_key: inv.submissionKey,
+        p_work_order_id: inv.wot,
+        p_num: baseNum,
+        p_user_typed_num: userTyped,
+        p_cme: inv.cme || null,
+        p_store_address: inv.storeAddr || null,
+        p_invoice_date: inv.invoiceDate || todayIso,
+        p_service_date: inv.serviceDate || null,
+        p_due_date: inv.dueDate || null,
+        p_terms: inv.terms || "Net 30",
+        p_sales_tax: salesTax,
+        p_total_override: hasTotalOverride ? total : null,
+        p_lines: rpcLines,
+      },
+    );
+    if (error) {
+      if (isInvoiceNumCollision(error)) {
+        const conflict: any = new Error(
+          error.message || `Invoice #${baseNum} already exists for this contractor`,
+        );
+        conflict.code = "INVOICE_NUM_CONFLICT";
+        throw conflict;
+      }
+      throw error;
+    }
+
+    const header = Array.isArray(data) ? data[0] : data;
+    if (!header?.id) throw new Error("Invoice submission returned no invoice");
+    const finalNum = String(header.num || baseNum);
+    return {
+      ...header,
+      num: finalNum,
+      total: parseFloat(header.total ?? total),
+      _collidedFrom: finalNum !== baseNum ? baseNum : null,
+    } as unknown as Invoice;
+  }
+
   const baseRow = {
     work_order_id: inv.wot,
     store_number: inv.store,
@@ -1082,8 +1134,8 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     service_date: inv.serviceDate || null,
     due_date: inv.dueDate || null,
     terms: inv.terms || "Net 30",
-    // Contractor lines remain writable only while the invoice is a draft.
-    // Promote to submitted after all line rows have been saved.
+    // New submissions use the atomic RPC above. This path only persists a
+    // draft, whose line rows remain editable by the assigned contractor.
     state: "draft",
     subtotal,
     sales_tax: salesTax,
@@ -1120,27 +1172,10 @@ export async function insertInvoice(inv: any, lines: any[], authorName: string):
     const { error: lErr } = await sb.from("invoice_lines").insert(lineRows);
     if (lErr) throw lErr;
   }
-  if (requestedState === "submitted") {
-    const { data: submitted, error: submitError } = await sb
-      .from("invoices")
-      .update({ state: "submitted" })
-      .eq("id", header.id)
-      .eq("state", "draft")
-      .select()
-      .single();
-    if (submitError) throw submitError;
-    header = submitted;
-  }
   // Drafts must NOT touch the parent WO — saving a draft mid-visit can't
   // advance the WO into pending_approval and can't write an audit entry that
   // claims it was submitted. Only the submit path moves the WO forward.
-  const isDraft = requestedState === "draft";
-  if (!isDraft) {
-    await updateWorkOrder(inv.wot, { status: "pending_approval", invoiceTotal: total });
-    await insertActivity(inv.wot, authorName, `Invoice ${finalNum} submitted. Total: $${total.toFixed(2)}.`, "system");
-  } else {
-    await insertActivity(inv.wot, authorName, `Invoice ${finalNum} draft saved.`, "system");
-  }
+  await insertActivity(inv.wot, authorName, `Invoice ${finalNum} draft saved.`, "system");
   // Surface the resolved number + the collided-from number so the caller can
   // show "X already exists, using Y instead" without parsing the row again.
   return { ...header, num: finalNum, total, _collidedFrom: collidedFrom } as unknown as Invoice;

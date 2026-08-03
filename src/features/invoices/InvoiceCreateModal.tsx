@@ -21,6 +21,17 @@ const todayIso = () => {
   return `${year}-${month}-${day}`;
 };
 
+const createSubmissionKey = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, character => {
+    const random = Math.floor(Math.random() * 16);
+    const value = character === "x" ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 // Contractors explicitly add only the line types needed for this invoice.
 const initialLines = () => [];
 
@@ -42,6 +53,8 @@ export default function InvoiceCreateModal(props: any) {
   const [pdfLinesReviewed, setPdfLinesReviewed] = useState(false);
   const pdfParseAttempt = useRef(0);
   const numTouchedRef = useRef(false);
+  const submitLockRef = useRef(false);
+  const submissionKeyRef = useRef("");
   const existingInvoiceId = resumeDraft?.id || null;
   // Tracks whether the user has touched the # field — if so we trust their
   // value (and surface a friendly toast if it collides). If untouched, the
@@ -84,6 +97,7 @@ export default function InvoiceCreateModal(props: any) {
     if (modal !== "createInvoice") return;
     let cancelled = false;
     pdfParseAttempt.current += 1;
+    submissionKeyRef.current = resumeDraft ? "" : createSubmissionKey();
     numTouchedRef.current = false;
     setNumTouched(false);
     setPdfFile(null);
@@ -183,6 +197,8 @@ export default function InvoiceCreateModal(props: any) {
     setPdfParseStatus("idle");
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
+    submissionKeyRef.current = "";
+    submitLockRef.current = false;
     setModal(null);
   };
   const clearPendingPdf = (error = "") => {
@@ -211,10 +227,12 @@ export default function InvoiceCreateModal(props: any) {
     }
   };
   const onSubmit = async (data: CreateInvoiceForm) => {
+    if (submitLockRef.current) return;
     if (data.uploadOnly && (data.lines || []).length > 0 && !pdfLinesReviewed) {
       setPdfError("Review the extracted line items and confirm them before submitting.");
       return;
     }
+    submitLockRef.current = true;
     setSubmitting(true);
     try {
     const ok = await doSubmitInvoice(woData, {
@@ -222,9 +240,11 @@ export default function InvoiceCreateModal(props: any) {
       userTypedNum: numTouched,
       pdfFile,
       hasExistingPdf: !!resumeDraft?.pdfStoragePath,
+      submissionKey: submissionKeyRef.current,
     }, existingInvoiceId);
     if (ok) reset();
     } finally {
+      submitLockRef.current = false;
       setSubmitting(false);
     }
   };

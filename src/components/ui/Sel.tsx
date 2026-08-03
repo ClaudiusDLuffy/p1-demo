@@ -115,7 +115,7 @@ export const Sel = forwardRef<HTMLInputElement, any>(function Sel(
         .pretty-select-option-value[data-align="center"] .pretty-select-option-label {
           text-align: center;
         }
-        @media(min-width: 769px) {
+        @media(min-width: 1201px) {
           .pretty-select-value,
           .pretty-select-option-value {
             display: flex;
@@ -127,7 +127,7 @@ export const Sel = forwardRef<HTMLInputElement, any>(function Sel(
             content: "- ";
           }
         }
-        @media(max-width: 768px) {
+        @media(max-width: 1200px) {
           .pretty-select-value,
           .pretty-select-option-value {
             display: flex;

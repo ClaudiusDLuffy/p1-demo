@@ -310,7 +310,7 @@ export default function WorkOrderList(props: any) {
             </div>
           </div>
 
-          <div className="mobile-only-cards">
+          <div className="mobile-only-cards responsive-card-grid">
             {paginatedWOs.map((wo: any, i: number) => {
               const sla = slaLabel(wo);
               const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
@@ -398,7 +398,7 @@ export default function WorkOrderList(props: any) {
               );
             })}
             {paginatedWOs.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
+              <div className="responsive-grid-empty" style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
                 No work orders match your filters
               </div>
             )}

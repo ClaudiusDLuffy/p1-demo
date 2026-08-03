@@ -127,7 +127,7 @@ export default function HistoryView(props: any) {
             </div>
           )}
         </div>
-        <div className="mobile-only-cards">
+        <div className="mobile-only-cards responsive-card-grid">
           {filteredClosedWOs.map((w: any) => (
             <div
               key={w.id}

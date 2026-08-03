@@ -8,6 +8,8 @@ export function useInvoicesQuery(enabled = true) {
     queryKey: INVOICES_KEY,
     queryFn: loadInvoices,
     staleTime: 30_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
     enabled,
   });
 }

@@ -368,7 +368,7 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
 .reassign-option-main {
   flex: 1;
 }
-@media(max-width: 768px) {
+@media(max-width: 1200px) {
   :root {
     --mobile-bottom-nav-space: calc(120px + env(safe-area-inset-bottom, 0px));
   }
@@ -979,7 +979,72 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     padding-right: 10px !important;
   }
 }
-@media(min-width: 769px) { .mobile-bottom-nav { display: none !important; } }
+@media(min-width: 769px) and (max-width: 1200px) {
+  :root {
+    --mobile-bottom-nav-space: calc(104px + env(safe-area-inset-bottom, 0px));
+  }
+  .content-pad {
+    padding: 24px !important;
+  }
+  .mobile-header-top {
+    padding: 16px 24px 0 24px;
+  }
+  .mobile-header-actions {
+    justify-content: flex-end;
+    padding: 12px 24px 16px 24px;
+  }
+  .mobile-header-actions button {
+    flex: 0 1 220px !important;
+  }
+  .responsive-card-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .responsive-card-grid > * {
+    min-width: 0;
+    margin-bottom: 0 !important;
+  }
+  .responsive-grid-empty {
+    grid-column: 1 / -1;
+  }
+  .filter-bar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .contractors-grid,
+  .capital-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .kanban-closing {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .modal-inner {
+    width: min(92vw, 900px) !important;
+    padding: 22px !important;
+  }
+  .modal-form-row,
+  .billing-form-grid,
+  .billing-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .billing-source-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  .wo-date-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  .mobile-card-grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+@media(min-width: 1000px) and (max-width: 1200px) {
+  .detail-two-col {
+    grid-template-columns: minmax(0, 1fr) 300px !important;
+  }
+}
+@media(min-width: 1201px) { .mobile-bottom-nav { display: none !important; } }
 `;
 
 

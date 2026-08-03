@@ -270,6 +270,7 @@ export type Database = {
           state: Database["public"]["Enums"]["invoice_state"]
           store_address: string | null
           store_number: string | null
+          submission_key: string | null
           subtotal: number | null
           tax_rate: number | null
           tax_state: string | null
@@ -301,6 +302,7 @@ export type Database = {
           state?: Database["public"]["Enums"]["invoice_state"]
           store_address?: string | null
           store_number?: string | null
+          submission_key?: string | null
           subtotal?: number | null
           tax_rate?: number | null
           tax_state?: string | null
@@ -332,6 +334,7 @@ export type Database = {
           state?: Database["public"]["Enums"]["invoice_state"]
           store_address?: string | null
           store_number?: string | null
+          submission_key?: string | null
           subtotal?: number | null
           tax_rate?: number | null
           tax_state?: string | null
@@ -1247,6 +1250,24 @@ export type Database = {
           p_invoice_id: string
           p_reason?: string | null
           p_total: number
+        }
+        Returns: Database["public"]["Tables"]["invoices"]["Row"]
+      }
+      submit_contractor_invoice_once: {
+        Args: {
+          p_cme: string | null
+          p_due_date: string | null
+          p_invoice_date: string | null
+          p_lines: Json
+          p_num: string
+          p_sales_tax: number | null
+          p_service_date: string | null
+          p_store_address: string | null
+          p_submission_key: string
+          p_terms: string | null
+          p_total_override: number | null
+          p_user_typed_num: boolean
+          p_work_order_id: string
         }
         Returns: Database["public"]["Tables"]["invoices"]["Row"]
       }

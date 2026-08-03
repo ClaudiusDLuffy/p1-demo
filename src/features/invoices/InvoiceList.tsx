@@ -120,7 +120,7 @@ export default function InvoiceList(props: any) {
                 )}
               </div>
               </div>
-              <div className="mobile-only-cards">
+              <div className="mobile-only-cards responsive-card-grid">
                 {visibleInvoices.map((inv: any) => (
                   <div
                     className="mobile-card"

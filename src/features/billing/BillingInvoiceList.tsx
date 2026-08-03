@@ -246,7 +246,7 @@ export default function BillingInvoiceList(props: any) {
         </div>
       </div>
 
-      <div className="mobile-only-cards">
+      <div className="mobile-only-cards responsive-card-grid">
         {visibleInvoices.map((invoice: any) => (
           <div
             key={invoice.id}
