@@ -482,7 +482,7 @@ export default function QuoteCalculatorWorkspace({
 
   const openWorkspace = () => {
     setViewMode(
-      window.matchMedia("(max-width: 768px)").matches ? "focus" : "table",
+      window.matchMedia("(max-width: 900px)").matches ? "focus" : "table",
     );
     setWorkspaceOpen(true);
   };
