@@ -65,18 +65,22 @@ test("does not treat every Texas city as DFW", () => {
   );
 });
 
-test("requires manual assignment for every Texas call", async () => {
-  const texasCalls = [
+test("requires manual assignment for every Texas and Florida call", async () => {
+  const manualCalls = [
     parsed({ city: "Dallas", lineOfService: "HVAC" }),
     parsed({ city: "Houston", lineOfService: "Refrigeration" }),
     parsed({ city: "Fort Worth", lineOfService: "EMS" }),
+    parsed({ state: "FL", city: "Tampa", lineOfService: "HVAC" }),
+    parsed({ state: "FL", city: "Orlando", lineOfService: "Refrigeration" }),
+    parsed({ state: "FL", city: "Miami", lineOfService: "Ice" }),
   ];
 
-  for (const workOrder of texasCalls) {
+  for (const workOrder of manualCalls) {
+    const state = workOrder.state;
     assert.equal(requiresManualContractorAssignment(workOrder), true);
     assert.deepEqual(await resolveContractor(workOrder), {
       contractorId: null,
-      reason: "manual assignment required for TX",
+      reason: `manual assignment required for ${state}`,
     });
   }
 

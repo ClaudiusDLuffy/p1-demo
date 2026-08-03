@@ -18,6 +18,54 @@ export const parseAllowedIntakeStates = (
 const enabled = (value: string | null | undefined) =>
   String(value || "").trim().toLowerCase() === "true";
 
+export type IntakeStateActivationDecision =
+  | { action: "allow"; reason: null }
+  | { action: "skip" | "hold"; reason: string };
+
+export function intakeStateActivationDecision(
+  state: string | null | undefined,
+  receivedAtRaw: string | null | undefined,
+  floridaStartAtRaw: string | null | undefined,
+): IntakeStateActivationDecision {
+  const normalizedState = String(state || "").trim().toUpperCase();
+  if (normalizedState !== "FL") {
+    return { action: "allow", reason: null };
+  }
+
+  const floridaStartAt = String(floridaStartAtRaw || "").trim();
+  if (!floridaStartAt) {
+    return {
+      action: "hold",
+      reason: "state FL intake activation timestamp is not configured; mailbox left unchanged",
+    };
+  }
+
+  const activationTime = new Date(floridaStartAt);
+  if (!Number.isFinite(activationTime.getTime())) {
+    return {
+      action: "hold",
+      reason: "state FL intake activation timestamp is invalid; mailbox left unchanged",
+    };
+  }
+
+  const receivedTime = new Date(String(receivedAtRaw || ""));
+  if (!Number.isFinite(receivedTime.getTime())) {
+    return {
+      action: "hold",
+      reason: "state FL dispatch received time is invalid; mailbox left unchanged",
+    };
+  }
+
+  if (receivedTime.getTime() < activationTime.getTime()) {
+    return {
+      action: "skip",
+      reason: `state FL dispatch predates Florida activation at ${activationTime.toISOString()}`,
+    };
+  }
+
+  return { action: "allow", reason: null };
+}
+
 export function intakeStateBlockReason(
   state: string | null | undefined,
   allowedStatesRaw: string | null | undefined,

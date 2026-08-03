@@ -237,8 +237,8 @@ export default function WorkOrderList(props: any) {
           </div>
 
           <div className="desktop-only-table">
-            <div className="card table-scroll" style={{ overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <div className="card table-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>
+              <table style={{ width: "100%", minWidth: 1120, borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.surfaceSoft }}>
                     {["WO#", "INC#", "Store", "Summary", "Priority", "Status", "Contractor", "Dates", "SLA due"].map(h => (

@@ -424,6 +424,7 @@ export type Database = {
           email: string
           id: string
           initials: string | null
+          is_assignable: boolean
           name: string
           phone: string | null
           role: Database["public"]["Enums"]["user_role"]
@@ -445,6 +446,7 @@ export type Database = {
           email: string
           id: string
           initials?: string | null
+          is_assignable?: boolean
           name: string
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
@@ -466,6 +468,7 @@ export type Database = {
           email?: string
           id?: string
           initials?: string | null
+          is_assignable?: boolean
           name?: string
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
@@ -822,6 +825,74 @@ export type Database = {
           },
         ]
       }
+      work_order_assignment_history: {
+        Row: {
+          assignment_ended_at: string
+          assignment_ended_by: string | null
+          assignment_started_at: string | null
+          assignment_version: number
+          contractor_id: string
+          created_at: string
+          id: string
+          next_contractor_id: string | null
+          work_order_id: string
+          workflow_snapshot: Json
+        }
+        Insert: {
+          assignment_ended_at?: string
+          assignment_ended_by?: string | null
+          assignment_started_at?: string | null
+          assignment_version: number
+          contractor_id: string
+          created_at?: string
+          id?: string
+          next_contractor_id?: string | null
+          work_order_id: string
+          workflow_snapshot?: Json
+        }
+        Update: {
+          assignment_ended_at?: string
+          assignment_ended_by?: string | null
+          assignment_started_at?: string | null
+          assignment_version?: number
+          contractor_id?: string
+          created_at?: string
+          id?: string
+          next_contractor_id?: string | null
+          work_order_id?: string
+          workflow_snapshot?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_assignment_history_assignment_ended_by_fkey"
+            columns: ["assignment_ended_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_assignment_history_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_assignment_history_next_contractor_id_fkey"
+            columns: ["next_contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_assignment_history_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_order_visits: {
         Row: {
           check_in_activity_id: string | null
@@ -918,11 +989,16 @@ export type Database = {
           asset_serial: string | null
           asset_year: number | null
           business_service: string | null
+          billing_only: boolean
+          billing_ready_at: string | null
+          billing_ready_by: string | null
           capital_status: Database["public"]["Enums"]["capital_status"] | null
           capital_notes: string | null
           category: string | null
           city: string | null
           closed_at: string | null
+          contractor_assignment_started_at: string | null
+          contractor_assignment_version: number
           contractor_id: string | null
           created_at: string | null
           created_by: string | null
@@ -979,11 +1055,16 @@ export type Database = {
           asset_serial?: string | null
           asset_year?: number | null
           business_service?: string | null
+          billing_only?: boolean
+          billing_ready_at?: string | null
+          billing_ready_by?: string | null
           capital_status?: Database["public"]["Enums"]["capital_status"] | null
           capital_notes?: string | null
           category?: string | null
           city?: string | null
           closed_at?: string | null
+          contractor_assignment_started_at?: string | null
+          contractor_assignment_version?: number
           contractor_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -1040,11 +1121,16 @@ export type Database = {
           asset_serial?: string | null
           asset_year?: number | null
           business_service?: string | null
+          billing_only?: boolean
+          billing_ready_at?: string | null
+          billing_ready_by?: string | null
           capital_status?: Database["public"]["Enums"]["capital_status"] | null
           capital_notes?: string | null
           category?: string | null
           city?: string | null
           closed_at?: string | null
+          contractor_assignment_started_at?: string | null
+          contractor_assignment_version?: number
           contractor_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -1093,6 +1179,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "work_orders_billing_ready_by_fkey"
+            columns: ["billing_ready_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "work_orders_afm_id_fkey"
             columns: ["afm_id"]
             isOneToOne: false
@@ -1131,6 +1224,10 @@ export type Database = {
         Args: { p_activity_id: string }
         Returns: undefined
       }
+      attach_contractor_invoice_pdf: {
+        Args: { p_invoice_id: string; p_storage_path: string }
+        Returns: undefined
+      }
       complete_work_order_once: {
         Args: {
           p_activity_text: string
@@ -1144,6 +1241,14 @@ export type Database = {
           p_work_order_id: string
         }
         Returns: Json
+      }
+      correct_contractor_invoice_total: {
+        Args: {
+          p_invoice_id: string
+          p_reason?: string | null
+          p_total: number
+        }
+        Returns: Database["public"]["Tables"]["invoices"]["Row"]
       }
       get_incident_reuse_warnings: {
         Args: never
@@ -1160,6 +1265,10 @@ export type Database = {
           p_invoice_id: string
         }
         Returns: Json
+      }
+      move_work_order_straight_to_billing: {
+        Args: { p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["work_orders"]["Row"]
       }
       is_invoice_controller: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }

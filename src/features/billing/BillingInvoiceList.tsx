@@ -21,9 +21,11 @@ export default function BillingInvoiceList(props: any) {
     currentUser,
     invoices,
     contractorInvoices,
+    readyWorkOrders = [],
     setSelectedBillingInvoice,
     onCreate,
     onCreateFromApproved,
+    onCreateFromWorkOrder,
     fmt,
   } = props;
   const [tab, setTab] = useState("all");
@@ -97,6 +99,31 @@ export default function BillingInvoiceList(props: any) {
 
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
+      {!controller && readyWorkOrders.length > 0 && (
+        <section style={{ marginBottom: 22 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 9 }}>
+            <h2 style={{ margin: 0, fontSize: 14, color: T.ink }}>Ready to Bill</h2>
+            <span style={{ fontSize: 11, color: T.subtle }}>{readyWorkOrders.length} work order{readyWorkOrders.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="card" style={{ overflow: "hidden" }}>
+            {readyWorkOrders.map((workOrder: any, index: number) => (
+              <div
+                key={workOrder.id}
+                className="billing-ready-row"
+                style={{ display: "grid", gridTemplateColumns: "minmax(160px, 1fr) minmax(120px, 1fr) minmax(160px, 2fr) auto", alignItems: "center", gap: 14, padding: "12px 14px", borderBottom: index === readyWorkOrders.length - 1 ? "none" : `1px solid ${T.borderSoft}` }}
+              >
+                <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent, fontSize: 11, fontWeight: 700 }}>
+                  {workOrder.id}
+                  <CopyWorkOrderButton value={workOrder.id} />
+                </span>
+                <span style={{ color: T.ink, fontSize: 12 }}>Store #{workOrder.store || "-"}</span>
+                <span style={{ minWidth: 0, color: T.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workOrder.summary || "Billing-only work order"}</span>
+                <button type="button" className="btn-primary" onClick={() => onCreateFromWorkOrder?.(workOrder)}>Create invoice</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
         <div
           className="billing-status-tabs"

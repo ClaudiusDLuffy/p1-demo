@@ -40,12 +40,6 @@ const DISPATCH_RULES: DispatchRule[] = [
     contractorEmail: "pro.ops.inc@gmail.com",
     contractorName: "Pro-Ops",
   },
-  {
-    territory: ["Florida", "FL", "Tampa"],
-    trades: ["refrigeration", "ice"],
-    contractorEmail: "buriakmw@gmail.com",
-    contractorName: "Mykola Buriak",
-  },
 ];
 
 const containsAny = (text: string, values: string[]) => {
@@ -56,7 +50,7 @@ const containsAny = (text: string, values: string[]) => {
 const normalize = (value: string | null | undefined) => (value || "").trim().toLowerCase();
 
 export const requiresManualContractorAssignment = (parsed: ParsedWorkOrder) =>
-  normalizeStateCode(parsed.state) === "TX";
+  ["TX", "FL"].includes(normalizeStateCode(parsed.state));
 
 export const detectDispatchTrade = (parsed: ParsedWorkOrder): string | null => {
   const lineOfService = normalize(parsed.lineOfService);
@@ -109,16 +103,13 @@ export async function resolveContractor(
   parsed: ParsedWorkOrder,
 ): Promise<{ contractorId: string | null; contractorEmail?: string | null; contractorName?: string | null; reason: string }> {
   if (requiresManualContractorAssignment(parsed)) {
-    return { contractorId: null, reason: "manual assignment required for TX" };
+    const state = normalizeStateCode(parsed.state);
+    return { contractorId: null, reason: `manual assignment required for ${state}` };
   }
 
   const territoryText = detectDispatchTerritory(parsed).join(" ");
   const trade = detectDispatchTrade(parsed);
   const tradeText = trade || "";
-
-  if (containsAny(territoryText, ["Florida", "FL"]) && containsAny(tradeText, ["hvac"])) {
-    return { contractorId: null, reason: "manual hold: Florida HVAC is not auto-assigned" };
-  }
 
   const vaOverride = containsAny(territoryText, ["Virginia", "VA", "Virginia Beach"]);
   const rule = vaOverride

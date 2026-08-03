@@ -10,7 +10,7 @@ import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/cons
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
   // Contractor perspective flips the invoice framing to FROM = their company,
   // BILL TO = P1 Pros (they have no 7-Eleven access). Staff keep the
   // 7-Eleven framing — that's the document P1 posts after review.
@@ -28,10 +28,17 @@ export default function InvoiceDetail(props: any) {
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [submittingReject, setSubmittingReject] = useState(false);
+  const [correctingTotal, setCorrectingTotal] = useState(false);
+  const [correctedTotal, setCorrectedTotal] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const inv = useMemo(
     () => invoices.find(i => i.id === selectedInvoice),
     [invoices, selectedInvoice]
   );
+  const canCorrectTotal = isManager
+    && inv?.state !== "paid"
+    && (!controller || inv?.state === "approved");
   const wo = useMemo(
     () => inv ? workOrders.find(w => w.id === inv.wot) : null,
     [workOrders, inv]
@@ -61,6 +68,19 @@ export default function InvoiceDetail(props: any) {
                       <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
                       Download CSV
                     </button>
+                    {canCorrectTotal && doCorrectInvoiceTotal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCorrectedTotal(Number(inv.total || 0).toFixed(2));
+                          setCorrectionReason("");
+                          setCorrectingTotal(true);
+                        }}
+                        className="btn-soft"
+                      >
+                        Correct total
+                      </button>
+                    )}
                     {/* Multi-invoice: every action is per-invoice (inv.id).
                         Approving here updates ONE invoice; the WO advances
                         only when all its non-draft, non-rejected siblings are
@@ -159,6 +179,71 @@ export default function InvoiceDetail(props: any) {
                         disabled={!rejectReason.trim() || submittingReject}
                         style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: rejectReason.trim() && !submittingReject ? "pointer" : "default", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: rejectReason.trim() && !submittingReject ? 1 : 0.5, display: "flex", alignItems: "center", gap: 6 }}
                       >{submittingReject ? <><BtnSpinner />Rejecting…</> : "Reject"}</button>
+                    </div>
+                  </Modal>
+                )}
+                {correctingTotal && (
+                  <Modal
+                    onClose={() => {
+                      if (submittingCorrection) return;
+                      setCorrectingTotal(false);
+                      setCorrectionReason("");
+                    }}
+                    title={`Correct invoice #${inv.num} total`}
+                    width={460}
+                  >
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 14, lineHeight: 1.55 }}>
+                      This updates the contractor-entered total only. The uploaded PDF and saved line items remain unchanged.
+                    </div>
+                    <label style={{ display: "block", marginBottom: 12 }}>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>Corrected total</span>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={correctedTotal}
+                        onChange={(event) => setCorrectedTotal(event.target.value)}
+                        inputMode="decimal"
+                        autoFocus
+                        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 14 }}
+                      />
+                    </label>
+                    <label style={{ display: "block" }}>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>Reason (optional)</span>
+                      <textarea
+                        rows={2}
+                        value={correctionReason}
+                        onChange={(event) => setCorrectionReason(event.target.value)}
+                        placeholder="Entered decimal did not match the uploaded PDF"
+                        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+                      />
+                    </label>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+                      <button type="button" className="btn-soft" disabled={submittingCorrection} onClick={() => setCorrectingTotal(false)}>Cancel</button>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={submittingCorrection || !(Number(correctedTotal) > 0)}
+                        onClick={async () => {
+                          setSubmittingCorrection(true);
+                          try {
+                            const ok = await doCorrectInvoiceTotal(
+                              inv,
+                              Number(correctedTotal),
+                              correctionReason,
+                            );
+                            if (ok) {
+                              setCorrectingTotal(false);
+                              setCorrectionReason("");
+                            }
+                          } finally {
+                            setSubmittingCorrection(false);
+                          }
+                        }}
+                        style={{ display: "flex", alignItems: "center", gap: 6 }}
+                      >
+                        {submittingCorrection ? <><BtnSpinner />Saving...</> : "Save correction"}
+                      </button>
                     </div>
                   </Modal>
                 )}

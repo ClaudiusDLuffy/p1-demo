@@ -512,6 +512,13 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     margin-left: auto !important;
     margin-right: auto !important;
   }
+  .billing-ready-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+  .billing-ready-row > span:nth-of-type(3) {
+    grid-column: 1 / -1;
+    white-space: normal !important;
+  }
   .detail-fields > * {
     min-width: 0 !important;
   }
@@ -989,6 +996,7 @@ export default function PortalShell() {
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
   const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
   const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
+  const [billingWorkOrderToStart, setBillingWorkOrderToStart] = useState<string | null>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
   const [histContractor, setHistContractor] = useState("all");
@@ -1063,7 +1071,7 @@ export default function PortalShell() {
   const { workOrders, setWorkOrders,
     loadingStates,
     patchLocalWO, localActivity, dbCall,
-    doAssign, doUnassign, doDeleteWO, doReassign,
+    doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
@@ -1104,7 +1112,7 @@ export default function PortalShell() {
     nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
-    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice,
+    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, fire });
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
@@ -1274,6 +1282,7 @@ export default function PortalShell() {
     setSelectedBillingInvoice(null);
     setBillingDraftToEdit(null);
     setBillingSourceToStart(null);
+    setBillingWorkOrderToStart(null);
     setAiNote(null);
   }, []);
 
@@ -1290,6 +1299,23 @@ export default function PortalShell() {
     () => billingInvoices.find((invoice: any) => invoice.id === selectedBillingInvoice) || null,
     [billingInvoices, selectedBillingInvoice]
   );
+  const billingReadyWorkOrders = useMemo(() => {
+    const workOrdersWithInvoices = new Set(
+      (billingInvoices || [])
+        .map((invoice: any) => invoice.wot)
+        .filter(Boolean),
+    );
+    return maskedWorkOrders
+      .filter((workOrder: any) =>
+        workOrder.billingOnly
+        && workOrder.status === "pending_invoice"
+        && !workOrdersWithInvoices.has(workOrder.id),
+      )
+      .sort((a: any, b: any) =>
+        new Date(b.billingReadyAt || b.updatedAt || 0).getTime()
+        - new Date(a.billingReadyAt || a.updatedAt || 0).getTime(),
+      );
+  }, [billingInvoices, maskedWorkOrders]);
   const doDownloadBillingInvoice = async (invoice: any) => {
     try {
       const { triggerBlobDownload, generateStaffInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
@@ -1384,22 +1410,43 @@ export default function PortalShell() {
     }
     return invoice;
   };
+  const openBillingForWorkOrder = (workOrderId: string) => {
+    setBillingDraftToEdit(null);
+    setBillingSourceToStart(null);
+    setBillingWorkOrderToStart(workOrderId);
+    setSelectedBillingInvoice(null);
+    setPage("billing");
+    setModal("createBillingInvoice");
+  };
+  const handleStraightToBilling = async (workOrderId: string) => {
+    const moved = await doStraightToBilling(workOrderId);
+    if (!moved) return;
+    setSelectedWO(null);
+    setAiNote(null);
+    openBillingForWorkOrder(workOrderId);
+  };
   const getUser = (id: string) => USERS.find(u => u.id === id);
   const contractorsOnly = useMemo(
     () => USERS.filter(u => u.role === "contractor"),
     [USERS]
   );
+  const assignableContractors = useMemo(
+    () => contractorsOnly.filter((contractor: any) =>
+      contractor.isAssignable !== false,
+    ),
+    [contractorsOnly],
+  );
   const reassignContractorOptions = useMemo(() => {
     const q = reassignSearch.trim().toLowerCase();
-    if (!q) return contractorsOnly;
-    return contractorsOnly.filter((c: any) =>
+    if (!q) return assignableContractors;
+    return assignableContractors.filter((c: any) =>
       [c.name, c.company, c.territory, ...(c.trades || [])]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(q)
     );
-  }, [contractorsOnly, reassignSearch]);
+  }, [assignableContractors, reassignSearch]);
   const myWOs = useMemo(
     () => currentUser?.role === "contractor"
       ? maskedWorkOrders.filter((w: any) => w.contractor === currentUser.id)
@@ -2030,7 +2077,7 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDownloadInvoiceCsv={doDownloadInvoiceCsv} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDownloadInvoiceCsv={doDownloadInvoiceCsv} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} doCorrectInvoiceTotal={doCorrectInvoiceTotal} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           {isManager && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
@@ -2038,17 +2085,21 @@ export default function PortalShell() {
               currentUser={currentUser}
               invoices={billingInvoices}
               contractorInvoices={invoices}
+              readyWorkOrders={billingReadyWorkOrders}
               setSelectedBillingInvoice={setSelectedBillingInvoice}
               onCreate={() => {
                 setBillingDraftToEdit(null);
                 setBillingSourceToStart(null);
+                setBillingWorkOrderToStart(null);
                 setModal("createBillingInvoice");
               }}
               onCreateFromApproved={(invoice: any) => {
                 setBillingDraftToEdit(null);
                 setBillingSourceToStart(invoice.id);
+                setBillingWorkOrderToStart(null);
                 setModal("createBillingInvoice");
               }}
+              onCreateFromWorkOrder={(workOrder: any) => openBillingForWorkOrder(workOrder.id)}
               fmt={fmt}
             />
           )}
@@ -2067,6 +2118,7 @@ export default function PortalShell() {
                 ) return;
                 setBillingDraftToEdit(selectedBillingInvoiceData);
                 setBillingSourceToStart(null);
+                setBillingWorkOrderToStart(null);
                 setModal("createBillingInvoice");
               }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
@@ -2102,8 +2154,9 @@ export default function PortalShell() {
             slaRemaining={slaRemaining}
             fmt={fmt}
             getUser={getUser}
-            contractorsOnly={contractorsOnly}
+            contractorsOnly={assignableContractors}
             doAssign={doAssign}
+            doStraightToBilling={handleStraightToBilling}
             setReassignTarget={setReassignTarget}
             setModal={setModal}
             doCapitalFlag={doCapitalFlag}
@@ -2168,7 +2221,7 @@ export default function PortalShell() {
         <WorkOrderCreateForm
           onClose={() => setModal(null)}
           doCreateWO={doCreateWO}
-          contractorsOnly={contractorsOnly}
+          contractorsOnly={assignableContractors}
           setSelectedWO={setSelectedWO}
           setPage={setPage}
           setAiNote={setAiNote}
@@ -2230,7 +2283,7 @@ export default function PortalShell() {
           </div>
           <div className="reassign-picker">
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>New contractor</div>
-            {contractorsOnly.length >= 10 && (
+            {assignableContractors.length >= 10 && (
               <div className="reassign-search-wrap" style={{ position: "relative", marginBottom: 10 }}>
                 <input
                   className="reassign-search"
@@ -2756,10 +2809,12 @@ export default function PortalShell() {
           billingInvoices={billingInvoices}
           editingInvoice={billingDraftToEdit}
           initialSourceInvoiceId={billingSourceToStart}
+          initialWorkOrderId={billingWorkOrderToStart}
           onClose={() => {
             setModal(null);
             setBillingDraftToEdit(null);
             setBillingSourceToStart(null);
+            setBillingWorkOrderToStart(null);
           }}
           onCreated={(invoice: any) => {
             qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
@@ -2774,6 +2829,7 @@ export default function PortalShell() {
             qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
             if (invoice?.id) setSelectedBillingInvoice(invoice.id);
             setBillingSourceToStart(null);
+            setBillingWorkOrderToStart(null);
           }}
           fire={fire}
           fmt={fmt}
