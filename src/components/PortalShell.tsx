@@ -1221,7 +1221,25 @@ export default function PortalShell() {
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
   }, [modal, nextInvNum]);
 
-  const maskedWorkOrders = workOrders;
+  // Contractors must never see the real 7-Eleven NTE. Keep the source array
+  // intact for staff calculations and replace the display value at the role
+  // boundary for every contractor account, including company admins.
+  const isContractorRole = currentUser?.role === "contractor";
+  const contractorNteCap = currentUser?.contractorNteDisplay != null
+    ? Number(currentUser.contractorNteDisplay)
+    : 1000;
+  const maskedWorkOrders = useMemo(
+    () => isContractorRole
+      ? workOrders.map((workOrder: any) => ({
+          ...workOrder,
+          nte: contractorNteCap,
+          nteFlagThreshold: null,
+          nteFlagged: false,
+          nteFlagAmount: null,
+        }))
+      : workOrders,
+    [contractorNteCap, isContractorRole, workOrders],
+  );
 
   const woData = useMemo(
     () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
@@ -1514,7 +1532,9 @@ export default function PortalShell() {
   }, [assignableContractors, reassignSearch]);
   const myWOs = useMemo(
     () => currentUser?.role === "contractor"
-      ? maskedWorkOrders.filter((w: any) => w.contractor === currentUser.id)
+      ? maskedWorkOrders.filter((w: any) =>
+          w.contractor === (currentUser.contractorAccountId || currentUser.id),
+        )
       : maskedWorkOrders,
     [maskedWorkOrders, currentUser]
   );
@@ -1712,8 +1732,11 @@ export default function PortalShell() {
     [myWOs]
   );
   const contractorInvoiceBadge = useMemo(
-    () => invoices.filter(i => i.contractor === currentUser?.id && (i.state === "submitted" || i.state === "revised")).length || null,
-    [invoices, currentUser?.id]
+    () => invoices.filter(i =>
+      i.contractor === (currentUser?.contractorAccountId || currentUser?.id)
+      && (i.state === "submitted" || i.state === "revised"),
+    ).length || null,
+    [invoices, currentUser?.contractorAccountId, currentUser?.id]
   );
   const contractorAttentionBadge = useMemo(
     () => myWOs.reduce(
@@ -1738,12 +1761,12 @@ export default function PortalShell() {
     ]
     : [
       { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge, attentionBadge: contractorAttentionBadge },
-      ...(currentUser?.contractorTier === "mr_freeze" ? [
+      ...(currentUser?.contractorTier === "mr_freeze" || currentUser?.canManageTeam ? [
         { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       ] : []),
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
     ],
-    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.contractorTier]
+    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canManageTeam, currentUser?.contractorTier]
   );
   const bottomNavItems = useMemo(() => {
     const preferred = ["dashboard", "work_orders", "capital", "invoices"];
@@ -2138,7 +2161,7 @@ export default function PortalShell() {
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
 
-          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} workOrders={workOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} getUser={getUser} loadingStates={loadingStates} />
+          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} technicians={technicians} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} getUser={getUser} loadingStates={loadingStates} />
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 

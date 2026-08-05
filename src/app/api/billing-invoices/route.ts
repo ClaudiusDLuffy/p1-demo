@@ -692,6 +692,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const targetState = body.state === "submitted" ? "submitted" : "draft";
+    const desiredNum = String(body.num || "").trim();
     const workOrderId = String(body.workOrderId || "").trim() || null;
     const sourceInvoiceIds: string[] = Array.from(new Set<string>(
       (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
@@ -701,6 +702,10 @@ export async function PATCH(req: NextRequest) {
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
     const validLines = normalizeBillingLines(lines);
 
+    if (!desiredNum) return jsonError("Invoice number is required", 400);
+    if (desiredNum.length > 80 || /[\u0000-\u001f\u007f]/.test(desiredNum)) {
+      return jsonError("Invoice number is invalid", 400);
+    }
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
     if (!String(body.territory || "").trim()) return jsonError("Territory is required", 400);
@@ -786,7 +791,8 @@ export async function PATCH(req: NextRequest) {
       return jsonError("Sales tax must be zero or greater", 400);
     }
     const total = roundInvoiceNumber(subtotal + salesTax);
-    const desiredNum = existing.num;
+    const previousNum = String(existing.num || "");
+    const invoiceWasRenumbered = desiredNum !== previousNum;
     const updatedAt = new Date().toISOString();
 
     const { data: updated, error: updateError } = await (auth.sb as any)
@@ -862,17 +868,26 @@ export async function PATCH(req: NextRequest) {
         : targetState === "submitted"
           ? "updated"
           : "draft updated";
+      const auditText = invoiceWasRenumbered
+        ? `P1 invoice #${previousNum} renumbered to #${desiredNum} and ${action}.`
+        : `P1 invoice #${desiredNum} ${action}.`;
       const { error: activityError } = await (auth.sb as any)
         .from("activities")
         .insert({
           work_order_id: workOrderId,
           author_id: auth.user.id,
           author_name: auth.profile.name || "P1 staff",
-          text: `P1 invoice #${desiredNum} ${action}.`,
+          text: auditText,
           type: "system",
           is_staff_override: false,
           is_staff_only: true,
           event_key: "staff_billing",
+          event_data: {
+            invoiceId: id,
+            previousInvoiceNum: previousNum,
+            invoiceNum: desiredNum,
+            renumbered: invoiceWasRenumbered,
+          },
         });
       if (activityError) {
         console.error("Billing draft activity audit insert failed", activityError);

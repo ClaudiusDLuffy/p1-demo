@@ -5,14 +5,17 @@ import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { T, INV_STATE } from "../../lib/constants";
+import { InvoiceSortKey, SortDirection, sortInvoices } from "../../lib/invoiceSort";
 import { useMemo, useState } from "react";
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt } = props;
-  const currentUserId = currentUser?.id ?? null;
+  const currentContractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<InvoiceSortKey>("recent");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const invoiceTabs = [
     { id: "all", l: "All", m: "All" },
     { id: "draft", l: "Draft", m: "Draft" },
@@ -22,12 +25,42 @@ export default function InvoiceList(props: any) {
     { id: "approved", l: "Approved", m: "Appr" },
     { id: "paid", l: "Sent to QuickBooks", m: "Sent to QB" },
   ];
+  const sortOptions = [
+    { id: "recent", label: "Recently added" },
+    { id: "invoice", label: "Invoice #" },
+    { id: "work_order", label: "WO #" },
+    ...(isManager ? [{ id: "contractor", label: "Contractor" }] : []),
+    { id: "status", label: "Status" },
+    { id: "date", label: "Invoice date" },
+    { id: "store", label: "Store" },
+    { id: "lines", label: "Lines" },
+    { id: "total", label: "Total" },
+  ] as { id: InvoiceSortKey; label: string }[];
+  const tableHeaders = [
+    { key: "invoice", label: "Invoice#" },
+    { key: "work_order", label: "WO#" },
+    ...(isManager ? [{ key: "contractor", label: "Contractor" }] : []),
+    { key: "status", label: "State" },
+    { key: "date", label: "Date" },
+    { key: "store", label: "Store" },
+    { key: "lines", label: "Lines", align: "right" },
+    { key: "total", label: "Total", align: "right" },
+  ] as { key: InvoiceSortKey; label: string; align?: "left" | "right" }[];
+  const chooseSort = (key: InvoiceSortKey) => {
+    if (key === sortKey) {
+      setSortDirection(direction => direction === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === "recent" || key === "date" ? "desc" : "asc");
+  };
   const visibleInvoices = useMemo(
-    () => (isManager ? invoices : invoices.filter(i => i.contractor === currentUserId))
-      .filter(i => (i.invoiceType || "contractor") === "contractor")
-      .filter(i => !controller || ["approved", "paid"].includes(i.state))
-      .filter(i => invTab === "all" ? true : i.state === invTab)
-      .filter(i => {
+    () => {
+      const filtered = (isManager ? invoices : invoices.filter(i => i.contractor === currentContractorId))
+        .filter(i => (i.invoiceType || "contractor") === "contractor")
+        .filter(i => !controller || ["approved", "paid"].includes(i.state))
+        .filter(i => invTab === "all" ? true : i.state === invTab)
+        .filter(i => {
         const query = search.trim().toLowerCase();
         if (!query) return true;
         const contractor = getUser(i.contractor);
@@ -49,8 +82,18 @@ export default function InvoiceList(props: any) {
           .join(" ")
           .toLowerCase()
           .includes(query);
-      }),
-    [controller, currentUserId, getUser, invTab, invoices, isManager, search]
+        });
+      return sortInvoices(
+        filtered,
+        sortKey,
+        sortDirection,
+        contractorId => {
+          const contractor = getUser(contractorId);
+          return contractor?.company || contractor?.name || "";
+        },
+      );
+    },
+    [controller, currentContractorId, getUser, invTab, invoices, isManager, search, sortDirection, sortKey]
   );
   return (
     <>
@@ -66,30 +109,66 @@ export default function InvoiceList(props: any) {
                     </button>
                   ))}
                 </div>
-                <label style={{ position: "relative", flex: "1 1 220px", maxWidth: 340 }}>
-                  <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", display: "flex", color: T.subtle, pointerEvents: "none" }}>
-                    <Ico d="M21 21l-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" size={15} color="currentColor" />
-                  </span>
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search invoices"
-                    aria-label="Search contractor invoices"
-                    style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
-                  />
-                </label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flex: "1 1 360px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <select
+                      value={sortKey}
+                      onChange={(event) => {
+                        const next = event.target.value as InvoiceSortKey;
+                        setSortKey(next);
+                        setSortDirection(next === "recent" || next === "date" ? "desc" : "asc");
+                      }}
+                      aria-label="Sort invoices by"
+                      style={{ minHeight: 38, padding: "8px 28px 8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
+                    >
+                      {sortOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setSortDirection(direction => direction === "asc" ? "desc" : "asc")}
+                      aria-label={`Sort ${sortDirection === "asc" ? "descending" : "ascending"}`}
+                      title={sortDirection === "asc" ? "Ascending" : "Descending"}
+                      className="btn-soft"
+                      style={{ minWidth: 38, minHeight: 38, padding: "7px 10px", fontSize: 15 }}
+                    >
+                      {sortDirection === "asc" ? "↑" : "↓"}
+                    </button>
+                  </div>
+                  <label style={{ position: "relative", flex: "1 1 220px", maxWidth: 340 }}>
+                    <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", display: "flex", color: T.subtle, pointerEvents: "none" }}>
+                      <Ico d="M21 21l-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" size={15} color="currentColor" />
+                    </span>
+                    <input
+                      type="search"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search invoices"
+                      aria-label="Search contractor invoices"
+                      style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
+                    />
+                  </label>
+                </div>
               </div>
               <div className="desktop-only-table">
               <div className="card table-scroll" style={{ overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: T.surfaceSoft }}>
-                      {(isManager
-                        ? ["Invoice#", "WO#", "Contractor", "State", "Date", "Store", "Lines", "Total"]
-                        : ["Invoice#", "WO#", "State", "Date", "Store", "Lines", "Total"]
-                      ).map(h => (
-                        <th key={h} style={{ textAlign: h === "Total" || h === "Lines" ? "right" : "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>{h}</th>
+                      {tableHeaders.map(header => (
+                        <th
+                          key={header.key}
+                          aria-sort={sortKey === header.key ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                          style={{ textAlign: header.align || "left", padding: 0, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => chooseSort(header.key)}
+                            style={{ width: "100%", padding: "12px 14px", display: "flex", justifyContent: header.align === "right" ? "flex-end" : "flex-start", alignItems: "center", gap: 5, border: "none", background: "transparent", color: "inherit", cursor: "pointer", font: "inherit", fontWeight: "inherit", textTransform: "inherit", letterSpacing: "inherit" }}
+                          >
+                            {header.label}
+                            {sortKey === header.key && <span aria-hidden="true">{sortDirection === "asc" ? "↑" : "↓"}</span>}
+                          </button>
+                        </th>
                       ))}
                     </tr>
                   </thead>

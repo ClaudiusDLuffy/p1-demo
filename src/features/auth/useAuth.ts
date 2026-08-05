@@ -45,13 +45,18 @@ export default function useAuth({
   const hydrateProfile = useCallback(async (userId: string) => {
     try {
       const sb = supabase();
-      const { data: prof, error } = await sb
-        .from("profiles").select("*").eq("id", userId).single();
+      const [profileResult, scopeResult] = await Promise.all([
+        sb.from("profiles").select("*").eq("id", userId).single(),
+        (sb as any).rpc("get_my_contractor_scope"),
+      ]);
+      const { data: prof, error } = profileResult;
       if (error) throw error;
+      if (scopeResult.error) throw scopeResult.error;
       if (!prof) throw new Error("Profile not found for this account");
       if (lastLoadedUserIdRef.current === prof.id) return;
       lastLoadedUserIdRef.current = prof.id;
       const profAny = prof as any;
+      const scope = scopeResult.data || {};
       setCurrentUser({
         id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
         title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
@@ -59,6 +64,12 @@ export default function useAuth({
         isDemo: DEMO_ACCOUNTS.some(d => d.email === prof.email),
         contractorTier: prof.contractor_tier || null,
         dispatcherId: prof.dispatcher_id || null,
+        contractorAccountId: scope.contractorAccountId || (prof.role === "contractor" ? prof.id : null),
+        contractorOrganizationId: scope.organizationId || null,
+        contractorOrganizationName: scope.organizationName || null,
+        contractorAccessLevel: scope.accessLevel || null,
+        canInvoice: !!scope.canInvoice,
+        canManageTeam: !!scope.canManageTeam,
         // Display cap for the WO NTE shown to this contractor. Mask applied
         // at the PortalShell boundary so this never reaches staff math or
         // the NTE-flag bucket. Falls back to 1000 pre-migration.

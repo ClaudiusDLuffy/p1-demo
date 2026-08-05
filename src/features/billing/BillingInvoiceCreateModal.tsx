@@ -67,7 +67,7 @@ const OptionalTaxRateSchema = z.preprocess(
 );
 
 const BillingInvoiceSchema = z.object({
-  num: z.string().min(1, "Invoice number is required"),
+  num: z.string().trim().min(1, "Invoice number is required").max(80, "Invoice number is too long"),
   invoiceDate: z.string().min(1, "Invoice date is required"),
   serviceDate: z.string().optional(),
   dueDate: z.string().optional(),
@@ -755,7 +755,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num")} readOnly title="Assigned automatically when the invoice is created" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: T.surfaceSoft, color: T.ink, fontSize: 13 }} /></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num")} readOnly={!isEditing} title={isEditing ? "Editable until approval or QuickBooks sync" : "Assigned automatically when the invoice is created"} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: isEditing ? T.surface : T.surfaceSoft, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
