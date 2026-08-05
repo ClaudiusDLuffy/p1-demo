@@ -1179,7 +1179,7 @@ export default function PortalShell() {
     doSaveDraftInvoice,
     doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal,
     lineAmount, invSubtotal,
-  } = useInvoices({ currentUser, fire });
+  } = useInvoices({ currentUser, profiles: USERS, fire });
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
   // on modal close. Passed to InvoiceCreateModal to hydrate the form.
   const [resumeDraft, setResumeDraft] = useState<any>(null);
@@ -2165,7 +2165,7 @@ export default function PortalShell() {
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDownloadInvoiceCsv={doDownloadInvoiceCsv} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} doCorrectInvoiceTotal={doCorrectInvoiceTotal} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} getUser={getUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDownloadInvoiceCsv={doDownloadInvoiceCsv} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} doCorrectInvoiceTotal={doCorrectInvoiceTotal} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
 
           {isManager && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList

@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -23,6 +23,14 @@ import {
   STAFF_BILLING_LINE_TYPES,
 } from "../../lib/staffBilling";
 import { supabase } from "../../lib/supabase/client";
+import BillingWorkOrderActivityPanel from "./BillingWorkOrderActivityPanel";
+import {
+  billingDraftStorageKey,
+  createBillingDraftPayload,
+  readBillingDraft,
+  removeBillingDraft,
+  writeBillingDraft,
+} from "../../lib/billingDraftPersistence";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -193,12 +201,25 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [sourceSnapshots, setSourceSnapshots] = useState<Record<string, any>>({});
   const [taxRates, setTaxRates] = useState<any[]>([]);
   const [taxRateLoadError, setTaxRateLoadError] = useState("");
+  const [numberEdited, setNumberEdited] = useState(false);
+  const [draftState, setDraftState] = useState<"idle" | "restored" | "saved" | "error">("idle");
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const initializedFor = useRef<string | null>(null);
   const previousInvoiceDate = useRef("");
   const previousWorkOrderId = useRef("");
+  const skipRestoredWorkOrderHydration = useRef<string | null>(null);
+  const draftHydrated = useRef(false);
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isEditing = !!editingInvoice?.id;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === CONTROLLER_EMAIL;
+  const draftStorageKey = useMemo(
+    () => billingDraftStorageKey({
+      userId: currentUser?.id || currentUser?.email || "staff",
+      editingInvoiceId: editingInvoice?.id || null,
+    }),
+    [currentUser?.email, currentUser?.id, editingInvoice?.id],
+  );
 
   const {
     register,
@@ -207,6 +228,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     watch,
     reset,
     setValue,
+    getValues,
     clearErrors,
     trigger,
     formState: { errors },
@@ -380,6 +402,38 @@ export default function BillingInvoiceCreateModal(props: any) {
     ).slice(0, 80);
   }, [activeWorkOrders, woSearch]);
 
+  const persistBillingDraft = useCallback(() => {
+    if (
+      modal !== "createBillingInvoice"
+      || !draftHydrated.current
+      || typeof window === "undefined"
+    ) return;
+    try {
+      const payload = createBillingDraftPayload({
+        form: getValues(),
+        selectedSourceIds,
+        sourceSnapshots,
+        partsMarkup,
+        customTerritory,
+        numberEdited,
+      });
+      writeBillingDraft(window.localStorage, draftStorageKey, payload);
+      setDraftSavedAt(payload.savedAt);
+      setDraftState("saved");
+    } catch {
+      setDraftState("error");
+    }
+  }, [
+    customTerritory,
+    draftStorageKey,
+    getValues,
+    modal,
+    numberEdited,
+    partsMarkup,
+    selectedSourceIds,
+    sourceSnapshots,
+  ]);
+
   useEffect(() => {
     if (modal !== "createBillingInvoice") return;
     let cancelled = false;
@@ -407,6 +461,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   useEffect(() => {
     if (modal !== "createBillingInvoice") {
       initializedFor.current = null;
+      draftHydrated.current = false;
       return;
     }
     const initializationKey = editingInvoice?.id
@@ -414,6 +469,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       : `create:${initialSourceInvoiceId || ""}:${initialWorkOrderId || ""}`;
     if (initializedFor.current === initializationKey) return;
     initializedFor.current = initializationKey;
+    draftHydrated.current = false;
 
     const today = todayIso();
     const initialInvoiceDate = editingInvoice?.invoiceDateRaw || today;
@@ -424,9 +480,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       || initialSourceInvoice?.wot
       || initialWorkOrderId
       || "";
-    previousInvoiceDate.current = initialInvoiceDate;
-    previousWorkOrderId.current = resolvedInitialWorkOrderId;
-    reset({
+    const initialForm = {
       num: editingInvoice?.num || nextStaffNum(billingInvoices, currentUser),
       invoiceDate: initialInvoiceDate,
       serviceDate: editingInvoice?.serviceDateRaw || "",
@@ -468,23 +522,45 @@ export default function BillingInvoiceCreateModal(props: any) {
               : Number(line.markupPercent),
           }))
         : [],
-    });
+    };
+    let storedDraft: ReturnType<typeof readBillingDraft> = null;
+    if (typeof window !== "undefined") {
+      try {
+        storedDraft = readBillingDraft(window.localStorage, draftStorageKey);
+      } catch {
+        storedDraft = null;
+      }
+    }
+    const storedWorkOrderId = String(storedDraft?.form?.workOrderId || "");
+    const requestedWorkOrderMatches = !resolvedInitialWorkOrderId
+      || storedWorkOrderId === resolvedInitialWorkOrderId;
+    const restoredDraft = storedDraft && requestedWorkOrderMatches
+      ? storedDraft
+      : null;
+    const formToLoad = restoredDraft?.form || initialForm;
+    previousInvoiceDate.current = String(formToLoad.invoiceDate || initialInvoiceDate);
+    previousWorkOrderId.current = String(formToLoad.workOrderId || resolvedInitialWorkOrderId);
+    reset(formToLoad as any);
     setWoSearch("");
-    setSelectedSourceIds(
+    setSelectedSourceIds(restoredDraft?.selectedSourceIds || (
       editingInvoice?.sourceInvoiceIds
-      || (initialSourceInvoice?.id ? [initialSourceInvoice.id] : []),
-    );
-    setSourceSnapshots(Object.fromEntries(
-      (editingInvoice?.sourceInvoices || []).map((invoice: any) => [
-        invoice.id,
-        invoice,
-      ]),
+      || (initialSourceInvoice?.id ? [initialSourceInvoice.id] : [])
     ));
-    setPartsMarkup("25");
-    setCustomTerritory(
+    setSourceSnapshots(restoredDraft?.sourceSnapshots || Object.fromEntries(
+      (editingInvoice?.sourceInvoices || []).map((invoice: any) => [invoice.id, invoice]),
+    ));
+    setPartsMarkup(restoredDraft?.partsMarkup || "25");
+    setCustomTerritory(restoredDraft?.customTerritory ?? (
       !!editingInvoice?.territory
-      && !KNOWN_TERRITORIES.includes(editingInvoice.territory),
-    );
+      && !KNOWN_TERRITORIES.includes(editingInvoice.territory)
+    ));
+    setNumberEdited(restoredDraft?.numberEdited ?? isEditing);
+    setDraftSavedAt(restoredDraft?.savedAt || null);
+    setDraftState(restoredDraft ? "restored" : "idle");
+    skipRestoredWorkOrderHydration.current = restoredDraft
+      ? String(restoredDraft.form.workOrderId || "")
+      : null;
+    draftHydrated.current = true;
   }, [
     activeWorkOrders,
     billingInvoices,
@@ -493,9 +569,29 @@ export default function BillingInvoiceCreateModal(props: any) {
     editingInvoice,
     initialSourceInvoiceId,
     initialWorkOrderId,
+    isEditing,
     modal,
     reset,
+    draftStorageKey,
   ]);
+
+  useEffect(() => {
+    if (modal !== "createBillingInvoice" || !draftHydrated.current) return;
+    const scheduleSave = () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = setTimeout(persistBillingDraft, 450);
+    };
+    const subscription = watch(scheduleSave);
+    scheduleSave();
+    window.addEventListener("beforeunload", persistBillingDraft);
+    return () => {
+      subscription.unsubscribe();
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = null;
+      window.removeEventListener("beforeunload", persistBillingDraft);
+      persistBillingDraft();
+    };
+  }, [modal, persistBillingDraft, watch]);
 
   useEffect(() => {
     if (!invoiceDate) return;
@@ -506,6 +602,10 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   useEffect(() => {
     if (!selectedWorkOrderId) return;
+    if (skipRestoredWorkOrderHydration.current === selectedWorkOrderId) {
+      skipRestoredWorkOrderHydration.current = null;
+      return;
+    }
     const wo = activeWorkOrders.find((item: any) => item.id === selectedWorkOrderId);
     if (!wo) return;
     setValue("storeNumber", wo.store || "", { shouldDirty: true, shouldValidate: true });
@@ -549,11 +649,25 @@ export default function BillingInvoiceCreateModal(props: any) {
     setValue("salesTaxOverride", "", { shouldDirty: true });
   }, [selectedWorkOrderId, setValue]);
 
+  const closeKeepingDraft = () => {
+    persistBillingDraft();
+    onClose?.();
+  };
+
   const discardAndClose = () => {
+    if (typeof window !== "undefined") {
+      try {
+        removeBillingDraft(window.localStorage, draftStorageKey);
+      } catch {
+        // The form still closes even when browser storage is unavailable.
+      }
+    }
     const today = todayIso();
+    draftHydrated.current = false;
     initializedFor.current = null;
     previousInvoiceDate.current = "";
     previousWorkOrderId.current = "";
+    skipRestoredWorkOrderHydration.current = null;
     reset({
       num: "",
       invoiceDate: today,
@@ -577,6 +691,9 @@ export default function BillingInvoiceCreateModal(props: any) {
     setSourceSnapshots({});
     setPartsMarkup("25");
     setCustomTerritory(false);
+    setNumberEdited(false);
+    setDraftState("idle");
+    setDraftSavedAt(null);
     setDraggingLine(null);
     onClose?.();
   };
@@ -713,6 +830,7 @@ export default function BillingInvoiceCreateModal(props: any) {
           state,
           taxState: String(data.taxState || "").toUpperCase(),
           sourceInvoiceIds: selectedSourceIds,
+          userTypedNum: numberEdited,
         }),
       });
 
@@ -730,9 +848,9 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   return (
     <Modal
-      onClose={discardAndClose}
+      onClose={closeKeepingDraft}
       title={isEditing ? `Edit invoice #${editingInvoice.num}` : "Create P1 to 7-Eleven invoice"}
-      width={980}
+      width={1240}
       closeOnBackdrop={false}
     >
       <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
@@ -741,6 +859,19 @@ export default function BillingInvoiceCreateModal(props: any) {
             ? `Update this ${editingInvoice.state} invoice. Approved, paid, and QuickBooks-synced invoices stay locked.`
             : "Direction is fixed: P1 Pros bills 7-Eleven. Linking a work order is optional."}
         </div>
+
+        <div role="status" style={{ marginTop: -10, marginBottom: 14, fontSize: 10, color: draftState === "error" ? T.danger : T.subtle }}>
+          {draftState === "restored"
+            ? `Restored your unsaved draft${draftSavedAt ? ` from ${new Date(draftSavedAt).toLocaleString()}` : ""}.`
+            : draftState === "saved"
+              ? `Draft autosaved on this device${draftSavedAt ? ` at ${new Date(draftSavedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}.`
+              : draftState === "error"
+                ? "Draft autosave is unavailable in this browser. Use Save as Draft before leaving."
+                : "Changes autosave on this device as you work."}
+        </div>
+
+        <div className="billing-create-layout">
+          <div style={{ minWidth: 0 }}>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, padding: "14px 16px", background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, marginBottom: 18 }} className="billing-summary-grid">
           <div>
@@ -755,7 +886,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num")} readOnly={!isEditing} title={isEditing ? "Editable until approval or QuickBooks sync" : "Assigned automatically when the invoice is created"} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: isEditing ? T.surface : T.surfaceSoft, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => setNumberEdited(true) })} title="Auto-populated, but editable until approval or QuickBooks sync" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
@@ -1233,9 +1364,19 @@ export default function BillingInvoiceCreateModal(props: any) {
             <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: `1px solid ${T.border}` }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: T.ink }}>{fmt(Math.round(total * 100) / 100)}</span></div>
           </div>
         </div>
+          </div>
+
+          <div className="billing-activity-sidebar">
+            <BillingWorkOrderActivityPanel
+              currentUser={currentUser}
+              workOrder={selectedWorkOrder}
+            />
+          </div>
+        </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button type="button" onClick={discardAndClose} className="btn-soft">Cancel</button>
+          <button type="button" onClick={discardAndClose} className="btn-soft" style={{ color: T.danger }}>Discard draft</button>
+          <button type="button" onClick={closeKeepingDraft} className="btn-soft">Close</button>
           {editingInvoice?.state !== "submitted" && (
             <button type="button" disabled={submitting} onClick={handleSubmit(data => submit(data, "draft"))} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting ? 0.7 : 1 }}>
               {submitting ? <><BtnSpinner />Saving...</> : isEditing ? "Save Draft" : "Save as Draft"}

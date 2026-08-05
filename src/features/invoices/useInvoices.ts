@@ -24,11 +24,27 @@ const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) ||
 const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
 const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
 
-export default function useInvoices({ currentUser, fire }: any) {
+export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const qc = useQueryClient();
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
   const [submittedInvoiceNum, setSubmittedInvoiceNum] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  const contractorProfileFor = (invoice: any) => {
+    const contractorId = invoice?.contractor || invoice?.contractorId;
+    return (profiles || []).find((profile: any) => profile.id === contractorId)
+      || (currentUser?.role === "contractor" ? currentUser : null)
+      || null;
+  };
+  const contractorPdfOptions = (invoice: any) => {
+    const profile = contractorProfileFor(invoice);
+    return {
+      perspective: "contractor" as const,
+      fromName: profile?.company || profile?.name || "Contractor",
+      fromEmail: profile?.email || "",
+      fromPhone: profile?.phone || "",
+    };
+  };
 
   // Contractors explicitly add only the line types they need.
   const defaultInvLines = () => [];
@@ -65,13 +81,12 @@ export default function useInvoices({ currentUser, fire }: any) {
   // submit-existing-draft so both paths produce the same artifact in storage.
   const generateAndUploadPdf = async (header: any, draft: any, wo: any, mappedLines: any[], subtotal: number, tax: number, total: number, fullStoreAddr: string) => {
     try {
-      const { generateInvoicePDFBlob, loadLogoDataUrl } = await import("../../lib/invoicePdf");
-      const logoDataUrl = await loadLogoDataUrl();
+      const { generateInvoicePDFBlob } = await import("../../lib/invoicePdf");
       const blob = generateInvoicePDFBlob({
         num: draft.num, wot: wo.id, store: wo.store, storeAddr: fullStoreAddr,
         invoiceDate: draft.invoiceDate, serviceDate: draft.serviceDate, terms: draft.terms,
         cme: draft.cme, lines: mappedLines, subtotal, salesTax: tax, total,
-      }, logoDataUrl);
+      }, null, contractorPdfOptions({ contractor: wo.contractor }));
       await uploadInvoicePdf(header.id, draft.num, blob);
     } catch (e: any) {
       // Non-fatal — PDF regenerates on first download via the same path.
@@ -263,14 +278,14 @@ export default function useInvoices({ currentUser, fire }: any) {
     }
   };
 
-  // Storage-first download with lazy-backfill: if the invoice already has a
-  // stored PDF, pull bytes directly; otherwise generate, upload, persist the
-  // path, then trigger the download. Either way the user gets a file.
+  // Original uploads stay byte-for-byte intact. Generated contractor invoices
+  // are rendered from the contractor perspective, including legacy rows whose
+  // cached artifact predates the branding fix.
   const doDownloadInvoice = async (inv: any) => {
     if (pdfBusy) return;
     setPdfBusy(true);
     try {
-      const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename, loadLogoDataUrl } = await import("../../lib/invoicePdf");
+      const { triggerBlobDownload, generateInvoicePDFBlob, invoiceFilename } = await import("../../lib/invoicePdf");
       const filename = invoiceFilename(inv);
       if (!inv.pdfStoragePath && (inv.lines || []).length === 0) {
         fire(`Original PDF is unavailable for invoice ${inv.num}. Reattach the contractor invoice before downloading.`);
@@ -281,36 +296,22 @@ export default function useInvoices({ currentUser, fire }: any) {
       // a fallback for uploads created before upload audit metadata existed.
       const hasOriginalPdf = inv.pdfStoragePath
         && (inv.pdfIsOriginal || (inv.lines || []).length === 0);
-      if (currentUser?.role === "contractor" && hasOriginalPdf) {
+      if (hasOriginalPdf) {
         const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
         triggerBlobDownload(blob, inv.originalPdfName || filename);
         fire(`Invoice ${inv.num} downloaded`);
         return;
       }
-      // Contractor download: always regenerate with the contractor-perspective
-      // framing (FROM contractor → BILL TO P1 Pros). We never serve the stored
-      // bytes (those are the staff/7-Eleven document P1 posts) and never
-      // overwrite storage, so the two perspectives don't cross-contaminate.
-      if (currentUser?.role === "contractor") {
-        const logoDataUrl = await loadLogoDataUrl();
-        const blob = generateInvoicePDFBlob(inv, logoDataUrl, { perspective: "contractor", fromName: currentUser?.company || currentUser?.name || "Contractor" });
-        triggerBlobDownload(blob, filename);
-        fire(`Invoice ${inv.num} downloaded`);
-        return;
-      }
-      if (inv.pdfStoragePath) {
-        const blob = await downloadInvoicePdfBlob(inv.pdfStoragePath);
-        triggerBlobDownload(blob, inv.originalPdfName || filename);
-        fire(`Invoice ${inv.num} downloaded`);
-        return;
-      }
-      // Lazy backfill - covers the seeded invoice + any pre-existing rows.
-      const logoDataUrl = await loadLogoDataUrl();
-      const blob = generateInvoicePDFBlob(inv, logoDataUrl);
+      // Every generated contractor invoice uses contractor framing for every
+      // viewer. This also bypasses legacy cached PDFs that were generated with
+      // a P1 header; original contractor-uploaded PDFs remain untouched above.
+      const blob = generateInvoicePDFBlob(inv, null, contractorPdfOptions(inv));
       if (inv.id) {
         try {
-          await uploadInvoicePdf(inv.id, inv.num, blob);
-          qc.invalidateQueries({ queryKey: INVOICES_KEY });
+          if (!inv.pdfStoragePath) {
+            await uploadInvoicePdf(inv.id, inv.num, blob);
+            qc.invalidateQueries({ queryKey: INVOICES_KEY });
+          }
         } catch (e: any) {
           fire(`PDF cache failed: ${e.message || e}`);
         }
@@ -356,7 +357,7 @@ export default function useInvoices({ currentUser, fire }: any) {
   // the WO stuck, surface a toast prompting staff to move it manually.
   const doDeleteInvoice = async (inv: any) => {
     try {
-      await deleteInvoice(inv.id, inv.num, inv.wot || null, currentUser.name);
+      await deleteInvoice(inv.id);
       // After delete: check whether the WO has any non-draft, non-rejected
       // siblings left at all. If not, surface the manual-move prompt.
       const all = ((qc.getQueryData(INVOICES_KEY) as any[]) ?? []);
