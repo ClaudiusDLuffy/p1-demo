@@ -795,21 +795,24 @@ export async function deleteWorkOrder(workOrderId: string, authorName: string): 
   await insertActivity(workOrderId, "System", `Work order deleted by ${authorName}.`, "system");
 }
 
-// Invoice soft delete — same pattern as deleteWorkOrder: deleted_at +
-// deleted_by, never a hard delete (row stays restorable via SQL). Staff-only
-// (gated in the UI; inv_update RLS already restricts who can update).
-// Writes the audit activity on the parent work order. Does NOT touch the
-// work order's status — staff move the WO manually if needed.
-export async function deleteInvoice(invoiceId: string, invoiceNum: string, workOrderId: string | null, authorName: string): Promise<void> {
+// Invoice soft delete is routed through an authenticated staff-only endpoint.
+// The server verifies the updated row and records an audit without allowing an
+// audit failure to masquerade as a failed delete. WO status remains unchanged.
+export async function deleteInvoice(invoiceId: string): Promise<void> {
   const sb = supabase();
-  const { data: { user } } = await sb.auth.getUser();
-  const { error } = await sb.from("invoices").update({
-    deleted_at: new Date().toISOString(),
-    deleted_by: user?.id || null,
-  }).eq("id", invoiceId);
-  if (error) throw error;
-  if (workOrderId) {
-    await insertActivity(workOrderId, "System", `Invoice #${invoiceNum} deleted by ${authorName}.`, "system");
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Your session expired. Sign in and try again.");
+  const response = await fetch(
+    `/api/contractor-invoices?id=${encodeURIComponent(invoiceId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Invoice delete failed");
   }
 }
 

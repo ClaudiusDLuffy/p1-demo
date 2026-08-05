@@ -6,19 +6,14 @@ import { Ico } from "../../components/ui/Ico";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Modal } from "../../components/ui/Modal";
-import { T, INV_STATE, P1_BUSINESS, SEVEN_BILL_TO, MONTHS } from "../../lib/constants";
+import { T, INV_STATE, P1_BUSINESS } from "../../lib/constants";
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
-  // Contractor perspective flips the invoice framing to FROM = their company,
-  // BILL TO = P1 Pros (they have no 7-Eleven access). Staff keep the
-  // 7-Eleven framing — that's the document P1 posts after review.
-  const contractorView = !isManager;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
   const canReview = isManager && !controller;
-  const contractorName = currentUser?.company || currentUser?.name || "Your company";
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(false);
@@ -36,6 +31,13 @@ export default function InvoiceDetail(props: any) {
     () => invoices.find(i => i.id === selectedInvoice),
     [invoices, selectedInvoice]
   );
+  const contractorProfile = inv
+    ? getUser?.(inv.contractor)
+      || (currentUser?.role === "contractor" ? currentUser : null)
+    : null;
+  const contractorName = contractorProfile?.company
+    || contractorProfile?.name
+    || "Contractor";
   const canCorrectTotal = isManager
     && inv?.state !== "paid"
     && (!controller || inv?.state === "approved");
@@ -276,20 +278,13 @@ export default function InvoiceDetail(props: any) {
                         <div className="display invoice-title-text" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>Invoice</div>
                         <div className="mono" style={{ fontSize: 16, color: T.accent, marginTop: 8, fontWeight: 600 }}>#{inv.num}</div>
                       </div>
-                      {contractorView ? (
-                        <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 2 }}>From</div>
-                          <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{contractorName}</div>
-                          {currentUser?.company && currentUser?.name && <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{currentUser.name}</div>}
-                        </div>
-                      ) : (
-                        <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
-                          <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>
-                          <div className="invoice-company-details" style={{ fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.55 }}>
-                            {P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}<br />{P1_BUSINESS.email}<br />{P1_BUSINESS.phone}<br />{P1_BUSINESS.website}
-                          </div>
-                        </div>
-                      )}
+                      <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 2 }}>From</div>
+                        <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{contractorName}</div>
+                        {contractorProfile?.company && contractorProfile?.name && <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{contractorProfile.name}</div>}
+                        {contractorProfile?.email && <div style={{ fontSize: 10, color: T.muted, marginTop: 4 }}>{contractorProfile.email}</div>}
+                        {contractorProfile?.phone && <div style={{ fontSize: 10, color: T.muted }}>{contractorProfile.phone}</div>}
+                      </div>
                     </div>
                   </div>
 
@@ -297,21 +292,12 @@ export default function InvoiceDetail(props: any) {
                   <div className="invoice-header-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: `1px solid ${T.borderSoft}` }}>
                     <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Bill to</div>
-                      {contractorView ? (
-                        <>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{P1_BUSINESS.dba}</div>
-                          <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
-                        </>
-                      ) : (
-                        <>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{SEVEN_BILL_TO.name}</div>
-                          <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>7-ELEVEN STORE - {inv.store}<br />{SEVEN_BILL_TO.addr1}<br />{SEVEN_BILL_TO.addr2}</div>
-                        </>
-                      )}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{P1_BUSINESS.dba}</div>
+                      <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>{P1_BUSINESS.addr1}<br />{P1_BUSINESS.addr2}</div>
                     </div>
                     <div style={{ padding: "20px 32px", borderRight: `1px solid ${T.borderSoft}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>{contractorView ? "Reference" : "Ship to"}</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>{contractorView ? `Store #${inv.store}` : `7-ELEVEN STORE - ${inv.store}`}</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>Reference</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.ink }}>Store #{inv.store}</div>
                       <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6, marginTop: 2 }}>{inv.storeAddr || wo?.addr || "—"}</div>
                     </div>
                     <div style={{ padding: "20px 32px" }}>
@@ -453,7 +439,7 @@ export default function InvoiceDetail(props: any) {
 
                   {/* Footer — ways to pay (placeholder until Jeremy confirms) */}
                   <div style={{ padding: "18px 32px", background: T.surfaceSoft, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, color: T.subtle, textAlign: "center" }}>
-                    Ways to pay — ACH / check (pending confirmation with Jeremy) · Questions? {P1_BUSINESS.email}
+                    Payment terms: {inv.terms || "Net 30"} · Questions? {contractorProfile?.email || contractorName}{contractorProfile?.phone ? ` · ${contractorProfile.phone}` : ""}
                   </div>
                 </div>
               </div>

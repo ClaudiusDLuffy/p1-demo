@@ -67,11 +67,15 @@ export async function loadLogoDataUrl(path = "/p1-pros-logo.jpeg"): Promise<stri
 type InvoicePdfOpts = {
   perspective?: "staff" | "contractor";
   fromName?: string;
+  fromEmail?: string;
+  fromPhone?: string;
   billTo?: { name: string; apAddr1: string; apAddr2: string };
 };
 export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): jsPDF {
   const isContractor = opts.perspective === "contractor";
   const fromName = opts.fromName || "Contractor";
+  const fromEmail = String(opts.fromEmail || "").trim();
+  const fromPhone = String(opts.fromPhone || "").trim();
   const billTo = opts.billTo || SEVEN;
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const W = doc.internal.pageSize.getWidth();
@@ -112,6 +116,8 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   doc.setTextColor(120, 116, 108);
   if (isContractor) {
     doc.text("Invoice to P1 Pros", textX, y + 30);
+    if (fromEmail) doc.text(fromEmail, textX, y + 44);
+    if (fromPhone) doc.text(fromPhone, textX, y + (fromEmail ? 56 : 44));
   } else {
     // Legal-name parenthetical removed (Lindsay 2026-06-16). Contact rows
     // shift up to fill the line previously occupied by "(P Hospitality...)".
@@ -303,12 +309,25 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(60, 58, 54);
-    doc.text(`ACH or check (confirm preferred method with ${P1.email})`, M, endY);
+    doc.text(
+      isContractor
+        ? `Payment terms: ${inv.terms || "Net 30"}`
+        : `ACH or check (confirm preferred method with ${P1.email})`,
+      M,
+      endY,
+    );
 
     endY += 14;
     doc.setFontSize(8);
     doc.setTextColor(154, 149, 141);
-    doc.text(`Questions? ${P1.email} · ${P1.phone}`, M, endY);
+    const contractorContact = [fromEmail, fromPhone].filter(Boolean).join(" · ");
+    doc.text(
+      isContractor
+        ? `Questions? ${contractorContact || fromName}`
+        : `Questions? ${P1.email} · ${P1.phone}`,
+      M,
+      endY,
+    );
   }
 
   // ── Footer bar

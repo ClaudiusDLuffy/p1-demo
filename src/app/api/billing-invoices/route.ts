@@ -469,6 +469,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const targetState = body.state === "draft" ? "draft" : "submitted";
+    const requestedNum = String(body.num || "").trim();
+    const userTypedNum = !!body.userTypedNum;
     const sourceInvoiceIds: string[] = Array.from(new Set<string>(
       (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
         .map((id: unknown) => String(id || "").trim())
@@ -477,6 +479,10 @@ export async function POST(req: NextRequest) {
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
     const validLines = normalizeBillingLines(lines);
 
+    if (!requestedNum) return jsonError("Invoice number is required", 400);
+    if (requestedNum.length > 80 || /[\u0000-\u001f\u007f]/.test(requestedNum)) {
+      return jsonError("Invoice number is invalid", 400);
+    }
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
     if (!String(body.territory || "").trim()) return jsonError("Territory is required", 400);
@@ -540,7 +546,7 @@ export async function POST(req: NextRequest) {
     const tax = await resolveTax(auth.sb, body, validLines);
     const salesTax = tax.salesTax;
     const total = roundInvoiceNumber(subtotal + salesTax);
-    let desiredNum = await nextStaffInvoiceNum(auth.sb, auth.user.id);
+    let desiredNum = requestedNum;
 
     let inserted: any = null;
     let insertError: any = null;
@@ -578,10 +584,13 @@ export async function POST(req: NextRequest) {
       }
 
       insertError = error;
-      if (error.code !== "23505") break;
+      if (error.code !== "23505" || userTypedNum) break;
       desiredNum = await nextStaffInvoiceNum(auth.sb, auth.user.id);
     }
 
+    if (insertError?.code === "23505") {
+      return jsonError(`Invoice number ${desiredNum} already exists`, 409);
+    }
     if (insertError || !inserted) throw insertError || new Error("Invoice insert failed");
 
     const lineRows = lineRowsForInvoice(inserted.id, validLines);
@@ -915,15 +924,51 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return jsonError("Invoice id is required", 400);
 
-  const { error } = await (auth.sb as any)
-    .from("invoices")
-    .update({
-      deleted_at: new Date().toISOString(),
-      deleted_by: auth.user.id,
-    })
-    .eq("id", id)
-    .eq("invoice_type", "staff");
+  try {
+    const { data: existing, error: existingError } = await (auth.sb as any)
+      .from("invoices")
+      .select("id, num, work_order_id")
+      .eq("id", id)
+      .eq("invoice_type", "staff")
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (!existing) return jsonError("Billing invoice not found or already deleted", 404);
 
-  if (error) return jsonError(error.message, 500);
-  return NextResponse.json({ ok: true });
+    const { data: deleted, error: deleteError } = await (auth.sb as any)
+      .from("invoices")
+      .update({
+        deleted_at: new Date().toISOString(),
+        deleted_by: auth.user.id,
+      })
+      .eq("id", id)
+      .eq("invoice_type", "staff")
+      .is("deleted_at", null)
+      .select("id, num, work_order_id, deleted_at")
+      .maybeSingle();
+    if (deleteError) throw deleteError;
+    if (!deleted) return jsonError("Billing invoice changed before it could be deleted", 409);
+
+    if (deleted.work_order_id) {
+      const { error: auditError } = await (auth.sb as any)
+        .from("activities")
+        .insert({
+          work_order_id: deleted.work_order_id,
+          author_id: auth.user.id,
+          author_name: auth.profile.name || "P1 staff",
+          text: `P1 invoice #${deleted.num} deleted by ${auth.profile.name || "P1 staff"}.`,
+          type: "system",
+          is_staff_override: false,
+          is_staff_only: true,
+          event_key: "staff_billing",
+          event_data: { invoiceId: deleted.id, invoiceNum: deleted.num, action: "deleted" },
+        });
+      if (auditError) console.error("Billing invoice delete audit failed", auditError);
+    }
+
+    return NextResponse.json({ invoice: deleted });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to delete billing invoice";
+    return jsonError(message, 500);
+  }
 }
