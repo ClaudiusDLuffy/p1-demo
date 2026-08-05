@@ -77,6 +77,8 @@ const mapProfile = (p: any) => ({
   color: p.color,
   contractorTier: p.contractor_tier || null,
   dispatcherId: p.dispatcher_id || null,
+  contractorOrganizationId: p.contractor_organization_id || null,
+  contractorAccessLevel: p.contractor_access_level || null,
   // Display-only NTE cap shown to this contractor in place of the real WO
   // NTE (Lindsay 2026-06-16). Falls back to 1000 if the migration hasn't
   // been applied yet, so a stale schema can't blow up logins.
@@ -94,7 +96,7 @@ const mapProfile = (p: any) => ({
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
   // Pull WOs + activities + photos + visit boundaries, then stitch together.
-  const [woRes, actRes, photoRes, visitRes, afmContactRes, incidentReuseRes, assignmentHistoryRes] = await Promise.all([
+  const [woRes, actRes, photoRes, visitRes, afmContactRes, incidentReuseRes, assignmentHistoryRes, financialRes] = await Promise.all([
     sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
     sb.from("photos").select("*"),
@@ -105,6 +107,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
       .from("work_order_assignment_history")
       .select("*")
       .order("assignment_ended_at", { ascending: false }),
+    (sb as any).from("work_order_financials").select("*"),
   ]);
   if (woRes.error) throw woRes.error;
   if (actRes.error) throw actRes.error;
@@ -113,9 +116,31 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
   if (afmContactRes.error) throw afmContactRes.error;
   if (incidentReuseRes.error) throw incidentReuseRes.error;
   if (assignmentHistoryRes.error) throw assignmentHistoryRes.error;
+  if (financialRes.error) throw financialRes.error;
+
+  // Contractors receive no financial rows through RLS and the compatibility
+  // columns on work_orders are masked. Staff receive these rows and merge the
+  // real values back before the common mapper runs.
+  const financialByWo = Object.fromEntries(
+    (financialRes.data || []).map((financial: any) => [
+      financial.work_order_id,
+      financial,
+    ]),
+  );
+  const workOrderRows = (woRes.data || []).map((workOrder: any) => {
+    const financial = financialByWo[workOrder.id];
+    if (!financial) return workOrder;
+    return {
+      ...workOrder,
+      nte: financial.nte,
+      nte_flag_threshold: financial.nte_flag_threshold,
+      nte_flagged: financial.nte_flagged,
+      nte_flag_amount: financial.nte_flag_amount,
+    };
+  });
 
   const timeZoneByWo = Object.fromEntries(
-    (woRes.data || []).map(workOrder => [
+    workOrderRows.map(workOrder => [
       workOrder.id,
       timezoneForWorkOrder({
         storeTimezone: workOrder.store_timezone,
@@ -177,7 +202,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     });
   }
 
-  const mapped = (woRes.data || []).map(wo => {
+  const mapped = workOrderRows.map(wo => {
     const activities = actsByWo[wo.id] || [];
     const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
     const pendingSevenElevenActivities = activities.filter(activity =>
@@ -211,7 +236,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
         .filter(Boolean),
     };
   });
-  for (const wo of woRes.data || []) {
+  for (const wo of workOrderRows) {
     WorkOrderSchema.safeParse({
       id: wo.id,
       status: wo.status,
@@ -402,6 +427,7 @@ const mapInvoice = (i: any) => ({
   invoiceType: i.invoice_type || "contractor",
   cme: i.cme,
   invoiceDate: formatDate(i.invoice_date),
+  invoiceDateRaw: i.invoice_date || null,
   serviceDate: formatDate(i.service_date),
   dueDate: formatDate(i.due_date),
   terms: i.terms,

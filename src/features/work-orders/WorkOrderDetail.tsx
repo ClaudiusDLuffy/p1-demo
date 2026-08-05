@@ -144,9 +144,7 @@ export default function WorkOrderDetail(props: any) {
     () => woData ? invoices.filter(i => i.wot === woData.id) : [],
     [invoices, woData]
   );
-  const canInvoice = isManager
-    ? false
-    : currentUser?.contractorTier === "direct" || currentUser?.contractorTier === null;
+  const canInvoice = !isManager && currentUser?.canInvoice === true;
   // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
   // his work actions (pause / close complete / submit report / resume) as long
   // as the job itself is alive — driven by whether the WO is closed, NOT by the
@@ -454,7 +452,10 @@ export default function WorkOrderDetail(props: any) {
                           .slice()
                           .sort((a: any, b: any) => (a.invoiceDate || "").localeCompare(b.invoiceDate || ""))
                           .map((inv: any, idx: number) => {
-                            const isMyDraft = inv.state === "draft" && (inv.contractor === currentUser?.id || isManager);
+                            const isMyDraft = inv.state === "draft" && (
+                              inv.contractor === (currentUser?.contractorAccountId || currentUser?.id)
+                              || isManager
+                            );
                             const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Sent to QuickBooks" } as any)[inv.state] || inv.state;
                             const stateColor = (
                               inv.state === "paid" ? T.success :
@@ -726,7 +727,8 @@ export default function WorkOrderDetail(props: any) {
                       const isDispatchTier = currentUser?.contractorTier === "mr_freeze";
                       const isDirectTier = currentUser?.contractorTier === "direct" || currentUser?.contractorTier == null;
                       const isContractedTier = currentUser?.contractorTier === "contracted";
-                      const isOwnContractor = !isManager && woData.contractor === currentUser?.id;
+                      const isOwnContractor = !isManager
+                        && woData.contractor === (currentUser?.contractorAccountId || currentUser?.id);
                       const dispatchTechs = isDispatchTier
                         ? USERS.filter((u: any) => u.dispatcherId === currentUser?.id)
                         : [];
