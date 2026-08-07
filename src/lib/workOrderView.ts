@@ -203,7 +203,7 @@ export const getWorkOrderActionReasons = (
     if (wo.status === "pending_approval") reasons.push("Approval follow-up");
     if (wo.status === "capital") reasons.push("Capital review");
     if (wo.hasUnreadNotes) reasons.push("Unread activity");
-    if (wo.hasPendingSevenElevenSync || Number(wo.pendingSevenElevenSyncCount || 0) > 0) {
+    if (workOrderHasPendingSevenElevenSync(wo)) {
       reasons.push("7-Eleven update pending");
     }
   } else if (
@@ -221,6 +221,24 @@ export const workOrderNeedsAction = (
   isManager: boolean,
 ) =>
   getWorkOrderActionReasons(wo, isManager).length > 0;
+
+export const workOrderHasPendingSevenElevenSync = (
+  wo: WorkOrderViewRow | null | undefined,
+) => Boolean(
+  wo?.hasPendingSevenElevenSync
+  || Number(wo?.pendingSevenElevenSyncCount || 0) > 0
+);
+
+/**
+ * Keep the caller's existing SLA/date/priority order within each group while
+ * lifting every work order with an unsynced 7-Eleven update to the top.
+ */
+export const prioritizePendingSevenElevenUpdates = <T extends WorkOrderViewRow>(
+  items: T[],
+) => [...items].sort((a, b) =>
+  Number(workOrderHasPendingSevenElevenSync(b))
+  - Number(workOrderHasPendingSevenElevenSync(a))
+);
 
 export const getWorkOrderProgressSteps = (
   wo: WorkOrderViewRow | null | undefined,
