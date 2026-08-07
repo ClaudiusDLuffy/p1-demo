@@ -4,6 +4,9 @@ import {
   getWorkOrderActionReasons,
   getWorkOrderProgressSteps,
   isInternalWorkOrderActivity,
+  prioritizePendingSevenElevenUpdates,
+  sortWorkOrders,
+  workOrderHasPendingSevenElevenSync,
   workOrderNeedsAction,
 } from "./workOrderView";
 
@@ -51,6 +54,25 @@ test("an overdue SLA does not make an otherwise active work order action-require
       resolutionBreachAt: "2026-07-25T13:26:00.000Z",
     }, true),
     [],
+  );
+});
+
+test("pending 7-Eleven updates are detected from either count or summary flag", () => {
+  assert.equal(workOrderHasPendingSevenElevenSync({ pendingSevenElevenSyncCount: 2 }), true);
+  assert.equal(workOrderHasPendingSevenElevenSync({ hasPendingSevenElevenSync: true }), true);
+  assert.equal(workOrderHasPendingSevenElevenSync({ pendingSevenElevenSyncCount: 0 }), false);
+});
+
+test("pending 7-Eleven updates rise first without changing the selected order within groups", () => {
+  const sorted = sortWorkOrders([
+    { id: "ordinary-newest", createdAt: "2026-08-06T15:00:00Z" },
+    { id: "sync-oldest", createdAt: "2026-08-06T13:00:00Z", pendingSevenElevenSyncCount: 1 },
+    { id: "sync-newest", createdAt: "2026-08-06T14:00:00Z", pendingSevenElevenSyncCount: 1 },
+  ], "newest");
+
+  assert.deepEqual(
+    prioritizePendingSevenElevenUpdates(sorted).map(row => row.id),
+    ["sync-newest", "sync-oldest", "ordinary-newest"],
   );
 });
 

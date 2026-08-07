@@ -12,9 +12,9 @@ import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { stateCodeFromWorkOrder } from "../../lib/billingRules";
 import {
-  getWorkOrderActionReasons,
   getSlaAgingStyle,
   getWorkOrderDateMeta,
+  prioritizePendingSevenElevenUpdates,
   sortWorkOrders,
   workOrderNeedsAction,
   type WorkOrderSortKey,
@@ -67,9 +67,9 @@ export default function WorkOrderList(props: any) {
       sortBy,
     );
 
-    return sorted.sort((a: any, b: any) =>
-      Number(workOrderNeedsAction(b, isManager)) - Number(workOrderNeedsAction(a, isManager))
-    );
+    return isManager
+      ? prioritizePendingSevenElevenUpdates(sorted)
+      : sorted;
   }, [stateFilteredWOs, hideClosed, isManager, sortBy, viewMode]);
   const hiddenClosedCount = isManager && hideClosed
     ? stateFilteredWOs.filter((w: any) => w.status === "closed").length
@@ -238,11 +238,11 @@ export default function WorkOrderList(props: any) {
 
           <div className="desktop-only-table">
             <div className="card table-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>
-              <table style={{ width: "100%", minWidth: 1120, borderCollapse: "collapse", fontSize: 12 }}>
+              <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.surfaceSoft }}>
-                    {["WO#", "INC#", "Store", "Summary", "Priority", "Status", "Contractor", "Dates", "SLA due"].map(h => (
-                      <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>{h}</th>
+                    {["WO#", "Status", "Priority", "INC#", "Store", "Summary", "Contractor", "Dates", "SLA due"].map(h => (
+                      <th key={h} style={{ textAlign: "left", padding: "10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -252,26 +252,21 @@ export default function WorkOrderList(props: any) {
                     const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
                     const dates = getWorkOrderDateMeta(wo);
                     const aging = getSlaAgingStyle(wo);
-                    const actionReasons = getWorkOrderActionReasons(wo, isManager);
                     return (
                       <tr key={wo.id} onClick={() => { setSelectedWO(wo.id); setAiNote(null); }} style={{ cursor: "pointer", borderBottom: `1px solid ${T.borderSoft}`, animation: `fadeUp 0.3s ${i * 0.02}s both` }}>
-                        <td className="mono" style={{ padding: "12px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>
-                          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {wo.id}
-                            <CopyWorkOrderButton value={wo.id} />
-                            {actionReasons.length > 0 && (
-                              <span
-                                title={actionReasons.join(", ")}
-                                style={{ fontFamily: "inherit", fontSize: 9, lineHeight: 1, fontWeight: 800, textTransform: "uppercase", color: T.danger, background: T.dangerSoft, border: `1px solid ${T.danger}33`, borderRadius: 6, padding: "4px 6px", whiteSpace: "nowrap" }}
-                              >
-                                Action required
-                              </span>
-                            )}
-                            {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                        <td className="mono" style={{ padding: "10px", fontWeight: 600, fontSize: 11, color: T.accent }}>
+                          <span style={{ display: "grid", justifyItems: "start", gap: 5 }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                              {wo.id}
+                              <CopyWorkOrderButton value={wo.id} />
+                              {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                            </span>
                             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
                         </td>
-                        <td className="mono" style={{ padding: "12px 14px", fontSize: 11, color: T.subtle }}>
+                        <td style={{ padding: "10px" }}><Badge conf={STATUS[wo.status]} small /></td>
+                        <td style={{ padding: "10px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
+                        <td className="mono" style={{ padding: "10px", fontSize: 11, color: T.subtle }}>
                           <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             {wo.incidentId || "-"}
                             {isManager && wo.incidentReuse && (
@@ -284,17 +279,15 @@ export default function WorkOrderList(props: any) {
                             )}
                           </span>
                         </td>
-                        <td style={{ padding: "12px 14px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "-"}</td>
-                        <td style={{ padding: "12px 14px", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "-"}</td>
-                        <td style={{ padding: "12px 14px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
-                        <td style={{ padding: "12px 14px" }}><Badge conf={STATUS[wo.status]} small /></td>
-                        <td style={{ padding: "12px 14px", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "-"}</td>
-                        <td style={{ padding: "12px 14px", color: T.muted, fontSize: 11, minWidth: 160 }}>
+                        <td style={{ padding: "10px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "-"}</td>
+                        <td style={{ padding: "10px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "-"}</td>
+                        <td style={{ padding: "10px", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "-"}</td>
+                        <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 140 }}>
                           <div>Created: {dates.created}</div>
                           <div style={{ marginTop: 3 }}>Updated: {dates.updated}</div>
                         </td>
-                        <td style={{ padding: "12px 14px" }}>
-                          <div style={{ display: "grid", gap: 4, minWidth: 150 }}>
+                        <td style={{ padding: "10px" }}>
+                          <div style={{ display: "grid", gap: 4, minWidth: 130 }}>
                             <span style={{ fontSize: 11, color: T.muted }}>{dates.slaDue}</span>
                             <span style={{ fontSize: 10, fontWeight: 700, color: aging.color, background: aging.bg, border: `1px solid ${aging.ring}66`, padding: "2px 8px", borderRadius: 10, width: "fit-content" }}>{aging.label}</span>
                             {hasNewSla
@@ -316,7 +309,6 @@ export default function WorkOrderList(props: any) {
               const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
               const dates = getWorkOrderDateMeta(wo);
               const aging = getSlaAgingStyle(wo);
-              const actionReasons = getWorkOrderActionReasons(wo, isManager);
 
               return (
                 <div
@@ -342,14 +334,6 @@ export default function WorkOrderList(props: any) {
                     <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: T.accent }}>
                       {wo.id}
                       <CopyWorkOrderButton value={wo.id} />
-                      {actionReasons.length > 0 && (
-                        <span
-                          title={actionReasons.join(", ")}
-                          style={{ fontFamily: "inherit", fontSize: 9, lineHeight: 1, fontWeight: 800, textTransform: "uppercase", color: T.danger, background: T.dangerSoft, border: `1px solid ${T.danger}33`, borderRadius: 6, padding: "4px 6px" }}
-                        >
-                          Action required
-                        </span>
-                      )}
                       {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
                       {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                     </span>
