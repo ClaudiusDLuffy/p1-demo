@@ -484,6 +484,12 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   .billing-summary-grid {
     grid-template-columns: 1fr !important;
   }
+  .billing-work-order-grid > * {
+    min-width: 0 !important;
+  }
+  .billing-work-order-search {
+    grid-column: 1 / -1;
+  }
   .billing-source-metrics {
     grid-template-columns: 1fr !important;
   }
