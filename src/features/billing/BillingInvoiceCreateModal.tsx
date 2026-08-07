@@ -892,8 +892,8 @@ export default function BillingInvoiceCreateModal(props: any) {
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
         </div>
 
-        <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr 0.8fr", gap: 10, marginBottom: 16 }}>
-          <div>
+        <div className="billing-form-grid billing-work-order-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(120px, 150px) minmax(160px, 190px)", gap: 10, marginBottom: 16 }}>
+          <div className="billing-work-order-search" style={{ minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Search work order</span>
             <input value={woSearch} onChange={(e: any) => setWoSearch(e.target.value)} placeholder="WO number, store, city, keyword" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13, marginBottom: 8 }} />
             {woSearch.trim() && (
@@ -910,7 +910,8 @@ export default function BillingInvoiceCreateModal(props: any) {
                       setValue("workOrderId", wo.id, { shouldDirty: true, shouldValidate: true });
                       setWoSearch("");
                     }}
-                    style={{ padding: "9px 10px", border: "none", borderRadius: 7, background: selectedWorkOrderId === wo.id ? T.accentSoft : T.surface, color: T.ink, cursor: "pointer", textAlign: "left", fontFamily: "inherit", fontSize: 12 }}
+                    title={`${wo.id} - Store #${wo.store || "-"} - ${wo.summary || "No summary"}`}
+                    style={{ width: "100%", minWidth: 0, padding: "9px 10px", border: "none", borderRadius: 7, background: selectedWorkOrderId === wo.id ? T.accentSoft : T.surface, color: T.ink, cursor: "pointer", textAlign: "left", fontFamily: "inherit", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                   >
                     <span className="mono" style={{ color: T.accent, fontWeight: 700 }}>{wo.id}</span>
                     <span style={{ color: T.muted }}> - Store #{wo.store || "-"} - {wo.summary || "No summary"}</span>
@@ -925,8 +926,8 @@ export default function BillingInvoiceCreateModal(props: any) {
               ))}
             </Sel>
           </div>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store number</span><input {...register("storeNumber")} placeholder="Required" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.storeNumber ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.storeNumber && <span style={{ fontSize: 11, color: T.danger }}>{errors.storeNumber.message}</span>}</label>
-          <label>
+          <label style={{ minWidth: 0 }}><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6, whiteSpace: "nowrap" }}>Store number</span><input {...register("storeNumber")} placeholder="Required" style={{ width: "100%", minWidth: 0, padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.storeNumber ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13, boxSizing: "border-box" }} />{errors.storeNumber && <span style={{ fontSize: 11, color: T.danger }}>{errors.storeNumber.message}</span>}</label>
+          <label style={{ minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Territory</span>
             <Sel
               value={customTerritory ? "__new__" : territory}
@@ -943,7 +944,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 });
               }}
               aria-label="Invoice territory"
-              style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
+              style={{ width: "100%", minWidth: 0, padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
             >
               <option value="">Select territory</option>
               {KNOWN_TERRITORIES.map(item => <option key={item} value={item}>{item}</option>)}
