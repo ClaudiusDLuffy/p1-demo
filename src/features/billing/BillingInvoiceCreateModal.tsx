@@ -1068,8 +1068,8 @@ export default function BillingInvoiceCreateModal(props: any) {
 
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
-          <div className="billing-line-head" style={{ display: "grid", gridTemplateColumns: "28px 110px minmax(180px, 1fr) 58px 82px 74px 66px 92px 28px", gap: 8, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
-            <div /><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Markup</div><div style={{ textAlign: "center" }}>Taxable</div><div style={{ textAlign: "right" }}>Amount</div><div />
+          <div className="billing-line-head" style={{ display: "grid", gridTemplateColumns: "28px minmax(86px, 110px) minmax(120px, 1fr) minmax(48px, 58px) minmax(64px, 82px) minmax(58px, 74px) minmax(54px, 66px) minmax(72px, 92px)", gap: 8, padding: "10px 48px 10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
+            <div /><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Markup</div><div style={{ textAlign: "center" }}>Taxable</div><div style={{ textAlign: "right" }}>Amount</div>
           </div>
           {fields.map((field, i) => {
             const line = lines[i] || field;
@@ -1087,7 +1087,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                   if (draggingLine != null && draggingLine !== i) move(draggingLine, i);
                   setDraggingLine(null);
                 }}
-                style={{ display: "grid", gridTemplateColumns: "28px 110px minmax(180px, 1fr) 58px 82px 74px 66px 92px 28px", gap: 8, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start", background: draggingLine === i ? T.accentSoft : T.surface }}
+                style={{ position: "relative", display: "grid", gridTemplateColumns: "28px minmax(86px, 110px) minmax(120px, 1fr) minmax(48px, 58px) minmax(64px, 82px) minmax(58px, 74px) minmax(54px, 66px) minmax(72px, 92px)", gap: 8, padding: "10px 48px 10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start", background: draggingLine === i ? T.accentSoft : T.surface }}
               >
                 <input type="hidden" {...register(`lines.${i}.sourceInvoiceLineId` as const)} />
                 <input
@@ -1195,7 +1195,16 @@ export default function BillingInvoiceCreateModal(props: any) {
                   <input type="checkbox" {...register(`lines.${i}.isTaxable` as const)} aria-label={`Line ${i + 1} taxable`} />
                 </label>
                 <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
-                <button type="button" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, paddingTop: 6 }}>x</button>
+                <button
+                  type="button"
+                  className="billing-line-remove"
+                  onClick={() => remove(i)}
+                  title={`Delete line ${i + 1}`}
+                  aria-label={`Delete line ${i + 1}`}
+                  style={{ position: "absolute", top: 10, right: 10, width: 30, height: 34, display: "grid", placeItems: "center", padding: 0, borderRadius: 8, border: `1px solid ${T.danger}33`, background: T.dangerSoft, color: T.danger, cursor: "pointer", fontSize: 18, lineHeight: 1 }}
+                >
+                  ×
+                </button>
               </div>
             );
           })}
