@@ -11,6 +11,7 @@ import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 import { parseInvoicePdf } from "../../lib/invoicePdfParserClient";
+import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 const todayIso = () => {
@@ -326,6 +327,7 @@ export default function InvoiceCreateModal(props: any) {
           {fields.map((field, i) => {
             const line = watchedLines[i] || field;
             const lineErr = errors.lines?.[i];
+            const quantityConstraints = invoiceQuantityInputConstraints(line.type);
             return (
               <div key={field.id} className="inv-line-row" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
                 <div className="mono inv-num" style={{ fontSize: 12, color: T.subtle, paddingTop: 10 }}>{i + 1}</div>
@@ -336,7 +338,15 @@ export default function InvoiceCreateModal(props: any) {
                 <span className="inv-mlabel" style={{ display: "none" }}>Qty</span>
                 <span className="inv-mlabel" style={{ display: "none" }}>Rate</span>
                 <span className="inv-mlabel" style={{ display: "none" }}>Amount</span>
-                <input type="number" step="0.1" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }} />
+                <input
+                  type="number"
+                  min={quantityConstraints.min}
+                  step={quantityConstraints.step}
+                  inputMode="decimal"
+                  title="Labor may be billed in quarter-hour increments (1.25 = 1 hour 15 minutes)."
+                  {...register(`lines.${i}.qty` as const, { valueAsNumber: true })}
+                  style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }}
+                />
                 <input type="number" step="any" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
                 <div className="mono inv-amount" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
                 <button type="button" className="inv-line-remove" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
@@ -349,6 +359,9 @@ export default function InvoiceCreateModal(props: any) {
             Check the highlighted line items. Every line needs a quantity and rate; travel descriptions are optional.
           </div>
         )}
+        <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>
+          Labor can be entered in 0.25-hour increments (1.25 = 1 hour 15 minutes).
+        </div>
         <div className="inv-add-btns" style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
           {["Labor", "Truck Charge", "Parts/Hardware", "Shipping", "Other"].map(type => (
             <button key={type} type="button" onClick={() => append({ type, desc: "", qty: 1, rate: type === "Truck Charge" ? P1_BUSINESS.defaultTruckCharge : undefined })} className="btn-soft" style={{ padding: "7px 12px", fontSize: 11 }}>+ {type === "Parts/Hardware" ? "Parts" : type}</button>

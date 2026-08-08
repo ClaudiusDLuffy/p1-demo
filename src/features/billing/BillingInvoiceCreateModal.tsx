@@ -31,6 +31,7 @@ import {
   removeBillingDraft,
   writeBillingDraft,
 } from "../../lib/billingDraftPersistence";
+import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -1077,6 +1078,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             const sourceUnitCost = line.sourceUnitCost == null
               ? null
               : Number(line.sourceUnitCost);
+            const quantityConstraints = invoiceQuantityInputConstraints(line.type);
             const typeRegistration = register(`lines.${i}.type` as const);
             return (
               <div
@@ -1161,7 +1163,15 @@ export default function BillingInvoiceCreateModal(props: any) {
                   {STAFF_BILLING_LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </Sel>
                 <textarea {...register(`lines.${i}.desc` as const)} placeholder={/^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
-                <input type="number" min="0.5" step="0.5" {...register(`lines.${i}.qty` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
+                <input
+                  type="number"
+                  min={quantityConstraints.min}
+                  step={quantityConstraints.step}
+                  inputMode="decimal"
+                  title="Labor may be billed in quarter-hour increments (1.25 = 1 hour 15 minutes)."
+                  {...register(`lines.${i}.qty` as const, { valueAsNumber: true })}
+                  style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
+                />
                 <input type="number" step="any" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
                 {sourceUnitCost == null || !isStaffBillingPartsLine(line.type) ? (
                   <div style={{ paddingTop: 10, textAlign: "right", color: T.subtle, fontSize: 11 }}>-</div>
