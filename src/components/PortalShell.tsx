@@ -43,6 +43,23 @@ import useInvoices from "../features/invoices/useInvoices";
 import { INVOICES_KEY, useInvoicesQuery } from "../features/invoices/queries";
 import ContractorList from "../features/contractors/ContractorList";
 import SubDispatchView from "../features/contractors/SubDispatchView";
+import StaffWorkHub from "../features/staff-work/StaffWorkHub";
+import {
+  STAFF_NOTIFICATION_READS_KEY,
+  STAFF_WORK_TODOS_KEY,
+  addStaffWorkTodo,
+  completeStaffWorkTodo,
+  markStaffWorkOrderRead,
+  transferStaffWorkTodo,
+  useStaffNotificationReadsQuery,
+  useStaffWorkTodosQuery,
+} from "../features/staff-work/queries";
+import {
+  buildStaffWorkRows,
+  latestContractorActivityAt,
+  type StaffWorkFilter,
+  type StaffWorkRow,
+} from "../features/staff-work/workQueue";
 import Dashboard from "../features/dashboard/Dashboard";
 import {
   T, DEMO_ACCOUNTS, PRIORITY, MONTHS, WEEKDAYS,
@@ -52,6 +69,13 @@ import {
   storeLocalDateTimeToIso,
   timezoneForWorkOrder,
 } from "../lib/billingRules";
+import {
+  PORTAL_HISTORY_KEY,
+  portalUrlForView,
+  portalViewFromHistoryState,
+  portalViewKey,
+  type PortalViewState,
+} from "../lib/portalNavigation";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -1065,6 +1089,13 @@ export default function PortalShell() {
   const [filterP, setFilterP] = useState("all");
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
+  const [workflowReturn, setWorkflowReturn] = useState<{
+    workOrderId: string;
+    page: string;
+  } | null>(null);
+  const [staffWorkFilter, setStaffWorkFilter] = useState<StaffWorkFilter>("all");
+  const [staffWorkBusyId, setStaffWorkBusyId] = useState<string | null>(null);
+  const [workOrderReturnPage, setWorkOrderReturnPage] = useState<string | null>(null);
   const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
   const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
   const [billingWorkOrderToStart, setBillingWorkOrderToStart] = useState<string | null>(null);
@@ -1083,6 +1114,12 @@ export default function PortalShell() {
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const [reassignSearch, setReassignSearch] = useState("");
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const portalHistoryInitializedRef = useRef(false);
+  const applyingPortalHistoryRef = useRef(false);
+  const portalHistoryDepthRef = useRef(0);
+  const lastPortalViewKeyRef = useRef<string | null>(null);
+  const windowScrollFrameRef = useRef<number | null>(null);
   const [activityMenuId, setActivityMenuId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -1123,6 +1160,7 @@ export default function PortalShell() {
   const isAuthenticated = hasSession || !!currentUser;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const notesSeenInFlight = useRef(new Set<string>());
+  const staffReadInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
   const {
     data: workOrdersData,
@@ -1133,6 +1171,12 @@ export default function PortalShell() {
   const { data: invoicesData } = useInvoicesQuery(isAuthenticated);
   const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
   const { data: woPartsData } = useWoPartsQuery(isAuthenticated);
+  const { data: staffWorkTodosData = [] } = useStaffWorkTodosQuery(
+    isAuthenticated && isManager,
+  );
+  const { data: staffNotificationReadsData = [] } = useStaffNotificationReadsQuery(
+    isAuthenticated && isManager,
+  );
   const woParts = woPartsData ?? [];
   const USERS = useMemo(
     () => profilesData ?? DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })),
@@ -1146,7 +1190,7 @@ export default function PortalShell() {
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
-    doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
+    doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart, doMarkSevenElevenSynced,
     doMarkContractorAttention, doAcknowledgeContractorAttention } = useWorkOrders({
@@ -1186,6 +1230,172 @@ export default function PortalShell() {
     doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, profiles: USERS, fire });
+  const portalView = useMemo<PortalViewState>(() => ({
+    page,
+    selectedWorkOrderId: selectedWO || null,
+    selectedInvoiceId: selectedInvoice || null,
+    selectedBillingInvoiceId: selectedBillingInvoice || null,
+    returnWorkOrderId: workflowReturn?.workOrderId || null,
+    returnWorkOrderPage: workflowReturn?.page || null,
+  }), [
+    page,
+    selectedBillingInvoice,
+    selectedInvoice,
+    selectedWO,
+    workflowReturn?.page,
+    workflowReturn?.workOrderId,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!currentUser?.id) {
+      portalHistoryInitializedRef.current = false;
+      applyingPortalHistoryRef.current = false;
+      portalHistoryDepthRef.current = 0;
+      lastPortalViewKeyRef.current = null;
+      return;
+    }
+
+    const key = portalViewKey(portalView);
+    const baseState = window.history.state && typeof window.history.state === "object"
+      ? window.history.state
+      : {};
+
+    if (!portalHistoryInitializedRef.current) {
+      const existingDepth = Number(baseState?.p1PortalDepth);
+      portalHistoryDepthRef.current = Number.isFinite(existingDepth)
+        ? existingDepth
+        : 0;
+      window.history.replaceState({
+        ...baseState,
+        [PORTAL_HISTORY_KEY]: portalView,
+        p1PortalDepth: portalHistoryDepthRef.current,
+        p1PortalScrollTop: window.scrollY || contentScrollRef.current?.scrollTop || 0,
+      }, "", portalUrlForView(window.location.href, portalView));
+      portalHistoryInitializedRef.current = true;
+      lastPortalViewKeyRef.current = key;
+      return;
+    }
+
+    if (applyingPortalHistoryRef.current) {
+      applyingPortalHistoryRef.current = false;
+      lastPortalViewKeyRef.current = key;
+      return;
+    }
+
+    if (lastPortalViewKeyRef.current === key) return;
+
+    portalHistoryDepthRef.current += 1;
+    window.history.pushState({
+      ...baseState,
+      [PORTAL_HISTORY_KEY]: portalView,
+      p1PortalDepth: portalHistoryDepthRef.current,
+      p1PortalScrollTop: 0,
+    }, "", portalUrlForView(window.location.href, portalView));
+    lastPortalViewKeyRef.current = key;
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
+    });
+  }, [currentUser?.id, portalView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentUser?.id) return;
+    const previousScrollRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+
+    const persistWindowScroll = () => {
+      if (windowScrollFrameRef.current != null) return;
+      windowScrollFrameRef.current = window.requestAnimationFrame(() => {
+        windowScrollFrameRef.current = null;
+        const state = window.history.state;
+        if (!portalViewFromHistoryState(state)) return;
+        window.history.replaceState({
+          ...state,
+          p1PortalScrollTop: window.scrollY,
+        }, "", window.location.href);
+      });
+    };
+
+    window.addEventListener("scroll", persistWindowScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", persistWindowScroll);
+      if (windowScrollFrameRef.current != null) {
+        window.cancelAnimationFrame(windowScrollFrameRef.current);
+        windowScrollFrameRef.current = null;
+      }
+      window.history.scrollRestoration = previousScrollRestoration;
+    };
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentUser?.id) return;
+    const onPopState = (event: PopStateEvent) => {
+      const restored = portalViewFromHistoryState(event.state);
+      if (!restored) return;
+
+      applyingPortalHistoryRef.current = true;
+      portalHistoryDepthRef.current = Number(event.state?.p1PortalDepth) || 0;
+      setPage(restored.page);
+      setSelectedWO(restored.selectedWorkOrderId);
+      setSelectedInvoice(restored.selectedInvoiceId);
+      setSelectedBillingInvoice(restored.selectedBillingInvoiceId);
+      setWorkflowReturn(restored.returnWorkOrderId ? {
+        workOrderId: restored.returnWorkOrderId,
+        page: restored.returnWorkOrderPage || "work_orders",
+      } : null);
+      setBillingDraftToEdit(null);
+      setBillingSourceToStart(null);
+      setBillingWorkOrderToStart(null);
+      setModal(null);
+      setAiNote(null);
+
+      const scrollTop = Number(event.state?.p1PortalScrollTop) || 0;
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (contentScrollRef.current) {
+            contentScrollRef.current.scrollTop = scrollTop;
+          }
+          window.scrollTo({ top: scrollTop, left: 0, behavior: "auto" });
+        });
+      });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [currentUser?.id, setSelectedInvoice, setSelectedWO]);
+
+  const rememberWorkOrderReturn = useCallback((workOrderId: string) => {
+    if (!workOrderId) return;
+    setWorkflowReturn({
+      workOrderId,
+      page: page === "history" ? "history" : "work_orders",
+    });
+  }, [page]);
+
+  const returnToWorkflowWorkOrder = useCallback(() => {
+    if (!workflowReturn?.workOrderId) return false;
+    setSelectedInvoice(null);
+    setSelectedBillingInvoice(null);
+    setBillingDraftToEdit(null);
+    setBillingSourceToStart(null);
+    setBillingWorkOrderToStart(null);
+    setModal(null);
+    setAiNote(null);
+    setPage(workflowReturn.page || "work_orders");
+    setSelectedWO(workflowReturn.workOrderId);
+    setWorkflowReturn(null);
+    return true;
+  }, [setSelectedInvoice, setSelectedWO, workflowReturn]);
+
+  const openContractorInvoiceFromWorkOrder = useCallback((invoice: any, workOrderId: string) => {
+    if (!invoice?.id || !workOrderId) return;
+    rememberWorkOrderReturn(workOrderId);
+    setSelectedInvoice(invoice.id);
+    setSelectedWO(null);
+    setAiNote(null);
+    setPage("invoices");
+  }, [rememberWorkOrderReturn, setSelectedInvoice, setSelectedWO]);
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
   // on modal close. Passed to InvoiceCreateModal to hydrate the form.
   const [resumeDraft, setResumeDraft] = useState<any>(null);
@@ -1352,6 +1562,8 @@ export default function PortalShell() {
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
       qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
+      qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY });
+      qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
     });
     return () => { unsub(); };
   }, [currentUser?.id, qc]);
@@ -1364,15 +1576,19 @@ export default function PortalShell() {
     qc.resetQueries({ queryKey: ["profiles"] });
     qc.resetQueries({ queryKey: ["technicians"] });
     qc.resetQueries({ queryKey: WO_PARTS_KEY });
+    qc.resetQueries({ queryKey: STAFF_WORK_TODOS_KEY });
+    qc.resetQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
   }, [currentUser?.id, qc]);
   const nav = useCallback((p: string) => {
     setPage(p);
     setSelectedWO(null);
     setSelectedBillingInvoice(null);
+    setWorkflowReturn(null);
     setBillingDraftToEdit(null);
     setBillingSourceToStart(null);
     setBillingWorkOrderToStart(null);
     setAiNote(null);
+    setWorkOrderReturnPage(null);
   }, []);
 
   const { data: billingInvoices = [] } = useQuery({
@@ -1405,6 +1621,51 @@ export default function PortalShell() {
         - new Date(a.billingReadyAt || a.updatedAt || 0).getTime(),
       );
   }, [billingInvoices, maskedWorkOrders]);
+  const staffProfiles = useMemo(
+    () => USERS.filter((profile: any) =>
+      profile.active !== false
+      && ["manager", "dispatcher", "back_office"].includes(profile.role),
+    ),
+    [USERS],
+  );
+  const staffWorkRows = useMemo(
+    () => buildStaffWorkRows({
+      workOrders: maskedWorkOrders,
+      todos: staffWorkTodosData,
+      reads: staffNotificationReadsData,
+      profiles: staffProfiles,
+      readyWorkOrderIds: new Set(billingReadyWorkOrders.map((workOrder: any) => workOrder.id)),
+      currentUserId: currentUser?.id || "",
+    }),
+    [
+      billingReadyWorkOrders,
+      currentUser?.id,
+      maskedWorkOrders,
+      staffNotificationReadsData,
+      staffProfiles,
+      staffWorkTodosData,
+    ],
+  );
+  const staffUnreadCount = useMemo(
+    () => staffWorkRows.filter(row => row.isUnread).length,
+    [staffWorkRows],
+  );
+  const staffMyTodoCount = useMemo(
+    () => staffWorkTodosData.filter(todo => todo.ownerId === currentUser?.id).length,
+    [currentUser?.id, staffWorkTodosData],
+  );
+  const selectedStaffTodo = useMemo(
+    () => selectedWO
+      ? staffWorkTodosData.find(todo => todo.workOrderId === selectedWO) || null
+      : null,
+    [selectedWO, staffWorkTodosData],
+  );
+  const selectedStaffTodoOwner = useMemo(
+    () => selectedStaffTodo
+      ? staffProfiles.find(profile => profile.id === selectedStaffTodo.ownerId) || null
+      : null,
+    [selectedStaffTodo, staffProfiles],
+  );
   const doDownloadBillingInvoice = async (invoice: any) => {
     try {
       const { triggerBlobDownload, generateStaffInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
@@ -1499,7 +1760,8 @@ export default function PortalShell() {
     }
     return invoice;
   };
-  const openBillingForWorkOrder = (workOrderId: string) => {
+  const openBillingForWorkOrder = (workOrderId: string, preserveWorkOrderReturn = false) => {
+    if (preserveWorkOrderReturn) rememberWorkOrderReturn(workOrderId);
     setBillingDraftToEdit(null);
     setBillingSourceToStart(null);
     setBillingWorkOrderToStart(workOrderId);
@@ -1507,13 +1769,79 @@ export default function PortalShell() {
     setPage("billing");
     setModal("createBillingInvoice");
   };
+  const refreshStaffWork = async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY }),
+      qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }),
+      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+    ]);
+  };
+  const runStaffWorkAction = async (
+    workOrderId: string,
+    action: () => Promise<unknown>,
+    successMessage: string,
+  ) => {
+    setStaffWorkBusyId(workOrderId);
+    try {
+      await action();
+      await refreshStaffWork();
+      fire(successMessage);
+    } catch (error: any) {
+      fire(`My Work update failed: ${error.message || error}`);
+    } finally {
+      setStaffWorkBusyId(null);
+    }
+  };
+  const openStaffWorkOrder = (row: StaffWorkRow) => {
+    setWorkOrderReturnPage("staff_work");
+    setSelectedWO(row.workOrder.id);
+    setAiNote(null);
+    setPage("wo_detail");
+  };
+  const openUnreadStaffWork = () => {
+    setStaffWorkFilter("unread");
+    nav("staff_work");
+  };
   const handleStraightToBilling = async (workOrderId: string) => {
     const moved = await doStraightToBilling(workOrderId);
     if (!moved) return;
+    rememberWorkOrderReturn(workOrderId);
     setSelectedWO(null);
     setAiNote(null);
     openBillingForWorkOrder(workOrderId);
   };
+
+  useEffect(() => {
+    if (!isManager || !selectedWO || !woData) return;
+    const latestNotificationAt = latestContractorActivityAt(woData);
+    if (!latestNotificationAt) return;
+
+    const existingRead = staffNotificationReadsData.find(
+      read => read.workOrderId === selectedWO,
+    );
+    if (
+      existingRead
+      && new Date(existingRead.readThroughAt).getTime()
+        >= new Date(latestNotificationAt).getTime()
+    ) return;
+    if (staffReadInFlight.current.has(selectedWO)) return;
+
+    const workOrderId = selectedWO;
+    staffReadInFlight.current.add(workOrderId);
+    void markStaffWorkOrderRead(workOrderId, latestNotificationAt)
+      .then(() => qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }))
+      .catch((error: any) => {
+        fire(`Could not mark update read: ${error.message || error}`);
+      })
+      .finally(() => staffReadInFlight.current.delete(workOrderId));
+  }, [
+    fire,
+    isManager,
+    qc,
+    selectedWO,
+    staffNotificationReadsData,
+    woData,
+  ]);
   const getUser = (id: string) => USERS.find(u => u.id === id);
   const contractorsOnly = useMemo(
     () => USERS.filter(u => u.role === "contractor"),
@@ -1758,6 +2086,7 @@ export default function PortalShell() {
   const sideItems = useMemo(() => isManager
     ? [
       { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
+      { id: "staff_work", label: "My Work", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", badge: staffWorkRows.length || null },
       { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
       { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
@@ -1770,12 +2099,14 @@ export default function PortalShell() {
       ...(currentUser?.contractorTier === "mr_freeze" || currentUser?.canManageTeam ? [
         { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       ] : []),
-      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
+      ...(currentUser?.canInvoice ? [
+        { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
+      ] : []),
     ],
-    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canManageTeam, currentUser?.contractorTier]
+    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canManageTeam, currentUser?.contractorTier, staffWorkRows.length]
   );
   const bottomNavItems = useMemo(() => {
-    const preferred = ["dashboard", "work_orders", "capital", "invoices"];
+    const preferred = ["dashboard", "staff_work", "work_orders", "invoices"];
     const items = preferred
       .map(id => sideItems.find(item => item.id === id))
       .filter(Boolean);
@@ -1790,7 +2121,7 @@ export default function PortalShell() {
   // ===============================================================
   //  APP SHELL
   // ===============================================================
-  const pageTitle: any = { dashboard: "Dashboard", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
+  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
 
   // =====  // ===============================================================
   //  LAYOUT
@@ -2098,6 +2429,21 @@ export default function PortalShell() {
             </div>
             {isManager && (
               <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={openUnreadStaffWork}
+                  aria-label={`Open unread staff work${staffUnreadCount ? `, ${staffUnreadCount} unread` : ""}`}
+                  title="Unread updates"
+                  className="btn-soft"
+                  style={{ width: 40, height: 40, padding: 0, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  <Ico d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" size={17} color={T.ink} />
+                  {staffUnreadCount > 0 && (
+                    <span style={{ position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 10, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 }}>
+                      {staffUnreadCount > 99 ? "99+" : staffUnreadCount}
+                    </span>
+                  )}
+                </button>
                 <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
                 <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
               </div>
@@ -2130,7 +2476,21 @@ export default function PortalShell() {
                 <div className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
               </div>
-              <div style={{ width: 40, height: 40 }} />
+              {isManager ? (
+                <button
+                  type="button"
+                  onClick={openUnreadStaffWork}
+                  aria-label={`Open unread staff work${staffUnreadCount ? `, ${staffUnreadCount} unread` : ""}`}
+                  style={{ width: 40, height: 40, borderRadius: 10, border: `1px solid ${T.border}`, background: T.bgWarm, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                >
+                  <Ico d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" size={17} color={T.ink} />
+                  {staffUnreadCount > 0 && (
+                    <span style={{ position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 10, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 }}>
+                      {staffUnreadCount > 99 ? "99+" : staffUnreadCount}
+                    </span>
+                  )}
+                </button>
+              ) : <div style={{ width: 40, height: 40 }} />}
             </div>
             {isManager && (
               <div className="mobile-header-actions">
@@ -2141,8 +2501,49 @@ export default function PortalShell() {
           </div>
         </div>
 
-        <div className="content-pad" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}>
+        <div
+          ref={contentScrollRef}
+          className="content-pad"
+          onScroll={(event: any) => {
+            if (typeof window === "undefined") return;
+            const state = window.history.state;
+            if (!portalViewFromHistoryState(state)) return;
+            window.history.replaceState({
+              ...state,
+              p1PortalScrollTop: event.currentTarget.scrollTop,
+            }, "", window.location.href);
+          }}
+          style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}
+        >
           <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} nav={nav} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} search={search} setSearch={setSearch} />
+
+          {isManager && (
+            <StaffWorkHub
+              page={page}
+              rows={staffWorkRows}
+              filter={staffWorkFilter}
+              setFilter={setStaffWorkFilter}
+              staffProfiles={staffProfiles}
+              busyWorkOrderId={staffWorkBusyId}
+              onOpenWorkOrder={openStaffWorkOrder}
+              onAddTodo={(workOrderId: string) => void runStaffWorkAction(
+                workOrderId,
+                () => addStaffWorkTodo(workOrderId),
+                "Added to your to-do list",
+              )}
+              onCompleteTodo={(workOrderId: string) => void runStaffWorkAction(
+                workOrderId,
+                () => completeStaffWorkTodo(workOrderId),
+                "To-do completed",
+              )}
+              onTransferTodo={(workOrderId: string, ownerId: string) => void runStaffWorkAction(
+                workOrderId,
+                () => transferStaffWorkTodo(workOrderId, ownerId),
+                "To-do owner updated",
+              )}
+              onOpenBilling={(workOrderId: string) => openBillingForWorkOrder(workOrderId)}
+            />
+          )}
 
           <WorkOrderList
             page={page}
@@ -2167,11 +2568,42 @@ export default function PortalShell() {
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
 
-          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} technicians={technicians} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} getUser={getUser} loadingStates={loadingStates} />
+          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} technicians={technicians} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} doAssignPortalTechnician={doAssignPortalTechnician} getUser={getUser} loadingStates={loadingStates} />
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} />
 
-          <InvoiceDetail page={page} selectedInvoice={selectedInvoice} invoices={invoices} billingInvoices={billingInvoices} workOrders={maskedWorkOrders} isManager={isManager} currentUser={currentUser} getUser={getUser} setSelectedInvoice={setSelectedInvoice} onOpenBillingInvoice={(invoice: any) => { setSelectedInvoice(null); setSelectedBillingInvoice(invoice.id); setPage("billing"); }} doApproveInvoice={doApproveInvoice} doMarkPaid={doMarkPaid} doDownloadInvoice={doDownloadInvoice} doDownloadInvoiceCsv={doDownloadInvoiceCsv} doDeleteInvoice={doDeleteInvoice} doRejectInvoice={doRejectInvoice} doCorrectInvoiceTotal={doCorrectInvoiceTotal} pdfBusy={pdfBusy} fmt={fmt} loadingStates={loadingStates} />
+          <InvoiceDetail
+            page={page}
+            selectedInvoice={selectedInvoice}
+            invoices={invoices}
+            billingInvoices={billingInvoices}
+            workOrders={maskedWorkOrders}
+            isManager={isManager}
+            currentUser={currentUser}
+            getUser={getUser}
+            setSelectedInvoice={setSelectedInvoice}
+            onBack={() => {
+              if (!returnToWorkflowWorkOrder()) setSelectedInvoice(null);
+            }}
+            backLabel={workflowReturn?.workOrderId
+              ? `Back to ${workflowReturn.workOrderId}`
+              : "Back to invoices"}
+            onOpenBillingInvoice={(invoice: any) => {
+              setSelectedInvoice(null);
+              setSelectedBillingInvoice(invoice.id);
+              setPage("billing");
+            }}
+            doApproveInvoice={doApproveInvoice}
+            doMarkPaid={doMarkPaid}
+            doDownloadInvoice={doDownloadInvoice}
+            doDownloadInvoiceCsv={doDownloadInvoiceCsv}
+            doDeleteInvoice={doDeleteInvoice}
+            doRejectInvoice={doRejectInvoice}
+            doCorrectInvoiceTotal={doCorrectInvoiceTotal}
+            pdfBusy={pdfBusy}
+            fmt={fmt}
+            loadingStates={loadingStates}
+          />
 
           {isManager && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
@@ -2202,7 +2634,12 @@ export default function PortalShell() {
             <BillingInvoiceDetail
               invoice={selectedBillingInvoiceData}
               invoiceLines={selectedBillingInvoiceData?.lines || []}
-              onBack={() => setSelectedBillingInvoice(null)}
+              onBack={() => {
+                if (!returnToWorkflowWorkOrder()) setSelectedBillingInvoice(null);
+              }}
+              backLabel={workflowReturn?.workOrderId
+                ? `Back to ${workflowReturn.workOrderId}`
+                : "Back to billing"}
               onEdit={() => {
                 if (
                   !selectedBillingInvoiceData
@@ -2241,7 +2678,18 @@ export default function PortalShell() {
             modal={modal}
             isManager={isManager}
             setSelectedWO={setSelectedWO}
+            onBackFromWorkOrder={() => {
+              setSelectedWO(null);
+              setAiNote(null);
+              if (workOrderReturnPage) {
+                setPage(workOrderReturnPage);
+                setWorkOrderReturnPage(null);
+              } else if (!isManager) {
+                setPage("my_jobs");
+              }
+            }}
             setSelectedInvoice={setSelectedInvoice}
+            onOpenContractorInvoice={openContractorInvoiceFromWorkOrder}
             setAiNote={setAiNote}
             setPage={setPage}
             slaLabel={slaLabel}
@@ -2263,7 +2711,10 @@ export default function PortalShell() {
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}
             openCreateInvoice={openCreateInvoice}
-            onConvertQuote={doConvertQuoteToBillingInvoice}
+            onConvertQuote={async (payload: Record<string, unknown>) => {
+              if (woData?.id) rememberWorkOrderReturn(woData.id);
+              return doConvertQuoteToBillingInvoice(payload);
+            }}
             pdfBusy={pdfBusy}
             activityMenuId={activityMenuId}
             setActivityMenuId={setActivityMenuId}
@@ -2277,6 +2728,7 @@ export default function PortalShell() {
             setNoteText={setNoteText}
             doPostNote={doPostNote}
             doSetTechnician={doSetTechnician}
+            doAssignPortalTechnician={doAssignPortalTechnician}
             imageErrors={imageErrors}
             setImageErrors={setImageErrors}
             setLightbox={setLightbox}
@@ -2303,6 +2755,26 @@ export default function PortalShell() {
             doAddPart={doAddPart}
             doUpdatePart={doUpdatePart}
             doDeletePart={doDeletePart}
+            staffTodo={selectedStaffTodo}
+            staffTodoOwner={selectedStaffTodoOwner}
+            staffProfiles={staffProfiles}
+            staffMyTodoCount={staffMyTodoCount}
+            staffTodoBusy={staffWorkBusyId === woData?.id}
+            onAddStaffTodo={(workOrderId: string) => void runStaffWorkAction(
+              workOrderId,
+              () => addStaffWorkTodo(workOrderId),
+              "Added to your to-do list",
+            )}
+            onCompleteStaffTodo={(workOrderId: string) => void runStaffWorkAction(
+              workOrderId,
+              () => completeStaffWorkTodo(workOrderId),
+              "To-do completed",
+            )}
+            onTransferStaffTodo={(workOrderId: string, ownerId: string) => void runStaffWorkAction(
+              workOrderId,
+              () => transferStaffWorkTodo(workOrderId, ownerId),
+              "To-do owner updated",
+            )}
           />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />

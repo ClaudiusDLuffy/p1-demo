@@ -156,6 +156,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           name: string
+          profile_id: string | null
           tier: string | null
           updated_at: string | null
         }
@@ -165,6 +166,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           name: string
+          profile_id?: string | null
           tier?: string | null
           updated_at?: string | null
         }
@@ -174,6 +176,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           name?: string
+          profile_id?: string | null
           tier?: string | null
           updated_at?: string | null
         }
@@ -181,6 +184,13 @@ export type Database = {
           {
             foreignKeyName: "contractor_technicians_contractor_id_fkey"
             columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_technicians_profile_id_fkey"
+            columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -616,6 +626,110 @@ export type Database = {
           },
         ]
       }
+      staff_work_order_notification_reads: {
+        Row: {
+          read_through_at: string
+          updated_at: string
+          user_id: string
+          work_order_id: string
+        }
+        Insert: {
+          read_through_at: string
+          updated_at?: string
+          user_id: string
+          work_order_id: string
+        }
+        Update: {
+          read_through_at?: string
+          updated_at?: string
+          user_id?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_work_order_notification_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_work_order_notification_reads_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_work_order_todos: {
+        Row: {
+          completed_at: string | null
+          completed_by: string | null
+          completed_reason: string | null
+          created_at: string
+          created_by: string
+          id: string
+          note: string | null
+          owner_id: string
+          updated_at: string
+          work_order_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          completed_by?: string | null
+          completed_reason?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          note?: string | null
+          owner_id: string
+          updated_at?: string
+          work_order_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          completed_by?: string | null
+          completed_reason?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          note?: string | null
+          owner_id?: string
+          updated_at?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_work_order_todos_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_work_order_todos_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_work_order_todos_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_work_order_todos_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_invoice_number_series: {
         Row: {
           next_number: number
@@ -896,6 +1010,65 @@ export type Database = {
           },
         ]
       }
+      work_order_technician_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          ended_at: string | null
+          ended_by: string | null
+          id: string
+          technician_profile_id: string
+          work_order_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          ended_at?: string | null
+          ended_by?: string | null
+          id?: string
+          technician_profile_id: string
+          work_order_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          ended_at?: string | null
+          ended_by?: string | null
+          id?: string
+          technician_profile_id?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_technician_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_technician_assignments_ended_by_fkey"
+            columns: ["ended_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_technician_assignments_technician_profile_id_fkey"
+            columns: ["technician_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_technician_assignments_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_order_visits: {
         Row: {
           check_in_activity_id: string | null
@@ -984,6 +1157,7 @@ export type Database = {
       work_orders: {
         Row: {
           address: string | null
+          assigned_technician_profile_id: string | null
           afm_email: string | null
           afm_id: string | null
           afm_name: string | null
@@ -1046,10 +1220,13 @@ export type Database = {
           sub_category: string | null
           summary: string | null
           technician_on_job: string | null
+          technician_assigned_at: string | null
+          technician_assigned_by: string | null
           updated_at: string | null
         }
         Insert: {
           address?: string | null
+          assigned_technician_profile_id?: string | null
           afm_email?: string | null
           afm_id?: string | null
           afm_name?: string | null
@@ -1112,10 +1289,13 @@ export type Database = {
           sub_category?: string | null
           summary?: string | null
           technician_on_job?: string | null
+          technician_assigned_at?: string | null
+          technician_assigned_by?: string | null
           updated_at?: string | null
         }
         Update: {
           address?: string | null
+          assigned_technician_profile_id?: string | null
           afm_email?: string | null
           afm_id?: string | null
           afm_name?: string | null
@@ -1178,12 +1358,28 @@ export type Database = {
           sub_category?: string | null
           summary?: string | null
           technician_on_job?: string | null
+          technician_assigned_at?: string | null
+          technician_assigned_by?: string | null
           updated_at?: string | null
         }
         Relationships: [
           {
+            foreignKeyName: "work_orders_assigned_technician_profile_id_fkey"
+            columns: ["assigned_technician_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "work_orders_billing_ready_by_fkey"
             columns: ["billing_ready_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_orders_technician_assigned_by_fkey"
+            columns: ["technician_assigned_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -1223,9 +1419,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_work_order_to_my_todos: {
+        Args: { p_note?: string | null; p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
+      }
       acknowledge_contractor_attention: {
         Args: { p_activity_id: string }
         Returns: undefined
+      }
+      assign_contractor_technician: {
+        Args: {
+          p_technician_profile_id: string | null
+          p_work_order_id: string
+        }
+        Returns: Database["public"]["Tables"]["work_orders"]["Row"]
       }
       attach_contractor_invoice_pdf: {
         Args: { p_invoice_id: string; p_storage_path: string }
@@ -1244,6 +1451,14 @@ export type Database = {
           p_work_order_id: string
         }
         Returns: Json
+      }
+      complete_my_work_order_todo: {
+        Args: { p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
+      }
+      contractor_account_id_for_profile: {
+        Args: { p_profile_id: string }
+        Returns: string | null
       }
       correct_contractor_invoice_total: {
         Args: {
@@ -1280,6 +1495,18 @@ export type Database = {
           work_order_id: string
         }[]
       }
+      can_access_contractor_work_order: {
+        Args: { p_work_order_id: string }
+        Returns: boolean
+      }
+      can_manage_work_order_technician: {
+        Args: { p_work_order_id: string }
+        Returns: boolean
+      }
+      mark_staff_work_order_read: {
+        Args: { p_read_through_at: string; p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["staff_work_order_notification_reads"]["Row"]
+      }
       mark_staff_invoice_billed: {
         Args: {
           p_actor_id: string
@@ -1301,6 +1528,10 @@ export type Database = {
       set_activity_contractor_attention: {
         Args: { p_activity_id: string; p_required: boolean }
         Returns: undefined
+      }
+      transfer_work_order_todo: {
+        Args: { p_new_owner_id: string; p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
       }
     }
     Enums: {

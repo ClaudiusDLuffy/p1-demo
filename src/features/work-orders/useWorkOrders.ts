@@ -12,6 +12,7 @@ import {
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
   moveWorkOrderStraightToBilling,
+  assignContractorTechnician,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
 import {
@@ -299,6 +300,29 @@ export default function useWorkOrders({
       await updateWorkOrder(woId, { technicianOnJob: name || null });
       await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "technician_updated", { technician: name || null }));
     }, "Technician save failed", () => restoreWorkOrders(snapshot));
+  };
+
+  // Portal-backed technician assignment controls both the display snapshot
+  // and the technician login's work-order access. The database RPC validates
+  // company membership and writes the audit/history record atomically.
+  const doAssignPortalTechnician = async (
+    woId: string,
+    profileId: string | null,
+    name: string | null,
+  ) => {
+    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    const text = name ? `Technician on job set to ${name}.` : "Technician assignment cleared.";
+    patchLocalWO(
+      woId,
+      {
+        technicianOnJob: name || null,
+        assignedTechnicianProfileId: profileId,
+      },
+      localActivity(text, "note", isManager, "technician_updated"),
+    );
+    await dbCall(async () => {
+      await assignContractorTechnician(woId, profileId);
+    }, "Technician assignment failed", () => restoreWorkOrders(snapshot));
   };
 
   const doStartWork = async (woId: string, notes: string) => {
@@ -1130,7 +1154,7 @@ export default function useWorkOrders({
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
-    doSetEta, doSetTechnician, doPostNote, doDeleteActivity,
+    doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart,
     doMarkSevenElevenSynced,

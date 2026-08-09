@@ -21,6 +21,7 @@ export default function SubDispatchView(props: any) {
     doAssign,
     doReassign,
     doSetTechnician,
+    doAssignPortalTechnician,
     getUser,
     loadingStates = {},
   } = props;
@@ -90,7 +91,12 @@ export default function SubDispatchView(props: any) {
             </thead>
             <tbody>
               {myTeamWOs.map((workOrder: any) => {
-                const target = targets[workOrder.id] ?? workOrder.technicianOnJob ?? "";
+                const matchingLegacyTechnician = companyTechnicians.find(
+                  (technician: any) => !technician.profileId && technician.name === workOrder.technicianOnJob,
+                );
+                const currentTarget = workOrder.assignedTechnicianProfileId
+                  || (matchingLegacyTechnician ? `legacy:${matchingLegacyTechnician.id}` : "");
+                const target = targets[workOrder.id] ?? currentTarget;
                 const assigned = companyMode
                   ? workOrder.technicianOnJob || "Not set"
                   : getUser(workOrder.contractor)?.name || workOrder.technicianOnJob || "Unassigned";
@@ -130,7 +136,14 @@ export default function SubDispatchView(props: any) {
                         >
                           <option value="">{companyMode ? "Not set" : "Select team member"}</option>
                           {options.map((option: any) => (
-                            <option key={option.id} value={companyMode ? option.name : option.id}>{option.name}</option>
+                            <option
+                              key={option.id}
+                              value={companyMode
+                                ? option.profileId || `legacy:${option.id}`
+                                : option.id}
+                            >
+                              {option.name}
+                            </option>
                           ))}
                         </Sel>
                         <button
@@ -138,7 +151,28 @@ export default function SubDispatchView(props: any) {
                             if (companyMode) {
                               setSavingWo(workOrder.id);
                               try {
-                                await doSetTechnician(workOrder.id, target);
+                                const selectedTechnician = companyTechnicians.find(
+                                  (technician: any) => technician.profileId === target
+                                    || `legacy:${technician.id}` === target,
+                                );
+                                if (!target) {
+                                  if (workOrder.assignedTechnicianProfileId) {
+                                    await doAssignPortalTechnician(workOrder.id, null, null);
+                                  } else {
+                                    await doSetTechnician(workOrder.id, "");
+                                  }
+                                } else if (selectedTechnician?.profileId) {
+                                  await doAssignPortalTechnician(
+                                    workOrder.id,
+                                    selectedTechnician.profileId,
+                                    selectedTechnician.name,
+                                  );
+                                } else if (selectedTechnician) {
+                                  if (workOrder.assignedTechnicianProfileId) {
+                                    await doAssignPortalTechnician(workOrder.id, null, null);
+                                  }
+                                  await doSetTechnician(workOrder.id, selectedTechnician.name);
+                                }
                               } finally {
                                 setSavingWo(null);
                               }
