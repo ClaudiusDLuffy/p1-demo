@@ -14,6 +14,7 @@ export default function BillingInvoiceDetail(props: any) {
   const {
     invoice,
     onBack,
+    backLabel = "Back to billing",
     onEdit,
     onDownloadPdf,
     onDownloadCsv,
@@ -45,7 +46,7 @@ export default function BillingInvoiceDetail(props: any) {
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
       <div className="invoice-action-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
-        <button onClick={onBack} className="invoice-back-button" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to billing</button>
+        <button onClick={onBack} className="invoice-back-button" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> {backLabel}</button>
         <div className="invoice-action-buttons" style={{ display: "flex", gap: 8 }}>
           <button onClick={onDownloadPdf} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />

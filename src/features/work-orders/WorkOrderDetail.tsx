@@ -57,7 +57,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, setSelectedInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
@@ -77,6 +77,10 @@ export default function WorkOrderDetail(props: any) {
   const viewInvoice = (inv: any) => {
     if (!inv?.id || !setSelectedInvoice) return;
     setInvoiceMenuId(null);
+    if (onOpenContractorInvoice) {
+      onOpenContractorInvoice(inv, woData?.id);
+      return;
+    }
     setSelectedInvoice(inv.id);
     setSelectedWO(null);
     setAiNote(null);
@@ -174,7 +178,62 @@ export default function WorkOrderDetail(props: any) {
             const aging = getSlaAgingStyle(woData);
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
-                <button onClick={() => { setSelectedWO(null); setAiNote(null); if (!isManager) setPage("my_jobs"); }} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
+                <button onClick={() => onBackFromWorkOrder?.()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
+
+                {isManager && woData.status !== "closed" && (
+                  <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 16px", marginBottom: 12 }}>
+                    <div>
+                      <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>
+                        {staffTodo
+                          ? `On ${staffTodoOwner?.name || "staff"}'s to-do list`
+                          : "Staff follow-up"}
+                      </div>
+                      <div style={{ color: T.subtle, fontSize: 10, marginTop: 3 }}>
+                        {staffTodo
+                          ? "The owner keeps this work order until it is completed or transferred."
+                          : `${staffMyTodoCount} of your 5 personal slots are in use.`}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {staffTodo ? (
+                        <>
+                          <Sel
+                            aria-label="To-do owner"
+                            value={staffTodo.ownerId}
+                            disabled={staffTodoBusy}
+                            onChange={(event: any) => onTransferStaffTodo(woData.id, event.target.value)}
+                            style={{ minWidth: 150 }}
+                          >
+                            {staffProfiles.map((profile: any) => (
+                              <option key={profile.id} value={profile.id}>{profile.name}</option>
+                            ))}
+                          </Sel>
+                          {staffTodo.ownerId === currentUser?.id && (
+                            <button
+                              type="button"
+                              className="btn-soft"
+                              disabled={staffTodoBusy}
+                              onClick={() => onCompleteStaffTodo(woData.id)}
+                            >
+                              Complete to-do
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-soft"
+                          disabled={staffTodoBusy || staffMyTodoCount >= 5}
+                          title={staffMyTodoCount >= 5 ? "Complete or transfer an item before adding another" : undefined}
+                          onClick={() => onAddStaffTodo(woData.id)}
+                          style={{ opacity: staffMyTodoCount >= 5 ? 0.5 : 1 }}
+                        >
+                          Add to my to-do
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Alert stack — two-breach SLA replaces the single-deadline view */}
                 {isManager && woData.incidentReuse && (
@@ -727,17 +786,70 @@ export default function WorkOrderDetail(props: any) {
                       const isDispatchTier = currentUser?.contractorTier === "mr_freeze";
                       const isDirectTier = currentUser?.contractorTier === "direct" || currentUser?.contractorTier == null;
                       const isContractedTier = currentUser?.contractorTier === "contracted";
+                      const canManagePortalTeam = currentUser?.canManageTeam === true;
+                      const isIndividualPortalTechnician = currentUser?.contractorAccessLevel === "report_only";
+                      const isReadOnlyCompanyMember = Boolean(
+                        currentUser?.contractorOrganizationId && !canManagePortalTeam,
+                      );
                       const isOwnContractor = !isManager
                         && woData.contractor === (currentUser?.contractorAccountId || currentUser?.id);
                       const dispatchTechs = isDispatchTier
                         ? USERS.filter((u: any) => u.dispatcherId === currentUser?.id)
                         : [];
                       const directTechs = technicians.filter((t: any) => t.contractorId === woData.contractor && t.isActive);
+                      const legacySelectedTechnician = directTechs.find(
+                        (technician: any) => !technician.profileId && technician.name === woData.technicianOnJob,
+                      );
+                      const selectedTechnicianValue = woData.assignedTechnicianProfileId
+                        || (legacySelectedTechnician ? `legacy:${legacySelectedTechnician.id}` : "");
                       return (
                         <div className="card" style={{ padding: 18, marginBottom: 16 }}>
                           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>Technician on Job</div>
-                          {isManager ? (
+                          {isManager || isIndividualPortalTechnician || isReadOnlyCompanyMember ? (
                             <div style={{ fontSize: 14, fontWeight: 500, color: woData.technicianOnJob ? T.ink : T.subtle }}>{woData.technicianOnJob || "(not set)"}</div>
+                          ) : canManagePortalTeam ? (
+                            directTechs.length > 0 ? (
+                              <Sel
+                                value={selectedTechnicianValue}
+                                onChange={async (e: any) => {
+                                  const value = e.target.value;
+                                  const selectedTechnician = directTechs.find(
+                                    (technician: any) => technician.profileId === value
+                                      || `legacy:${technician.id}` === value,
+                                  );
+                                  if (!value) {
+                                    if (woData.assignedTechnicianProfileId) {
+                                      await doAssignPortalTechnician(woData.id, null, null);
+                                    } else {
+                                      await doSetTechnician(woData.id, "");
+                                    }
+                                  } else if (selectedTechnician?.profileId) {
+                                    await doAssignPortalTechnician(
+                                      woData.id,
+                                      selectedTechnician.profileId,
+                                      selectedTechnician.name,
+                                    );
+                                  } else if (selectedTechnician) {
+                                    if (woData.assignedTechnicianProfileId) {
+                                      await doAssignPortalTechnician(woData.id, null, null);
+                                    }
+                                    await doSetTechnician(woData.id, selectedTechnician.name);
+                                  }
+                                }}
+                              >
+                                <option value="">— Not set —</option>
+                                {directTechs.map((technician: any) => (
+                                  <option
+                                    key={technician.id}
+                                    value={technician.profileId || `legacy:${technician.id}`}
+                                  >
+                                    {technician.name}
+                                  </option>
+                                ))}
+                              </Sel>
+                            ) : (
+                              <div style={{ fontSize: 13, color: T.subtle, padding: "10px 13px", borderRadius: 10, border: `1px dashed ${T.border}`, background: T.surfaceSoft }}>No technicians on file</div>
+                            )
                           ) : isDispatchTier ? (
                             dispatchTechs.length > 0 ? (
                               <Sel value={woData.technicianOnJob || ""} onChange={(e: any) => doSetTechnician(woData.id, e.target.value)}>

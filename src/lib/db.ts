@@ -57,6 +57,7 @@ export async function loadTechnicians(): Promise<any[]> {
   return (data || []).map((t: any) => ({
     id: t.id,
     contractorId: t.contractor_id,
+    profileId: t.profile_id || null,
     name: t.name,
     tier: t.tier,
     isActive: t.is_active,
@@ -69,6 +70,7 @@ const mapProfile = (p: any) => ({
   initials: p.initials,
   email: p.email,
   role: p.role,
+  active: p.active !== false,
   title: p.title,
   company: p.company,
   phone: p.phone,
@@ -323,6 +325,9 @@ const mapWO = (w: any) => ({
   contractorAssignmentVersion: Number(w.contractor_assignment_version || 0),
   staffNotesSeenAt: w.staff_notes_seen_at || null,
   technicianOnJob: w.technician_on_job,
+  assignedTechnicianProfileId: w.assigned_technician_profile_id || null,
+  technicianAssignedAt: w.technician_assigned_at || null,
+  technicianAssignedBy: w.technician_assigned_by || null,
   createdAt: w.created_at,
   updatedAt: w.updated_at,
   closedAt: w.closed_at,
@@ -560,6 +565,9 @@ const WO_FIELD_MAP: Record<string, string> = {
   nteFlagAmount: "nte_flag_amount",
   closedAt: "closed_at",
   technicianOnJob: "technician_on_job",
+  assignedTechnicianProfileId: "assigned_technician_profile_id",
+  technicianAssignedAt: "technician_assigned_at",
+  technicianAssignedBy: "technician_assigned_by",
   staffNotesSeenAt: "staff_notes_seen_at",
   storeState: "store_state",
   storeTimezone: "store_timezone",
@@ -598,6 +606,22 @@ export async function updateWorkOrder(id: string, patch: any): Promise<any> {
       : await sb.from("work_order_afm_contacts").delete().eq("work_order_id", id);
     if (contactResult.error) throw contactResult.error;
   }
+  return data;
+}
+
+export async function assignContractorTechnician(
+  workOrderId: string,
+  technicianProfileId: string | null,
+): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "assign_contractor_technician",
+    {
+      p_work_order_id: workOrderId,
+      p_technician_profile_id: technicianProfileId,
+    },
+  );
+  if (error) throw error;
   return data;
 }
 
@@ -1543,6 +1567,9 @@ export function subscribeToChanges(onChange: () => void): () => void {
     .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "work_order_visits" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_technician_assignments" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_todos" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_notification_reads" }, onChange)
     .subscribe();
   return () => { sb.removeChannel(channel); };
 }
