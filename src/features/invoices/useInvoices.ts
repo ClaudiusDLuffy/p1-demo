@@ -8,9 +8,12 @@ import {
   updateInvoiceWithLines,
   updateWorkOrder,
   uploadInvoicePdf,
+  uploadInvoicePdfObject,
   downloadInvoicePdfBlob,
   deleteInvoice,
-  rejectInvoice,
+  reviewContractorInvoice,
+  resubmitRejectedContractorInvoice,
+  retractContractorInvoiceRejection,
   insertActivity,
   nextInvoiceNumFromDb,
   correctContractorInvoiceTotal,
@@ -19,10 +22,34 @@ import { P1_BUSINESS } from "../../lib/constants";
 import { normalizeInvoiceLineNumbers } from "../../lib/invoiceMath";
 import { WORK_ORDERS_KEY } from "../work-orders/queries";
 import { INVOICES_KEY } from "./queries";
+import { supabase } from "../../lib/supabase/client";
 
 const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
 const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
 const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
+
+async function notifyInvoiceReview(
+  invoiceId: string,
+  event: "rejected" | "retraction",
+) {
+  const sb = supabase();
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Missing session");
+
+  const response = await fetch("/api/notifications/invoice-review", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ invoiceId, event }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Invoice notification failed");
+  }
+}
 
 export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const qc = useQueryClient();
@@ -215,7 +242,62 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       let header: any;
       let finalNum: string = draft.num || "";
       let collidedFrom: string | null = null;
-      if (existingInvoiceId) {
+      let pdfHandled = false;
+      if (existingInvoiceId && draft.resubmittingRejected) {
+        let replacementPdfPath: string | null = null;
+        if (draft.pdfFile) {
+          replacementPdfPath = await uploadInvoicePdfObject(
+            existingInvoiceId,
+            finalNum,
+            draft.pdfFile,
+          );
+        } else if (!draft.hasExistingOriginalPdf) {
+          try {
+            const { generateInvoicePDFBlob } = await import("../../lib/invoicePdf");
+            const blob = generateInvoicePDFBlob({
+              num: finalNum,
+              wot: wo.id,
+              store: wo.store,
+              storeAddr: fullStoreAddr,
+              invoiceDate: draft.invoiceDate,
+              serviceDate: draft.serviceDate,
+              terms: draft.terms,
+              cme: draft.cme,
+              lines: mappedLines,
+              subtotal,
+              salesTax: tax,
+              total,
+            }, null, contractorPdfOptions({ contractor: wo.contractor }));
+            replacementPdfPath = await uploadInvoicePdfObject(
+              existingInvoiceId,
+              finalNum,
+              blob,
+            );
+          } catch (error: any) {
+            // Line-item invoices remain valid without a cached generated PDF;
+            // the normal download path can regenerate it later.
+            fire(`PDF upload skipped: ${error.message || error}`);
+          }
+        }
+
+        const result = await resubmitRejectedContractorInvoice(
+          existingInvoiceId,
+          {
+            cme: draft.cme || null,
+            storeAddr: fullStoreAddr,
+            invoiceDate: draft.invoiceDate,
+            serviceDate: draft.serviceDate || null,
+            terms: draft.terms,
+            salesTax: tax,
+            totalOverride: uploadOnly ? total : null,
+            pdfStoragePath: replacementPdfPath,
+          },
+          validLines,
+        );
+        header = { id: result.invoiceId };
+        finalNum = result.invoiceNum || finalNum;
+        pdfHandled = true;
+      } else if (existingInvoiceId) {
         // Promote an existing draft to a real submission. Lines are replaced
         // wholesale; state flips to 'submitted'. WO is then nudged into
         // pending_approval (matches the brand-new submit path below).
@@ -242,7 +324,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       // would label the file with the colliding number the user originally
       // typed, which would be wrong on download.
       const draftForPdf = { ...draft, num: finalNum };
-      if (draft.pdfFile) {
+      if (!pdfHandled && draft.pdfFile) {
         try {
           await uploadInvoicePdf(header.id, finalNum, draft.pdfFile);
           await insertActivity(
@@ -255,7 +337,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
         } catch (e: any) {
           fire(`Invoice saved, but PDF upload failed: ${e.message || e}`);
         }
-      } else if (!draft.hasExistingPdf) {
+      } else if (!pdfHandled && !draft.hasExistingPdf) {
         await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
       }
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
@@ -358,10 +440,10 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const doDeleteInvoice = async (inv: any) => {
     try {
       await deleteInvoice(inv.id);
-      // After delete: check whether the WO has any non-draft, non-rejected
-      // siblings left at all. If not, surface the manual-move prompt.
+      // After delete: check whether the WO has any non-draft siblings left at
+      // all. Rejections are live unresolved review work.
       const all = ((qc.getQueryData(INVOICES_KEY) as any[]) ?? []);
-      const remaining = all.filter((i: any) => i.id !== inv.id && i.wot === inv.wot && i.state !== "draft" && i.state !== "rejected");
+      const remaining = all.filter((i: any) => i.id !== inv.id && i.wot === inv.wot && i.state !== "draft");
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
       if (remaining.length === 0 && inv.wot) {
@@ -376,20 +458,47 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     }
   };
 
-  // Staff-only reject with a reason. Same gating pattern as delete. Does
-  // NOT advance the WO. Rejected invoices are excluded from the
-  // "is everything approved?" check.
+  // Staff-only rejection is atomic with the work-order status and structured
+  // activity entry. Email is deliberately after commit: delivery failure must
+  // not roll back an otherwise valid review decision.
   const doRejectInvoice = async (inv: any, reason: string) => {
     const trimmed = (reason || "").trim();
     if (!trimmed) { fire("Enter a rejection reason"); return false; }
     try {
-      await rejectInvoice(inv.id, inv.num, inv.wot || null, trimmed, currentUser.name);
+      await reviewContractorInvoice(inv.id, "reject", trimmed);
       qc.invalidateQueries({ queryKey: INVOICES_KEY });
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      fire(`Invoice #${inv.num} rejected`);
+      try {
+        await notifyInvoiceReview(inv.id, "rejected");
+        fire(`Invoice #${inv.num} rejected — contractor notified`);
+      } catch (notificationError: any) {
+        console.error("Invoice rejection notification failed", notificationError);
+        fire(`Invoice #${inv.num} rejected, but the email notification failed`);
+      }
       return true;
     } catch (e: any) {
       fire(`Reject failed: ${e.message || e}`);
+      return false;
+    }
+  };
+
+  const doRetractInvoiceRejection = async (inv: any) => {
+    try {
+      await retractContractorInvoiceRejection(inv.id);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      ]);
+      try {
+        await notifyInvoiceReview(inv.id, "retraction");
+        fire(`Invoice #${inv.num} rejection retracted and approved — contractor notified`);
+      } catch (notificationError: any) {
+        console.error("Invoice rejection retraction notification failed", notificationError);
+        fire(`Invoice #${inv.num} approved, but the correction email failed`);
+      }
+      return true;
+    } catch (error: any) {
+      fire(`Could not retract rejection: ${error.message || error}`);
       return false;
     }
   };
@@ -424,7 +533,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal,
+    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal,
     lineAmount, invSubtotal, invTotal,
   };
 }

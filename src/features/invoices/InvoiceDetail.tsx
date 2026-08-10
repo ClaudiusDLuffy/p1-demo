@@ -10,15 +10,17 @@ import { T, INV_STATE, P1_BUSINESS } from "../../lib/constants";
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
   const canReview = isManager && !controller;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [confirmMarkPaid, setConfirmMarkPaid] = useState(false);
+  const [confirmRetract, setConfirmRetract] = useState(false);
   const [approving, setApproving] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
+  const [retracting, setRetracting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -41,6 +43,10 @@ export default function InvoiceDetail(props: any) {
   const canCorrectTotal = isManager
     && inv?.state !== "paid"
     && (!controller || inv?.state === "approved");
+  const canEditRejected = !isManager
+    && currentUser?.canInvoice === true
+    && inv?.state === "rejected"
+    && inv?.contractor === (currentUser?.contractorAccountId || currentUser?.id);
   const wo = useMemo(
     () => inv ? workOrders.find(w => w.id === inv.wot) : null,
     [workOrders, inv]
@@ -83,10 +89,18 @@ export default function InvoiceDetail(props: any) {
                         Correct total
                       </button>
                     )}
+                    {canEditRejected && onEditRejected && (
+                      <button
+                        type="button"
+                        onClick={() => onEditRejected(inv)}
+                        className="btn-accent"
+                      >
+                        Edit and resubmit
+                      </button>
+                    )}
                     {/* Multi-invoice: every action is per-invoice (inv.id).
-                        Approving here updates ONE invoice; the WO advances
-                        only when all its non-draft, non-rejected siblings are
-                        approved/paid (logic in useWorkOrders). */}
+                        Approving here updates ONE invoice; rejected siblings
+                        remain unresolved until corrected or retracted. */}
                     {canReview && (inv.state === "submitted" || inv.state === "revised") && (
                       <>
                         <button
@@ -107,6 +121,17 @@ export default function InvoiceDetail(props: any) {
                         className="btn-primary"
                         style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["markPaid_" + inv.id] || markingPaid ? 0.7 : 1, cursor: loadingStates["markPaid_" + inv.id] || markingPaid ? "default" : "pointer" }}
                       >{loadingStates["markPaid_" + inv.id] || markingPaid ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
+                    )}
+                    {canReview && inv.state === "rejected" && doRetractInvoiceRejection && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRetract(true)}
+                        disabled={retracting}
+                        className="btn-primary"
+                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: retracting ? 0.7 : 1 }}
+                      >
+                        {retracting ? <><BtnSpinner />Approving...</> : "Undo rejection and approve"}
+                      </button>
                     )}
                     {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
                     {canReview && (
@@ -162,10 +187,37 @@ export default function InvoiceDetail(props: any) {
                     </div>
                   </Modal>
                 )}
+                {confirmRetract && (
+                  <Modal onClose={() => { if (!retracting) setConfirmRetract(false); }} title={`Undo rejection for #${inv.num}`} width={460}>
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                      Withdraw the rejection and approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This is allowed only while the contractor has not resubmitted it. The correction is recorded in the activity log.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button type="button" onClick={() => setConfirmRetract(false)} disabled={retracting} className="btn-soft">Cancel</button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setRetracting(true);
+                          try {
+                            const ok = await doRetractInvoiceRejection(inv);
+                            if (ok) setConfirmRetract(false);
+                          } finally {
+                            setRetracting(false);
+                          }
+                        }}
+                        disabled={retracting}
+                        className="btn-primary"
+                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: retracting ? 0.7 : 1 }}
+                      >
+                        {retracting ? <><BtnSpinner />Approving...</> : "Undo and approve"}
+                      </button>
+                    </div>
+                  </Modal>
+                )}
                 {rejecting && (
                   <Modal onClose={() => { setRejecting(false); setRejectReason(""); }} title={`Reject invoice #${inv.num}`} width={460}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
-                      The contractor sees this reason on their invoice. The WO does not advance until the remaining live invoices are approved.
+                      The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or sent to QuickBooks.
                     </div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
                     <textarea rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
@@ -430,10 +482,10 @@ export default function InvoiceDetail(props: any) {
                   </div>
 
                   {/* Rejected reason */}
-                  {inv.state === "rejected" && inv.reason && (
+                  {inv.state === "rejected" && (inv.rejectionReason || inv.reason) && (
                     <div style={{ padding: "16px 32px", background: T.dangerSoft, borderTop: `1px solid ${T.danger}22` }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.danger, marginBottom: 4 }}>Rejection reason</div>
-                      <div style={{ fontSize: 12, color: "#8B2C20" }}>{inv.reason}</div>
+                      <div style={{ fontSize: 12, color: "#8B2C20" }}>{inv.rejectionReason || inv.reason}</div>
                     </div>
                   )}
 

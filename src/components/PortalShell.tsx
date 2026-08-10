@@ -1227,7 +1227,7 @@ export default function PortalShell() {
     nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
-    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doCorrectInvoiceTotal,
+    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, profiles: USERS, fire });
   const portalView = useMemo<PortalViewState>(() => ({
@@ -1460,6 +1460,12 @@ export default function PortalShell() {
   const woData = useMemo(
     () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
     [maskedWorkOrders, selectedWO]
+  );
+  const invoiceFormWorkOrder = useMemo(
+    () => resumeDraft?.wot
+      ? maskedWorkOrders.find((workOrder: any) => workOrder.id === resumeDraft.wot) || null
+      : woData,
+    [maskedWorkOrders, resumeDraft?.wot, woData],
   );
 
   useEffect(() => {
@@ -2068,7 +2074,7 @@ export default function PortalShell() {
   const contractorInvoiceBadge = useMemo(
     () => invoices.filter(i =>
       i.contractor === (currentUser?.contractorAccountId || currentUser?.id)
-      && (i.state === "submitted" || i.state === "revised"),
+      && (i.state === "submitted" || i.state === "revised" || i.state === "rejected"),
     ).length || null,
     [invoices, currentUser?.contractorAccountId, currentUser?.id]
   );
@@ -2593,12 +2599,14 @@ export default function PortalShell() {
               setSelectedBillingInvoice(invoice.id);
               setPage("billing");
             }}
+            onEditRejected={openCreateInvoice}
             doApproveInvoice={doApproveInvoice}
             doMarkPaid={doMarkPaid}
             doDownloadInvoice={doDownloadInvoice}
             doDownloadInvoiceCsv={doDownloadInvoiceCsv}
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}
+            doRetractInvoiceRejection={doRetractInvoiceRejection}
             doCorrectInvoiceTotal={doCorrectInvoiceTotal}
             pdfBusy={pdfBusy}
             fmt={fmt}
@@ -2710,6 +2718,7 @@ export default function PortalShell() {
             doDownloadInvoice={doDownloadInvoice}
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}
+            doRetractInvoiceRejection={doRetractInvoiceRejection}
             openCreateInvoice={openCreateInvoice}
             onConvertQuote={async (payload: Record<string, unknown>) => {
               if (woData?.id) rememberWorkOrderReturn(woData.id);
@@ -3364,7 +3373,7 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      <InvoiceCreateModal modal={modal} woData={woData} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
+      <InvoiceCreateModal modal={modal} woData={invoiceFormWorkOrder} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
 
       {isManager && (
         <BillingInvoiceCreateModal

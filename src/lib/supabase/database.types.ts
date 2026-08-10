@@ -275,6 +275,11 @@ export type Database = {
           qbo_invoice_id: string | null
           qbo_synced_at: string | null
           rejection_reason: string | null
+          rejected_at: string | null
+          rejected_by: string | null
+          resubmitted_at: string | null
+          resubmitted_by: string | null
+          review_revision: number
           sales_tax: number | null
           service_date: string | null
           state: Database["public"]["Enums"]["invoice_state"]
@@ -307,6 +312,11 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_synced_at?: string | null
           rejection_reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          resubmitted_at?: string | null
+          resubmitted_by?: string | null
+          review_revision?: number
           sales_tax?: number | null
           service_date?: string | null
           state?: Database["public"]["Enums"]["invoice_state"]
@@ -339,6 +349,11 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_synced_at?: string | null
           rejection_reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          resubmitted_at?: string | null
+          resubmitted_by?: string | null
+          review_revision?: number
           sales_tax?: number | null
           service_date?: string | null
           state?: Database["public"]["Enums"]["invoice_state"]
@@ -365,6 +380,20 @@ export type Database = {
           {
             foreignKeyName: "invoices_created_by_fkey"
             columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_rejected_by_fkey"
+            columns: ["rejected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_resubmitted_by_fkey"
+            columns: ["resubmitted_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -428,6 +457,8 @@ export type Database = {
           active: boolean | null
           color: string | null
           company: string | null
+          contractor_access_level: "company_admin" | "invoice" | "report_only" | null
+          contractor_organization_id: string | null
           contractor_tier: "direct" | "mr_freeze" | "contracted" | null
           created_at: string | null
           default_labor_rate: number | null
@@ -450,6 +481,8 @@ export type Database = {
           active?: boolean | null
           color?: string | null
           company?: string | null
+          contractor_access_level?: "company_admin" | "invoice" | "report_only" | null
+          contractor_organization_id?: string | null
           contractor_tier?: "direct" | "mr_freeze" | "contracted" | null
           created_at?: string | null
           default_labor_rate?: number | null
@@ -472,6 +505,8 @@ export type Database = {
           active?: boolean | null
           color?: string | null
           company?: string | null
+          contractor_access_level?: "company_admin" | "invoice" | "report_only" | null
+          contractor_organization_id?: string | null
           contractor_tier?: "direct" | "mr_freeze" | "contracted" | null
           created_at?: string | null
           default_labor_rate?: number | null
@@ -1460,6 +1495,10 @@ export type Database = {
         Args: { p_profile_id: string }
         Returns: string | null
       }
+      contractor_invoice_work_order_status: {
+        Args: { p_work_order_id: string }
+        Returns: Database["public"]["Enums"]["wo_status"] | null
+      }
       correct_contractor_invoice_total: {
         Args: {
           p_invoice_id: string
@@ -1524,6 +1563,33 @@ export type Database = {
       next_staff_invoice_num: {
         Args: { p_actor_id: string }
         Returns: string
+      }
+      resubmit_rejected_contractor_invoice: {
+        Args: {
+          p_cme: string | null
+          p_invoice_date: string | null
+          p_invoice_id: string
+          p_lines: Json
+          p_pdf_storage_path?: string | null
+          p_sales_tax: number | null
+          p_service_date: string | null
+          p_store_address: string | null
+          p_terms: string | null
+          p_total_override: number | null
+        }
+        Returns: Json
+      }
+      retract_contractor_invoice_rejection: {
+        Args: { p_invoice_id: string }
+        Returns: Json
+      }
+      review_contractor_invoice: {
+        Args: {
+          p_action: string
+          p_invoice_id: string
+          p_reason?: string | null
+        }
+        Returns: Json
       }
       set_activity_contractor_attention: {
         Args: { p_activity_id: string; p_required: boolean }

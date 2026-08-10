@@ -57,6 +57,7 @@ export default function InvoiceCreateModal(props: any) {
   const submitLockRef = useRef(false);
   const submissionKeyRef = useRef("");
   const existingInvoiceId = resumeDraft?.id || null;
+  const isRejectedResubmission = resumeDraft?.state === "rejected";
   // Tracks whether the user has touched the # field — if so we trust their
   // value (and surface a friendly toast if it collides). If untouched, the
   // hook can replace it with a freshly-resolved DB number on submit.
@@ -123,8 +124,8 @@ export default function InvoiceCreateModal(props: any) {
       setPdfLinesReviewed(resumeUploadOnly && (resumeDraft.lines || []).length > 0);
       reset({
         num: resumeDraft.num || "",
-        invoiceDate: resumeDraft.invoiceDate || todayIso(),
-        serviceDate: resumeDraft.serviceDate || todayIso(),
+        invoiceDate: resumeDraft.invoiceDateRaw || resumeDraft.invoiceDate || todayIso(),
+        serviceDate: resumeDraft.serviceDateRaw || resumeDraft.serviceDate || todayIso(),
         terms: resumeDraft.terms || "Net 30",
         tax: resumeUploadOnly ? "" : resumeDraft.salesTax != null ? String(resumeDraft.salesTax) : "",
         cme: resumeDraft.cme || "",
@@ -241,7 +242,10 @@ export default function InvoiceCreateModal(props: any) {
       userTypedNum: numTouched,
       pdfFile,
       hasExistingPdf: !!resumeDraft?.pdfStoragePath,
+      hasExistingOriginalPdf: !!resumeDraft?.pdfStoragePath
+        && (!!resumeDraft?.pdfIsOriginal || (resumeDraft?.lines || []).length === 0),
       submissionKey: submissionKeyRef.current,
+      resubmittingRejected: isRejectedResubmission,
     }, existingInvoiceId);
     if (ok) reset();
     } finally {
@@ -251,9 +255,22 @@ export default function InvoiceCreateModal(props: any) {
   };
 
   return (
-    <Modal onClose={close} title="Create invoice" width={820} closeOnBackdrop={false}>
+    <Modal
+      onClose={close}
+      title={isRejectedResubmission ? `Correct invoice #${resumeDraft.num}` : "Create invoice"}
+      width={820}
+      closeOnBackdrop={false}
+    >
       <form onSubmit={handleSubmit(onSubmit)}>
-        <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {woData.id}</div>
+        <div style={{ fontSize: 13, color: T.muted, marginBottom: isRejectedResubmission ? 12 : 20 }}>Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {woData.id}</div>
+
+        {isRejectedResubmission && (
+          <div style={{ padding: "12px 14px", marginBottom: 18, borderRadius: 10, border: `1px solid ${T.danger}33`, background: T.dangerSoft }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: T.danger, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Correction requested</div>
+            <div style={{ fontSize: 12, color: "#8B2C20", lineHeight: 1.5 }}>{resumeDraft.rejectionReason || resumeDraft.reason || "Review the invoice and correct the requested information before resubmitting."}</div>
+            <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5, marginTop: 6 }}>The same invoice record and number will be preserved. Once resubmitted, it will be locked while P1 reviews it again.</div>
+          </div>
+        )}
 
         {/* Contractor invoice direction: FROM the contractor, BILL TO P1 Pros.
             Contractors have no direct 7-Eleven access — P1 reviews + posts to
@@ -277,7 +294,7 @@ export default function InvoiceCreateModal(props: any) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } })} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } })} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
@@ -557,7 +574,7 @@ export default function InvoiceCreateModal(props: any) {
           {/* Save draft bypasses the lines-complete validation — a draft can
               be partially filled. Resumes by passing the existing invoice id
               so we update in place instead of inserting a duplicate. */}
-          {doSaveDraftInvoice && (
+          {doSaveDraftInvoice && !isRejectedResubmission && (
             <button
               type="button"
               disabled={savingDraft || submitting || pdfParseStatus === "reading"}
@@ -601,8 +618,10 @@ export default function InvoiceCreateModal(props: any) {
             }}
           >
             {submitting
-              ? <><BtnSpinner />Submitting...</>
-              : (existingInvoiceId ? "Submit draft" : "Submit")
+              ? <><BtnSpinner />{isRejectedResubmission ? "Resubmitting..." : "Submitting..."}</>
+              : isRejectedResubmission
+                ? "Resubmit invoice"
+                : (existingInvoiceId ? "Submit draft" : "Submit")
             }
           </button>
         </div>
