@@ -19,6 +19,17 @@ type DispatchNotificationInput = {
   contractorName?: string | null;
 };
 
+type InvoiceReviewNotificationInput = {
+  event: "rejected" | "retraction";
+  recipients: string[];
+  invoice: {
+    num: string;
+    workOrderId: string;
+    storeNumber?: string | null;
+    rejectionReason?: string | null;
+  };
+};
+
 const SERVICE_INBOX = "service@p1pros.com";
 
 const PRIORITY_LABELS: Record<string, string> = {
@@ -167,5 +178,62 @@ export async function sendContractorPortalPing(contractorEmail: string) {
 
 Log in to review it:
 ${portalUrl()}`,
+  );
+}
+
+export function createInvoiceReviewNotificationPlan(
+  input: InvoiceReviewNotificationInput,
+) {
+  const recipients = [...new Set(
+    (input.recipients || [])
+      .map(email => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const { invoice } = input;
+
+  if (input.event === "rejected") {
+    return {
+      recipients,
+      subject: `Invoice #${invoice.num} rejected — action required`,
+      body: `Your contractor invoice needs corrections before it can be approved.
+
+Invoice: #${invoice.num}
+Work Order: ${invoice.workOrderId}
+Store: #${invoice.storeNumber || "Not captured"}
+Reason: ${invoice.rejectionReason || "No reason provided"}
+
+Log in to edit and resubmit the rejected invoice:
+${portalUrl()}`,
+    };
+  }
+
+  return {
+    recipients,
+    subject: `Invoice #${invoice.num} rejection withdrawn — invoice approved`,
+    body: `The prior rejection of your contractor invoice was withdrawn by P1 staff. The invoice is now approved; no correction or resubmission is needed.
+
+Invoice: #${invoice.num}
+Work Order: ${invoice.workOrderId}
+Store: #${invoice.storeNumber || "Not captured"}
+
+Log in to review the updated status:
+${portalUrl()}`,
+  };
+}
+
+export async function sendInvoiceReviewNotification(
+  input: InvoiceReviewNotificationInput,
+) {
+  const plan = createInvoiceReviewNotificationPlan(input);
+  if (plan.recipients.length === 0) {
+    throw new Error("No contractor invoice recipients were found");
+  }
+
+  const accessToken = await getAccessToken();
+  await sendEmail(
+    accessToken,
+    plan.recipients,
+    plan.subject,
+    plan.body,
   );
 }

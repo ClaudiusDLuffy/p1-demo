@@ -47,6 +47,12 @@ export const InvoiceSchema = z.object({
   sales_tax: z.number().optional().nullable(),
   total: z.number(),
   pdf_storage_path: z.string().optional().nullable(),
+  rejection_reason: z.string().optional().nullable(),
+  review_revision: z.number().int().positive().optional(),
+  rejected_at: z.string().optional().nullable(),
+  rejected_by: z.string().uuid().optional().nullable(),
+  resubmitted_at: z.string().optional().nullable(),
+  resubmitted_by: z.string().uuid().optional().nullable(),
   created_at: z.string().optional().nullable(),
 })
 

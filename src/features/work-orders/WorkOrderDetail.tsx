@@ -57,13 +57,14 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [deletingInvId, setDeletingInvId] = useState<string | null>(null);
   const [markingPaidInvId, setMarkingPaidInvId] = useState<string | null>(null);
+  const [retractingInvId, setRetractingInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
   const [invoiceMenuId, setInvoiceMenuId] = useState<string | null>(null);
   const copyWorkOrderNumber = async () => {
@@ -158,6 +159,7 @@ export default function WorkOrderDetail(props: any) {
   const jobOpen = !["closed", "capital"].includes(woData?.status);
   const invoiceController = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
+  const canReviewInvoices = isManager && !invoiceController;
   const isLoading = (key: string) => !!loadingStates[key];
   const loadingStyle = (key: string) => ({
     opacity: isLoading(key) ? 0.7 : 1,
@@ -515,6 +517,10 @@ export default function WorkOrderDetail(props: any) {
                               inv.contractor === (currentUser?.contractorAccountId || currentUser?.id)
                               || isManager
                             );
+                            const isMyRejectedInvoice = !isManager
+                              && canInvoice
+                              && inv.state === "rejected"
+                              && inv.contractor === (currentUser?.contractorAccountId || currentUser?.id);
                             const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Sent to QuickBooks" } as any)[inv.state] || inv.state;
                             const stateColor = (
                               inv.state === "paid" ? T.success :
@@ -540,8 +546,8 @@ export default function WorkOrderDetail(props: any) {
                                     <span className="mono" style={{ fontSize: 12, color: T.muted }}>{fmt(inv.total || 0)}</span>
                                     {inv.invoiceDate && <span style={{ fontSize: 11, color: T.subtle }}>{inv.invoiceDate}</span>}
                                   </div>
-                                  {inv.state === "rejected" && inv.reason && (
-                                    <div style={{ fontSize: 11, color: T.danger, marginTop: 4, lineHeight: 1.45 }}><strong>Rejected:</strong> {inv.reason}</div>
+                                  {inv.state === "rejected" && (inv.rejectionReason || inv.reason) && (
+                                    <div style={{ fontSize: 11, color: T.danger, marginTop: 4, lineHeight: 1.45 }}><strong>Rejected:</strong> {inv.rejectionReason || inv.reason}</div>
                                   )}
                                 </div>
                                 <div className="wo-invoice-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -552,7 +558,10 @@ export default function WorkOrderDetail(props: any) {
                                   {isMyDraft && !isManager && (
                                     <button onClick={() => openCreate(inv)} className="btn-accent wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Resume</button>
                                   )}
-                                  {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                                  {isMyRejectedInvoice && (
+                                    <button onClick={() => openCreate(inv)} className="btn-accent wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Edit and resubmit</button>
+                                  )}
+                                  {canReviewInvoices && (inv.state === "submitted" || inv.state === "revised") && (
                                     <>
                                       <button
                                         onClick={async () => { setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }}
@@ -570,6 +579,9 @@ export default function WorkOrderDetail(props: any) {
                                       className="btn-primary wo-invoice-action"
                                       style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
                                     >{rowBusy || isLoading("markPaid_" + inv.id) ? <><BtnSpinner />…</> : "Sent to QuickBooks"}</button>
+                                  )}
+                                  {canReviewInvoices && inv.state === "rejected" && doRetractInvoiceRejection && (
+                                    <button onClick={() => setRetractingInvId(inv.id)} className="btn-accent wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Undo rejection</button>
                                   )}
                                   {isManager && (
                                     <button onClick={() => setDeletingInvId(inv.id)} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
@@ -592,7 +604,10 @@ export default function WorkOrderDetail(props: any) {
                                         {isMyDraft && !isManager && (
                                           <button onClick={() => { setInvoiceMenuId(null); openCreate(inv); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Resume</button>
                                         )}
-                                        {isManager && (inv.state === "submitted" || inv.state === "revised") && (
+                                        {isMyRejectedInvoice && (
+                                          <button onClick={() => { setInvoiceMenuId(null); openCreate(inv); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.accent, fontFamily: "inherit", fontWeight: 600 }}>Edit and resubmit</button>
+                                        )}
+                                        {canReviewInvoices && (inv.state === "submitted" || inv.state === "revised") && (
                                           <>
                                             <button onClick={async () => { setInvoiceMenuId(null); setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }} disabled={rowBusy || isLoading("approveInvoice_" + inv.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: rowBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: rowBusy ? 0.6 : 1 }}>Approve</button>
                                             <button onClick={() => { setInvoiceMenuId(null); setRejectingInv(inv); setRejectReason(""); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Reject</button>
@@ -600,6 +615,9 @@ export default function WorkOrderDetail(props: any) {
                                         )}
                                         {isManager && inv.state === "approved" && (
                                           <button onClick={() => { setInvoiceMenuId(null); setMarkingPaidInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Sent to QuickBooks</button>
+                                        )}
+                                        {canReviewInvoices && inv.state === "rejected" && doRetractInvoiceRejection && (
+                                          <button onClick={() => { setInvoiceMenuId(null); setRetractingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.accent, fontFamily: "inherit" }}>Undo rejection and approve</button>
                                         )}
                                         {isManager && (
                                           <button onClick={() => { setInvoiceMenuId(null); setDeletingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Delete</button>
@@ -618,7 +636,7 @@ export default function WorkOrderDetail(props: any) {
                     {rejectingInv && (
                       <Modal onClose={() => { setRejectingInv(null); setRejectReason(""); }} title={`Reject invoice #${rejectingInv.num}`} width={460}>
                         <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
-                          The contractor sees the reason on their invoice. The WO does not advance until the remaining live invoices are approved.
+                          The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or sent to QuickBooks.
                         </div>
                         <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
                         <TA rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" />
@@ -635,6 +653,37 @@ export default function WorkOrderDetail(props: any) {
                         </div>
                       </Modal>
                     )}
+
+                    {retractingInvId && (() => {
+                      const inv = woAllInvoices.find((item: any) => item.id === retractingInvId);
+                      if (!inv) return null;
+                      const isBusy = busyInvId === inv.id;
+                      return (
+                        <Modal onClose={() => { if (!isBusy) setRetractingInvId(null); }} title={`Undo rejection for #${inv.num}`} width={460}>
+                          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+                            Withdraw the rejection and approve this invoice? This succeeds only if the contractor has not resubmitted it, and the correction will be recorded in the activity log.
+                          </div>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                            <button type="button" onClick={() => setRetractingInvId(null)} disabled={isBusy} className="btn-soft">Cancel</button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setBusyInvId(inv.id);
+                                try {
+                                  const ok = await doRetractInvoiceRejection(inv);
+                                  if (ok) setRetractingInvId(null);
+                                } finally {
+                                  setBusyInvId(null);
+                                }
+                              }}
+                              disabled={isBusy}
+                              className="btn-primary"
+                              style={{ display: "flex", alignItems: "center", gap: 6, opacity: isBusy ? 0.7 : 1 }}
+                            >{isBusy ? <><BtnSpinner />Approving...</> : "Undo and approve"}</button>
+                          </div>
+                        </Modal>
+                      );
+                    })()}
 
                     {/* Per-row delete-invoice confirmation — staff only. */}
                     {markingPaidInvId && (() => {

@@ -434,6 +434,7 @@ const mapInvoice = (i: any) => ({
   invoiceDate: formatDate(i.invoice_date),
   invoiceDateRaw: i.invoice_date || null,
   serviceDate: formatDate(i.service_date),
+  serviceDateRaw: i.service_date || null,
   dueDate: formatDate(i.due_date),
   terms: i.terms,
   state: i.state,
@@ -446,6 +447,13 @@ const mapInvoice = (i: any) => ({
   pdfStoragePath: i.pdf_storage_path || null,
   date: shortMonthDay(i.invoice_date),
   rejectionReason: i.rejection_reason,
+  // Keep the legacy UI alias while newer callers use the explicit field.
+  reason: i.rejection_reason,
+  reviewRevision: Number(i.review_revision || 1),
+  rejectedAt: i.rejected_at || null,
+  rejectedBy: i.rejected_by || null,
+  resubmittedAt: i.resubmitted_at || null,
+  resubmittedBy: i.resubmitted_by || null,
   createdAt: i.created_at,
   updatedAt: i.updated_at,
 });
@@ -453,7 +461,11 @@ const mapInvoice = (i: any) => ({
 // ── INVOICE PDF STORAGE ────────────────────────────────────────────────────
 // Bucket is private; reads use sb.storage.download which authenticates via
 // the user's session. Path layout: {invoice_id}/{invoice_number}.pdf.
-export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, blob: Blob): Promise<string> {
+export async function uploadInvoicePdfObject(
+  invoiceId: string,
+  invoiceNum: string,
+  blob: Blob,
+): Promise<string> {
   const sb = supabase();
   const safeInvoiceNum = String(invoiceNum || "invoice").replace(/[^a-zA-Z0-9_-]/g, "-");
   const uploadId = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -465,6 +477,12 @@ export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, bl
     upsert: false,
   });
   if (upErr) throw upErr;
+  return path;
+}
+
+export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, blob: Blob): Promise<string> {
+  const sb = supabase();
+  const path = await uploadInvoicePdfObject(invoiceId, invoiceNum, blob);
   const { error: rowErr } = await (sb as any).rpc(
     "attach_contractor_invoice_pdf",
     { p_invoice_id: invoiceId, p_storage_path: path },
@@ -1346,24 +1364,86 @@ export async function correctContractorInvoiceTotal(
   return data;
 }
 
-// Reject an invoice with a reason. Staff-only at the UI layer; inv_update
-// RLS already restricts who can write. Writes an audit activity on the WO.
-export async function rejectInvoice(
+export type ContractorInvoiceReviewResult = {
+  invoiceId: string;
+  invoiceNum: string;
+  invoiceState: "submitted" | "approved" | "rejected" | "revised" | "paid";
+  workOrderId: string;
+  workOrderStatus: "pending_invoice" | "pending_approval" | "closed" | null;
+  reviewRevision: number;
+  rejectionReason?: string | null;
+  total?: number;
+  pdfStoragePath?: string | null;
+};
+
+export async function reviewContractorInvoice(
   invoiceId: string,
-  invoiceNum: string,
-  workOrderId: string | null,
-  reason: string,
-  authorName: string,
-): Promise<void> {
+  action: "approve" | "reject",
+  reason?: string | null,
+): Promise<ContractorInvoiceReviewResult> {
   const sb = supabase();
-  const { error } = await sb.from("invoices").update({
-    state: "rejected",
-    rejection_reason: reason,
-  }).eq("id", invoiceId);
+  const { data, error } = await (sb as any).rpc(
+    "review_contractor_invoice",
+    {
+      p_invoice_id: invoiceId,
+      p_action: action,
+      p_reason: reason?.trim() || null,
+    },
+  );
   if (error) throw error;
-  if (workOrderId) {
-    await insertActivity(workOrderId, "System", `Invoice #${invoiceNum} rejected by ${authorName}: ${reason}`, "system");
-  }
+  return data as ContractorInvoiceReviewResult;
+}
+
+export async function resubmitRejectedContractorInvoice(
+  invoiceId: string,
+  patch: {
+    cme?: string | null;
+    storeAddr?: string | null;
+    invoiceDate?: string | null;
+    serviceDate?: string | null;
+    terms?: string | null;
+    salesTax?: number | null;
+    totalOverride?: number | null;
+    pdfStoragePath?: string | null;
+  },
+  lines: any[],
+): Promise<ContractorInvoiceReviewResult> {
+  const sb = supabase();
+  const rpcLines = lines.map(line => ({
+    type: line.type || "Other",
+    description: line.desc || line.description || "",
+    qty: parseFloat(line.qty) || 1,
+    rate: parseFloat(line.rate) || 0,
+  }));
+  const { data, error } = await (sb as any).rpc(
+    "resubmit_rejected_contractor_invoice",
+    {
+      p_invoice_id: invoiceId,
+      p_cme: patch.cme || null,
+      p_store_address: patch.storeAddr || null,
+      p_invoice_date: patch.invoiceDate || null,
+      p_service_date: patch.serviceDate || null,
+      p_terms: patch.terms || "Net 30",
+      p_sales_tax: patch.salesTax ?? 0,
+      p_total_override: patch.totalOverride ?? null,
+      p_lines: rpcLines,
+      p_pdf_storage_path: patch.pdfStoragePath || null,
+    },
+  );
+  if (error) throw error;
+  return data as ContractorInvoiceReviewResult;
+}
+
+export async function retractContractorInvoiceRejection(
+  invoiceId: string,
+): Promise<ContractorInvoiceReviewResult> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "retract_contractor_invoice_rejection",
+    { p_invoice_id: invoiceId },
+  );
+  if (error) throw error;
+  return data as ContractorInvoiceReviewResult;
 }
 
 // Patch an invoice's state (and optionally paid_at). Used by the Owner

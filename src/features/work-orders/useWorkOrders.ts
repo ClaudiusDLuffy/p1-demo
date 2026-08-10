@@ -13,6 +13,7 @@ import {
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
   moveWorkOrderStraightToBilling,
   assignContractorTechnician,
+  reviewContractorInvoice,
 } from "../../lib/db";
 import { T, PRIORITY, MONTHS } from "../../lib/constants";
 import {
@@ -23,6 +24,7 @@ import {
 import { supabase } from "../../lib/supabase/client";
 import { WORK_ORDERS_KEY, WO_PARTS_KEY } from "./queries";
 import { INVOICES_KEY } from "../invoices/queries";
+import { contractorInvoiceWorkOrderStatus } from "../../lib/contractorInvoiceReview";
 
 const PART_STATUS_LABEL: Record<string, string> = {
   ordered: "Ordered",
@@ -622,25 +624,20 @@ export default function useWorkOrders({
   };
 
   // Multi-invoice rule:
-  // - WO returns to pending_invoice when every non-draft, non-rejected
-  //   invoice is approved or sent to QuickBooks (drafts + rejected ignored).
+  // - WO returns to pending_invoice only when every non-draft invoice is
+  //   approved or sent to QuickBooks. A rejection is unresolved review work.
   // - QuickBooks handoff NEVER closes the WO. Capital jobs run for weeks with
   //   the contractor sending more invoices as work continues; a person
   //   decides when the job is actually done (manual "Close work order"
   //   button below). This helper therefore never returns "closed".
   // - When no live invoices exist, returns null so the WO is left alone.
   const computeWoStatusFromInvoices = (woId: string, override?: any[]) => {
-    const list = (override ?? invoices).filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected");
-    if (list.length === 0) return null;
-    if (list.every((i: any) => i.state === "approved" || i.state === "paid")) return "pending_invoice";
-    return "pending_approval";
+    return contractorInvoiceWorkOrderStatus(override ?? invoices, woId);
   };
 
-  // Per-invoice approve. Flips one invoice to 'approved' and then recomputes
-  // the WO status across siblings. WO does not advance until ALL non-draft,
-  // non-rejected invoices are approved/paid (billing team's expectation).
-  // computeWoStatusFromInvoices never returns "closed" (capital-job rule),
-  // so the closing branches are gone.
+  // Per-invoice approval is one atomic database operation: validate the
+  // current state, approve, recompute the parent WO, and write one structured
+  // activity entry. Rejected siblings keep the WO in pending_approval.
   const doApproveInvoice = async (invoiceId: string) => {
     setLoading("approveInvoice_" + invoiceId, true);
     try {
@@ -650,26 +647,33 @@ export default function useWorkOrders({
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
     const nextInvoices = invoices.map((i: any) => i.id === invoiceId ? { ...i, state: "approved" } : i);
     const nextWoStatus = computeWoStatusFromInvoices(inv.wot, nextInvoices);
-    const woText = nextWoStatus === "pending_invoice"
-      ? `All contractor invoices are approved — ready for P1 billing.`
-      : null;
     setInvoices(nextInvoices);
     const localUpdates: any = {};
     if (nextWoStatus) localUpdates.status = nextWoStatus;
-    patchLocalWO(inv.wot, localUpdates, localActivity(`Invoice #${inv.num} approved by ${currentUser.name}.`, "system"));
-    if (woText) patchLocalWO(inv.wot, {}, localActivity(woText, "system"));
-    fire(nextWoStatus === "pending_invoice" ? "All contractor invoices approved - Pending 7-Eleven Submission" : `Invoice #${inv.num} approved`);
-    await dbCall(async () => {
-      await updateInvoiceState(inv.id, "approved");
-      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} approved by ${currentUser.name}.`, "system");
-      if (nextWoStatus) {
-        await updateWorkOrder(inv.wot, { status: nextWoStatus });
-        if (woText) await insertActivity(inv.wot, "System", woText, "system");
+    patchLocalWO(
+      inv.wot,
+      localUpdates,
+      localActivity(
+        `Invoice #${inv.num} approved by ${currentUser.name}.`,
+        "system",
+        false,
+        "invoice_approved",
+      ),
+    );
+    const ok = await dbCall(async () => {
+      const result = await reviewContractorInvoice(inv.id, "approve");
+      if (result.workOrderStatus) {
+        patchLocalWO(inv.wot, { status: result.workOrderStatus });
       }
     }, "Approval failed", () => {
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
+    if (ok) {
+      fire(nextWoStatus === "pending_invoice"
+        ? `Invoice #${inv.num} approved — ready for P1 billing`
+        : `Invoice #${inv.num} approved`);
+    }
     } finally {
       setLoading("approveInvoice_" + invoiceId, false);
     }

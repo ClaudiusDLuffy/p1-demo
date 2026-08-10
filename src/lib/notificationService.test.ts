@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDispatchNotificationPlan } from "./notificationService";
+import {
+  createDispatchNotificationPlan,
+  createInvoiceReviewNotificationPlan,
+} from "./notificationService";
 
 const workOrder = {
   id: "WOT0000001",
@@ -65,4 +68,45 @@ test("deduplicates repeated configured owner emails", () => {
     plan.internalRecipients.filter(email => email === "landryd@phospitality.com").length,
     1,
   );
+});
+
+test("rejection email identifies the invoice, work order, and correction reason", () => {
+  const plan = createInvoiceReviewNotificationPlan({
+    event: "rejected",
+    recipients: [
+      "Nancy@Example.com",
+      "nancy@example.com",
+      " invoices@example.com ",
+    ],
+    invoice: {
+      num: "4352",
+      workOrderId: "WOT1007298",
+      storeNumber: "42522",
+      rejectionReason: "Please attach the missing parts receipt.",
+    },
+  });
+
+  assert.deepEqual(plan.recipients, [
+    "nancy@example.com",
+    "invoices@example.com",
+  ]);
+  assert.match(plan.subject, /4352 rejected/);
+  assert.match(plan.body, /WOT1007298/);
+  assert.match(plan.body, /missing parts receipt/);
+  assert.match(plan.body, /edit and resubmit/i);
+});
+
+test("retraction email tells the contractor no resubmission is needed", () => {
+  const plan = createInvoiceReviewNotificationPlan({
+    event: "retraction",
+    recipients: ["contractor@example.com"],
+    invoice: {
+      num: "4352",
+      workOrderId: "WOT1007298",
+    },
+  });
+
+  assert.match(plan.subject, /rejection withdrawn/);
+  assert.match(plan.body, /now approved/);
+  assert.match(plan.body, /no correction or resubmission is needed/i);
 });
