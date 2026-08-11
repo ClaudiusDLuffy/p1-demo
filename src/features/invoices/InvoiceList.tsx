@@ -2,20 +2,27 @@
 // @ts-nocheck
 
 import { Badge } from "../../components/ui/Badge";
+import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
+import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE } from "../../lib/constants";
 import { InvoiceSortKey, SortDirection, sortInvoices } from "../../lib/invoiceSort";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function InvoiceList(props: any) {
-  const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt } = props;
+  const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices } = props;
   const currentContractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
+  const canBatchReview = isManager && !controller && !!doBatchReviewInvoices;
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<InvoiceSortKey>("recent");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(() => new Set());
+  const [batchDialog, setBatchDialog] = useState<"approve" | "reject" | null>(null);
+  const [batchReason, setBatchReason] = useState("");
+  const [batchBusy, setBatchBusy] = useState(false);
   const invoiceTabs = [
     { id: "all", l: "All", m: "All" },
     { id: "draft", l: "Draft", m: "Draft" },
@@ -95,6 +102,83 @@ export default function InvoiceList(props: any) {
     },
     [controller, currentContractorId, getUser, invTab, invoices, isManager, search, sortDirection, sortKey]
   );
+  const reviewableInvoices = useMemo(
+    () => canBatchReview
+      ? visibleInvoices.filter((invoice: any) =>
+          invoice.state === "submitted" || invoice.state === "revised",
+        )
+      : [],
+    [canBatchReview, visibleInvoices],
+  );
+  const reviewableIdSet = useMemo(
+    () => new Set<string>(reviewableInvoices.map((invoice: any) => String(invoice.id))),
+    [reviewableInvoices],
+  );
+  const selectedReviewInvoices = useMemo(
+    () => reviewableInvoices.filter((invoice: any) => selectedReviewIds.has(String(invoice.id))),
+    [reviewableInvoices, selectedReviewIds],
+  );
+  const allVisibleReviewableSelected = reviewableInvoices.length > 0
+    && reviewableInvoices.slice(0, 100).every((invoice: any) => selectedReviewIds.has(String(invoice.id)));
+
+  useEffect(() => {
+    setSelectedReviewIds(previous => {
+      const next = new Set(
+        [...previous].filter(invoiceId => reviewableIdSet.has(invoiceId)),
+      );
+      if (next.size === previous.size
+          && [...next].every(invoiceId => previous.has(invoiceId))) {
+        return previous;
+      }
+      return next;
+    });
+  }, [reviewableIdSet]);
+
+  const toggleReviewSelection = (invoiceId: string) => {
+    if (!reviewableIdSet.has(invoiceId)) return;
+    setSelectedReviewIds(previous => {
+      const next = new Set(previous);
+      if (next.has(invoiceId)) next.delete(invoiceId);
+      else if (next.size < 100) next.add(invoiceId);
+      return next;
+    });
+  };
+
+  const toggleAllVisibleReviewable = () => {
+    setSelectedReviewIds(() => {
+      if (allVisibleReviewableSelected) return new Set();
+      return new Set(
+        reviewableInvoices.slice(0, 100).map((invoice: any) => String(invoice.id)),
+      );
+    });
+  };
+
+  const closeBatchDialog = () => {
+    if (batchBusy) return;
+    setBatchDialog(null);
+    setBatchReason("");
+  };
+
+  const submitBatchReview = async () => {
+    if (!batchDialog || selectedReviewInvoices.length === 0) return;
+    if (batchDialog === "reject" && !batchReason.trim()) return;
+    setBatchBusy(true);
+    try {
+      const ok = await doBatchReviewInvoices(
+        selectedReviewInvoices.map((invoice: any) => String(invoice.id)),
+        batchDialog,
+        batchReason,
+      );
+      if (ok) {
+        setSelectedReviewIds(new Set());
+        setBatchDialog(null);
+        setBatchReason("");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   return (
     <>
           {/* ═════ INVOICES ═════ */}
@@ -149,11 +233,46 @@ export default function InvoiceList(props: any) {
                   </label>
                 </div>
               </div>
+              {canBatchReview && selectedReviewInvoices.length > 0 && (
+                <div
+                  className="card"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 14px", marginBottom: 14, flexWrap: "wrap", borderColor: `${T.accent}44`, background: T.accentSoft }}
+                >
+                  <div style={{ fontSize: 12, color: T.ink }}>
+                    <strong>{selectedReviewInvoices.length}</strong> reviewable invoice{selectedReviewInvoices.length === 1 ? "" : "s"} selected
+                    {reviewableInvoices.length > 100 && <span style={{ color: T.muted }}> · maximum 100 per batch</span>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" className="btn-soft" onClick={() => setSelectedReviewIds(new Set())}>Clear</button>
+                    <button type="button" className="btn-primary" onClick={() => setBatchDialog("approve")}>Approve selected</button>
+                    <button type="button" className="btn-soft" onClick={() => setBatchDialog("reject")} style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject selected</button>
+                  </div>
+                </div>
+              )}
               <div className="desktop-only-table">
               <div className="card table-scroll" style={{ overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: T.surfaceSoft }}>
+                      {canBatchReview && (
+                        <th style={{ width: 42, padding: "12px 10px", textAlign: "center", borderBottom: `1px solid ${T.borderSoft}` }}>
+                          <input
+                            ref={(element: HTMLInputElement | null) => {
+                              if (element) {
+                                element.indeterminate = selectedReviewInvoices.length > 0
+                                  && !allVisibleReviewableSelected;
+                              }
+                            }}
+                            type="checkbox"
+                            checked={allVisibleReviewableSelected}
+                            disabled={reviewableInvoices.length === 0}
+                            onChange={toggleAllVisibleReviewable}
+                            aria-label="Select all visible submitted and revised invoices"
+                            title="Select reviewable invoices"
+                            style={{ width: 16, height: 16, accentColor: T.accent, cursor: reviewableInvoices.length ? "pointer" : "default" }}
+                          />
+                        </th>
+                      )}
                       {tableHeaders.map(header => (
                         <th
                           key={header.key}
@@ -173,8 +292,23 @@ export default function InvoiceList(props: any) {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleInvoices.map(inv => (
-                      <tr key={inv.id} onClick={() => setSelectedInvoice(inv.id)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer" }}>
+                    {visibleInvoices.map(inv => {
+                      const reviewable = reviewableIdSet.has(String(inv.id));
+                      return (
+                      <tr key={inv.id} onClick={() => setSelectedInvoice(inv.id)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", background: selectedReviewIds.has(String(inv.id)) ? T.accentSoft : undefined }}>
+                        {canBatchReview && (
+                          <td onClick={(event) => event.stopPropagation()} style={{ width: 42, padding: "13px 10px", textAlign: "center" }}>
+                            {reviewable && (
+                              <input
+                                type="checkbox"
+                                checked={selectedReviewIds.has(String(inv.id))}
+                                onChange={() => toggleReviewSelection(String(inv.id))}
+                                aria-label={`Select invoice ${inv.num} for batch review`}
+                                style={{ width: 16, height: 16, accentColor: T.accent, cursor: "pointer" }}
+                              />
+                            )}
+                          </td>
+                        )}
                         <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
                         <td style={{ padding: "13px 14px" }}>
                           <span className="mono" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted }}>
@@ -189,7 +323,8 @@ export default function InvoiceList(props: any) {
                         <td className="mono" style={{ padding: "13px 14px", textAlign: "right", color: T.muted }}>{(inv.lines || []).length}</td>
                         <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(Math.round(inv.total))}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 {visibleInvoices.length === 0 && (
@@ -208,7 +343,7 @@ export default function InvoiceList(props: any) {
                     style={{
                       background: "#fff",
                       borderRadius: 12,
-                      border: `1px solid ${T.borderSoft}`,
+                      border: `1px solid ${selectedReviewIds.has(String(inv.id)) ? T.accent : T.borderSoft}`,
                       padding: "14px 16px",
                       marginBottom: 10,
                       cursor: "pointer",
@@ -216,7 +351,19 @@ export default function InvoiceList(props: any) {
                     }}
                   >
                     <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: T.accent }}>#{inv.num}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+                        {canBatchReview && reviewableIdSet.has(String(inv.id)) && (
+                          <input
+                            type="checkbox"
+                            checked={selectedReviewIds.has(String(inv.id))}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => toggleReviewSelection(String(inv.id))}
+                            aria-label={`Select invoice ${inv.num} for batch review`}
+                            style={{ width: 18, height: 18, accentColor: T.accent, cursor: "pointer" }}
+                          />
+                        )}
+                        <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: T.accent }}>#{inv.num}</span>
+                      </span>
                       <Badge conf={INV_STATE[inv.state]} small />
                     </div>
                     <div className="mobile-card-title" style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 4 }}>
@@ -249,6 +396,51 @@ export default function InvoiceList(props: any) {
                   </div>
                 )}
               </div>
+
+              {batchDialog === "approve" && (
+                <Modal onClose={closeBatchDialog} title={`Approve ${selectedReviewInvoices.length} invoices`} width={480}>
+                  <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
+                    Approve all selected Submitted/Revised invoices in one transaction? If any invoice has changed or cannot be reviewed, none will be approved.
+                  </div>
+                  <div className="mono" style={{ fontSize: 11, color: T.inkSoft, background: T.surfaceSoft, borderRadius: 9, padding: 10, marginBottom: 18, lineHeight: 1.6 }}>
+                    {selectedReviewInvoices.slice(0, 8).map((invoice: any) => `#${invoice.num}`).join(", ")}
+                    {selectedReviewInvoices.length > 8 ? ` +${selectedReviewInvoices.length - 8} more` : ""}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <button type="button" onClick={closeBatchDialog} disabled={batchBusy} className="btn-soft">Cancel</button>
+                    <button type="button" onClick={submitBatchReview} disabled={batchBusy} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6, opacity: batchBusy ? 0.7 : 1 }}>
+                      {batchBusy ? <><BtnSpinner />Approving...</> : `Approve ${selectedReviewInvoices.length}`}
+                    </button>
+                  </div>
+                </Modal>
+              )}
+
+              {batchDialog === "reject" && (
+                <Modal onClose={closeBatchDialog} title={`Reject ${selectedReviewInvoices.length} invoices`} width={500}>
+                  <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
+                    The same reason will be recorded on every selected invoice and sent to each affected contractor. If any invoice cannot be rejected, the entire batch is rolled back.
+                  </div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Shared rejection reason</label>
+                  <textarea
+                    rows={4}
+                    value={batchReason}
+                    onChange={(event) => setBatchReason(event.target.value)}
+                    placeholder="e.g. Missing receipts or labor-hour details"
+                    style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none" }}
+                  />
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                    <button type="button" onClick={closeBatchDialog} disabled={batchBusy} className="btn-soft">Cancel</button>
+                    <button
+                      type="button"
+                      onClick={submitBatchReview}
+                      disabled={batchBusy || !batchReason.trim()}
+                      style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: batchBusy || !batchReason.trim() ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: batchBusy || !batchReason.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      {batchBusy ? <><BtnSpinner />Rejecting...</> : `Reject ${selectedReviewInvoices.length}`}
+                    </button>
+                  </div>
+                </Modal>
+              )}
             </div>
           )}
 

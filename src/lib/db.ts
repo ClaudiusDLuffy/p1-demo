@@ -1376,6 +1376,13 @@ export type ContractorInvoiceReviewResult = {
   pdfStoragePath?: string | null;
 };
 
+export type BatchContractorInvoiceReviewResult = {
+  action: "approve" | "reject";
+  count: number;
+  invoiceIds: string[];
+  results: ContractorInvoiceReviewResult[];
+};
+
 export async function reviewContractorInvoice(
   invoiceId: string,
   action: "approve" | "reject",
@@ -1392,6 +1399,24 @@ export async function reviewContractorInvoice(
   );
   if (error) throw error;
   return data as ContractorInvoiceReviewResult;
+}
+
+export async function reviewContractorInvoices(
+  invoiceIds: string[],
+  action: "approve" | "reject",
+  reason?: string | null,
+): Promise<BatchContractorInvoiceReviewResult> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "review_contractor_invoices",
+    {
+      p_invoice_ids: invoiceIds,
+      p_action: action,
+      p_reason: reason?.trim() || null,
+    },
+  );
+  if (error) throw error;
+  return data as BatchContractorInvoiceReviewResult;
 }
 
 export async function resubmitRejectedContractorInvoice(

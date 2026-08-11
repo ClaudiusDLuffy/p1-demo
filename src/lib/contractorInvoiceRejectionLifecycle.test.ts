@@ -6,6 +6,7 @@ import test from "node:test";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 const migration = read("supabase/migrations/0060_contractor_invoice_rejection_lifecycle.sql");
+const aliasHotfix = read("supabase/migrations/0061_fix_invoice_review_work_order_alias.sql");
 const workOrderHook = read("src/features/work-orders/useWorkOrders.ts");
 const invoiceHook = read("src/features/invoices/useInvoices.ts");
 const invoiceModal = read("src/features/invoices/InvoiceCreateModal.tsx");
@@ -98,4 +99,14 @@ test("invoice activity remains behind the contractor invoicing permission ceilin
   assert.match(migration, /public\.can_invoice_for_contractor/);
   assert.match(migration, /coalesce\(activity\.event_key, ''\) <> 'invoice_rejected'/);
   assert.match(migration, /Pending contractor attention item not found/);
+});
+
+test("invoice review work-order aliases are unambiguous", () => {
+  // Applied migrations remain immutable; 0061 replaces the affected live
+  // functions without rewriting the historical 0060 migration.
+  assert.match(migration, /update public\.work_orders work_order\n  set status = case/);
+  assert.match(aliasHotfix, /create or replace function public\.review_contractor_invoice/);
+  assert.match(aliasHotfix, /create or replace function public\.retract_contractor_invoice_rejection/);
+  assert.match(aliasHotfix, /update public\.work_orders target_work_order/);
+  assert.doesNotMatch(aliasHotfix, /update public\.work_orders work_order\n  set status = case/);
 });
