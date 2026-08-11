@@ -12,6 +12,7 @@ import {
   downloadInvoicePdfBlob,
   deleteInvoice,
   reviewContractorInvoice,
+  reviewContractorInvoices,
   resubmitRejectedContractorInvoice,
   retractContractorInvoiceRejection,
   insertActivity,
@@ -482,6 +483,69 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     }
   };
 
+  const doBatchReviewInvoices = async (
+    invoiceIds: string[],
+    action: "approve" | "reject",
+    reason?: string,
+  ) => {
+    const normalizedIds = [...new Set((invoiceIds || []).filter(Boolean))];
+    const reasonText = (reason || "").trim();
+    if (normalizedIds.length === 0) {
+      fire("Select at least one invoice");
+      return false;
+    }
+    if (normalizedIds.length > 100) {
+      fire("Select no more than 100 invoices at a time");
+      return false;
+    }
+    if (action === "reject" && !reasonText) {
+      fire("Enter a rejection reason");
+      return false;
+    }
+
+    try {
+      const result = await reviewContractorInvoices(
+        normalizedIds,
+        action,
+        reasonText,
+      );
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      ]);
+
+      const reviewedCount = Number(result?.count || normalizedIds.length);
+      if (action === "approve") {
+        fire(`${reviewedCount} invoice${reviewedCount === 1 ? "" : "s"} approved`);
+        return true;
+      }
+
+      // Review decisions are already committed atomically. Notifications are
+      // deliberately independent so a mail outage cannot undo staff work.
+      const notifications = await Promise.allSettled(
+        normalizedIds.map(invoiceId =>
+          notifyInvoiceReview(invoiceId, "rejected"),
+        ),
+      );
+      const failedNotifications = notifications.filter(
+        notification => notification.status === "rejected",
+      ).length;
+      if (failedNotifications > 0) {
+        console.error(
+          "Batch invoice rejection notifications failed",
+          notifications.filter(notification => notification.status === "rejected"),
+        );
+        fire(`${reviewedCount} invoices rejected, but ${failedNotifications} notification${failedNotifications === 1 ? "" : "s"} failed`);
+      } else {
+        fire(`${reviewedCount} invoice${reviewedCount === 1 ? "" : "s"} rejected — contractors notified`);
+      }
+      return true;
+    } catch (error: any) {
+      fire(`Batch ${action === "approve" ? "approval" : "rejection"} failed: ${error.message || error}`);
+      return false;
+    }
+  };
+
   const doRetractInvoiceRejection = async (inv: any) => {
     try {
       await retractContractorInvoiceRejection(inv.id);
@@ -533,7 +597,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal,
+    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal,
     lineAmount, invSubtotal, invTotal,
   };
 }

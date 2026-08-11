@@ -1591,6 +1591,14 @@ export type Database = {
         }
         Returns: Json
       }
+      review_contractor_invoices: {
+        Args: {
+          p_action: string
+          p_invoice_ids: string[]
+          p_reason?: string | null
+        }
+        Returns: Json
+      }
       set_activity_contractor_attention: {
         Args: { p_activity_id: string; p_required: boolean }
         Returns: undefined
