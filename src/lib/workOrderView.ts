@@ -229,6 +229,18 @@ export const workOrderHasPendingSevenElevenSync = (
   || Number(wo?.pendingSevenElevenSyncCount || 0) > 0
 );
 
+export const canFlagWorkOrderCapital = (
+  wo: WorkOrderViewRow | null | undefined,
+) => Boolean(wo?.status && [
+  "assigned",
+  "wip",
+  "parts",
+  "completed",
+  "pending_invoice",
+  "pending_approval",
+  "pending_payment",
+].includes(wo.status));
+
 /**
  * Keep the caller's existing SLA/date/priority order within each group while
  * lifting every work order with an unsynced 7-Eleven update to the top.

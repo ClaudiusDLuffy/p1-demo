@@ -1553,6 +1553,29 @@ export type Database = {
         }
         Returns: Json
       }
+      save_staff_billing_invoice: {
+        Args: {
+          p_actor_id: string
+          p_cme: string | null
+          p_due_date: string | null
+          p_invoice_date: string
+          p_invoice_id: string | null
+          p_lines: Json
+          p_num: string
+          p_sales_tax: number
+          p_service_date: string | null
+          p_source_invoice_ids: string[]
+          p_state: string
+          p_store_address: string | null
+          p_store_number: string
+          p_tax_rate: number | null
+          p_tax_state: string | null
+          p_terms: string
+          p_territory: string
+          p_work_order_id: string | null
+        }
+        Returns: string
+      }
       move_work_order_straight_to_billing: {
         Args: { p_work_order_id: string }
         Returns: Database["public"]["Tables"]["work_orders"]["Row"]

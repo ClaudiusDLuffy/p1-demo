@@ -76,6 +76,7 @@ import {
   portalViewKey,
   type PortalViewState,
 } from "../lib/portalNavigation";
+import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -1672,44 +1673,53 @@ export default function PortalShell() {
       : null,
     [selectedStaffTodo, staffProfiles],
   );
+  const loadBillingInvoiceForExport = async (invoice: any) => {
+    const payload = await billingFetch(
+      `/api/billing-invoices?invoiceId=${encodeURIComponent(invoice.id)}`,
+    );
+    const exportInvoice = payload.invoice;
+    if (!exportInvoice) throw new Error("Billing invoice could not be reloaded");
+
+    assertStaffInvoiceIntegrity(exportInvoice);
+    qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) =>
+      (items || []).map(item => item.id === exportInvoice.id ? exportInvoice : item),
+    );
+    return exportInvoice;
+  };
   const doDownloadBillingInvoice = async (invoice: any) => {
     try {
+      // Always reload the exact invoice before creating an external document.
+      // A stale or historically truncated line array must never be rendered
+      // beside a header total that was calculated from more lines.
+      const exportInvoice = await loadBillingInvoiceForExport(invoice);
       const { triggerBlobDownload, generateStaffInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
       const logoDataUrl = await loadLogoDataUrl();
       const blob = generateStaffInvoicePDFBlob({
-        num: invoice.num,
-        wot: invoice.wot || "Standalone",
-        store: invoice.store || "",
-        storeAddr: invoice.storeAddr || "",
-        invoiceDate: invoice.invoiceDate || invoice.invoiceDateRaw || "",
-        serviceDate: invoice.serviceDate || invoice.serviceDateRaw || "",
-        terms: invoice.terms || "Net 30",
-        cme: invoice.cme || "",
-        lines: invoice.lines || [],
-        subtotal: invoice.subtotal || 0,
-        salesTax: invoice.salesTax || 0,
-        total: invoice.total || 0,
+        num: exportInvoice.num,
+        wot: exportInvoice.wot || "Standalone",
+        store: exportInvoice.store || "",
+        storeAddr: exportInvoice.storeAddr || "",
+        invoiceDate: exportInvoice.invoiceDate || exportInvoice.invoiceDateRaw || "",
+        serviceDate: exportInvoice.serviceDate || exportInvoice.serviceDateRaw || "",
+        terms: exportInvoice.terms || "Net 30",
+        cme: exportInvoice.cme || "",
+        lines: exportInvoice.lines || [],
+        subtotal: exportInvoice.subtotal || 0,
+        salesTax: exportInvoice.salesTax || 0,
+        total: exportInvoice.total || 0,
       }, logoDataUrl);
-      triggerBlobDownload(blob, `Invoice-${invoice.num}-${invoice.wot || "Standalone"}.pdf`);
-      fire(`Invoice ${invoice.num} downloaded`);
+      triggerBlobDownload(blob, `Invoice-${exportInvoice.num}-${exportInvoice.wot || "Standalone"}.pdf`);
+      fire(`Invoice ${exportInvoice.num} downloaded`);
     } catch (e: any) {
       fire(`Download failed: ${e.message || e}`);
     }
   };
   const doDownloadBillingInvoiceCsv = async (invoice: any) => {
     try {
-      let exportInvoice = invoice;
-      if ((invoice.lines || []).length === 0) {
-        const payload = await billingFetch("/api/billing-invoices");
-        const refreshed = (payload.invoices || []).find(
-          (candidate: any) => candidate.id === invoice.id,
-        );
-        if (refreshed) exportInvoice = refreshed;
-      }
-
+      const exportInvoice = await loadBillingInvoiceForExport(invoice);
       const { downloadStaffInvoiceCsv } = await import("../lib/invoiceCsv");
       downloadStaffInvoiceCsv(exportInvoice);
-      fire(`Invoice ${invoice.num} CSV downloaded`);
+      fire(`Invoice ${exportInvoice.num} CSV downloaded`);
     } catch (e: any) {
       fire(`CSV download failed: ${e.message || e}`);
     }
@@ -1774,6 +1784,20 @@ export default function PortalShell() {
     setSelectedBillingInvoice(null);
     setPage("billing");
     setModal("createBillingInvoice");
+  };
+  const approveInvoiceAndOpenBilling = async (invoice: any) => {
+    if (!invoice?.id || !invoice?.wot) return false;
+    const approved = await doApproveInvoice(invoice.id);
+    if (!approved) return false;
+
+    rememberWorkOrderReturn(invoice.wot);
+    setBillingDraftToEdit(null);
+    setBillingSourceToStart(invoice.id);
+    setBillingWorkOrderToStart(invoice.wot);
+    setSelectedBillingInvoice(null);
+    setPage("billing");
+    setModal("createBillingInvoice");
+    return true;
   };
   const refreshStaffWork = async () => {
     await Promise.all([
@@ -2713,6 +2737,7 @@ export default function PortalShell() {
             doCapitalDecline={doCapitalDecline}
             doMoveToInvoice={doMoveToInvoice}
             doApproveInvoice={doApproveInvoice}
+            onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
             doMarkPaid={doMarkPaid}
             doCloseWO={doCloseWO}
             doDownloadInvoice={doDownloadInvoice}

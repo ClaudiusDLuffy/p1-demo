@@ -17,11 +17,16 @@ import {
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
 import {
+  applyStaffBillingPartsMarkup,
   importedStaffBillingRate,
   isStaffBillingPartsLine,
+  normalizeImportedStaffBillingLineType,
   normalizeStaffBillingLineType,
+  staffBillingDescriptionPlaceholder,
+  staffBillingMarkupPercent,
   STAFF_BILLING_LINE_TYPES,
 } from "../../lib/staffBilling";
+import { billingWorkOrderOptions } from "../../lib/billingWorkOrderOptions";
 import { supabase } from "../../lib/supabase/client";
 import BillingWorkOrderActivityPanel from "./BillingWorkOrderActivityPanel";
 import {
@@ -211,6 +216,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const skipRestoredWorkOrderHydration = useRef<string | null>(null);
   const draftHydrated = useRef(false);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
   const isEditing = !!editingInvoice?.id;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === CONTROLLER_EMAIL;
@@ -256,6 +262,9 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   const { fields, append, remove, replace, move } = useFieldArray({ control, name: "lines" });
   const lines = watch("lines") || [];
+  const allLinesTaxable = lines.length > 0
+    && lines.every((line: any) => Boolean(line?.isTaxable));
+  const someLinesTaxable = lines.some((line: any) => Boolean(line?.isTaxable));
   const subtotal = lines.reduce((sum: number, line: any) => sum + amount(line), 0);
   const selectedWorkOrderId = watch("workOrderId");
   const territory = String(watch("territory") || "");
@@ -391,17 +400,21 @@ export default function BillingInvoiceCreateModal(props: any) {
     ? ((subtotal - contractorCost) / subtotal) * 100
     : null;
 
-  const workOrderOptions = useMemo(() => {
-    const q = woSearch.trim().toLowerCase();
-    if (!q) return activeWorkOrders.slice(0, 80);
-    return activeWorkOrders.filter((wo: any) =>
-      [wo.id, wo.incidentId, wo.store, wo.city, wo.addr, wo.summary]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
-    ).slice(0, 80);
-  }, [activeWorkOrders, woSearch]);
+  const workOrderOptions = useMemo(
+    () => billingWorkOrderOptions(
+      activeWorkOrders,
+      woSearch,
+      selectedWorkOrderId,
+    ),
+    [activeWorkOrders, selectedWorkOrderId, woSearch],
+  );
+
+  useEffect(() => {
+    if (selectAllTaxableRef.current) {
+      selectAllTaxableRef.current.indeterminate = someLinesTaxable
+        && !allLinesTaxable;
+    }
+  }, [allLinesTaxable, someLinesTaxable]);
 
   const persistBillingDraft = useCallback(() => {
     if (
@@ -758,13 +771,16 @@ export default function BillingInvoiceCreateModal(props: any) {
             ),
           }];
         }
-        return invoice.lines.map((line: any) => ({
-          type: normalizeStaffBillingLineType(line.type),
-          desc: line.desc || line.description || "Contractor service",
-          qty: Number(line.qty || 1),
-          sourceInvoiceLineId: line.id || null,
-          sourceUnitCost: Number(line.rate || 0),
-        }));
+        return invoice.lines.map((line: any) => {
+          const description = line.desc || line.description || "Contractor service";
+          return {
+            type: normalizeImportedStaffBillingLineType(line.type, description),
+            desc: description,
+            qty: Number(line.qty || 1),
+            sourceInvoiceLineId: line.id || null,
+            sourceUnitCost: Number(line.rate || 0),
+          };
+        });
       });
 
       const imported = sourceLines.map((line: any) => {
@@ -1068,10 +1084,32 @@ export default function BillingInvoiceCreateModal(props: any) {
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Notes / CME</span><input {...register("cme")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
         </div>
 
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>Line items</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>Line items</div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: T.muted, fontSize: 11, fontWeight: 600, cursor: fields.length > 0 ? "pointer" : "default" }} title="Set every line taxable or non-taxable">
+            <input
+              ref={selectAllTaxableRef}
+              type="checkbox"
+              checked={allLinesTaxable}
+              disabled={fields.length === 0}
+              onChange={(event: any) => {
+                fields.forEach((_: any, lineIndex: number) => {
+                  setValue(
+                    `lines.${lineIndex}.isTaxable` as const,
+                    event.target.checked,
+                    { shouldDirty: true },
+                  );
+                });
+              }}
+              aria-label="Set all line items taxable"
+            />
+            <span>Set all taxable</span>
+          </label>
+        </div>
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
           <div className="billing-line-head" style={{ display: "grid", gridTemplateColumns: "28px minmax(86px, 110px) minmax(120px, 1fr) minmax(48px, 58px) minmax(64px, 82px) minmax(58px, 74px) minmax(54px, 66px) minmax(72px, 92px)", gap: 8, padding: "10px 48px 10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
-            <div /><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Markup</div><div style={{ textAlign: "center" }}>Taxable</div><div style={{ textAlign: "right" }}>Amount</div>
+            <div /><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Markup</div><div style={{ textAlign: "center" }}>Taxable</div>
+            <div style={{ textAlign: "right" }}>Amount</div>
           </div>
           {fields.map((field, i) => {
             const line = lines[i] || field;
@@ -1080,6 +1118,9 @@ export default function BillingInvoiceCreateModal(props: any) {
               : Number(line.sourceUnitCost);
             const quantityConstraints = invoiceQuantityInputConstraints(line.type);
             const typeRegistration = register(`lines.${i}.type` as const);
+            const rateRegistration = register(`lines.${i}.rate` as const, {
+              valueAsNumber: true,
+            });
             return (
               <div
                 key={field.id}
@@ -1162,7 +1203,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 >
                   {STAFF_BILLING_LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </Sel>
-                <textarea {...register(`lines.${i}.desc` as const)} placeholder={/^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
+                <textarea {...register(`lines.${i}.desc` as const)} placeholder={staffBillingDescriptionPlaceholder(line.type)} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
                 <input
                   type="number"
                   min={quantityConstraints.min}
@@ -1172,8 +1213,22 @@ export default function BillingInvoiceCreateModal(props: any) {
                   {...register(`lines.${i}.qty` as const, { valueAsNumber: true })}
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
                 />
-                <input type="number" step="any" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }} />
-                {sourceUnitCost == null || !isStaffBillingPartsLine(line.type) ? (
+                <input
+                  type="number"
+                  step="any"
+                  {...rateRegistration}
+                  onChange={(event: any) => {
+                    void rateRegistration.onChange(event);
+                    if (!isStaffBillingPartsLine(line.type) || sourceUnitCost == null) return;
+                    setValue(
+                      `lines.${i}.markupPercent` as const,
+                      staffBillingMarkupPercent(sourceUnitCost, event.target.value),
+                      { shouldDirty: true },
+                    );
+                  }}
+                  style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
+                />
+                {!isStaffBillingPartsLine(line.type) ? (
                   <div style={{ paddingTop: 10, textAlign: "right", color: T.subtle, fontSize: 11 }}>-</div>
                 ) : (
                   <label style={{ position: "relative" }}>
@@ -1183,20 +1238,32 @@ export default function BillingInvoiceCreateModal(props: any) {
                       max="999"
                       step="0.1"
                       value={line.markupPercent ?? ""}
+                      disabled={sourceUnitCost == null && !(Number(line.rate) > 0)}
                       onChange={(event: any) => {
-                        const markup = Number(event.target.value);
+                        const next = applyStaffBillingPartsMarkup(
+                          sourceUnitCost,
+                          line.rate,
+                          event.target.value,
+                        );
+                        if (!next) return;
+                        setValue(
+                          `lines.${i}.sourceUnitCost` as const,
+                          next.sourceUnitCost,
+                          { shouldDirty: true },
+                        );
                         setValue(
                           `lines.${i}.markupPercent` as const,
-                          Number.isFinite(markup) ? markup : 0,
+                          next.markupPercent,
                           { shouldDirty: true },
                         );
                         setValue(
                           `lines.${i}.rate` as const,
-                          money(sourceUnitCost * (1 + (Number.isFinite(markup) ? markup : 0) / 100)),
+                          next.rate,
                           { shouldDirty: true, shouldValidate: true },
                         );
                       }}
                       aria-label={`Line ${i + 1} markup percent`}
+                      title={sourceUnitCost == null ? "Enter the part cost in Rate, then set markup" : "Parts markup percentage"}
                       style={{ width: "100%", padding: "8px 20px 8px 7px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
                     />
                     <span style={{ position: "absolute", right: 7, top: 9, color: T.subtle, fontSize: 11 }}>%</span>

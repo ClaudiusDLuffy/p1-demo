@@ -642,7 +642,7 @@ export default function useWorkOrders({
     setLoading("approveInvoice_" + invoiceId, true);
     try {
     const inv = invoices.find((i: any) => i.id === invoiceId);
-    if (!inv) { fire("Invoice not found"); return; }
+    if (!inv) { fire("Invoice not found"); return false; }
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
     const nextInvoices = invoices.map((i: any) => i.id === invoiceId ? { ...i, state: "approved" } : i);
@@ -674,6 +674,7 @@ export default function useWorkOrders({
         ? `Invoice #${inv.num} approved — ready for P1 billing`
         : `Invoice #${inv.num} approved`);
     }
+    return Boolean(ok);
     } finally {
       setLoading("approveInvoice_" + invoiceId, false);
     }

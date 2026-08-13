@@ -30,6 +30,7 @@ export default function BillingInvoiceList(props: any) {
   } = props;
   const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
+  const [readyToBillExpanded, setReadyToBillExpanded] = useState(false);
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
   const showingRecentlyApproved = tab === "recently_approved";
@@ -101,27 +102,39 @@ export default function BillingInvoiceList(props: any) {
     <div style={{ animation: "fadeUp 0.25s" }}>
       {!controller && readyWorkOrders.length > 0 && (
         <section style={{ marginBottom: 22 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 9 }}>
-            <h2 style={{ margin: 0, fontSize: 14, color: T.ink }}>Ready to Bill</h2>
+          <button
+            type="button"
+            aria-expanded={readyToBillExpanded}
+            aria-controls="billing-ready-work-orders"
+            onClick={() => setReadyToBillExpanded(expanded => !expanded)}
+            className="card"
+            style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", background: T.surface, color: T.ink, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <span aria-hidden="true" style={{ color: T.subtle, transform: readyToBillExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
+              <strong style={{ fontSize: 14 }}>Ready to Bill</strong>
+            </span>
             <span style={{ fontSize: 11, color: T.subtle }}>{readyWorkOrders.length} work order{readyWorkOrders.length === 1 ? "" : "s"}</span>
-          </div>
-          <div className="card" style={{ overflow: "hidden" }}>
-            {readyWorkOrders.map((workOrder: any, index: number) => (
-              <div
-                key={workOrder.id}
-                className="billing-ready-row"
-                style={{ display: "grid", gridTemplateColumns: "minmax(160px, 1fr) minmax(120px, 1fr) minmax(160px, 2fr) auto", alignItems: "center", gap: 14, padding: "12px 14px", borderBottom: index === readyWorkOrders.length - 1 ? "none" : `1px solid ${T.borderSoft}` }}
-              >
-                <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent, fontSize: 11, fontWeight: 700 }}>
-                  {workOrder.id}
-                  <CopyWorkOrderButton value={workOrder.id} />
-                </span>
-                <span style={{ color: T.ink, fontSize: 12 }}>Store #{workOrder.store || "-"}</span>
-                <span style={{ minWidth: 0, color: T.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workOrder.summary || "Billing-only work order"}</span>
-                <button type="button" className="btn-primary" onClick={() => onCreateFromWorkOrder?.(workOrder)}>Create invoice</button>
-              </div>
-            ))}
-          </div>
+          </button>
+          {readyToBillExpanded && (
+            <div id="billing-ready-work-orders" className="card" style={{ overflow: "hidden", marginTop: 9 }}>
+              {readyWorkOrders.map((workOrder: any, index: number) => (
+                <div
+                  key={workOrder.id}
+                  className="billing-ready-row"
+                  style={{ display: "grid", gridTemplateColumns: "minmax(160px, 1fr) minmax(120px, 1fr) minmax(160px, 2fr) auto", alignItems: "center", gap: 14, padding: "12px 14px", borderBottom: index === readyWorkOrders.length - 1 ? "none" : `1px solid ${T.borderSoft}` }}
+                >
+                  <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent, fontSize: 11, fontWeight: 700 }}>
+                    {workOrder.id}
+                    <CopyWorkOrderButton value={workOrder.id} />
+                  </span>
+                  <span style={{ color: T.ink, fontSize: 12 }}>Store #{workOrder.store || "-"}</span>
+                  <span style={{ minWidth: 0, color: T.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workOrder.summary || "Billing-only work order"}</span>
+                  <button type="button" className="btn-primary" onClick={() => onCreateFromWorkOrder?.(workOrder)}>Create invoice</button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
