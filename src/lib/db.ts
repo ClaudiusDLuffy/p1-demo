@@ -1521,12 +1521,13 @@ const mapWoPart = (p: any) => ({
 
 export async function loadWoParts(): Promise<any[]> {
   const sb = supabase();
-  const { data, error } = await (sb as any)
+  const rows = await collectSupabasePages<any>((from, to) => (sb as any)
     .from("wo_parts")
     .select("*")
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapWoPart);
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, to));
+  return rows.map(mapWoPart);
 }
 
 export async function insertWoPart(part: {

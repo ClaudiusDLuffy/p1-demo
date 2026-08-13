@@ -6,6 +6,7 @@ import {
   taxRateFromPercent,
 } from "../../../lib/billingRules";
 import { roundInvoiceNumber } from "../../../lib/invoiceMath";
+import { collectSupabasePages } from "../../../lib/paginatedQuery";
 import { normalizeStaffBillingLineType } from "../../../lib/staffBilling";
 import type { Database } from "../../../lib/supabase/database.types";
 
@@ -283,12 +284,7 @@ async function resolveTax(
   };
 }
 
-const lineRowsForInvoice = (
-  invoiceId: string,
-  lines: ValidBillingLine[],
-) => lines.map((line, index) => ({
-  invoice_id: invoiceId,
-  position: index + 1,
+const rpcLinePayload = (lines: ValidBillingLine[]) => lines.map(line => ({
   type: line.type,
   description: line.description,
   qty: line.qty,
@@ -299,38 +295,127 @@ const lineRowsForInvoice = (
   markup_percent: line.markupPercent,
 }));
 
+type StaffInvoiceSaveInput = {
+  actorId: string;
+  invoiceId: string | null;
+  num: string;
+  workOrderId: string | null;
+  storeNumber: string;
+  storeAddress: string | null;
+  cme: string | null;
+  invoiceDate: string;
+  serviceDate: string | null;
+  dueDate: string | null;
+  terms: string;
+  state: "draft" | "submitted";
+  tax: {
+    salesTax: number;
+    taxState: string | null;
+    taxRate: number | null;
+  };
+  territory: string;
+  lines: ValidBillingLine[];
+  sourceInvoiceIds: string[];
+};
+
+async function saveStaffBillingInvoice(
+  sb: ReturnType<typeof createServerClient>,
+  input: StaffInvoiceSaveInput,
+) {
+  const { data, error } = await (sb as any).rpc(
+    "save_staff_billing_invoice",
+    {
+      p_actor_id: input.actorId,
+      p_invoice_id: input.invoiceId,
+      p_num: input.num,
+      p_work_order_id: input.workOrderId,
+      p_store_number: input.storeNumber,
+      p_store_address: input.storeAddress,
+      p_cme: input.cme,
+      p_invoice_date: input.invoiceDate,
+      p_service_date: input.serviceDate,
+      p_due_date: input.dueDate,
+      p_terms: input.terms,
+      p_state: input.state,
+      p_sales_tax: input.tax.salesTax,
+      p_tax_state: input.tax.taxState,
+      p_tax_rate: input.tax.taxRate,
+      p_territory: input.territory,
+      p_lines: rpcLinePayload(input.lines),
+      p_source_invoice_ids: input.sourceInvoiceIds,
+    },
+  );
+  if (error) throw error;
+  if (!data) throw new Error("Billing invoice save returned no invoice id");
+  return String(data);
+}
+
+const billingSaveErrorStatus = (error: any) => {
+  switch (String(error?.code || "")) {
+    case "22023":
+    case "23503":
+    case "23514":
+      return 400;
+    case "23505":
+    case "55000":
+      return 409;
+    case "42501":
+      return 403;
+    case "P0002":
+      return 404;
+    default:
+      return 500;
+  }
+};
+
 async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
-  const [invoiceRes, contractorRes, lineRes, sourceRes] = await Promise.all([
-    (sb as any)
+  // PostgREST caps an unpaged response (1,000 rows in production). Billing
+  // joins four global tables in memory, so truncating any one of them makes
+  // an otherwise valid invoice appear to have missing lines or sources while
+  // its persisted header total remains correct. Page every source with a
+  // deterministic tie-breaker before assembling invoices.
+  const [invoiceRows, contractorRows, lineRows, sourceRows] = await Promise.all([
+    collectSupabasePages<any>((from, to) => (sb as any)
       .from("invoices")
       .select("*")
       .eq("invoice_type", "staff")
       .is("deleted_at", null)
-      .order("invoice_date", { ascending: false }),
-    (sb as any)
+      .order("invoice_date", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    collectSupabasePages<any>((from, to) => (sb as any)
       .from("invoices")
       .select("*")
       .eq("invoice_type", "contractor")
-      .is("deleted_at", null),
-    sb.from("invoice_lines").select("*").order("position"),
-    (sb as any).from("staff_invoice_sources").select("*"),
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, to)),
+    collectSupabasePages<any>((from, to) => sb
+      .from("invoice_lines")
+      .select("*")
+      .order("invoice_id", { ascending: true })
+      .order("position", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    collectSupabasePages<any>((from, to) => (sb as any)
+      .from("staff_invoice_sources")
+      .select("*")
+      .order("staff_invoice_id", { ascending: true })
+      .order("contractor_invoice_id", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
   ]);
 
-  if (invoiceRes.error) throw invoiceRes.error;
-  if (contractorRes.error) throw contractorRes.error;
-  if (lineRes.error) throw lineRes.error;
-  if (sourceRes.error) throw sourceRes.error;
-
   const linesByInvoice: Record<string, any[]> = {};
-  for (const line of lineRes.data || []) {
+  for (const line of lineRows) {
     (linesByInvoice[line.invoice_id] ||= []).push(line);
   }
 
   const contractorById = new Map<string, any>(
-    (contractorRes.data || []).map((invoice: any) => [invoice.id, invoice]),
+    contractorRows.map((invoice: any) => [invoice.id, invoice]),
   );
   const sourcesByStaffInvoice: Record<string, any[]> = {};
-  for (const source of sourceRes.data || []) {
+  for (const source of sourceRows) {
     const contractorInvoice = contractorById.get(source.contractor_invoice_id);
     if (!contractorInvoice) continue;
     const mapped = mapInvoice(
@@ -340,7 +425,7 @@ async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
     (sourcesByStaffInvoice[source.staff_invoice_id] ||= []).push(mapped);
   }
 
-  return (invoiceRes.data || []).map((invoice: any) => {
+  return invoiceRows.map((invoice: any) => {
     const mapped = mapInvoice(invoice, linesByInvoice[invoice.id] || []);
     const sourceInvoices = sourcesByStaffInvoice[invoice.id] || [];
     return {
@@ -350,6 +435,82 @@ async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
       ...sourceMetrics(sourceInvoices, mapped.subtotal),
     };
   });
+}
+
+async function loadStaffInvoiceById(
+  sb: ReturnType<typeof createServerClient>,
+  invoiceId: string,
+) {
+  const { data: invoice, error: invoiceError } = await (sb as any)
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .eq("invoice_type", "staff")
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (invoiceError) throw invoiceError;
+  if (!invoice) return null;
+
+  const [staffLines, sourceLinks] = await Promise.all([
+    collectSupabasePages<any>((from, to) => sb
+      .from("invoice_lines")
+      .select("*")
+      .eq("invoice_id", invoiceId)
+      .order("position", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    collectSupabasePages<any>((from, to) => (sb as any)
+      .from("staff_invoice_sources")
+      .select("*")
+      .eq("staff_invoice_id", invoiceId)
+      .order("contractor_invoice_id", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+  ]);
+
+  const sourceInvoiceIds = sourceLinks.map(link => link.contractor_invoice_id);
+  let sourceInvoices: any[] = [];
+  if (sourceInvoiceIds.length > 0) {
+    const [sourceRows, sourceLines] = await Promise.all([
+      collectSupabasePages<any>((from, to) => (sb as any)
+        .from("invoices")
+        .select("*")
+        .in("id", sourceInvoiceIds)
+        .eq("invoice_type", "contractor")
+        .is("deleted_at", null)
+        .order("id", { ascending: true })
+        .range(from, to)),
+      collectSupabasePages<any>((from, to) => sb
+        .from("invoice_lines")
+        .select("*")
+        .in("invoice_id", sourceInvoiceIds)
+        .order("invoice_id", { ascending: true })
+        .order("position", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)),
+    ]);
+    const sourceLinesByInvoice: Record<string, any[]> = {};
+    for (const line of sourceLines) {
+      (sourceLinesByInvoice[line.invoice_id] ||= []).push(line);
+    }
+    const sourceById = new Map(
+      sourceRows.map(row => [
+        row.id,
+        mapInvoice(row, sourceLinesByInvoice[row.id] || []),
+      ]),
+    );
+    sourceInvoices = sourceInvoiceIds
+      .map(id => sourceById.get(id))
+      .filter(Boolean);
+  }
+
+  const mapped = mapInvoice(invoice, staffLines);
+  return {
+    ...mapped,
+    sourceInvoices,
+    sourceInvoiceIds,
+    ...sourceMetrics(sourceInvoices, mapped.subtotal),
+  };
 }
 
 async function loadContractorInvoiceSources(
@@ -451,6 +612,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ invoices });
     }
 
+    const invoiceId = String(
+      req.nextUrl.searchParams.get("invoiceId") || "",
+    ).trim();
+    if (invoiceId) {
+      const invoice = await loadStaffInvoiceById(auth.sb, invoiceId);
+      if (!invoice) return jsonError("Billing invoice not found", 404);
+      return NextResponse.json({ invoice });
+    }
     const invoices = await loadStaffInvoices(auth.sb);
     return NextResponse.json({ invoices });
   } catch (err) {
@@ -469,8 +638,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const targetState = body.state === "draft" ? "draft" : "submitted";
-    const requestedNum = String(body.num || "").trim();
-    const userTypedNum = !!body.userTypedNum;
+    const suppliedNum = String(body.num || "").trim();
+    const userTypedNum = !!body.userTypedNum && Boolean(suppliedNum);
     const sourceInvoiceIds: string[] = Array.from(new Set<string>(
       (Array.isArray(body.sourceInvoiceIds) ? body.sourceInvoiceIds : [])
         .map((id: unknown) => String(id || "").trim())
@@ -479,8 +648,7 @@ export async function POST(req: NextRequest) {
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
     const validLines = normalizeBillingLines(lines);
 
-    if (!requestedNum) return jsonError("Invoice number is required", 400);
-    if (requestedNum.length > 80 || /[\u0000-\u001f\u007f]/.test(requestedNum)) {
+    if (suppliedNum && (suppliedNum.length > 80 || /[\u0000-\u001f\u007f]/.test(suppliedNum))) {
       return jsonError("Invoice number is invalid", 400);
     }
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
@@ -540,136 +708,58 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const subtotal = roundInvoiceNumber(
-      validLines.reduce((sum, line) => sum + line.qty * line.rate, 0),
-    );
     const tax = await resolveTax(auth.sb, body, validLines);
-    const salesTax = tax.salesTax;
-    const total = roundInvoiceNumber(subtotal + salesTax);
+    const requestedNum = suppliedNum
+      || await nextStaffInvoiceNum(auth.sb, auth.user.id);
+    if (!requestedNum || requestedNum.length > 80 || /[\u0000-\u001f\u007f]/.test(requestedNum)) {
+      return jsonError("An invoice number could not be allocated", 500);
+    }
     let desiredNum = requestedNum;
 
-    let inserted: any = null;
-    let insertError: any = null;
+    let savedInvoiceId: string | null = null;
+    let saveError: any = null;
     for (let attempt = 0; attempt < 6; attempt++) {
-      const { data, error } = await (auth.sb as any)
-        .from("invoices")
-        .insert({
+      try {
+        savedInvoiceId = await saveStaffBillingInvoice(auth.sb, {
+          actorId: auth.user.id,
+          invoiceId: null,
           num: desiredNum,
-          invoice_type: "staff",
-          work_order_id: body.workOrderId || null,
-          store_number: String(body.storeNumber || "").trim(),
-          store_address: body.storeAddress || null,
-          contractor_id: null,
+          workOrderId: String(body.workOrderId || "").trim() || null,
+          storeNumber: String(body.storeNumber || "").trim(),
+          storeAddress: body.storeAddress || null,
           cme: body.cme || null,
-          invoice_date: body.invoiceDate,
-          service_date: body.serviceDate || null,
-          due_date: body.dueDate || null,
+          invoiceDate: body.invoiceDate,
+          serviceDate: body.serviceDate || null,
+          dueDate: body.dueDate || null,
           terms: body.terms || "Net 30",
           state: targetState,
-          subtotal,
-          sales_tax: salesTax,
-          tax_state: tax.taxState,
-          tax_rate: tax.taxRate,
-          total,
+          tax,
           territory: String(body.territory || "").trim(),
-          created_by: auth.user.id,
-        })
-        .select()
-        .single();
-
-      if (!error) {
-        inserted = data;
-        insertError = null;
+          lines: validLines,
+          sourceInvoiceIds,
+        });
+        saveError = null;
         break;
+      } catch (error: any) {
+        saveError = error;
+        if (error?.code !== "23505" || userTypedNum) break;
+        desiredNum = await nextStaffInvoiceNum(auth.sb, auth.user.id);
       }
-
-      insertError = error;
-      if (error.code !== "23505" || userTypedNum) break;
-      desiredNum = await nextStaffInvoiceNum(auth.sb, auth.user.id);
     }
 
-    if (insertError?.code === "23505") {
+    if (saveError?.code === "23505") {
       return jsonError(`Invoice number ${desiredNum} already exists`, 409);
     }
-    if (insertError || !inserted) throw insertError || new Error("Invoice insert failed");
-
-    const lineRows = lineRowsForInvoice(inserted.id, validLines);
-
-    const { data: createdLines, error: lineError } = await auth.sb
-      .from("invoice_lines")
-      .insert(lineRows)
-      .select();
-
-    if (lineError) {
-      await (auth.sb as any)
-        .from("invoices")
-        .update({ deleted_at: new Date().toISOString(), deleted_by: auth.user.id })
-        .eq("id", inserted.id);
-      throw lineError;
+    if (saveError || !savedInvoiceId) {
+      throw saveError || new Error("Invoice save failed");
     }
 
-    if (sourceInvoiceIds.length > 0) {
-      const sourceRows = sourceInvoiceIds.map(contractorInvoiceId => ({
-        staff_invoice_id: inserted.id,
-        contractor_invoice_id: contractorInvoiceId,
-        work_order_id: body.workOrderId,
-        created_by: auth.user.id,
-      }));
-      const { error: sourceInsertError } = await (auth.sb as any)
-        .from("staff_invoice_sources")
-        .insert(sourceRows);
-
-      if (sourceInsertError) {
-        await (auth.sb as any)
-          .from("invoices")
-          .update({ deleted_at: new Date().toISOString(), deleted_by: auth.user.id })
-          .eq("id", inserted.id);
-        throw sourceInsertError;
-      }
-    }
-
-    const sourceInvoices = sourceInvoiceIds.length > 0
-      ? await loadStaffInvoices(auth.sb).then((items: any[]) =>
-          items.find(item => item.id === inserted.id)?.sourceInvoices || [],
-        )
-      : [];
-    const mappedInvoice = mapInvoice(inserted, createdLines || []);
-
-    if (body.workOrderId) {
-      const sourceText = sourceInvoiceIds.length > 0
-        ? ` from ${sourceInvoiceIds.length} contractor invoice${sourceInvoiceIds.length === 1 ? "" : "s"}`
-        : "";
-      const actionText = targetState === "submitted"
-        ? `prepared for 7-Eleven submission${sourceText}.`
-        : `created${sourceText}.`;
-      const { error: activityError } = await (auth.sb as any)
-        .from("activities")
-        .insert({
-          work_order_id: body.workOrderId,
-          author_id: auth.user.id,
-          author_name: auth.profile.name || "P1 staff",
-          text: `P1 invoice #${mappedInvoice.num} ${actionText}`,
-          type: "system",
-          is_staff_override: false,
-          is_staff_only: true,
-          event_key: "staff_billing",
-        });
-      if (activityError) {
-        console.error("Billing activity audit insert failed", activityError);
-      }
-    }
-
-    return NextResponse.json({
-      invoice: {
-        ...mappedInvoice,
-        sourceInvoices,
-        sourceInvoiceIds,
-        ...sourceMetrics(sourceInvoices, mappedInvoice.subtotal),
-      },
-    });
+    const invoice = await loadStaffInvoiceById(auth.sb, savedInvoiceId);
+    if (!invoice) throw new Error("Created invoice could not be reloaded");
+    return NextResponse.json({ invoice });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create billing invoice";
-    return jsonError(message, 500);
+    return jsonError(message, billingSaveErrorStatus(err));
   }
 }
 
@@ -693,8 +783,7 @@ export async function PATCH(req: NextRequest) {
         });
       if (finalizationError) throw finalizationError;
 
-      const refreshed = await loadStaffInvoices(auth.sb);
-      const invoice = refreshed.find((item: any) => item.id === id);
+      const invoice = await loadStaffInvoiceById(auth.sb, id);
       if (!invoice) throw new Error("Billed invoice could not be reloaded");
 
       return NextResponse.json({ invoice, finalization });
@@ -791,126 +880,42 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const subtotal = roundInvoiceNumber(
-      validLines.reduce((sum, line) => sum + line.qty * line.rate, 0),
-    );
     const tax = await resolveTax(auth.sb, body, validLines);
-    const salesTax = tax.salesTax;
-    if (!Number.isFinite(salesTax) || salesTax < 0) {
+    if (!Number.isFinite(tax.salesTax) || tax.salesTax < 0) {
       return jsonError("Sales tax must be zero or greater", 400);
     }
-    const total = roundInvoiceNumber(subtotal + salesTax);
-    const previousNum = String(existing.num || "");
-    const invoiceWasRenumbered = desiredNum !== previousNum;
-    const updatedAt = new Date().toISOString();
 
-    const { data: updated, error: updateError } = await (auth.sb as any)
-      .from("invoices")
-      .update({
+    try {
+      await saveStaffBillingInvoice(auth.sb, {
+        actorId: auth.user.id,
+        invoiceId: id,
         num: desiredNum,
-        work_order_id: workOrderId,
-        store_number: String(body.storeNumber || "").trim(),
-        store_address: body.storeAddress || null,
-        contractor_id: null,
+        workOrderId,
+        storeNumber: String(body.storeNumber || "").trim(),
+        storeAddress: body.storeAddress || null,
         cme: body.cme || null,
-        invoice_date: body.invoiceDate,
-        service_date: body.serviceDate || null,
-        due_date: body.dueDate || null,
+        invoiceDate: body.invoiceDate,
+        serviceDate: body.serviceDate || null,
+        dueDate: body.dueDate || null,
         terms: body.terms || "Net 30",
         state: targetState,
-        subtotal,
-        sales_tax: salesTax,
-        tax_state: tax.taxState,
-        tax_rate: tax.taxRate,
-        total,
+        tax,
         territory: String(body.territory || "").trim(),
-        updated_at: updatedAt,
-      })
-      .eq("id", id)
-      .eq("invoice_type", "staff")
-      .in("state", ["draft", "submitted"])
-      .is("deleted_at", null)
-      .select()
-      .maybeSingle();
-
-    if (updateError?.code === "23505") {
+        lines: validLines,
+        sourceInvoiceIds,
+      });
+    } catch (error: any) {
+      if (error?.code !== "23505") throw error;
       return jsonError(`Invoice number ${desiredNum} already exists`, 409);
     }
-    if (updateError) throw updateError;
-    if (!updated) return jsonError("Invoice changed before it could be saved", 409);
 
-    const { error: lineDeleteError } = await auth.sb
-      .from("invoice_lines")
-      .delete()
-      .eq("invoice_id", id);
-    if (lineDeleteError) throw lineDeleteError;
-
-    const lineRows = lineRowsForInvoice(id, validLines);
-    const { error: lineInsertError } = await auth.sb
-      .from("invoice_lines")
-      .insert(lineRows);
-    if (lineInsertError) throw lineInsertError;
-
-    const { error: sourceDeleteError } = await (auth.sb as any)
-      .from("staff_invoice_sources")
-      .delete()
-      .eq("staff_invoice_id", id);
-    if (sourceDeleteError) throw sourceDeleteError;
-
-    if (sourceInvoiceIds.length > 0) {
-      const sourceRows = sourceInvoiceIds.map(contractorInvoiceId => ({
-        staff_invoice_id: id,
-        contractor_invoice_id: contractorInvoiceId,
-        work_order_id: workOrderId,
-        created_by: auth.user.id,
-      }));
-      const { error: sourceInsertError } = await (auth.sb as any)
-        .from("staff_invoice_sources")
-        .insert(sourceRows);
-      if (sourceInsertError) throw sourceInsertError;
-    }
-
-    if (workOrderId) {
-      const action = targetState === "submitted"
-        && existing.state !== "submitted"
-        ? "prepared for 7-Eleven submission"
-        : targetState === "submitted"
-          ? "updated"
-          : "draft updated";
-      const auditText = invoiceWasRenumbered
-        ? `P1 invoice #${previousNum} renumbered to #${desiredNum} and ${action}.`
-        : `P1 invoice #${desiredNum} ${action}.`;
-      const { error: activityError } = await (auth.sb as any)
-        .from("activities")
-        .insert({
-          work_order_id: workOrderId,
-          author_id: auth.user.id,
-          author_name: auth.profile.name || "P1 staff",
-          text: auditText,
-          type: "system",
-          is_staff_override: false,
-          is_staff_only: true,
-          event_key: "staff_billing",
-          event_data: {
-            invoiceId: id,
-            previousInvoiceNum: previousNum,
-            invoiceNum: desiredNum,
-            renumbered: invoiceWasRenumbered,
-          },
-        });
-      if (activityError) {
-        console.error("Billing draft activity audit insert failed", activityError);
-      }
-    }
-
-    const refreshed = await loadStaffInvoices(auth.sb);
-    const invoice = refreshed.find((item: any) => item.id === id);
+    const invoice = await loadStaffInvoiceById(auth.sb, id);
     if (!invoice) throw new Error("Updated invoice could not be reloaded");
 
     return NextResponse.json({ invoice });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update billing invoice";
-    return jsonError(message, 500);
+    return jsonError(message, billingSaveErrorStatus(err));
   }
 }
 

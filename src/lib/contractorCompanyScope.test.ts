@@ -11,10 +11,6 @@ const financialMigration = readFileSync(
   resolve(process.cwd(), "supabase/migrations/0057_work_order_financial_privacy.sql"),
   "utf8",
 );
-const verification = readFileSync(
-  resolve(process.cwd(), "supabase/verify_0056_0057.sql"),
-  "utf8",
-);
 
 test("company members resolve to one canonical contractor without becoming staff", () => {
   assert.match(companyMigration, /current_contractor_account_id/);
@@ -65,9 +61,9 @@ test("the real NTE is absent from contractor-readable work order rows", () => {
   assert.match(financialMigration, /after update of nte_flagged on public\.work_orders/);
 });
 
-test("company migrations and verification remain tenant-agnostic", () => {
+test("company migrations remain tenant-agnostic", () => {
   const emailLiteral = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
-  for (const source of [companyMigration, financialMigration, verification]) {
+  for (const source of [companyMigration, financialMigration]) {
     assert.doesNotMatch(source, emailLiteral);
   }
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canFlagWorkOrderCapital,
   getWorkOrderActionReasons,
   getWorkOrderProgressSteps,
   isInternalWorkOrderActivity,
@@ -9,6 +10,22 @@ import {
   workOrderHasPendingSevenElevenSync,
   workOrderNeedsAction,
 } from "./workOrderView";
+
+test("capital review can start from every open non-capital status", () => {
+  for (const status of [
+    "assigned",
+    "wip",
+    "parts",
+    "completed",
+    "pending_invoice",
+    "pending_approval",
+  ]) {
+    assert.equal(canFlagWorkOrderCapital({ status }), true, status);
+  }
+  assert.equal(canFlagWorkOrderCapital({ status: "unassigned" }), false);
+  assert.equal(canFlagWorkOrderCapital({ status: "capital" }), false);
+  assert.equal(canFlagWorkOrderCapital({ status: "closed" }), false);
+});
 
 test("staff action reasons cover operational and billing follow-up", () => {
   assert.deepEqual(

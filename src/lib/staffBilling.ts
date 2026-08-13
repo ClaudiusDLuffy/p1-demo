@@ -19,6 +19,22 @@ export function normalizeStaffBillingLineType(type: unknown): StaffBillingLineTy
   return "Other";
 }
 
+export function normalizeImportedStaffBillingLineType(
+  type: unknown,
+  description: unknown,
+): StaffBillingLineType {
+  const normalizedType = normalizeStaffBillingLineType(type);
+  const detail = String(description || "").trim();
+  const describesOvertimeLabor = /\b(?:(?:overtime|over[\s-]?time|ot)\s+(?:labou?r|hours?|hrs?)|(?:labou?r|hours?|hrs?)\s+(?:overtime|over[\s-]?time|ot))\b/i.test(detail);
+  if (
+    ["Labor", "Other"].includes(normalizedType)
+    && describesOvertimeLabor
+  ) {
+    return "OT Labor";
+  }
+  return normalizedType;
+}
+
 export const isStaffBillingPartsLine = (type: unknown) =>
   /part|hardware|material/i.test(String(type || ""));
 
@@ -39,4 +55,49 @@ export function importedStaffBillingRate(
     ) / 100;
   }
   return Math.round(finiteSourceCost * 100) / 100;
+}
+
+export function staffBillingDescriptionPlaceholder(type: unknown) {
+  const normalizedType = normalizeStaffBillingLineType(type);
+  if (normalizedType === "Labor" || normalizedType === "OT Labor") {
+    return "Enter job notes";
+  }
+  if (normalizedType === "Travel") return "Description (optional)";
+  return "Description";
+}
+
+export function applyStaffBillingPartsMarkup(
+  sourceUnitCost: unknown,
+  currentRate: unknown,
+  markupPercent: unknown,
+) {
+  const explicitSourceCost = Number(sourceUnitCost);
+  const displayedRate = Number(currentRate);
+  const markup = Number(markupPercent);
+  const sourceCost = sourceUnitCost != null && Number.isFinite(explicitSourceCost)
+    ? explicitSourceCost
+    : displayedRate;
+
+  if (!Number.isFinite(sourceCost) || sourceCost <= 0) return null;
+  if (!Number.isFinite(markup) || markup < 0 || markup > 999) return null;
+
+  return {
+    sourceUnitCost: Math.round(sourceCost * 100) / 100,
+    markupPercent: markup,
+    rate: Math.round(sourceCost * (1 + markup / 100) * 100) / 100,
+  };
+}
+
+export function staffBillingMarkupPercent(
+  sourceUnitCost: unknown,
+  rate: unknown,
+) {
+  const sourceCost = Number(sourceUnitCost);
+  const billedRate = Number(rate);
+  if (!Number.isFinite(sourceCost) || sourceCost <= 0) return null;
+  if (!Number.isFinite(billedRate) || billedRate < sourceCost) return null;
+
+  const markup = ((billedRate - sourceCost) / sourceCost) * 100;
+  if (!Number.isFinite(markup) || markup > 999) return null;
+  return Math.round(markup * 100) / 100;
 }

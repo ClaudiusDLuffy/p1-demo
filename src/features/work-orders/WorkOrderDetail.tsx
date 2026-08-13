@@ -19,6 +19,7 @@ import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
 import {
+  canFlagWorkOrderCapital,
   getSlaAgingStyle,
   getWorkOrderDateMeta,
   getWorkOrderProgressSteps,
@@ -58,7 +59,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
@@ -87,6 +88,17 @@ export default function WorkOrderDetail(props: any) {
     setSelectedWO(null);
     setAiNote(null);
     setPage("invoices");
+  };
+  const approveInvoice = async (inv: any, goToBilling = false) => {
+    setBusyInvId(inv.id);
+    try {
+      if (goToBilling && onApproveAndGoToBilling) {
+        return await onApproveAndGoToBilling(inv);
+      }
+      return await doApproveInvoice(inv.id);
+    } finally {
+      setBusyInvId(null);
+    }
   };
   const storeHistory = useMemo(
     () => woData ? workOrders.filter(w => w.store === woData.store && w.id !== woData.id) : [],
@@ -449,13 +461,15 @@ export default function WorkOrderDetail(props: any) {
                           <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
                             {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
                           </button>
-                          {isManager && woData.status === "wip" && <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>}
                           {!isManager && (
                             <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
                               {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Mark work complete"}
                             </button>
                           )}
                         </>
+                      )}
+                      {isManager && canFlagWorkOrderCapital(woData) && (
+                        <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>
                       )}
                       {woData.status === "capital" && isManager && (
                         <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
@@ -566,11 +580,19 @@ export default function WorkOrderDetail(props: any) {
                                   {canReviewInvoices && (inv.state === "submitted" || inv.state === "revised") && (
                                     <>
                                       <button
-                                        onClick={async () => { setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }}
+                                        onClick={() => approveInvoice(inv)}
                                         disabled={rowBusy || isLoading("approveInvoice_" + inv.id)}
                                         className="btn-accent wo-invoice-action"
                                         style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
                                       >{rowBusy || isLoading("approveInvoice_" + inv.id) ? <><BtnSpinner />Approving…</> : "Approve"}</button>
+                                      {onApproveAndGoToBilling && (
+                                        <button
+                                          onClick={() => approveInvoice(inv, true)}
+                                          disabled={rowBusy || isLoading("approveInvoice_" + inv.id)}
+                                          className="btn-primary wo-invoice-action"
+                                          style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
+                                        >Approve &amp; go to Billing</button>
+                                      )}
                                       <button onClick={() => { setRejectingInv(inv); setRejectReason(""); }} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
                                     </>
                                   )}
@@ -611,7 +633,10 @@ export default function WorkOrderDetail(props: any) {
                                         )}
                                         {canReviewInvoices && (inv.state === "submitted" || inv.state === "revised") && (
                                           <>
-                                            <button onClick={async () => { setInvoiceMenuId(null); setBusyInvId(inv.id); try { await doApproveInvoice(inv.id); } finally { setBusyInvId(null); } }} disabled={rowBusy || isLoading("approveInvoice_" + inv.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: rowBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: rowBusy ? 0.6 : 1 }}>Approve</button>
+                                            <button onClick={() => { setInvoiceMenuId(null); void approveInvoice(inv); }} disabled={rowBusy || isLoading("approveInvoice_" + inv.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: rowBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: rowBusy ? 0.6 : 1 }}>Approve</button>
+                                            {onApproveAndGoToBilling && (
+                                              <button onClick={() => { setInvoiceMenuId(null); void approveInvoice(inv, true); }} disabled={rowBusy || isLoading("approveInvoice_" + inv.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: rowBusy ? "default" : "pointer", fontSize: 13, color: T.accent, fontFamily: "inherit", fontWeight: 600, opacity: rowBusy ? 0.6 : 1 }}>Approve &amp; go to Billing</button>
+                                            )}
                                             <button onClick={() => { setInvoiceMenuId(null); setRejectingInv(inv); setRejectReason(""); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Reject</button>
                                           </>
                                         )}
