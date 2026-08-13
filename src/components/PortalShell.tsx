@@ -2576,7 +2576,7 @@ export default function PortalShell() {
 
           <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} technicians={technicians} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} doAssignPortalTechnician={doAssignPortalTechnician} getUser={getUser} loadingStates={loadingStates} />
 
-          <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} doBatchReviewInvoices={doBatchReviewInvoices} />
+          <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} doBatchReviewInvoices={doBatchReviewInvoices} onEditRejected={openCreateInvoice} />
 
           <InvoiceDetail
             page={page}

@@ -11,6 +11,7 @@ const workOrderHook = read("src/features/work-orders/useWorkOrders.ts");
 const invoiceHook = read("src/features/invoices/useInvoices.ts");
 const invoiceModal = read("src/features/invoices/InvoiceCreateModal.tsx");
 const invoiceDetail = read("src/features/invoices/InvoiceDetail.tsx");
+const invoiceList = read("src/features/invoices/InvoiceList.tsx");
 const workOrderDetail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const portalShell = read("src/components/PortalShell.tsx");
 const notificationRoute = read("src/app/api/notifications/invoice-review/route.ts");
@@ -68,9 +69,11 @@ test("staff can retract only an untouched rejection and the correction is audite
 });
 
 test("contractor UI exposes correction only for rejected invoices", () => {
-  assert.match(invoiceDetail, /currentUser\?\.canInvoice === true/);
-  assert.match(invoiceDetail, /inv\?\.state === "rejected"/);
+  assert.match(invoiceDetail, /canEditRejectedContractorInvoice/);
   assert.match(invoiceDetail, /Edit and resubmit/);
+  assert.match(invoiceList, /canEditRejectedContractorInvoice/);
+  assert.match(invoiceList, /Edit and resubmit/g);
+  assert.match(workOrderDetail, /canEditRejectedContractorInvoice/);
   assert.match(invoiceModal, /resubmittingRejected: isRejectedResubmission/);
   assert.match(invoiceModal, /readOnly=\{isRejectedResubmission\}/);
   assert.match(invoiceModal, /!isRejectedResubmission/);

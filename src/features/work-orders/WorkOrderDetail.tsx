@@ -15,6 +15,7 @@ import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
+import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
 import {
@@ -517,10 +518,11 @@ export default function WorkOrderDetail(props: any) {
                               inv.contractor === (currentUser?.contractorAccountId || currentUser?.id)
                               || isManager
                             );
-                            const isMyRejectedInvoice = !isManager
-                              && canInvoice
-                              && inv.state === "rejected"
-                              && inv.contractor === (currentUser?.contractorAccountId || currentUser?.id);
+                            const isMyRejectedInvoice = canEditRejectedContractorInvoice(
+                              inv,
+                              currentUser,
+                              isManager,
+                            );
                             const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Sent to QuickBooks" } as any)[inv.state] || inv.state;
                             const stateColor = (
                               inv.state === "paid" ? T.success :

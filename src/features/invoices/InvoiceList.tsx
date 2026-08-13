@@ -7,11 +7,12 @@ import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE } from "../../lib/constants";
+import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { InvoiceSortKey, SortDirection, sortInvoices } from "../../lib/invoiceSort";
 import { useEffect, useMemo, useState } from "react";
 
 export default function InvoiceList(props: any) {
-  const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices } = props;
+  const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices, onEditRejected } = props;
   const currentContractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const controller = String(currentUser?.email || "").trim().toLowerCase()
     === "emilyb@phospitality.com";
@@ -317,7 +318,24 @@ export default function InvoiceList(props: any) {
                           </span>
                         </td>
                         {isManager && <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>}
-                        <td style={{ padding: "13px 14px" }}><Badge conf={INV_STATE[inv.state]} small /></td>
+                        <td style={{ padding: "13px 14px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                            <Badge conf={INV_STATE[inv.state]} small />
+                            {canEditRejectedContractorInvoice(inv, currentUser, isManager) && onEditRejected && (
+                              <button
+                                type="button"
+                                className="btn-accent"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onEditRejected(inv);
+                                }}
+                                style={{ padding: "5px 8px", fontSize: 10 }}
+                              >
+                                Edit and resubmit
+                              </button>
+                            )}
+                          </div>
+                        </td>
                         <td style={{ padding: "13px 14px", color: T.subtle }}>{inv.date}</td>
                         <td style={{ padding: "13px 14px" }}>#{inv.store}</td>
                         <td className="mono" style={{ padding: "13px 14px", textAlign: "right", color: T.muted }}>{(inv.lines || []).length}</td>
@@ -388,6 +406,19 @@ export default function InvoiceList(props: any) {
                         {fmt(Math.round(inv.total))}
                       </span>
                     </div>
+                    {canEditRejectedContractorInvoice(inv, currentUser, isManager) && onEditRejected && (
+                      <button
+                        type="button"
+                        className="btn-accent"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEditRejected(inv);
+                        }}
+                        style={{ width: "100%", justifyContent: "center", marginTop: 10 }}
+                      >
+                        Edit and resubmit
+                      </button>
+                    )}
                   </div>
                 ))}
                 {visibleInvoices.length === 0 && (

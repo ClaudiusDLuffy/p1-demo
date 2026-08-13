@@ -7,6 +7,7 @@ import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE, P1_BUSINESS } from "../../lib/constants";
+import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
@@ -43,10 +44,11 @@ export default function InvoiceDetail(props: any) {
   const canCorrectTotal = isManager
     && inv?.state !== "paid"
     && (!controller || inv?.state === "approved");
-  const canEditRejected = !isManager
-    && currentUser?.canInvoice === true
-    && inv?.state === "rejected"
-    && inv?.contractor === (currentUser?.contractorAccountId || currentUser?.id);
+  const canEditRejected = canEditRejectedContractorInvoice(
+    inv,
+    currentUser,
+    isManager,
+  );
   const wo = useMemo(
     () => inv ? workOrders.find(w => w.id === inv.wot) : null,
     [workOrders, inv]

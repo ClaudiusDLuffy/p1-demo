@@ -4,6 +4,7 @@
 
 import { supabase } from "./supabase/client";
 import { stateCodeFromWorkOrder, timezoneForWorkOrder } from "./billingRules";
+import { collectSupabasePages } from "./paginatedQuery";
 import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
 import type { Invoice, WorkOrder } from "./schemas";
@@ -97,39 +98,31 @@ const mapProfile = (p: any) => ({
 
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
-  // Pull WOs + activities + photos + visit boundaries, then stitch together.
-  const [woRes, actRes, photoRes, visitRes, afmContactRes, incidentReuseRes, assignmentHistoryRes, financialRes] = await Promise.all([
-    sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-    sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-    sb.from("photos").select("*"),
-    (sb as any).from("work_order_visits").select("*").order("check_in_at", { ascending: true }),
-    sb.from("work_order_afm_contacts").select("work_order_id, afm_email"),
+  // Pull WOs + related history, then stitch together. Every table query is
+  // explicitly paged: PostgREST otherwise returns at most 1,000 rows, which
+  // made older notes, photos, and check-in/out visits appear to be deleted.
+  const [rawWorkOrderRows, activityRows, photoRows, visitRows, afmContactRows, incidentReuseRes, assignmentHistoryRows, financialRows] = await Promise.all([
+    collectSupabasePages<any>((from, to) => sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to)),
+    collectSupabasePages<any>((from, to) => sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
+    collectSupabasePages<any>((from, to) => sb.from("photos").select("*").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
+    collectSupabasePages<any>((from, to) => (sb as any).from("work_order_visits").select("*").order("check_in_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    collectSupabasePages<any>((from, to) => sb.from("work_order_afm_contacts").select("work_order_id, afm_email").order("work_order_id", { ascending: true }).range(from, to)),
     sb.rpc("get_incident_reuse_warnings"),
-    (sb as any)
-      .from("work_order_assignment_history")
-      .select("*")
-      .order("assignment_ended_at", { ascending: false }),
-    (sb as any).from("work_order_financials").select("*"),
+    collectSupabasePages<any>((from, to) => (sb as any).from("work_order_assignment_history").select("*").order("assignment_ended_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
+    collectSupabasePages<any>((from, to) => (sb as any).from("work_order_financials").select("*").order("work_order_id", { ascending: true }).range(from, to)),
   ]);
-  if (woRes.error) throw woRes.error;
-  if (actRes.error) throw actRes.error;
-  if (photoRes.error) throw photoRes.error;
-  if (visitRes.error) throw visitRes.error;
-  if (afmContactRes.error) throw afmContactRes.error;
   if (incidentReuseRes.error) throw incidentReuseRes.error;
-  if (assignmentHistoryRes.error) throw assignmentHistoryRes.error;
-  if (financialRes.error) throw financialRes.error;
 
   // Contractors receive no financial rows through RLS and the compatibility
   // columns on work_orders are masked. Staff receive these rows and merge the
   // real values back before the common mapper runs.
   const financialByWo = Object.fromEntries(
-    (financialRes.data || []).map((financial: any) => [
+    financialRows.map((financial: any) => [
       financial.work_order_id,
       financial,
     ]),
   );
-  const workOrderRows = (woRes.data || []).map((workOrder: any) => {
+  const workOrderRows = rawWorkOrderRows.map((workOrder: any) => {
     const financial = financialByWo[workOrder.id];
     if (!financial) return workOrder;
     return {
@@ -153,17 +146,17 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     ]),
   );
   const actsByWo: Record<string, any[]> = {};
-  for (const a of actRes.data || []) {
+  for (const a of activityRows) {
     (actsByWo[a.work_order_id] ||= []).push(
       mapActivity(a, timeZoneByWo[a.work_order_id]),
     );
   }
   const photosByWo: Record<string, any[]> = {};
-  for (const p of photoRes.data || []) {
+  for (const p of photoRows) {
     (photosByWo[p.work_order_id] ||= []).push(p);
   }
   const visitsByWo: Record<string, any[]> = {};
-  for (const visit of visitRes.data || []) {
+  for (const visit of visitRows) {
     (visitsByWo[visit.work_order_id] ||= []).push({
       id: visit.id,
       workOrderId: visit.work_order_id,
@@ -175,7 +168,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     });
   }
   const afmEmailByWo = Object.fromEntries(
-    (afmContactRes.data || []).map(contact => [
+    afmContactRows.map(contact => [
       contact.work_order_id,
       contact.afm_email || null,
     ]),
@@ -191,7 +184,7 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     ]),
   );
   const assignmentHistoryByWo: Record<string, any[]> = {};
-  for (const assignment of assignmentHistoryRes.data || []) {
+  for (const assignment of assignmentHistoryRows) {
     (assignmentHistoryByWo[assignment.work_order_id] ||= []).push({
       id: assignment.id,
       contractorId: assignment.contractor_id,
@@ -385,26 +378,21 @@ export async function loadInvoices(): Promise<Invoice[]> {
   const sb = supabase();
   // Soft-deleted invoices are excluded at the source — every list, badge,
   // stat, and spend calc consumes this array, so one filter covers all.
-  const [invRes, lineRes, uploadActivityRes] = await Promise.all([
-    sb.from("invoices").select("*").is("deleted_at", null).eq("invoice_type", "contractor").order("invoice_date", { ascending: false }),
-    sb.from("invoice_lines").select("*").order("position"),
-    sb.from("activities")
-      .select("event_data, created_at")
-      .eq("event_key", "invoice_uploaded")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true }),
+  // Page all three sources so an older rejected invoice or its line items do
+  // not vanish once the global table passes the PostgREST response cap.
+  const [invoiceRows, lineRows, uploadActivityRows] = await Promise.all([
+    collectSupabasePages<any>((from, to) => sb.from("invoices").select("*").is("deleted_at", null).eq("invoice_type", "contractor").order("invoice_date", { ascending: false }).order("id", { ascending: true }).range(from, to)),
+    collectSupabasePages<any>((from, to) => sb.from("invoice_lines").select("*").order("invoice_id", { ascending: true }).order("position", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    collectSupabasePages<any>((from, to) => sb.from("activities").select("event_data, created_at, id").eq("event_key", "invoice_uploaded").is("deleted_at", null).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
   ]);
-  if (invRes.error) throw invRes.error;
-  if (lineRes.error) throw lineRes.error;
-  if (uploadActivityRes.error) throw uploadActivityRes.error;
 
   const linesByInv: Record<string, any[]> = {};
-  for (const l of lineRes.data || []) {
+  for (const l of lineRows) {
     (linesByInv[l.invoice_id] ||= []).push(mapInvoiceLine(l));
   }
 
   const originalPdfByInv = new Map<string, string | null>();
-  for (const activity of uploadActivityRes.data || []) {
+  for (const activity of uploadActivityRows) {
     const eventData = activity.event_data;
     if (!eventData || typeof eventData !== "object" || Array.isArray(eventData)) continue;
     const invoiceId = typeof eventData.invoiceId === "string" ? eventData.invoiceId : null;
@@ -413,7 +401,7 @@ export async function loadInvoices(): Promise<Invoice[]> {
     originalPdfByInv.set(invoiceId, fileName);
   }
 
-  return (invRes.data || []).map(i => ({
+  return invoiceRows.map(i => ({
     ...mapInvoice(i),
     lines: linesByInv[i.id] || [],
     pdfIsOriginal: originalPdfByInv.has(i.id),
