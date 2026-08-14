@@ -14,6 +14,7 @@ import {
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
   moveWorkOrderStraightToBilling,
   resumeCapitalWork,
+  closeWorkOrderWithoutInvoice,
   assignContractorTechnician,
   reviewContractorInvoice,
 } from "../../lib/db";
@@ -781,6 +782,39 @@ export default function useWorkOrders({
     }
   };
 
+  // Staff-only no-billing terminal path. The database locks the work order,
+  // confirms that no live contractor or P1 invoice exists, closes every open
+  // visit, and writes the audit event in one transaction.
+  const doCloseWithoutInvoice = async (woId: string) => {
+    setLoading("closeWithoutInvoice_" + woId, true);
+    const closedAt = new Date().toISOString();
+    const text = `Work order closed without an invoice by ${currentUser.name}.`;
+    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    try {
+      patchLocalWO(
+        woId,
+        { status: "closed", closedAt },
+        localActivity(
+          text,
+          "system",
+          false,
+          "work_order_closed_without_invoice",
+          false,
+          true,
+        ),
+      );
+      const ok = await dbCall(
+        () => closeWorkOrderWithoutInvoice(woId),
+        "Close without invoice failed",
+        () => restoreWorkOrders(snapshot),
+      );
+      if (ok) fire("Work order closed without an invoice");
+      return Boolean(ok);
+    } finally {
+      setLoading("closeWithoutInvoice_" + woId, false);
+    }
+  };
+
   // Staff-only fail-safe: pull a closed WO back onto the active board by
   // pulling it back onto the active board. Now that closing is a manual
   // staff decision (not "all invoices paid"), reopening does NOT touch
@@ -1220,7 +1254,7 @@ export default function useWorkOrders({
     patchLocalWO, localActivity, dbCall,
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
+    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
