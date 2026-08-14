@@ -1,10 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "../../../lib/supabase/server";
+import {
+  isInvoiceControllerProfile,
+  loadStaffPermissions,
+  STAFF_ROLES,
+} from "../../../lib/server/staffAuthorization";
 import type { Database } from "../../../lib/supabase/database.types";
-
-const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
-const CONTROLLER_EMAIL = "emilyb@phospitality.com";
 
 const jsonError = (message: string, status: number) =>
   NextResponse.json({ error: message }, { status });
@@ -25,10 +27,6 @@ async function requireInvoiceStaff(request: NextRequest) {
   const auth = authClient();
   const { data, error } = await auth.auth.getUser(token);
   if (error || !data.user) return { error: jsonError("Unauthorized", 401) };
-  if (String(data.user.email || "").trim().toLowerCase() === CONTROLLER_EMAIL) {
-    return { error: jsonError("The controller cannot delete contractor invoices", 403) };
-  }
-
   const sb = createServerClient();
   const { data: profile, error: profileError } = await sb
     .from("profiles")
@@ -39,7 +37,17 @@ async function requireInvoiceStaff(request: NextRequest) {
   if (!profile || !STAFF_ROLES.has(profile.role || "")) {
     return { error: jsonError("Forbidden", 403) };
   }
-  return { sb, user: data.user, profile };
+  let staffPermissions: string[];
+  try {
+    staffPermissions = await loadStaffPermissions(sb, profile.id);
+  } catch (permissionError) {
+    return { error: jsonError(permissionError instanceof Error ? permissionError.message : "Permission lookup failed", 500) };
+  }
+  const authorizedProfile = { ...profile, staffPermissions };
+  if (isInvoiceControllerProfile(authorizedProfile)) {
+    return { error: jsonError("The controller cannot delete contractor invoices", 403) };
+  }
+  return { sb, user: data.user, profile: authorizedProfile };
 }
 
 export async function DELETE(request: NextRequest) {

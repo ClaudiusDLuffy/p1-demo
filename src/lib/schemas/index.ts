@@ -5,7 +5,7 @@ export const WorkOrderSchema = z.object({
   summary: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   status: z.enum([
-    "unassigned", "assigned", "wip", "parts", "capital",
+    "unassigned", "assigned", "wip", "parts", "capital", "pending_capital_completion",
     "completed", "pending_invoice", "pending_approval",
     "pending_payment", "closed"
   ]),

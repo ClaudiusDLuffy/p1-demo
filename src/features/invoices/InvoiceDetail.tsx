@@ -8,12 +8,12 @@ import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE, P1_BUSINESS } from "../../lib/constants";
 import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
+import { isInvoiceController } from "../../lib/staffPermissions";
 import { useMemo, useState } from "react";
 
 export default function InvoiceDetail(props: any) {
   const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
-  const controller = String(currentUser?.email || "").trim().toLowerCase()
-    === "emilyb@phospitality.com";
+  const controller = isInvoiceController(currentUser);
   const canReview = isManager && !controller;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);

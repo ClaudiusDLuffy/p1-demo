@@ -60,7 +60,7 @@ export default function WorkOrderList(props: any) {
   const tableWOs = useMemo(() => {
     const sorted = sortWorkOrders(
       stateFilteredWOs.filter((w: any) =>
-        w.status !== "capital"
+        !["capital", "pending_capital_completion"].includes(w.status)
         && (!isManager || !hideClosed || w.status !== "closed")
         && (viewMode !== "needs_action" || workOrderNeedsAction(w, isManager)),
       ),

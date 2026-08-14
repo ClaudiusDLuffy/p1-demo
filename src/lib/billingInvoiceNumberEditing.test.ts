@@ -27,7 +27,7 @@ test("auto-populated P1 invoice numbers are editable before lifecycle lock", () 
 
 test("the server validates the requested number and preserves lifecycle locks", () => {
   assert.match(route, /const suppliedNum = String\(body\.num \|\| ""\)\.trim\(\)/);
-  assert.match(route, /const requestedNum = suppliedNum[\s\S]*?nextStaffInvoiceNum\(auth\.sb, auth\.user\.id\)/);
+  assert.match(route, /const requestedNum = userTypedNum[\s\S]*?suppliedNum[\s\S]*?nextStaffInvoiceNum\(auth\.sb, auth\.user\.id\)/);
   assert.match(route, /const userTypedNum = !!body\.userTypedNum && Boolean\(suppliedNum\)/);
   assert.match(route, /const desiredNum = String\(body\.num \|\| ""\)\.trim\(\)/);
   assert.match(route, /Invoice number is invalid/);
@@ -41,7 +41,7 @@ test("the server validates the requested number and preserves lifecycle locks", 
 test("quote conversion can atomically allocate a staff invoice number", () => {
   assert.match(route, /\.rpc\("next_staff_invoice_num", \{ p_actor_id: actorId \}\)/);
   assert.doesNotMatch(route, /if \(!requestedNum\) return jsonError\("Invoice number is required"/);
-  assert.match(route, /const tax = await resolveTax[\s\S]*?const requestedNum = suppliedNum/);
+  assert.match(route, /const tax = await resolveTax[\s\S]*?const requestedNum = userTypedNum/);
 });
 
 test("new invoices preserve an edited number and only auto-retry untouched suggestions", () => {

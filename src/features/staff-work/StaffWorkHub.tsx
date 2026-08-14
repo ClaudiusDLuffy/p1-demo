@@ -87,6 +87,9 @@ export default function StaffWorkHub({
           <div style={{ color: T.muted, fontSize: 11, marginTop: 4 }}>
             Unread updates, personal follow-up, and Ready to Bill are merged by work order.
           </div>
+          <div style={{ color: T.subtle, fontSize: 10, marginTop: 4, lineHeight: 1.45 }}>
+            Unread is personal new activity. A 7-Eleven update is a specific activity still waiting to be copied; one work order can have both labels.
+          </div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ color: T.ink, fontSize: 14, fontWeight: 800 }}>{myTodoCount} / 5</div>

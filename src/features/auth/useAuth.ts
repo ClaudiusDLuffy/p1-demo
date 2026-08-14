@@ -45,13 +45,18 @@ export default function useAuth({
   const hydrateProfile = useCallback(async (userId: string) => {
     try {
       const sb = supabase();
-      const [profileResult, scopeResult] = await Promise.all([
+      const [profileResult, scopeResult, permissionsResult] = await Promise.all([
         sb.from("profiles").select("*").eq("id", userId).single(),
         (sb as any).rpc("get_my_contractor_scope"),
+        (sb as any)
+          .from("staff_permission_grants")
+          .select("permission")
+          .eq("profile_id", userId),
       ]);
       const { data: prof, error } = profileResult;
       if (error) throw error;
       if (scopeResult.error) throw scopeResult.error;
+      if (permissionsResult.error) throw permissionsResult.error;
       if (!prof) throw new Error("Profile not found for this account");
       if (lastLoadedUserIdRef.current === prof.id) return;
       lastLoadedUserIdRef.current = prof.id;
@@ -68,6 +73,8 @@ export default function useAuth({
         contractorOrganizationId: scope.organizationId || null,
         contractorOrganizationName: scope.organizationName || null,
         contractorAccessLevel: scope.accessLevel || null,
+        staffPermissions: (permissionsResult.data || [])
+          .map((grant: any) => String(grant.permission)),
         canInvoice: !!scope.canInvoice,
         canManageTeam: !!scope.canManageTeam,
         // Display cap for the WO NTE shown to this contractor. Mask applied

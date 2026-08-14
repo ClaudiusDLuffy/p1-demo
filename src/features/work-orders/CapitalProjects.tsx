@@ -10,7 +10,10 @@ import { useMemo } from "react";
 export default function CapitalProjects(props: any) {
   const { page, isManager, capitalCount, workOrders, setSelectedWO, setPage, setAiNote, getUser } = props;
   const capitalWOs = useMemo(
-    () => workOrders.filter(w => w.status === "capital"),
+    () => workOrders.filter(w =>
+      (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
+      && w.status !== "closed",
+    ),
     [workOrders]
   );
   return (

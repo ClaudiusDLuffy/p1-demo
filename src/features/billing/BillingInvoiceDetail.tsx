@@ -9,10 +9,13 @@ import { Ico } from "../../components/ui/Ico";
 import { Modal } from "../../components/ui/Modal";
 import { T, STAFF_INV_STATE, P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
 import { normalizeStaffBillingLineType } from "../../lib/staffBilling";
+import { isInvoiceController } from "../../lib/staffPermissions";
+import InvoiceLineTypeSubtotals from "./InvoiceLineTypeSubtotals";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
     invoice,
+    workOrder,
     onBack,
     backLabel = "Back to billing",
     onEdit,
@@ -33,8 +36,7 @@ export default function BillingInvoiceDetail(props: any) {
 
   const lines = invoice.lines || [];
   const sourceInvoices = invoice.sourceInvoices || [];
-  const controller = String(currentUser?.email || "").trim().toLowerCase()
-    === "emilyb@phospitality.com";
+  const controller = isInvoiceController(currentUser);
   const canDelete = !controller
     && ["manager", "dispatcher", "back_office"].includes(currentUser?.role || "");
   const canEdit = canDelete
@@ -42,6 +44,13 @@ export default function BillingInvoiceDetail(props: any) {
     && !invoice.qboInvoiceId
     && !invoice.qboSyncedAt;
   const canMarkBilled = canDelete && invoice.state === "submitted";
+  const capitalHandoff = Boolean(
+    workOrder?.isCapital
+    && (
+      ["capital", "pending_capital_completion"].includes(workOrder?.status)
+      || workOrder?.capitalStatus === "Pending approval"
+    ),
+  );
 
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
@@ -54,7 +63,7 @@ export default function BillingInvoiceDetail(props: any) {
           </button>
           {canMarkBilled && (
             <button onClick={() => setConfirmBilled(true)} className="btn-accent">
-              Billed to 7-Eleven
+              {capitalHandoff ? "Send capital quote to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           )}
           {canEdit && (
@@ -97,7 +106,11 @@ export default function BillingInvoiceDetail(props: any) {
       {confirmBilled && (
         <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} title="Confirm 7-Eleven billing" width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven and close its linked work order? Linked contractor invoices will remain Approved.
+            {capitalHandoff ? (
+              <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven? The work order will remain open in Pending Capital Completion until 7-Eleven authorizes the work.</>
+            ) : (
+              <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven and close its linked work order? Linked contractor invoices will remain Approved.</>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setConfirmBilled(false)} disabled={billing} className="btn-soft">Cancel</button>
@@ -115,7 +128,9 @@ export default function BillingInvoiceDetail(props: any) {
               className="btn-accent"
               style={{ display: "flex", alignItems: "center", gap: 6, opacity: billing ? 0.7 : 1 }}
             >
-              {billing ? <><BtnSpinner />Updating...</> : "Billed to 7-Eleven"}
+              {billing
+                ? <><BtnSpinner />Updating...</>
+                : capitalHandoff ? "Send and await approval" : "Billed to 7-Eleven"}
             </button>
           </div>
         </Modal>
@@ -239,20 +254,11 @@ export default function BillingInvoiceDetail(props: any) {
         </div>
 
         <div className="invoice-totals-section" style={{ padding: "22px 32px", display: "flex", justifyContent: "flex-end" }}>
-          <div style={{ width: 300 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0" }}>
-              <span style={{ color: T.muted }}>Subtotal</span>
-              <span className="mono" style={{ color: T.ink, fontWeight: 500 }}>{fmt(Math.round(invoice.subtotal * 100) / 100)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0", borderBottom: `1px solid ${T.border}` }}>
-              <span style={{ color: T.muted }}>Sales tax</span>
-              <span className="mono" style={{ color: T.ink, fontWeight: 500 }}>{fmt(Math.round(invoice.salesTax * 100) / 100)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0 0" }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Total</span>
-              <span className="display" style={{ fontSize: 26, color: T.ink, letterSpacing: -0.5 }}>{fmt(Math.round(invoice.total * 100) / 100)}</span>
-            </div>
-          </div>
+          <InvoiceLineTypeSubtotals
+            lines={lines}
+            salesTax={Number(invoice.salesTax || 0)}
+            fmt={fmt}
+          />
         </div>
 
         <div style={{ padding: "18px 32px", background: T.surfaceSoft, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, color: T.subtle, textAlign: "center" }}>
