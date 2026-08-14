@@ -107,6 +107,12 @@ export function buildDashboardWorkBuckets({
 
   return [
     bucket(
+      "unassigned",
+      "Unassigned",
+      "New calls that still need a contractor assignment.",
+      workOrder => workOrder.status === "unassigned",
+    ),
+    bucket(
       "pending_submission",
       "Pending 7-Eleven submission",
       "Contractor review is complete; P1 billing still needs to be prepared or submitted.",
@@ -131,12 +137,6 @@ export function buildDashboardWorkBuckets({
       "Needing 7-Eleven updates",
       "Activity exists that has not yet been copied into the 7-Eleven portal.",
       workOrder => Boolean(workOrder.hasPendingSevenElevenSync),
-    ),
-    bucket(
-      "unassigned",
-      "Unassigned",
-      "New calls that still need a contractor assignment.",
-      workOrder => workOrder.status === "unassigned",
     ),
     bucket(
       "p1_parts_to_order",

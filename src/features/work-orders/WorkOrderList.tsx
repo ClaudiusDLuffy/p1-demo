@@ -32,6 +32,8 @@ export default function WorkOrderList(props: any) {
     contractorsOnly,
     filterP,
     setFilterP,
+    filterStatus,
+    setFilterStatus,
     filteredWOs,
     slaLabel,
     setSelectedWO,
@@ -84,7 +86,7 @@ export default function WorkOrderList(props: any) {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, filterC, filterP, filterState, sortBy, hideClosed, viewMode]);
+  }, [search, filterC, filterP, filterStatus, filterState, sortBy, hideClosed, viewMode]);
 
   useEffect(() => {
     setListPage((prev) => Math.min(prev, totalPages));
@@ -198,6 +200,15 @@ export default function WorkOrderList(props: any) {
               </Sel>
             )}
             <Sel
+              value={filterStatus}
+              onChange={(e: { target: { value: string } }) => setFilterStatus(e.target.value)}
+              aria-label="Filter unassigned work orders"
+              style={{ width: 170, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}
+            >
+              <option value="all">All work orders</option>
+              <option value="unassigned">Unassigned only</option>
+            </Sel>
+            <Sel
               value={filterState}
               onChange={(e: { target: { value: string } }) => setFilterState(e.target.value)}
               aria-label="Filter work orders by state"
@@ -229,8 +240,8 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls{hiddenClosedCount > 0 ? ` (${hiddenClosedCount})` : ""}
               </label>
             )}
-            {(filterC !== "all" || filterP !== "all" || filterState !== "all" || search || viewMode !== "recent") && (
-              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent") && (
+              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}
