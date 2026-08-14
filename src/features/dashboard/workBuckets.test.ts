@@ -33,6 +33,7 @@ test("dashboard buckets expose each operational queue without merging their mean
   });
   const byId = new Map(buckets.map(bucket => [bucket.id, bucket.workOrders]));
 
+  assert.equal(buckets[0]?.id, "unassigned");
   assert.deepEqual(ids(byId.get("pending_submission") || []), ["WO-PENDING"]);
   assert.deepEqual(ids(byId.get("pending_approval") || []), ["WO-REVIEW"]);
   assert.deepEqual(ids(byId.get("awaiting_parts") || []), ["WO-PARTS"]);

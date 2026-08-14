@@ -39,6 +39,43 @@ body {
   min-width: 0;
 }
 
+.dashboard-unassigned-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.dashboard-unassigned-summary-action {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.dashboard-unassigned-summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .dashboard-unassigned-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .dashboard-unassigned-summary-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-unassigned-summary-action {
+    width: 100%;
+  }
+}
+
 @media (max-width: 1100px) {
   .billing-create-layout {
     grid-template-columns: minmax(0, 1fr);

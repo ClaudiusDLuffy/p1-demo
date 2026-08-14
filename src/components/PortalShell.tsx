@@ -1094,6 +1094,7 @@ export default function PortalShell() {
   const [search, setSearch] = useState("");
   const [filterC, setFilterC] = useState("all");
   const [filterP, setFilterP] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
   const [workflowReturn, setWorkflowReturn] = useState<{
@@ -1606,6 +1607,13 @@ export default function PortalShell() {
     setAiNote(null);
     setWorkOrderReturnPage(null);
   }, []);
+  const openUnassignedWorkOrders = useCallback(() => {
+    setSearch("");
+    setFilterC("all");
+    setFilterP("all");
+    setFilterStatus("unassigned");
+    nav("work_orders");
+  }, [nav]);
 
   const { data: billingInvoices = [] } = useQuery({
     queryKey: BILLING_INVOICES_KEY,
@@ -1945,9 +1953,10 @@ export default function PortalShell() {
       }
       if (filterC !== "all" && w.contractor !== filterC) return false;
       if (filterP !== "all" && w.priority !== filterP) return false;
+      if (filterStatus !== "all" && w.status !== filterStatus) return false;
       return true;
     }),
-    [myWOs, search, filterC, filterP]
+    [myWOs, search, filterC, filterP, filterStatus]
   );
   const statusCounts = useMemo(() => {
     const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
@@ -2636,6 +2645,7 @@ export default function PortalShell() {
             p1Unassigned={p1Unassigned}
             slaBreached={slaBreached}
             nav={nav}
+            onViewUnassigned={openUnassignedWorkOrders}
             doAutoAssign={doAutoAssign}
             invoices={invoices}
             currentUser={currentUser}
@@ -2688,6 +2698,8 @@ export default function PortalShell() {
             contractorsOnly={contractorsOnly}
             filterP={filterP}
             setFilterP={setFilterP}
+            filterStatus={filterStatus}
+            setFilterStatus={setFilterStatus}
             filteredWOs={filteredWOs}
             slaLabel={slaLabel}
             setSelectedWO={setSelectedWO}
