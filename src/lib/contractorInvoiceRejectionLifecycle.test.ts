@@ -87,7 +87,9 @@ test("rejection notification endpoint authenticates staff and scopes company rec
   const serviceUse = notificationRoute.indexOf("auth.sb");
   assert.ok(authCheck >= 0 && serviceUse > authCheck);
   assert.match(notificationRoute, /STAFF_ROLES/);
-  assert.match(notificationRoute, /INVOICE_CONTROLLER_EMAIL/);
+  assert.match(notificationRoute, /loadStaffPermissions/);
+  assert.match(notificationRoute, /isInvoiceControllerProfile/);
+  assert.doesNotMatch(notificationRoute, /INVOICE_CONTROLLER_EMAIL/);
   assert.match(notificationRoute, /\.eq\("active", true\)/);
   assert.match(notificationRoute, /\.eq\("contractor_access_level", "company_admin"\)/);
   assert.match(notificationRoute, /invoice\.created_by/);

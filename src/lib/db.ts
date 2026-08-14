@@ -34,9 +34,17 @@ export async function loadCurrentProfile(): Promise<any | null> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return null;
-  const { data, error } = await sb.from("profiles").select("*").eq("id", user.id).single();
-  if (error) throw error;
-  return mapProfile(data);
+  const [profileResult, permissionsResult] = await Promise.all([
+    sb.from("profiles").select("*").eq("id", user.id).single(),
+    (sb as any)
+      .from("staff_permission_grants")
+      .select("permission")
+      .eq("profile_id", user.id),
+  ]);
+  if (profileResult.error) throw profileResult.error;
+  if (permissionsResult.error) throw permissionsResult.error;
+  return mapProfile(profileResult.data, (permissionsResult.data || [])
+    .map((grant: any) => String(grant.permission)));
 }
 
 // ── PROFILES (all users) ────────────────────────────────────────────────────
@@ -44,9 +52,23 @@ export async function loadCurrentProfile(): Promise<any | null> {
 // profiles_read: staff see all, contractors see contractors
 export async function loadAllProfiles(): Promise<any[]> {
   const sb = supabase();
-  const { data, error } = await sb.from("profiles").select("*").order("name");
-  if (error) throw error;
-  return (data || []).map(mapProfile);
+  const [profilesResult, permissionsResult] = await Promise.all([
+    sb.from("profiles").select("*").order("name"),
+    (sb as any).from("staff_permission_grants").select("profile_id, permission"),
+  ]);
+  if (profilesResult.error) throw profilesResult.error;
+  if (permissionsResult.error) throw permissionsResult.error;
+  const permissionsByProfile = new Map<string, string[]>();
+  for (const grant of permissionsResult.data || []) {
+    const profileId = String(grant.profile_id);
+    const permissions = permissionsByProfile.get(profileId) || [];
+    permissions.push(String(grant.permission));
+    permissionsByProfile.set(profileId, permissions);
+  }
+  return (profilesResult.data || []).map(profile => mapProfile(
+    profile,
+    permissionsByProfile.get(profile.id) || [],
+  ));
 }
 
 // Contractor technicians — RLS returns all rows to staff, own rows to a
@@ -65,7 +87,7 @@ export async function loadTechnicians(): Promise<any[]> {
   }));
 }
 
-const mapProfile = (p: any) => ({
+const mapProfile = (p: any, staffPermissions: string[] = []) => ({
   id: p.id,
   name: p.name,
   initials: p.initials,
@@ -82,6 +104,7 @@ const mapProfile = (p: any) => ({
   dispatcherId: p.dispatcher_id || null,
   contractorOrganizationId: p.contractor_organization_id || null,
   contractorAccessLevel: p.contractor_access_level || null,
+  staffPermissions,
   // Display-only NTE cap shown to this contractor in place of the real WO
   // NTE (Lindsay 2026-06-16). Falls back to 1000 if the migration hasn't
   // been applied yet, so a stale schema can't blow up logins.
@@ -635,6 +658,16 @@ export async function moveWorkOrderStraightToBilling(id: string): Promise<any> {
   const sb = supabase();
   const { data, error } = await (sb as any).rpc(
     "move_work_order_straight_to_billing",
+    { p_work_order_id: id },
+  );
+  if (error) throw error;
+  return data;
+}
+
+export async function resumeCapitalWork(id: string): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "resume_capital_work",
     { p_work_order_id: id },
   );
   if (error) throw error;
@@ -1515,6 +1548,12 @@ const mapWoPart = (p: any) => ({
   trackingNumber: p.tracking_number || "",
   expectedReturnDate: p.expected_return_date || null,
   notes: p.notes || "",
+  orderingResponsibility: p.ordering_responsibility || "contractor",
+  p1OrderStatus: p.p1_order_status || null,
+  p1RequestedAt: p.p1_requested_at || null,
+  p1RequestedBy: p.p1_requested_by || null,
+  p1ResolvedAt: p.p1_resolved_at || null,
+  p1ResolvedBy: p.p1_resolved_by || null,
   createdAt: p.created_at,
   updatedAt: p.updated_at,
 });
@@ -1583,6 +1622,28 @@ export async function deleteWoPart(id: string): Promise<void> {
   const sb = supabase();
   const { error } = await (sb as any).from("wo_parts").delete().eq("id", id);
   if (error) throw error;
+}
+
+export async function requestP1PartOrder(id: string): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await (sb as any)
+    .rpc("request_p1_part_order", { p_part_id: id });
+  if (error) throw error;
+  return mapWoPart(data);
+}
+
+export async function setP1PartOrderStatus(
+  id: string,
+  status: "requested" | "ordered" | "received" | "cancelled",
+): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await (sb as any)
+    .rpc("set_p1_part_order_status", {
+      p_part_id: id,
+      p_status: status,
+    });
+  if (error) throw error;
+  return mapWoPart(data);
 }
 
 export async function loadWorkReports(

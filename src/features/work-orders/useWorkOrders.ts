@@ -8,10 +8,12 @@ import {
   unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
   uploadPhotos, removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
+  requestP1PartOrder, setP1PartOrderStatus,
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
   moveWorkOrderStraightToBilling,
+  resumeCapitalWork,
   assignContractorTechnician,
   reviewContractorInvoice,
 } from "../../lib/db";
@@ -556,6 +558,47 @@ export default function useWorkOrders({
     }
   };
 
+  const doRequestP1PartOrder = async (partId: string) => {
+    setLoading("p1Part_" + partId, true);
+    try {
+      const updated = await requestP1PartOrder(partId);
+      patchPartsCache(rows => rows.map(row => row.id === partId ? updated : row));
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: WO_PARTS_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      ]);
+      fire("Added to P1 purchasing");
+      return true;
+    } catch (error: any) {
+      fire(`P1 purchasing request failed: ${error.message || error}`);
+      return false;
+    } finally {
+      setLoading("p1Part_" + partId, false);
+    }
+  };
+
+  const doSetP1PartOrderStatus = async (
+    partId: string,
+    status: "requested" | "ordered" | "received" | "cancelled",
+  ) => {
+    setLoading("p1Part_" + partId, true);
+    try {
+      const updated = await setP1PartOrderStatus(partId, status);
+      patchPartsCache(rows => rows.map(row => row.id === partId ? updated : row));
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: WO_PARTS_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      ]);
+      fire(`P1 purchasing marked ${status}`);
+      return true;
+    } catch (error: any) {
+      fire(`P1 purchasing update failed: ${error.message || error}`);
+      return false;
+    } finally {
+      setLoading("p1Part_" + partId, false);
+    }
+  };
+
   const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null, completedAt?: string, resolutionNotes?: string) => {
     setLoading("closeComplete_" + woId, true);
     try {
@@ -853,6 +896,38 @@ export default function useWorkOrders({
     }, "Capital decline failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("capitalDecline_" + woId, false);
+    }
+  };
+
+  const doCapitalResume = async (woId: string) => {
+    setLoading("capitalResume_" + woId, true);
+    try {
+      const workOrder = workOrders.find((item: any) => item.id === woId);
+      if (!workOrder || workOrder.status !== "pending_capital_completion") {
+        fire("This work order is not waiting for capital approval");
+        return;
+      }
+      const patch = {
+        status: workOrder.contractor ? "assigned" : "unassigned",
+        functionalStatus: workOrder.contractor ? "Dispatched" : "New",
+        capitalStatus: "Approved - work authorized",
+        isCapital: true,
+      };
+      const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+      patchLocalWO(
+        woId,
+        patch,
+        localActivity(
+          `Capital work authorized by 7-Eleven and resumed by ${currentUser.name}.`,
+          "system",
+        ),
+      );
+      const resumed = await dbCall(async () => {
+        await resumeCapitalWork(woId);
+      }, "Capital resume failed", () => restoreWorkOrders(snapshot));
+      if (resumed) fire("Capital approved — work can resume");
+    } finally {
+      setLoading("capitalResume_" + woId, false);
     }
   };
 
@@ -1158,10 +1233,11 @@ export default function useWorkOrders({
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
-    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart,
+    doRequestP1PartOrder, doSetP1PartOrderStatus,
     doMarkSevenElevenSynced,
     doMarkContractorAttention,
     doAcknowledgeContractorAttention,

@@ -47,6 +47,7 @@ export const STATUS = {
   wip: { label: "In Progress", color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" },
   parts: { label: "Awaiting Parts", color: T.warn, bg: T.warnSoft, ring: "#EED9A6" },
   capital: { label: "Capital Replacement", color: "#5B4B8A", bg: "#EDE9F5", ring: "#D4C9E8" },
+  pending_capital_completion: { label: "Pending Capital Completion", color: "#5B4B8A", bg: "#EDE9F5", ring: "#D4C9E8" },
   completed: { label: "Completed", color: T.success, bg: T.successSoft, ring: "#CFDED3" },
   pending_invoice: { label: "Pending 7-Eleven Submission", color: "#B8478A", bg: "#F8E9F0", ring: "#EEC8DC" },
   pending_approval: { label: "Pending Approval", color: T.muted, bg: T.borderSoft, ring: T.border },

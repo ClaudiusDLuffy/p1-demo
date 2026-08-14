@@ -8,10 +8,12 @@ import {
 import { roundInvoiceNumber } from "../../../lib/invoiceMath";
 import { collectSupabasePages } from "../../../lib/paginatedQuery";
 import { normalizeStaffBillingLineType } from "../../../lib/staffBilling";
+import {
+  isInvoiceControllerProfile,
+  loadStaffPermissions,
+  STAFF_ROLES,
+} from "../../../lib/server/staffAuthorization";
 import type { Database } from "../../../lib/supabase/database.types";
-
-const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
-const CONTROLLER_EMAIL = "emilyb@phospitality.com";
 
 type BillingLineInput = {
   type: string;
@@ -68,11 +70,17 @@ async function requireStaff(req: NextRequest) {
     return { error: jsonError("Forbidden", 403) };
   }
 
-  return { sb, user, profile };
+  let staffPermissions: string[];
+  try {
+    staffPermissions = await loadStaffPermissions(sb, profile.id);
+  } catch (permissionError) {
+    return { error: jsonError(permissionError instanceof Error ? permissionError.message : "Permission lookup failed", 500) };
+  }
+
+  return { sb, user, profile: { ...profile, staffPermissions } };
 }
 
-const isController = (user: { email?: string | null }) =>
-  String(user.email || "").trim().toLowerCase() === CONTROLLER_EMAIL;
+const isController = isInvoiceControllerProfile;
 
 const mapLine = (line: any) => ({
   id: line.id,
@@ -559,25 +567,6 @@ async function loadContractorInvoiceSources(
     .filter(Boolean);
 }
 
-const nextLegacyStaffInvoiceNum = async (
-  sb: ReturnType<typeof createServerClient>,
-) => {
-  const { data, error } = await (sb as any)
-    .from("invoices")
-    .select("num")
-    .eq("invoice_type", "staff");
-
-  if (error) throw error;
-
-  const maxNum = (data || []).reduce((max: number, row: any) => {
-    const match = String(row.num || "").match(/^P1-(\d+)$/i);
-    const n = match ? parseInt(match[1], 10) : 0;
-    return Number.isFinite(n) && n > max ? n : max;
-  }, 0);
-
-  return `P1-${String(maxNum + 1).padStart(5, "0")}`;
-};
-
 const nextStaffInvoiceNum = async (
   sb: ReturnType<typeof createServerClient>,
   actorId: string,
@@ -585,7 +574,8 @@ const nextStaffInvoiceNum = async (
   const { data, error } = await (sb as any)
     .rpc("next_staff_invoice_num", { p_actor_id: actorId });
   if (error) throw error;
-  return data || nextLegacyStaffInvoiceNum(sb);
+  if (!data) throw new Error("Staff invoice numbering is not configured");
+  return data;
 };
 
 export async function GET(req: NextRequest) {
@@ -607,9 +597,22 @@ export async function GET(req: NextRequest) {
       const invoices = await loadContractorInvoiceSources(
         auth.sb,
         sourceInvoiceIds,
-        isController(auth.user),
+        isController(auth.profile),
       );
       return NextResponse.json({ invoices });
+    }
+
+    if (req.nextUrl.searchParams.get("nextNumber") === "1") {
+      if (isController(auth.profile)) {
+        return jsonError("The controller cannot create P1 billing invoices", 403);
+      }
+      const { data: configuredNumber, error: numberError } = await (auth.sb as any)
+        .rpc("peek_staff_invoice_num", { p_actor_id: auth.user.id });
+      if (numberError) throw numberError;
+      if (!configuredNumber) {
+        return jsonError("Staff invoice numbering is not configured", 503);
+      }
+      return NextResponse.json({ num: configuredNumber });
     }
 
     const invoiceId = String(
@@ -631,7 +634,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
-  if (isController(auth.user)) {
+  if (isController(auth.profile)) {
     return jsonError("The controller cannot create P1 billing invoices", 403);
   }
 
@@ -709,8 +712,11 @@ export async function POST(req: NextRequest) {
     }
 
     const tax = await resolveTax(auth.sb, body, validLines);
-    const requestedNum = suppliedNum
-      || await nextStaffInvoiceNum(auth.sb, auth.user.id);
+    // The value displayed before save is only a preview. Allocate a canonical
+    // number now unless staff deliberately replaced the preview.
+    const requestedNum = userTypedNum
+      ? suppliedNum
+      : await nextStaffInvoiceNum(auth.sb, auth.user.id);
     if (!requestedNum || requestedNum.length > 80 || /[\u0000-\u001f\u007f]/.test(requestedNum)) {
       return jsonError("An invoice number could not be allocated", 500);
     }
@@ -766,7 +772,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
-  if (isController(auth.user)) {
+  if (isController(auth.profile)) {
     return jsonError("The controller cannot change P1 billing invoices", 403);
   }
 
@@ -922,7 +928,7 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
-  if (isController(auth.user)) {
+  if (isController(auth.profile)) {
     return jsonError("The controller cannot delete P1 billing invoices", 403);
   }
 

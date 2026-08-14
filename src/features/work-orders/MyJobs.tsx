@@ -13,7 +13,10 @@ export default function MyJobs(props: any) {
   const jobCounts = useMemo(() => ({
     active: myWOs.filter(w => activeStatuses.includes(w.status)).length,
     pendingInvoice: myWOs.filter(w => w.status === "pending_invoice").length,
-    capital: myWOs.filter(w => w.status === "capital").length,
+    capital: myWOs.filter(w =>
+      (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
+      && w.status !== "closed",
+    ).length,
   }), [myWOs, activeStatuses]);
   const visibleJobs = useMemo(() => {
     const needle = search.trim().toLowerCase();

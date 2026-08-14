@@ -197,6 +197,155 @@ export type Database = {
           },
         ]
       }
+      contractor_technician_admin_events: {
+        Row: {
+          access_level: string | null
+          action: string
+          actor_id: string
+          contractor_id: string
+          created_at: string
+          details: Json
+          id: string
+          technician_profile_id: string
+        }
+        Insert: {
+          access_level?: string | null
+          action: string
+          actor_id: string
+          contractor_id: string
+          created_at?: string
+          details?: Json
+          id?: string
+          technician_profile_id: string
+        }
+        Update: {
+          access_level?: string | null
+          action?: string
+          actor_id?: string
+          contractor_id?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          technician_profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_technician_admin_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_technician_admin_events_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_technician_admin_events_technician_profile_id_fkey"
+            columns: ["technician_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      controller_invoice_export_batches: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          invoice_count: number
+          object_path: string
+          total: number
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id: string
+          invoice_count: number
+          object_path: string
+          total: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          invoice_count?: number
+          object_path?: string
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "controller_invoice_export_batches_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      controller_invoice_export_items: {
+        Row: {
+          batch_id: string
+          contractor_id: string | null
+          exported_at: string
+          invoice_id: string
+          invoice_num: string
+          total: number
+          work_order_id: string | null
+        }
+        Insert: {
+          batch_id: string
+          contractor_id?: string | null
+          exported_at?: string
+          invoice_id: string
+          invoice_num: string
+          total: number
+          work_order_id?: string | null
+        }
+        Update: {
+          batch_id?: string
+          contractor_id?: string | null
+          exported_at?: string
+          invoice_id?: string
+          invoice_num?: string
+          total?: number
+          work_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "controller_invoice_export_items_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "controller_invoice_export_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "controller_invoice_export_items_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "controller_invoice_export_items_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "controller_invoice_export_items_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_lines: {
         Row: {
           amount: number | null
@@ -535,6 +684,133 @@ export type Database = {
           },
         ]
       }
+      p1_parts_alert_deliveries: {
+        Row: {
+          attempt_count: number
+          claimed_at: string
+          completed_at: string | null
+          error_message: string | null
+          id: string
+          local_date: string
+          provider_message_id: string | null
+          recipient_id: string
+          request_signature: string
+          status: string
+        }
+        Insert: {
+          attempt_count?: number
+          claimed_at?: string
+          completed_at?: string | null
+          error_message?: string | null
+          id?: string
+          local_date: string
+          provider_message_id?: string | null
+          recipient_id: string
+          request_signature: string
+          status?: string
+        }
+        Update: {
+          attempt_count?: number
+          claimed_at?: string
+          completed_at?: string | null
+          error_message?: string | null
+          id?: string
+          local_date?: string
+          provider_message_id?: string | null
+          recipient_id?: string
+          request_signature?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "p1_parts_alert_deliveries_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "p1_parts_alert_recipients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      p1_parts_alert_recipients: {
+        Row: {
+          active: boolean
+          added_by: string | null
+          created_at: string
+          id: string
+          phone_e164: string
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          added_by?: string | null
+          created_at?: string
+          id?: string
+          phone_e164: string
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          added_by?: string | null
+          created_at?: string
+          id?: string
+          phone_e164?: string
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "p1_parts_alert_recipients_added_by_fkey"
+            columns: ["added_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "p1_parts_alert_recipients_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      p1_parts_alert_settings: {
+        Row: {
+          cutoff_time: string | null
+          enabled: boolean
+          singleton: boolean
+          timezone: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          cutoff_time?: string | null
+          enabled?: boolean
+          singleton?: boolean
+          timezone?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          cutoff_time?: string | null
+          enabled?: boolean
+          singleton?: boolean
+          timezone?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "p1_parts_alert_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       qbo_tokens: {
         Row: {
           access_token: string
@@ -655,6 +931,66 @@ export type Database = {
           {
             foreignKeyName: "state_sales_tax_rates_created_by_fkey"
             columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_invoice_default_series: {
+        Row: {
+          next_number: number
+          number_width: number
+          prefix: string
+          singleton: boolean
+          updated_at: string
+        }
+        Insert: {
+          next_number: number
+          number_width?: number
+          prefix: string
+          singleton?: boolean
+          updated_at?: string
+        }
+        Update: {
+          next_number?: number
+          number_width?: number
+          prefix?: string
+          singleton?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      staff_permission_grants: {
+        Row: {
+          created_at: string
+          granted_by: string | null
+          permission: string
+          profile_id: string
+        }
+        Insert: {
+          created_at?: string
+          granted_by?: string | null
+          permission: string
+          profile_id: string
+        }
+        Update: {
+          created_at?: string
+          granted_by?: string | null
+          permission?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_permission_grants_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_permission_grants_profile_id_fkey"
+            columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -884,6 +1220,98 @@ export type Database = {
             columns: ["default_afm_id"]
             isOneToOne: false
             referencedRelation: "afms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wo_parts: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          description: string
+          expected_return_date: string | null
+          id: string
+          notes: string | null
+          ordering_responsibility: string
+          p1_order_status: string | null
+          p1_requested_at: string | null
+          p1_requested_by: string | null
+          p1_resolved_at: string | null
+          p1_resolved_by: string | null
+          part_number: string | null
+          qty: number | null
+          status: string
+          tracking_number: string | null
+          updated_at: string | null
+          work_order_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          description: string
+          expected_return_date?: string | null
+          id?: string
+          notes?: string | null
+          ordering_responsibility?: string
+          p1_order_status?: string | null
+          p1_requested_at?: string | null
+          p1_requested_by?: string | null
+          p1_resolved_at?: string | null
+          p1_resolved_by?: string | null
+          part_number?: string | null
+          qty?: number | null
+          status?: string
+          tracking_number?: string | null
+          updated_at?: string | null
+          work_order_id: string
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          description?: string
+          expected_return_date?: string | null
+          id?: string
+          notes?: string | null
+          ordering_responsibility?: string
+          p1_order_status?: string | null
+          p1_requested_at?: string | null
+          p1_requested_by?: string | null
+          p1_resolved_at?: string | null
+          p1_resolved_by?: string | null
+          part_number?: string | null
+          qty?: number | null
+          status?: string
+          tracking_number?: string | null
+          updated_at?: string | null
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wo_parts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wo_parts_p1_requested_by_fkey"
+            columns: ["p1_requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wo_parts_p1_resolved_by_fkey"
+            columns: ["p1_resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wo_parts_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -1473,6 +1901,32 @@ export type Database = {
         Args: { p_invoice_id: string; p_storage_path: string }
         Returns: undefined
       }
+      claim_p1_parts_alert_delivery: {
+        Args: {
+          p_local_date: string
+          p_recipient_id: string
+          p_request_signature: string
+        }
+        Returns: string | null
+      }
+      complete_controller_invoice_export: {
+        Args: {
+          p_actor_id: string
+          p_batch_id: string
+          p_invoice_ids: string[]
+          p_object_path: string
+        }
+        Returns: Json
+      }
+      complete_p1_parts_alert_delivery: {
+        Args: {
+          p_delivery_id: string
+          p_error_message?: string | null
+          p_provider_message_id?: string | null
+          p_status: string
+        }
+        Returns: undefined
+      }
       complete_work_order_once: {
         Args: {
           p_activity_text: string
@@ -1490,6 +1944,27 @@ export type Database = {
       complete_my_work_order_todo: {
         Args: { p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
+      }
+      configure_contractor_technician: {
+        Args: {
+          p_access_level: string
+          p_actor_id: string
+          p_contractor_id: string
+          p_name: string
+          p_phone: string | null
+          p_profile_id: string
+        }
+        Returns: Json
+      }
+      configure_p1_parts_alerts: {
+        Args: {
+          p_actor_id: string
+          p_cutoff_time: string | null
+          p_enabled: boolean
+          p_recipients: Json
+          p_timezone: string
+        }
+        Returns: Json
       }
       contractor_account_id_for_profile: {
         Args: { p_profile_id: string }
@@ -1553,6 +2028,14 @@ export type Database = {
         }
         Returns: Json
       }
+      deactivate_contractor_technician: {
+        Args: { p_actor_id: string; p_profile_id: string }
+        Returns: Json
+      }
+      resume_capital_work: {
+        Args: { p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["work_orders"]["Row"]
+      }
       save_staff_billing_invoice: {
         Args: {
           p_actor_id: string
@@ -1582,10 +2065,26 @@ export type Database = {
       }
       is_invoice_controller: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
+      has_staff_permission: {
+        Args: { p_permission: string }
+        Returns: boolean
+      }
       next_contractor_invoice_num: { Args: never; Returns: string }
       next_staff_invoice_num: {
         Args: { p_actor_id: string }
         Returns: string
+      }
+      peek_staff_invoice_num: {
+        Args: { p_actor_id: string }
+        Returns: string
+      }
+      profile_has_staff_permission: {
+        Args: { p_permission: string; p_profile_id: string }
+        Returns: boolean
+      }
+      request_p1_part_order: {
+        Args: { p_part_id: string }
+        Returns: Database["public"]["Tables"]["wo_parts"]["Row"]
       }
       resubmit_rejected_contractor_invoice: {
         Args: {
@@ -1626,6 +2125,10 @@ export type Database = {
         Args: { p_activity_id: string; p_required: boolean }
         Returns: undefined
       }
+      set_p1_part_order_status: {
+        Args: { p_part_id: string; p_status: string }
+        Returns: Database["public"]["Tables"]["wo_parts"]["Row"]
+      }
       transfer_work_order_todo: {
         Args: { p_new_owner_id: string; p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
@@ -1634,6 +2137,7 @@ export type Database = {
     Enums: {
       capital_status:
         | "Pending approval"
+        | "Approved - work authorized"
         | "Equipment ordered"
         | "Equipment received"
         | "Installation scheduled"
@@ -1661,6 +2165,7 @@ export type Database = {
         | "wip"
         | "parts"
         | "capital"
+        | "pending_capital_completion"
         | "completed"
         | "pending_invoice"
         | "pending_approval"
@@ -1795,6 +2300,7 @@ export const Constants = {
     Enums: {
       capital_status: [
         "Pending approval",
+        "Approved - work authorized",
         "Equipment ordered",
         "Equipment received",
         "Installation scheduled",
@@ -1825,6 +2331,7 @@ export const Constants = {
         "wip",
         "parts",
         "capital",
+        "pending_capital_completion",
         "completed",
         "pending_invoice",
         "pending_approval",

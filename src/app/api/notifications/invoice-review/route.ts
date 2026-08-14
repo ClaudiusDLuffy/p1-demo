@@ -2,10 +2,12 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { sendInvoiceReviewNotification } from "../../../../lib/notificationService";
 import { createServerClient } from "../../../../lib/supabase/server";
+import {
+  isInvoiceControllerProfile,
+  loadStaffPermissions,
+  STAFF_ROLES,
+} from "../../../../lib/server/staffAuthorization";
 import type { Database } from "../../../../lib/supabase/database.types";
-
-const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
-const INVOICE_CONTROLLER_EMAIL = "emilyb@phospitality.com";
 
 const jsonError = (message: string, status: number) =>
   NextResponse.json({ error: message }, { status });
@@ -40,12 +42,17 @@ async function requireStaff(request: NextRequest) {
     .maybeSingle();
 
   if (profileError) return { error: jsonError(profileError.message, 500) };
-  if (
-    !profile?.active
-    || !STAFF_ROLES.has(profile.role || "")
-    || String(profile.email || "").trim().toLowerCase()
-      === INVOICE_CONTROLLER_EMAIL
-  ) {
+  if (!profile?.active || !STAFF_ROLES.has(profile.role || "")) {
+    return { error: jsonError("Forbidden", 403) };
+  }
+
+  let staffPermissions: string[];
+  try {
+    staffPermissions = await loadStaffPermissions(sb, profile.id);
+  } catch (permissionError) {
+    return { error: jsonError(permissionError instanceof Error ? permissionError.message : "Permission lookup failed", 500) };
+  }
+  if (isInvoiceControllerProfile({ staffPermissions })) {
     return { error: jsonError("Forbidden", 403) };
   }
 

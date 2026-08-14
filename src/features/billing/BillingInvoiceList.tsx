@@ -6,6 +6,7 @@ import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { T, INV_STATE, STAFF_INV_STATE } from "../../lib/constants";
+import { isInvoiceController } from "../../lib/staffPermissions";
 
 const tabs = [
   { id: "all", label: "All" },
@@ -31,8 +32,7 @@ export default function BillingInvoiceList(props: any) {
   const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
   const [readyToBillExpanded, setReadyToBillExpanded] = useState(false);
-  const controller = String(currentUser?.email || "").trim().toLowerCase()
-    === "emilyb@phospitality.com";
+  const controller = isInvoiceController(currentUser);
   const showingRecentlyApproved = tab === "recently_approved";
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, any>();

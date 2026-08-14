@@ -61,6 +61,8 @@ import {
   type StaffWorkRow,
 } from "../features/staff-work/workQueue";
 import Dashboard from "../features/dashboard/Dashboard";
+import AddressBookModal from "../features/contacts/AddressBookModal";
+import FloatingProfitCalculator from "../features/billing/FloatingProfitCalculator";
 import {
   T, DEMO_ACCOUNTS, PRIORITY, MONTHS, WEEKDAYS,
 } from "../lib/constants";
@@ -77,6 +79,7 @@ import {
   type PortalViewState,
 } from "../lib/portalNavigation";
 import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
+import { isInvoiceController } from "../lib/staffPermissions";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -224,9 +227,9 @@ const slaLabel = (wo: any) => {
   return { text: `${Math.floor(s.remainingHours)}h left`, color: T.success, bg: T.successSoft, severity: "safe" };
 };
 
-const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "closed", "capital"].includes(state);
+const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "pending_capital_completion", "closed", "capital"].includes(state);
 const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
-const closingStatuses = ["completed", "pending_invoice", "pending_approval", "closed"];
+const closingStatuses = ["completed", "pending_invoice", "pending_approval", "pending_capital_completion", "closed"];
 
 // A closed WO lingers on the active board for 24h after closed_at,
 // then lives only in History. A closed WO with no closed_at is treated as
@@ -506,7 +509,8 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   .detail-fields { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .wo-date-grid { grid-template-columns: 1fr !important; }
   .billing-form-grid,
-  .billing-summary-grid {
+  .billing-summary-grid,
+  .parts-alert-settings-grid {
     grid-template-columns: 1fr !important;
   }
   .billing-work-order-grid > * {
@@ -557,6 +561,8 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     overflow-wrap: anywhere;
   }
   .contractors-grid { grid-template-columns: 1fr !important; }
+  .address-book-row { grid-template-columns: 38px minmax(0, 1fr) !important; }
+  .address-book-contact { grid-column: 2; }
   .capital-grid { grid-template-columns: 1fr !important; }
   .table-scroll { overflow-x: auto; }
   .desktop-only-table { display: none !important; }
@@ -1160,6 +1166,7 @@ export default function PortalShell() {
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
   const isAuthenticated = hasSession || !!currentUser;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
+  const invoiceController = isInvoiceController(currentUser);
   const notesSeenInFlight = useRef(new Set<string>());
   const staffReadInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
@@ -1173,10 +1180,10 @@ export default function PortalShell() {
   const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
   const { data: woPartsData } = useWoPartsQuery(isAuthenticated);
   const { data: staffWorkTodosData = [] } = useStaffWorkTodosQuery(
-    isAuthenticated && isManager,
+    isAuthenticated && isManager && !invoiceController,
   );
   const { data: staffNotificationReadsData = [] } = useStaffNotificationReadsQuery(
-    isAuthenticated && isManager,
+    isAuthenticated && isManager && !invoiceController,
   );
   const woParts = woPartsData ?? [];
   const USERS = useMemo(
@@ -1190,10 +1197,12 @@ export default function PortalShell() {
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
-    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
-    doAddPart, doUpdatePart, doDeletePart, doMarkSevenElevenSynced,
+    doAddPart, doUpdatePart, doDeletePart,
+    doRequestP1PartOrder, doSetP1PartOrderStatus,
+    doMarkSevenElevenSynced,
     doMarkContractorAttention, doAcknowledgeContractorAttention } = useWorkOrders({
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
@@ -1653,6 +1662,19 @@ export default function PortalShell() {
       staffWorkTodosData,
     ],
   );
+  const dashboardWorkOrders = useMemo(() => {
+    const unreadIds = new Set(
+      staffWorkRows
+        .filter(row => row.isUnread)
+        .map(row => row.workOrder.id),
+    );
+    return maskedWorkOrders.map((workOrder: any) => ({
+      ...workOrder,
+      // Dashboard unread is intentionally per login; the 7-Eleven-sync flag
+      // remains a separate, shared workflow state.
+      hasUnreadNotes: unreadIds.has(workOrder.id),
+    }));
+  }, [maskedWorkOrders, staffWorkRows]);
   const staffUnreadCount = useMemo(
     () => staffWorkRows.filter(row => row.isUnread).length,
     [staffWorkRows],
@@ -1751,7 +1773,9 @@ export default function PortalShell() {
         qc.invalidateQueries({ queryKey: INVOICES_KEY }),
         qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
       ]);
-      fire(`Invoice #${invoice.num} sent to 7-Eleven; work order closed`);
+      fire(payload.finalization?.pendingCapitalCompletion
+        ? `Invoice #${invoice.num} sent to 7-Eleven; capital work remains open awaiting approval`
+        : `Invoice #${invoice.num} sent to 7-Eleven; work order closed`);
     } catch (e: any) {
       fire(`Billing update failed: ${e.message || e}`);
       throw e;
@@ -1941,7 +1965,10 @@ export default function PortalShell() {
       openValue,
       p1Count: workOrders.filter(w => w.priority === "p1" && activeStatuses.includes(w.status)).length,
       p1Unassigned: workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length,
-      capitalCount: workOrders.filter(w => w.status === "capital").length,
+      capitalCount: workOrders.filter(w =>
+        (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
+        && w.status !== "closed",
+      ).length,
       completedCount: workOrders.filter(w => w.status === "completed").length,
       pendAppr: workOrders.filter(w => w.status === "pending_approval").length,
       closedWOs: workOrders.filter(w => w.status === "closed"),
@@ -2113,7 +2140,12 @@ export default function PortalShell() {
     () => invoices.find(i => i.num === submittedInvoiceNum),
     [invoices, submittedInvoiceNum]
   );
-  const sideItems = useMemo(() => isManager
+  const sideItems = useMemo(() => invoiceController
+    ? [
+      { id: "dashboard", label: "Controller", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
+      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8" },
+    ]
+    : isManager
     ? [
       { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
       { id: "staff_work", label: "My Work", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", badge: staffWorkRows.length || null },
@@ -2133,7 +2165,7 @@ export default function PortalShell() {
         { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
       ] : []),
     ],
-    [isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canManageTeam, currentUser?.contractorTier, staffWorkRows.length]
+    [invoiceController, isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canManageTeam, currentUser?.contractorTier, staffWorkRows.length]
   );
   const bottomNavItems = useMemo(() => {
     const preferred = ["dashboard", "staff_work", "work_orders", "invoices"];
@@ -2142,6 +2174,15 @@ export default function PortalShell() {
       .filter(Boolean);
     return items.length ? items : sideItems.slice(0, 4);
   }, [sideItems]);
+
+  useEffect(() => {
+    if (!invoiceController || page === "dashboard" || page === "invoices") return;
+    setSelectedWO(null);
+    setSelectedInvoice(null);
+    setSelectedBillingInvoice(null);
+    setModal(null);
+    setPage("dashboard");
+  }, [invoiceController, page]);
 
   // ===============================================================
   //  LOGIN
@@ -2288,6 +2329,29 @@ export default function PortalShell() {
               <div style={{ fontSize: 10, color: T.sidebarText }}>{currentUser.title || currentUser.company}</div>
             </div>
           </div>
+          {isManager && !invoiceController && (
+            <button
+              onClick={() => {
+                setModal("addressBook");
+                setDrawerOpen(false);
+              }}
+              style={{
+                width: "calc(100% - 20px)",
+                margin: "0 10px 8px 10px",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid rgba(250,247,242,0.12)",
+                background: "transparent",
+                color: T.sidebarText,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Address book
+            </button>
+          )}
           <button
             onClick={() => {
               setModal("manageAccount");
@@ -2391,6 +2455,26 @@ export default function PortalShell() {
               <div style={{ fontSize: 10, color: T.sidebarText }}>{currentUser.title || currentUser.company}</div>
             </div>
           </div>
+          {isManager && !invoiceController && (
+            <button
+              onClick={() => setModal("addressBook")}
+              style={{
+                width: "100%",
+                padding: 8,
+                borderRadius: 8,
+                border: `1px solid rgba(250,247,242,0.1)`,
+                background: "transparent",
+                color: T.sidebarText,
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                marginBottom: 6,
+              }}
+            >
+              Address book
+            </button>
+          )}
           <button
             onClick={() => setModal("manageAccount")}
             style={{
@@ -2457,7 +2541,7 @@ export default function PortalShell() {
               <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
               <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
             </div>
-            {isManager && (
+            {isManager && !invoiceController && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="button"
@@ -2506,7 +2590,7 @@ export default function PortalShell() {
                 <div className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
               </div>
-              {isManager ? (
+              {isManager && !invoiceController ? (
                 <button
                   type="button"
                   onClick={openUnreadStaffWork}
@@ -2522,7 +2606,7 @@ export default function PortalShell() {
                 </button>
               ) : <div style={{ width: 40, height: 40 }} />}
             </div>
-            {isManager && (
+            {isManager && !invoiceController && (
               <div className="mobile-header-actions">
                 <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
                 <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
@@ -2545,9 +2629,27 @@ export default function PortalShell() {
           }}
           style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}
         >
-          <Dashboard page={page} isManager={isManager} openValue={openValue} openCount={openCount} openWOs={openWOs} workOrders={maskedWorkOrders} p1Count={p1Count} p1Unassigned={p1Unassigned} slaAtRisk={slaAtRisk} slaBreached={slaBreached} capitalCount={capitalCount} nav={nav} doAutoAssign={doAutoAssign} filteredWOs={filteredWOs} activeStatuses={activeStatuses} closingStatuses={closingStatuses} invoices={invoices} USERS={USERS} getUser={getUser} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setAiNote={setAiNote} setPage={setPage} fmt={fmt} search={search} setSearch={setSearch} />
+          <Dashboard
+            page={page}
+            isManager={isManager}
+            workOrders={dashboardWorkOrders}
+            p1Unassigned={p1Unassigned}
+            slaBreached={slaBreached}
+            nav={nav}
+            doAutoAssign={doAutoAssign}
+            invoices={invoices}
+            currentUser={currentUser}
+            staffProfiles={staffProfiles}
+            getUser={getUser}
+            setSelectedWO={setSelectedWO}
+            setAiNote={setAiNote}
+            setPage={setPage}
+            search={search}
+            setSearch={setSearch}
+            woParts={woParts}
+          />
 
-          {isManager && (
+          {isManager && !invoiceController && (
             <StaffWorkHub
               page={page}
               rows={staffWorkRows}
@@ -2637,7 +2739,7 @@ export default function PortalShell() {
             loadingStates={loadingStates}
           />
 
-          {isManager && page === "billing" && !selectedBillingInvoice && (
+          {isManager && !invoiceController && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
               page={page}
               currentUser={currentUser}
@@ -2662,9 +2764,12 @@ export default function PortalShell() {
             />
           )}
 
-          {isManager && page === "billing" && selectedBillingInvoice && (
+          {isManager && !invoiceController && page === "billing" && selectedBillingInvoice && (
             <BillingInvoiceDetail
               invoice={selectedBillingInvoiceData}
+              workOrder={selectedBillingInvoiceData?.wot
+                ? maskedWorkOrders.find((workOrder: any) => workOrder.id === selectedBillingInvoiceData.wot)
+                : null}
               invoiceLines={selectedBillingInvoiceData?.lines || []}
               onBack={() => {
                 if (!returnToWorkflowWorkOrder()) setSelectedBillingInvoice(null);
@@ -2694,7 +2799,18 @@ export default function PortalShell() {
             />
           )}
 
-          <ContractorList page={page} isManager={isManager} contractorsOnly={contractorsOnly} workOrders={workOrders} activeStatuses={activeStatuses} nav={nav} setFilterC={setFilterC} fmt={fmt} />
+          <ContractorList
+            page={page}
+            isManager={isManager}
+            contractorsOnly={assignableContractors}
+            technicians={technicians}
+            users={USERS}
+            workOrders={workOrders}
+            activeStatuses={activeStatuses}
+            nav={nav}
+            setFilterC={setFilterC}
+            fire={fire}
+          />
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
@@ -2735,6 +2851,7 @@ export default function PortalShell() {
             setModal={setModal}
             doCapitalFlag={doCapitalFlag}
             doCapitalDecline={doCapitalDecline}
+            doCapitalResume={doCapitalResume}
             doMoveToInvoice={doMoveToInvoice}
             doApproveInvoice={doApproveInvoice}
             onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
@@ -2789,6 +2906,8 @@ export default function PortalShell() {
             doAddPart={doAddPart}
             doUpdatePart={doUpdatePart}
             doDeletePart={doDeletePart}
+            doRequestP1PartOrder={doRequestP1PartOrder}
+            doSetP1PartOrderStatus={doSetP1PartOrderStatus}
             staffTodo={selectedStaffTodo}
             staffTodoOwner={selectedStaffTodoOwner}
             staffProfiles={staffProfiles}
@@ -3400,7 +3519,7 @@ export default function PortalShell() {
 
       <InvoiceCreateModal modal={modal} woData={invoiceFormWorkOrder} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
 
-      {isManager && (
+      {isManager && !invoiceController && (
         <BillingInvoiceCreateModal
           modal={modal}
           currentUser={currentUser}
@@ -3458,6 +3577,20 @@ export default function PortalShell() {
           </Modal>
         );
       })()}
+
+      {isManager && !invoiceController && (
+        <AddressBookModal
+          open={modal === "addressBook"}
+          onClose={() => setModal(null)}
+          staff={staffProfiles}
+          contractors={assignableContractors}
+        />
+      )}
+
+      <FloatingProfitCalculator
+        visible={isManager && !invoiceController && page === "billing"}
+        fmt={fmt}
+      />
 
       {lightbox && (
         <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, background: "rgba(31,30,28,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 20, cursor: "zoom-out" }}>

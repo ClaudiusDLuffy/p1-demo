@@ -37,6 +37,8 @@ import {
   writeBillingDraft,
 } from "../../lib/billingDraftPersistence";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
+import { isInvoiceController } from "../../lib/staffPermissions";
+import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -115,13 +117,6 @@ const addDays = (iso: string, days: number) => {
 const amount = (line: any) => (Number(line?.qty) || 0) * (Number(line?.rate) || 0);
 const money = (value: number) => Math.round(value * 100) / 100;
 const KNOWN_TERRITORIES = ["Virginia", "Texas", "Florida"] as const;
-const CONTROLLER_EMAIL = "emilyb@phospitality.com";
-const STAFF_INVOICE_SERIES: Record<string, { prefix: string; start: number }> = {
-  "lynzy@p1pros.com": { prefix: "P1-L-", start: 1000 },
-  "mandy@p1pros.com": { prefix: "P1-M-", start: 2000 },
-  "lynette@p1pros.com": { prefix: "P1-N-", start: 3000 },
-  "landryd@phospitality.com": { prefix: "P1-D-", start: 4000 },
-};
 
 const territoryFromState = (state: unknown) => {
   const code = String(state || "").trim().toUpperCase();
@@ -161,27 +156,6 @@ const dateInTimeZone = (value: string | null | undefined, timeZone: string) => {
   return `${get("year")}-${get("month")}-${get("day")}`;
 };
 
-const nextStaffNum = (invoices: any[], currentUser: any) => {
-  const email = String(currentUser?.email || "").trim().toLowerCase();
-  const series = STAFF_INVOICE_SERIES[email];
-  if (series) {
-    const maxNum = (invoices || []).reduce((max: number, invoice: any) => {
-      const value = String(invoice.num || "");
-      if (!value.startsWith(series.prefix)) return max;
-      const n = Number(value.slice(series.prefix.length));
-      return Number.isInteger(n) && n >= series.start && n > max ? n : max;
-    }, series.start - 1);
-    return `${series.prefix}${maxNum + 1}`;
-  }
-
-  const maxNum = (invoices || []).reduce((max: number, invoice: any) => {
-    const match = String(invoice.num || "").match(/^P1-(\d+)$/i);
-    const n = match ? parseInt(match[1], 10) : 0;
-    return Number.isFinite(n) && n > max ? n : max;
-  }, 0);
-  return `P1-${String(maxNum + 1).padStart(5, "0")}`;
-};
-
 export default function BillingInvoiceCreateModal(props: any) {
   const {
     modal,
@@ -208,6 +182,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [taxRates, setTaxRates] = useState<any[]>([]);
   const [taxRateLoadError, setTaxRateLoadError] = useState("");
   const [numberEdited, setNumberEdited] = useState(false);
+  const [numberPreview, setNumberPreview] = useState("");
+  const [numberPreviewError, setNumberPreviewError] = useState("");
   const [draftState, setDraftState] = useState<"idle" | "restored" | "saved" | "error">("idle");
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const initializedFor = useRef<string | null>(null);
@@ -218,8 +194,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
   const isEditing = !!editingInvoice?.id;
-  const controller = String(currentUser?.email || "").trim().toLowerCase()
-    === CONTROLLER_EMAIL;
+  const controller = isInvoiceController(currentUser);
   const draftStorageKey = useMemo(
     () => billingDraftStorageKey({
       userId: currentUser?.id || currentUser?.email || "staff",
@@ -351,6 +326,10 @@ export default function BillingInvoiceCreateModal(props: any) {
     ? money(Number(salesTaxOverride))
     : rateBasedSalesTax;
   const total = subtotal + salesTax;
+  const lineTypeSummary = useMemo(
+    () => summarizeInvoiceLineTypes(lines, salesTax),
+    [lines, salesTax],
+  );
 
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, { id: string; num: string }>();
@@ -473,6 +452,39 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, [modal]);
 
   useEffect(() => {
+    if (modal !== "createBillingInvoice" || isEditing) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const sb = supabase();
+        const { data: sessionData } = await sb.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) throw new Error("Your session expired. Sign in again.");
+        const response = await fetch("/api/billing-invoices?nextNumber=1", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Invoice number is unavailable");
+        if (cancelled) return;
+        const preview = String(payload.num || "").trim();
+        if (!preview) throw new Error("Invoice number is unavailable");
+        setNumberPreview(preview);
+        setNumberPreviewError("");
+        // Never overwrite a restored draft or something staff already typed.
+        if (!String(getValues("num") || "").trim()) {
+          setValue("num", preview, { shouldValidate: true });
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setNumberPreviewError(error instanceof Error ? error.message : "Invoice number is unavailable");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [getValues, isEditing, modal, setValue]);
+
+  useEffect(() => {
     if (modal !== "createBillingInvoice") {
       initializedFor.current = null;
       draftHydrated.current = false;
@@ -495,7 +507,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       || initialWorkOrderId
       || "";
     const initialForm = {
-      num: editingInvoice?.num || nextStaffNum(billingInvoices, currentUser),
+      num: editingInvoice?.num || numberPreview,
       invoiceDate: initialInvoiceDate,
       serviceDate: editingInvoice?.serviceDateRaw || "",
       dueDate: editingInvoice?.dueDateRaw || addDays(initialInvoiceDate, 30),
@@ -585,6 +597,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     initialWorkOrderId,
     isEditing,
     modal,
+    numberPreview,
     reset,
     draftStorageKey,
   ]);
@@ -903,7 +916,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => setNumberEdited(true) })} title="Auto-populated, but editable until approval or QuickBooks sync" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => setNumberEdited(true) })} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
@@ -1394,7 +1407,14 @@ export default function BillingInvoiceCreateModal(props: any) {
             </div>
           </div>
           <div style={{ width: 300, background: T.surfaceSoft, borderRadius: 12, border: `1px solid ${T.borderSoft}`, padding: "14px 16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 10 }}><span style={{ color: T.muted }}>Subtotal</span><span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{fmt(Math.round(subtotal * 100) / 100)}</span></div>
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.7, textTransform: "uppercase", color: T.subtle, marginBottom: 7 }}>P1 sell totals by type</div>
+            {lineTypeSummary.categories.map((category: any) => (
+              <div key={category.category} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, marginBottom: 7 }}>
+                <span style={{ color: T.muted }}>{category.label}</span>
+                <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{fmt(category.amount)}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingTop: 9, marginBottom: 10, borderTop: `1px solid ${T.borderSoft}` }}><span style={{ color: T.muted }}>Pre-tax subtotal</span><span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{fmt(Math.round(subtotal * 100) / 100)}</span></div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 10, gap: 10 }}>
               <span style={{ color: T.muted }}>Taxable subtotal</span>
               <span className="mono" style={{ color: T.ink }}>{fmt(money(taxableSubtotal))}</span>

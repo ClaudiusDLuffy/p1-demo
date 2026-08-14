@@ -16,6 +16,7 @@ import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
+import { isInvoiceController } from "../../lib/staffPermissions";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
 import {
@@ -59,7 +60,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
@@ -169,9 +170,8 @@ export default function WorkOrderDetail(props: any) {
   // invoice-driven status (submitting an invoice flips the WO to
   // pending_approval, which previously hid these). Capital is excluded (it has
   // its own staff flow). Pausing/closing never touches existing invoices.
-  const jobOpen = !["closed", "capital"].includes(woData?.status);
-  const invoiceController = String(currentUser?.email || "").trim().toLowerCase()
-    === "emilyb@phospitality.com";
+  const jobOpen = !["closed", "capital", "pending_capital_completion"].includes(woData?.status);
+  const invoiceController = isInvoiceController(currentUser);
   const canReviewInvoices = isManager && !invoiceController;
   const isLoading = (key: string) => !!loadingStates[key];
   const loadingStyle = (key: string) => ({
@@ -474,6 +474,11 @@ export default function WorkOrderDetail(props: any) {
                       {woData.status === "capital" && isManager && (
                         <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
                           {isLoading("capitalDecline_" + woData.id) ? <><BtnSpinnerDark />Returning...</> : "Capital declined - return to dispatched"}
+                        </button>
+                      )}
+                      {woData.status === "pending_capital_completion" && isManager && (
+                        <button onClick={() => doCapitalResume(woData.id)} disabled={isLoading("capitalResume_" + woData.id)} className="btn-accent" style={loadingStyle("capitalResume_" + woData.id)}>
+                          {isLoading("capitalResume_" + woData.id) ? <><BtnSpinner />Resuming...</> : "Capital approved - resume work"}
                         </button>
                       )}
                       {woData.status === "parts" && (
@@ -1260,6 +1265,8 @@ export default function WorkOrderDetail(props: any) {
                         doAddPart={doAddPart}
                         doUpdatePart={doUpdatePart}
                         doDeletePart={doDeletePart}
+                        doRequestP1PartOrder={doRequestP1PartOrder}
+                        doSetP1PartOrderStatus={doSetP1PartOrderStatus}
                         isPartBilled={isPartBilled}
                         loadingStates={loadingStates}
                         T={T}
@@ -1336,7 +1343,14 @@ const PART_STATUS_META: Record<string, { label: string; bg: string; fg: string }
   received:    { label: "Received",    bg: "#D1FAE5", fg: "#065F46" },
 };
 
-function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, isPartBilled, loadingStates, T }: any) {
+const P1_ORDER_STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
+  requested: { label: "P1 to order", bg: "#F3E8FF", fg: "#6B21A8" },
+  ordered: { label: "P1 ordered", bg: "#DBEAFE", fg: "#1E40AF" },
+  received: { label: "P1 received", bg: "#D1FAE5", fg: "#065F46" },
+  cancelled: { label: "P1 request cancelled", bg: "#F3F4F6", fg: "#4B5563" },
+};
+
+function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, isPartBilled, loadingStates, T }: any) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<any>({});
   const startEdit = (p: any) => {
@@ -1381,6 +1395,11 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
           const isEditing = editingId === p.id;
           const billed = isPartBilled ? isPartBilled(p.description) : false;
           const updating = !!loadingStates["updatePart_" + p.id];
+          const p1Updating = !!loadingStates["p1Part_" + p.id];
+          const isP1Order = p.orderingResponsibility === "p1";
+          const p1Meta = isP1Order
+            ? P1_ORDER_STATUS_META[p.p1OrderStatus] || P1_ORDER_STATUS_META.requested
+            : null;
           return (
             <div key={p.id} style={{ padding: 12, background: T.surfaceSoft, borderRadius: 10, border: `1px solid ${T.borderSoft}` }}>
               {isEditing ? (
@@ -1410,7 +1429,8 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                       {p.partNumber && <div className="mono" style={{ fontSize: 11, color: T.muted }}>{p.partNumber}</div>}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: meta.fg, background: meta.bg, padding: "3px 9px", borderRadius: 10, letterSpacing: 0.4, textTransform: "uppercase" }}>{meta.label}</span>
+                      {!isP1Order && <span style={{ fontSize: 10, fontWeight: 700, color: meta.fg, background: meta.bg, padding: "3px 9px", borderRadius: 10, letterSpacing: 0.4, textTransform: "uppercase" }}>{meta.label}</span>}
+                      {p1Meta && <span style={{ fontSize: 10, fontWeight: 700, color: p1Meta.fg, background: p1Meta.bg, padding: "3px 9px", borderRadius: 10, letterSpacing: 0.4, textTransform: "uppercase" }}>{p1Meta.label}</span>}
                       {billed && <span style={{ fontSize: 9, fontWeight: 700, color: T.subtle, background: T.surface, padding: "3px 8px", borderRadius: 10, letterSpacing: 0.4, textTransform: "uppercase", border: `1px solid ${T.border}` }}>Billed</span>}
                     </div>
                   </div>
@@ -1423,17 +1443,47 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                     {p.expectedReturnDate && <span>Expected return <span style={{ color: T.ink }}>{p.expectedReturnDate}</span></span>}
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 8, flexWrap: "wrap" }}>
-                    <Sel
-                      value={p.status}
-                      onChange={(e: any) => doUpdatePart(p.id, woId, { status: e.target.value })}
-                      style={{ padding: "5px 10px", fontSize: 11, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
-                    >
-                      <option value="ordered">Ordered</option>
-                      <option value="backordered">Backordered</option>
-                      <option value="shipped">Shipped</option>
-                      <option value="received">Received</option>
-                    </Sel>
+                    {isP1Order ? (
+                      isManager ? (
+                        <Sel
+                          value={p.p1OrderStatus || "requested"}
+                          disabled={p1Updating}
+                          onChange={(e: any) => doSetP1PartOrderStatus?.(p.id, e.target.value)}
+                          aria-label={`P1 purchasing status for ${p.description}`}
+                          style={{ padding: "5px 10px", fontSize: 11, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+                        >
+                          <option value="requested">Requested</option>
+                          <option value="ordered">Ordered</option>
+                          <option value="received">Received</option>
+                          <option value="cancelled">Cancelled</option>
+                        </Sel>
+                      ) : (
+                        <span style={{ fontSize: 10, color: T.muted }}>P1 purchasing owns this request</span>
+                      )
+                    ) : (
+                      <Sel
+                        value={p.status}
+                        onChange={(e: any) => doUpdatePart(p.id, woId, { status: e.target.value })}
+                        style={{ padding: "5px 10px", fontSize: 11, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+                      >
+                        <option value="ordered">Ordered</option>
+                        <option value="backordered">Backordered</option>
+                        <option value="shipped">Shipped</option>
+                        <option value="received">Received</option>
+                      </Sel>
+                    )}
                     <div style={{ display: "flex", gap: 6 }}>
+                      {!isP1Order && p.status !== "received" && doRequestP1PartOrder && (
+                        <button
+                          type="button"
+                          onClick={() => doRequestP1PartOrder(p.id)}
+                          disabled={p1Updating}
+                          className="btn-soft"
+                          style={{ padding: "5px 10px", fontSize: 11, color: T.violet, borderColor: `${T.violet}44` }}
+                        >
+                          {p1Updating ? "Requesting…" : "P1 to order"}
+                        </button>
+                      )}
                       <button type="button" onClick={() => startEdit(p)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit</button>
                       {isManager && doDeletePart && (
                         <button type="button" onClick={() => doDeletePart(p.id, woId)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11, color: T.danger }}>Remove</button>

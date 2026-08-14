@@ -241,6 +241,15 @@ export function generateStaffInvoiceCsv(invoice: StaffInvoiceCsvInput): string {
   return generateCsv(staffInvoiceCsvRows(invoice));
 }
 
+export function generateInvoiceBatchCsv(
+  invoices: StaffInvoiceCsvInput[],
+): string {
+  if (invoices.length === 0) {
+    throw new Error("No invoices are available to export");
+  }
+  return generateCsv(invoices.flatMap(invoiceCsvRows));
+}
+
 const filenameToken = (value: unknown, fallback: string) => {
   const token = String(value || "")
     .trim()

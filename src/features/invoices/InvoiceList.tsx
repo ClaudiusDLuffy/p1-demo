@@ -9,13 +9,14 @@ import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE } from "../../lib/constants";
 import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { InvoiceSortKey, SortDirection, sortInvoices } from "../../lib/invoiceSort";
+import { isInvoiceController } from "../../lib/staffPermissions";
+import ControllerExportPanel from "./ControllerExportPanel";
 import { useEffect, useMemo, useState } from "react";
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices, onEditRejected } = props;
   const currentContractorId = currentUser?.contractorAccountId || currentUser?.id || null;
-  const controller = String(currentUser?.email || "").trim().toLowerCase()
-    === "emilyb@phospitality.com";
+  const controller = isInvoiceController(currentUser);
   const canBatchReview = isManager && !controller && !!doBatchReviewInvoices;
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<InvoiceSortKey>("recent");
@@ -185,6 +186,7 @@ export default function InvoiceList(props: any) {
           {/* ═════ INVOICES ═════ */}
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
+              <ControllerExportPanel invoices={invoices} currentUser={currentUser} />
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
                 <div className="mobile-tabs invoice-tabs" style={{ display: "flex", gap: 0, borderBottom: `2px solid ${T.borderSoft}` }}>
                   {invoiceTabs.map(t => (
