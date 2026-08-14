@@ -843,15 +843,7 @@ export default function useWorkOrders({
     }
   };
 
-  const doCapitalFlag = async (
-    woId: string,
-    extras?: {
-      repairQuote?: number
-      installQuote?: number
-      assetYear?: number
-      capitalNotes?: string
-    }
-  ) => {
+  const doCapitalFlag = async (woId: string) => {
     setLoading("capitalFlag_" + woId, true);
     try {
     const text = "Flagged as capital replacement — pending approval.";
@@ -860,10 +852,6 @@ export default function useWorkOrders({
       functionalStatus: "Pending Capital Approval",
       capitalStatus: "Pending approval",
       isCapital: true,
-      ...(extras?.repairQuote && { repairQuote: extras.repairQuote }),
-      ...(extras?.installQuote && { installQuote: extras.installQuote }),
-      ...(extras?.assetYear && { assetYear: extras.assetYear }),
-      ...(extras?.capitalNotes && { capitalNotes: extras.capitalNotes }),
     };
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "system"));

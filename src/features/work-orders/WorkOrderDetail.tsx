@@ -32,10 +32,6 @@ const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
   { ssr: false }
 );
-const CapitalFlagModal = dynamic(
-  () => import("./CapitalFlagModal"),
-  { ssr: false }
-);
 const QuoteCalculator = dynamic(
   () => import("./QuoteCalculatorWorkspace"),
   { ssr: false }
@@ -469,7 +465,7 @@ export default function WorkOrderDetail(props: any) {
                         </>
                       )}
                       {isManager && canFlagWorkOrderCapital(woData) && (
-                        <button onClick={() => setModal("capitalFlag")} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>
+                        <button onClick={() => void doCapitalFlag(woData.id)} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>
                       )}
                       {woData.status === "capital" && isManager && (
                         <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
@@ -1316,15 +1312,6 @@ export default function WorkOrderDetail(props: any) {
                 setModal(null);
                 fire("Work report submitted");
               }}
-            />
-          )}
-
-          {modal === "capitalFlag" && woData && (
-            <CapitalFlagModal
-              woId={woData.id}
-              woStore={woData.store}
-              onClose={() => setModal(null)}
-              doCapitalFlag={doCapitalFlag}
             />
           )}
 
