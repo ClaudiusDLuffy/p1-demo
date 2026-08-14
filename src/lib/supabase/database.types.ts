@@ -2017,6 +2017,10 @@ export type Database = {
         Args: { p_work_order_id: string }
         Returns: boolean
       }
+      close_work_order_without_invoice: {
+        Args: { p_work_order_id: string }
+        Returns: Json
+      }
       mark_staff_work_order_read: {
         Args: { p_read_through_at: string; p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_notification_reads"]["Row"]

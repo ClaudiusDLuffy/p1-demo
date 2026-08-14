@@ -1197,7 +1197,7 @@ export default function PortalShell() {
     patchLocalWO, localActivity, dbCall,
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doReopen,
+    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
@@ -2869,6 +2869,7 @@ export default function PortalShell() {
             onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
             doMarkPaid={doMarkPaid}
             doCloseWO={doCloseWO}
+            doCloseWithoutInvoice={doCloseWithoutInvoice}
             doDownloadInvoice={doDownloadInvoice}
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}
@@ -3186,6 +3187,33 @@ export default function PortalShell() {
               disabled={modalLoading}
               style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: modalLoading ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: modalLoading ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}
             >{modalLoading ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "closeWithoutInvoice" && woData && (
+        <Modal onClose={() => setModal(null)} title="Close without an invoice" width={460}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
+            Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
+            <CopyWorkOrderButton value={woData.id} /> without an invoice? The work order will appear in History immediately and leave the active board after the normal 24-hour closed-job window.
+            <br /><br />No invoice, line item, activity, photo, part, or assignment history will be deleted. Any open visit will be closed at the time of this action.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setModal(null)} disabled={modalLoading} className="btn-soft">Cancel</button>
+            <button
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  const closed = await doCloseWithoutInvoice(woData.id);
+                  if (closed) setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
+              className="btn-primary"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Closing...</> : "Close — no invoice"}</button>
           </div>
         </Modal>
       )}

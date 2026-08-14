@@ -674,6 +674,16 @@ export async function resumeCapitalWork(id: string): Promise<any> {
   return data;
 }
 
+export async function closeWorkOrderWithoutInvoice(id: string): Promise<Json> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "close_work_order_without_invoice",
+    { p_work_order_id: id },
+  );
+  if (error) throw error;
+  return data;
+}
+
 export async function markWorkOrderNotesSeen(
   workOrderId: string,
   latestNoteAt: string,
