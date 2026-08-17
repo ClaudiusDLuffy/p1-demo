@@ -39,6 +39,7 @@ import {
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
+import { useWorkOrderDetailsQuery } from "../work-orders/queries";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -255,9 +256,19 @@ export default function BillingInvoiceCreateModal(props: any) {
     ),
     [editingInvoice?.wot, workOrders],
   );
-  const selectedWorkOrder = useMemo(
+  const selectedWorkOrderBase = useMemo(
     () => activeWorkOrders.find((wo: any) => wo.id === selectedWorkOrderId) || null,
     [activeWorkOrders, selectedWorkOrderId],
+  );
+  const { data: selectedWorkOrderDetails } = useWorkOrderDetailsQuery(
+    selectedWorkOrderBase,
+    modal === "createBillingInvoice" && Boolean(selectedWorkOrderId),
+  );
+  const selectedWorkOrder = useMemo(
+    () => selectedWorkOrderBase && selectedWorkOrderDetails
+      ? { ...selectedWorkOrderBase, ...selectedWorkOrderDetails }
+      : selectedWorkOrderBase,
+    [selectedWorkOrderBase, selectedWorkOrderDetails],
   );
   const selectedTimeZone = timezoneForWorkOrder(selectedWorkOrder);
   const selectedTrips = useMemo(() => {
@@ -633,7 +644,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       skipRestoredWorkOrderHydration.current = null;
       return;
     }
-    const wo = activeWorkOrders.find((item: any) => item.id === selectedWorkOrderId);
+    const wo = selectedWorkOrder;
     if (!wo) return;
     setValue("storeNumber", wo.store || "", { shouldDirty: true, shouldValidate: true });
     setValue("storeAddress", wo.addr || "", { shouldDirty: true });
@@ -658,11 +669,11 @@ export default function BillingInvoiceCreateModal(props: any) {
     }
     clearErrors("storeNumber");
   }, [
-    activeWorkOrders,
     clearErrors,
     editingInvoice?.serviceDateRaw,
     editingInvoice?.wot,
     isEditing,
+    selectedWorkOrder,
     selectedWorkOrderId,
     setValue,
   ]);

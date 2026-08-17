@@ -58,6 +58,9 @@ test("the client reuses one submission key and blocks rapid duplicate clicks", (
 });
 
 test("invoice lists refresh for submissions made in another session", () => {
-  assert.match(invoiceQuery, /refetchInterval: 30_000/);
-  assert.match(invoiceQuery, /refetchIntervalInBackground: false/);
+  assert.doesNotMatch(invoiceQuery, /refetchInterval/);
+  assert.match(
+    dbClient,
+    /table: "invoices" \}, handleChange\("invoices"\)/,
+  );
 });
