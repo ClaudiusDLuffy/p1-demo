@@ -30,12 +30,15 @@ import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import {
+  WORK_ORDER_DETAILS_KEY,
   WORK_ORDERS_KEY,
   WO_PARTS_KEY,
+  useWorkOrderDetailsQuery,
   useProfilesQuery,
   useTechniciansQuery,
   useWorkOrdersQuery,
   useWoPartsQuery,
+  workOrderDetailsKey,
 } from "../features/work-orders/queries";
 import InvoiceList from "../features/invoices/InvoiceList";
 import InvoiceDetail from "../features/invoices/InvoiceDetail";
@@ -80,6 +83,12 @@ import {
 } from "../lib/portalNavigation";
 import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
 import { isInvoiceController } from "../lib/staffPermissions";
+import {
+  REALTIME_INVALIDATION_BATCH_MS,
+  datasetsForRealtimeTables,
+  type PortalRealtimeTable,
+  workOrderIdFromRealtimeChange,
+} from "../lib/realtimeInvalidation";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -1162,10 +1171,13 @@ export default function PortalShell() {
   const [resolutionInput, setResolutionInput] = useState("");
   const [resolutionNotesInput, setResolutionNotesInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
-  const { currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
+  const { currentUser, setCurrentUser, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
-  const isAuthenticated = hasSession || !!currentUser;
+  // Wait for the profile before enabling portal data. Starting on the raw
+  // session and then resetting again when the profile arrives caused every
+  // initial query to run twice.
+  const isAuthenticated = !!currentUser?.id;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const invoiceController = isInvoiceController(currentUser);
   const notesSeenInFlight = useRef(new Set<string>());
@@ -1176,6 +1188,16 @@ export default function PortalShell() {
     isLoading: woLoading,
     isSuccess: workOrdersLoaded,
   } = useWorkOrdersQuery(isAuthenticated);
+  const selectedWorkOrderBase = useMemo(
+    () => selectedWO
+      ? workOrdersData?.find((workOrder: any) => workOrder.id === selectedWO) || null
+      : null,
+    [selectedWO, workOrdersData],
+  );
+  const { data: selectedWorkOrderDetails } = useWorkOrderDetailsQuery(
+    selectedWorkOrderBase,
+    isAuthenticated && Boolean(selectedWO),
+  );
   const { data: profilesData } = useProfilesQuery(isAuthenticated);
   const { data: invoicesData } = useInvoicesQuery(isAuthenticated);
   const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
@@ -1206,6 +1228,8 @@ export default function PortalShell() {
     doMarkSevenElevenSynced,
     doMarkContractorAttention, doAcknowledgeContractorAttention } = useWorkOrders({
       currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
+      selectedWorkOrderId: selectedWO,
+      selectedWorkOrderDetails,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
       isManager,
@@ -1574,27 +1598,57 @@ export default function PortalShell() {
   // Subscribe to realtime so changes from other clients propagate.
   useEffect(() => {
     if (!currentUser?.id) return;
-    const unsub = subscribeToChanges(() => {
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
-      qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
-      qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY });
-      qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
-    });
-    return () => { unsub(); };
-  }, [currentUser?.id, qc]);
+    const pendingTables = new Set<PortalRealtimeTable>();
+    const pendingWorkOrderIds = new Set<string>();
+    let needsBroadDetailRefresh = false;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    qc.resetQueries({ queryKey: WORK_ORDERS_KEY });
-    qc.resetQueries({ queryKey: INVOICES_KEY });
-    qc.resetQueries({ queryKey: BILLING_INVOICES_KEY });
-    qc.resetQueries({ queryKey: ["profiles"] });
-    qc.resetQueries({ queryKey: ["technicians"] });
-    qc.resetQueries({ queryKey: WO_PARTS_KEY });
-    qc.resetQueries({ queryKey: STAFF_WORK_TODOS_KEY });
-    qc.resetQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
+    const flush = () => {
+      flushTimer = null;
+      const datasets = datasetsForRealtimeTables(pendingTables);
+      pendingTables.clear();
+
+      for (const dataset of datasets) {
+        if (dataset === "workOrders") void qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+        if (dataset === "invoices") void qc.invalidateQueries({ queryKey: INVOICES_KEY });
+        if (dataset === "billingInvoices") void qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+        if (dataset === "woParts") void qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
+        if (dataset === "staffWorkTodos") void qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY });
+        if (dataset === "staffNotificationReads") void qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
+        if (dataset === "workOrderDetails") {
+          // Prefix invalidation safely covers DELETE payloads that do not
+          // include work_order_id unless replica identity is FULL.
+          const ids = [...pendingWorkOrderIds];
+          if (needsBroadDetailRefresh || ids.length === 0) {
+            void qc.invalidateQueries({ queryKey: WORK_ORDER_DETAILS_KEY });
+          } else {
+            for (const workOrderId of ids) {
+              void qc.invalidateQueries({ queryKey: workOrderDetailsKey(workOrderId) });
+            }
+          }
+        }
+      }
+
+      pendingWorkOrderIds.clear();
+      needsBroadDetailRefresh = false;
+    };
+
+    const unsub = subscribeToChanges(change => {
+      pendingTables.add(change.table);
+      const datasets = datasetsForRealtimeTables([change.table]);
+      if (datasets.includes("workOrderDetails")) {
+        const workOrderId = workOrderIdFromRealtimeChange(change);
+        if (workOrderId) pendingWorkOrderIds.add(workOrderId);
+        else needsBroadDetailRefresh = true;
+      }
+      if (!flushTimer) {
+        flushTimer = setTimeout(flush, REALTIME_INVALIDATION_BATCH_MS);
+      }
+    });
+    return () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      unsub();
+    };
   }, [currentUser?.id, qc]);
   const nav = useCallback((p: string) => {
     setPage(p);

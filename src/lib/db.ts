@@ -9,6 +9,10 @@ import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
 import type { Invoice, WorkOrder } from "./schemas";
 import type { Json } from "./supabase/database.types";
+import type {
+  PortalRealtimeChange,
+  PortalRealtimeTable,
+} from "./realtimeInvalidation";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -119,16 +123,108 @@ const mapProfile = (p: any, staffPermissions: string[] = []) => ({
 
 // ── WORK ORDERS ─────────────────────────────────────────────────────────────
 
+type WorkOrderActivitySummary = {
+  workOrderId: string;
+  latestNoteAt: string | null;
+  latestContractorActivityAt: string | null;
+  pendingSevenElevenSyncCount: number;
+  pendingContractorAttentionCount: number;
+};
+
+export type WorkOrderDetails = {
+  activities: any[];
+  photos: string[];
+  visits: any[];
+  latestNoteAt: string | null;
+  latestContractorActivityAt: string | null;
+  hasUnreadNotes: boolean;
+  pendingSevenElevenActivities: any[];
+  pendingSevenElevenSyncCount: number;
+  hasPendingSevenElevenSync: boolean;
+  pendingContractorActivities: any[];
+  pendingContractorAttentionCount: number;
+  hasPendingContractorAttention: boolean;
+  detailsLoaded: true;
+};
+
+const activitySummaryFromRows = (rows: any[]): WorkOrderActivitySummary[] => {
+  const summaries = new Map<string, WorkOrderActivitySummary>();
+  const latest = (left: string | null, right: string | null) => {
+    if (!left) return right;
+    if (!right) return left;
+    return new Date(right).getTime() > new Date(left).getTime() ? right : left;
+  };
+
+  for (const row of rows) {
+    const workOrderId = String(row.work_order_id || "");
+    if (!workOrderId) continue;
+    const summary = summaries.get(workOrderId) || {
+      workOrderId,
+      latestNoteAt: null,
+      latestContractorActivityAt: null,
+      pendingSevenElevenSyncCount: 0,
+      pendingContractorAttentionCount: 0,
+    };
+    if (row.type === "note") {
+      summary.latestNoteAt = latest(summary.latestNoteAt, row.created_at || null);
+    }
+    if (row.entered_by_role === "contractor") {
+      summary.latestContractorActivityAt = latest(
+        summary.latestContractorActivityAt,
+        row.created_at || null,
+      );
+    }
+    if (row.requires_7eleven_sync && !row.synced_to_7eleven_at) {
+      summary.pendingSevenElevenSyncCount += 1;
+    }
+    if (row.requires_contractor_attention && !row.contractor_attention_acknowledged_at) {
+      summary.pendingContractorAttentionCount += 1;
+    }
+    summaries.set(workOrderId, summary);
+  }
+  return [...summaries.values()];
+};
+
+const missingActivitySummaryRpc = (error: any) =>
+  error?.code === "PGRST202"
+  || error?.code === "42883"
+  || /get_work_order_activity_summaries/i.test(String(error?.message || ""))
+    && /schema cache|does not exist|could not find/i.test(String(error?.message || ""));
+
+async function loadWorkOrderActivitySummaries(sb: ReturnType<typeof supabase>) {
+  const { data, error } = await sb.rpc("get_work_order_activity_summaries");
+  if (!error) {
+    return (data || []).map(row => ({
+      workOrderId: row.work_order_id,
+      latestNoteAt: row.latest_note_at || null,
+      latestContractorActivityAt: row.latest_contractor_activity_at || null,
+      pendingSevenElevenSyncCount: Number(row.pending_7eleven_sync_count || 0),
+      pendingContractorAttentionCount: Number(row.pending_contractor_attention_count || 0),
+    }));
+  }
+  if (!missingActivitySummaryRpc(error)) throw error;
+
+  // Safe rollout fallback: if the web build reaches production just before
+  // migration 0070, transfer only the columns needed for list summaries.
+  // This preserves behavior without restoring the former select=* payload.
+  const rows = await collectSupabasePages<any>((from, to) => sb
+    .from("activities")
+    .select("work_order_id, created_at, type, entered_by_role, requires_7eleven_sync, synced_to_7eleven_at, requires_contractor_attention, contractor_attention_acknowledged_at")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to));
+  return activitySummaryFromRows(rows);
+}
+
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   const sb = supabase();
-  // Pull WOs + related history, then stitch together. Every table query is
-  // explicitly paged: PostgREST otherwise returns at most 1,000 rows, which
-  // made older notes, photos, and check-in/out visits appear to be deleted.
-  const [rawWorkOrderRows, activityRows, photoRows, visitRows, afmContactRows, incidentReuseRes, assignmentHistoryRows, financialRows] = await Promise.all([
+  // List data stays compact. Exact activity counters come from one aggregate
+  // row per work order; full activities, photos, and visits are fetched by
+  // loadWorkOrderDetails only when a work order is opened.
+  const [rawWorkOrderRows, activitySummaries, afmContactRows, incidentReuseRes, assignmentHistoryRows, financialRows] = await Promise.all([
     collectSupabasePages<any>((from, to) => sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to)),
-    collectSupabasePages<any>((from, to) => sb.from("activities").select("*").is("deleted_at", null).order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
-    collectSupabasePages<any>((from, to) => sb.from("photos").select("*").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
-    collectSupabasePages<any>((from, to) => (sb as any).from("work_order_visits").select("*").order("check_in_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    loadWorkOrderActivitySummaries(sb),
     collectSupabasePages<any>((from, to) => sb.from("work_order_afm_contacts").select("work_order_id, afm_email").order("work_order_id", { ascending: true }).range(from, to)),
     sb.rpc("get_incident_reuse_warnings"),
     collectSupabasePages<any>((from, to) => (sb as any).from("work_order_assignment_history").select("*").order("assignment_ended_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
@@ -157,39 +253,9 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
     };
   });
 
-  const timeZoneByWo = Object.fromEntries(
-    workOrderRows.map(workOrder => [
-      workOrder.id,
-      timezoneForWorkOrder({
-        storeTimezone: workOrder.store_timezone,
-        storeState: workOrder.store_state,
-        city: workOrder.city,
-        address: workOrder.address,
-      }),
-    ]),
+  const activitySummaryByWo = Object.fromEntries(
+    activitySummaries.map(summary => [summary.workOrderId, summary]),
   );
-  const actsByWo: Record<string, any[]> = {};
-  for (const a of activityRows) {
-    (actsByWo[a.work_order_id] ||= []).push(
-      mapActivity(a, timeZoneByWo[a.work_order_id]),
-    );
-  }
-  const photosByWo: Record<string, any[]> = {};
-  for (const p of photoRows) {
-    (photosByWo[p.work_order_id] ||= []).push(p);
-  }
-  const visitsByWo: Record<string, any[]> = {};
-  for (const visit of visitRows) {
-    (visitsByWo[visit.work_order_id] ||= []).push({
-      id: visit.id,
-      workOrderId: visit.work_order_id,
-      contractorId: visit.contractor_id || null,
-      checkInAt: visit.check_in_at,
-      checkOutAt: visit.check_out_at || null,
-      createdBy: visit.checked_in_by || null,
-      closedBy: visit.checked_out_by || null,
-    });
-  }
   const afmEmailByWo = Object.fromEntries(
     afmContactRows.map(contact => [
       contact.work_order_id,
@@ -221,14 +287,8 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
   }
 
   const mapped = workOrderRows.map(wo => {
-    const activities = actsByWo[wo.id] || [];
-    const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
-    const pendingSevenElevenActivities = activities.filter(activity =>
-      activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
-    );
-    const pendingContractorActivities = activities.filter(activity =>
-      activity.requiresContractorAttention && !activity.contractorAcknowledgedAt
-    );
+    const summary = activitySummaryByWo[wo.id];
+    const latestNoteAt = summary?.latestNoteAt || null;
     const seenAt = (wo as any).staff_notes_seen_at || null;
     const hasUnreadNotes = !!latestNoteAt && (
       !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
@@ -239,19 +299,19 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
       incidentReuse: incidentReuseByWo[wo.id] || null,
       assignmentHistory: assignmentHistoryByWo[wo.id] || [],
       afmEmail: afmEmailByWo[wo.id] || null,
-      activities,
+      activities: [],
       latestNoteAt,
+      latestContractorActivityAt: summary?.latestContractorActivityAt || null,
       hasUnreadNotes,
-      pendingSevenElevenActivities,
-      pendingSevenElevenSyncCount: pendingSevenElevenActivities.length,
-      hasPendingSevenElevenSync: pendingSevenElevenActivities.length > 0,
-      pendingContractorActivities,
-      pendingContractorAttentionCount: pendingContractorActivities.length,
-      hasPendingContractorAttention: pendingContractorActivities.length > 0,
-      visits: visitsByWo[wo.id] || [],
-      photos: (photosByWo[wo.id] || [])
-        .map(p => p.storage_path)
-        .filter(Boolean),
+      pendingSevenElevenActivities: [],
+      pendingSevenElevenSyncCount: summary?.pendingSevenElevenSyncCount || 0,
+      hasPendingSevenElevenSync: (summary?.pendingSevenElevenSyncCount || 0) > 0,
+      pendingContractorActivities: [],
+      pendingContractorAttentionCount: summary?.pendingContractorAttentionCount || 0,
+      hasPendingContractorAttention: (summary?.pendingContractorAttentionCount || 0) > 0,
+      visits: [],
+      photos: [],
+      detailsLoaded: false,
     };
   });
   for (const wo of workOrderRows) {
@@ -380,6 +440,81 @@ const mapActivity = (a: any, timeZone?: string) => ({
   contractorAcknowledgedAt: a.contractor_attention_acknowledged_at || null,
   contractorAcknowledgedBy: a.contractor_attention_acknowledged_by || null,
 });
+
+export async function loadWorkOrderDetails(workOrder: {
+  id: string;
+  storeTimezone?: string | null;
+  storeState?: string | null;
+  city?: string | null;
+  addr?: string | null;
+  staffNotesSeenAt?: string | null;
+}): Promise<WorkOrderDetails> {
+  if (!workOrder?.id) throw new Error("A work order ID is required");
+  const sb = supabase();
+  const [activityRows, photoRows, visitRows] = await Promise.all([
+    collectSupabasePages<any>((from, to) => sb
+      .from("activities")
+      .select("*")
+      .eq("work_order_id", workOrder.id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to)),
+    collectSupabasePages<any>((from, to) => sb
+      .from("photos")
+      .select("*")
+      .eq("work_order_id", workOrder.id)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to)),
+    collectSupabasePages<any>((from, to) => (sb as any)
+      .from("work_order_visits")
+      .select("*")
+      .eq("work_order_id", workOrder.id)
+      .order("check_in_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+  ]);
+
+  const timeZone = timezoneForWorkOrder(workOrder);
+  const activities = activityRows.map(row => mapActivity(row, timeZone));
+  const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
+  const pendingSevenElevenActivities = activities.filter(activity =>
+    activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
+  );
+  const pendingContractorActivities = activities.filter(activity =>
+    activity.requiresContractorAttention && !activity.contractorAcknowledgedAt
+  );
+  const seenAt = workOrder.staffNotesSeenAt || null;
+
+  return {
+    activities,
+    photos: photoRows.map(photo => photo.storage_path).filter(Boolean),
+    visits: visitRows.map(visit => ({
+      id: visit.id,
+      workOrderId: visit.work_order_id,
+      contractorId: visit.contractor_id || null,
+      checkInAt: visit.check_in_at,
+      checkOutAt: visit.check_out_at || null,
+      createdBy: visit.checked_in_by || null,
+      closedBy: visit.checked_out_by || null,
+    })),
+    latestNoteAt,
+    latestContractorActivityAt: activities.find(
+      activity => activity.enteredByRole === "contractor",
+    )?.createdAt || null,
+    hasUnreadNotes: !!latestNoteAt && (
+      !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
+    ),
+    pendingSevenElevenActivities,
+    pendingSevenElevenSyncCount: pendingSevenElevenActivities.length,
+    hasPendingSevenElevenSync: pendingSevenElevenActivities.length > 0,
+    pendingContractorActivities,
+    pendingContractorAttentionCount: pendingContractorActivities.length,
+    hasPendingContractorAttention: pendingContractorActivities.length > 0,
+    detailsLoaded: true,
+  };
+}
 
 // "5h", "2d", "1w" — relative age string from a timestamp
 function ageString(createdAt: string, dispatchedAt?: string): string {
@@ -1721,20 +1856,32 @@ export async function removePhoto(workOrderId: string, storagePath: string): Pro
 }
 
 // ── REALTIME SUBSCRIPTION ──────────────────────────────────────────────────
-// Returns an unsubscribe function. Caller passes a callback that re-fetches.
-export function subscribeToChanges(onChange: () => void): () => void {
+// Returns an unsubscribe function. The table-aware payload lets callers
+// invalidate only the data affected by a change instead of reloading the
+// entire portal for every row event.
+export function subscribeToChanges(
+  onChange: (change: PortalRealtimeChange) => void,
+): () => void {
   const sb = supabase();
+  const handleChange = (table: PortalRealtimeTable) => (payload: any) => {
+    onChange({
+      table,
+      eventType: payload.eventType,
+      new: payload.new || {},
+      old: payload.old || {},
+    });
+  };
   const channel = sb
     .channel("portal-changes")
-    .on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "activities" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_visits" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_technician_assignments" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_todos" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_notification_reads" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, handleChange("work_orders"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "activities" }, handleChange("activities"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, handleChange("invoices"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, handleChange("photos"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, handleChange("wo_parts"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_visits" }, handleChange("work_order_visits"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_technician_assignments" }, handleChange("work_order_technician_assignments"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_todos" }, handleChange("staff_work_order_todos"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_notification_reads" }, handleChange("staff_work_order_notification_reads"))
     .subscribe();
   return () => { sb.removeChannel(channel); };
 }

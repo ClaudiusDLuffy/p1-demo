@@ -25,6 +25,14 @@ test("latestContractorActivityAt ignores staff activity", () => {
   }), "2026-08-02T00:00:00Z");
 });
 
+test("latestContractorActivityAt uses the list summary before details load", () => {
+  assert.equal(latestContractorActivityAt({
+    ...baseWorkOrder,
+    latestContractorActivityAt: "2026-08-04T00:00:00Z",
+    activities: [],
+  }), "2026-08-04T00:00:00Z");
+});
+
 test("queue merges unread, todo, and ready labels into one work-order row", () => {
   const workOrder = {
     ...baseWorkOrder,

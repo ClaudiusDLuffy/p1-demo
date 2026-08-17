@@ -25,7 +25,7 @@ import {
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
 import { supabase } from "../../lib/supabase/client";
-import { WORK_ORDERS_KEY, WO_PARTS_KEY } from "./queries";
+import { WORK_ORDERS_KEY, WO_PARTS_KEY, workOrderDetailsKey } from "./queries";
 import { INVOICES_KEY } from "../invoices/queries";
 import { contractorInvoiceWorkOrderStatus } from "../../lib/contractorInvoiceReview";
 
@@ -38,6 +38,7 @@ const PART_STATUS_LABEL: Record<string, string> = {
 
 export default function useWorkOrders({
   currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
+  selectedWorkOrderId, selectedWorkOrderDetails,
   startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
   setSelectedWO, setAiNote, setPage, isManager,
   noteText, setNoteText, SERVICE_TO_TRADES, contractorFor,
@@ -50,12 +51,44 @@ export default function useWorkOrders({
     setLoadingStates(prev => ({ ...prev, [key]: val }));
 
   useEffect(() => {
-    if (workOrdersData) setWorkOrders(workOrdersData);
+    if (!workOrdersData) return;
+    setWorkOrders(current => {
+      const currentById = new Map(current.map(workOrder => [workOrder.id, workOrder]));
+      return workOrdersData.map(baseWorkOrder => {
+        const existing = currentById.get(baseWorkOrder.id);
+        if (!existing?.detailsLoaded) return baseWorkOrder;
+        return {
+          ...baseWorkOrder,
+          activities: existing.activities || [],
+          photos: existing.photos || [],
+          visits: existing.visits || [],
+          pendingSevenElevenActivities: existing.pendingSevenElevenActivities || [],
+          pendingContractorActivities: existing.pendingContractorActivities || [],
+          detailsLoaded: true,
+        };
+      });
+    });
   }, [workOrdersData]);
+
+  useEffect(() => {
+    if (!selectedWorkOrderId || !selectedWorkOrderDetails) return;
+    setWorkOrders(current => current.map(workOrder =>
+      workOrder.id === selectedWorkOrderId
+        ? { ...workOrder, ...selectedWorkOrderDetails }
+        : workOrder
+    ));
+  }, [selectedWorkOrderDetails, selectedWorkOrderId]);
 
   const restoreWorkOrders = (snapshot: any) => {
     qc.setQueryData(WORK_ORDERS_KEY, snapshot);
-    if (snapshot) setWorkOrders(snapshot as any[]);
+    if (snapshot) {
+      setWorkOrders((snapshot as any[]).map(workOrder => {
+        const cachedDetails = qc.getQueryData(workOrderDetailsKey(workOrder.id));
+        return cachedDetails
+          ? { ...workOrder, ...(cachedDetails as Record<string, unknown>) }
+          : workOrder;
+      }));
+    }
   };
   const restoreInvoices = (snapshot: any) => {
     qc.setQueryData(INVOICES_KEY, snapshot);
@@ -74,7 +107,7 @@ export default function useWorkOrders({
     setWorkOrders(prev => prev.map(w => w.id === id ? {
       ...w,
       ...patch,
-      activities: newActivity ? [newActivity, ...w.activities] : w.activities,
+      activities: newActivity ? [newActivity, ...(w.activities || [])] : (w.activities || []),
     } : w));
   };
   const workflowAuditFor = (
@@ -1002,7 +1035,7 @@ export default function useWorkOrders({
     try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     setNoteText("");
-    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: false }, ...w.activities] } : w));
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: false }, ...(w.activities || [])] } : w));
     fire("Note posted");
     await dbCall(async () => {
       await insertActivity(woId, currentUser.name, text, "note", { eventKey: "note" });
@@ -1030,7 +1063,7 @@ export default function useWorkOrders({
       setWorkOrders(prev => prev.map(w => w.id === woId ? {
         ...w,
         photos: [...(w.photos || []), ...paths],
-        activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: !!isManager }, ...w.activities],
+        activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: !!isManager }, ...(w.activities || [])],
       } : w));
       fire(`${paths.length} photo${paths.length > 1 ? "s" : ""} uploaded`);
     } catch (e: any) {

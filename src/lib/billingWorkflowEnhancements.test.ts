@@ -32,10 +32,10 @@ test("approve-and-bill waits for server approval before opening Billing", () => 
   assert.match(workOrderHook, /return Boolean\(ok\)/);
 });
 
-test("photo history is paged and successful uploads reconcile into the gallery", () => {
+test("selected work-order photo history is scoped, paged, and reconciled after uploads", () => {
   assert.match(
     db,
-    /collectSupabasePages<any>\(\(from, to\) => sb\.from\("photos"\)[\s\S]*?\.range\(from, to\)\)/,
+    /loadWorkOrderDetails[\s\S]*?\.from\("photos"\)[\s\S]*?\.eq\("work_order_id", workOrder\.id\)[\s\S]*?\.range\(from, to\)/,
   );
   assert.match(workOrderHook, /photos: \[\.\.\.\(w\.photos \|\| \[\]\), \.\.\.paths\]/);
   assert.match(workOrderHook, /invalidateBoth\(\)/);

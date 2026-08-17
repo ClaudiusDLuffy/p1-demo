@@ -34,6 +34,7 @@ export type StaffWorkOrder = WorkOrderViewRow & {
   summary?: string | null;
   description?: string | null;
   activities?: StaffWorkActivity[];
+  latestContractorActivityAt?: string | null;
 };
 
 export type StaffWorkProfile = {
@@ -58,9 +59,12 @@ const timestamp = (value: string | null | undefined) => {
 };
 
 export function latestContractorActivityAt(workOrder: StaffWorkOrder): string | null {
-  const contractorActivities = (workOrder?.activities || [])
+  const contractorActivities = [
+    workOrder?.latestContractorActivityAt || null,
+    ...(workOrder?.activities || [])
     .filter(activity => activity?.enteredByRole === "contractor")
-    .map(activity => activity.createdAt)
+    .map(activity => activity.createdAt),
+  ]
     .filter((value): value is string => Boolean(value))
     .sort((left: string, right: string) => timestamp(right) - timestamp(left));
 

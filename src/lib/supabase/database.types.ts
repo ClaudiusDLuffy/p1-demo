@@ -2009,6 +2009,16 @@ export type Database = {
           work_order_id: string
         }[]
       }
+      get_work_order_activity_summaries: {
+        Args: never
+        Returns: {
+          latest_contractor_activity_at: string | null
+          latest_note_at: string | null
+          pending_7eleven_sync_count: number
+          pending_contractor_attention_count: number
+          work_order_id: string
+        }[]
+      }
       can_access_contractor_work_order: {
         Args: { p_work_order_id: string }
         Returns: boolean
