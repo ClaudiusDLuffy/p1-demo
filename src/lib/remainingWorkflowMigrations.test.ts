@@ -9,6 +9,7 @@ const migration = (name: string) => readFileSync(
 );
 
 const controller = migration("0064_controller_exports_and_staff_permissions.sql");
+const additiveQuickBooks = migration("0071_additive_quickbooks_export_permission.sql");
 const procurement = migration("0065_p1_parts_procurement.sql");
 const technicians = migration("0066_staff_managed_contractor_technicians.sql");
 const capitalEnums = migration("0067_pending_capital_completion_enums.sql");
@@ -24,6 +25,16 @@ test("controller permissions and invoice numbering are data-driven and atomic", 
   assert.match(controller, /set state = 'paid'/);
   assert.match(controller, /invoice\.pdf_storage_path is not null[\s\S]*or exists \([\s\S]*from public\.invoice_lines/);
   assert.doesNotMatch(controller, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+});
+
+test("QuickBooks export is additive and preserves the optional restricted role", () => {
+  assert.match(additiveQuickBooks, /'quickbooks_export'/);
+  assert.match(additiveQuickBooks, /where permission_grant\.permission = 'invoice_controller'/);
+  assert.match(additiveQuickBooks, /public\.has_staff_permission\('quickbooks_export'\)/);
+  assert.match(additiveQuickBooks, /public\.profile_has_staff_permission\([\s\S]*p_actor_id,[\s\S]*'quickbooks_export'/);
+  assert.match(additiveQuickBooks, /complete_controller_invoice_export/);
+  assert.doesNotMatch(additiveQuickBooks, /delete from public\.staff_permission_grants/i);
+  assert.doesNotMatch(additiveQuickBooks, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
 });
 
 test("P1 parts procurement is guarded, configurable, and idempotent", () => {

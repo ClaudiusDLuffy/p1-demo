@@ -111,7 +111,7 @@ export default function Dashboard(props: DashboardProps) {
                   </div>
                 </section>
               )}
-              {/* Operational alerts are outside the controller permission ceiling. */}
+              {/* Only the legacy controller-only role hides operational work. */}
               {!controller && slaBreached > 0 && (
                 <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: T.danger, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, animation: "pulse 1.6s infinite" }}>!</div>

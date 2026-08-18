@@ -3,7 +3,10 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-import { STAFF_PERMISSION } from "../staffPermissions";
+import {
+  canExportQuickBooks,
+  isInvoiceController,
+} from "../staffPermissions";
 import { createServerClient } from "../supabase/server";
 import type { Database } from "../supabase/database.types";
 
@@ -24,8 +27,13 @@ export async function loadStaffPermissions(
 export function isInvoiceControllerProfile(profile: {
   staffPermissions?: string[] | null;
 } | null | undefined): boolean {
-  return Array.isArray(profile?.staffPermissions)
-    && profile.staffPermissions.includes(STAFF_PERMISSION.invoiceController);
+  return isInvoiceController(profile);
+}
+
+export function canExportQuickBooksProfile(profile: {
+  staffPermissions?: string[] | null;
+} | null | undefined): boolean {
+  return canExportQuickBooks(profile);
 }
 
 export async function requireStaffRequest(
