@@ -4,8 +4,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateInvoiceBatchCsv } from "../../../lib/invoiceCsv";
 import { generateInvoicePDFBlob } from "../../../lib/invoicePdf";
 import {
-  isInvoiceControllerProfile,
+  canExportQuickBooksProfile,
   loadStaffPermissions,
+  STAFF_ROLES,
 } from "../../../lib/server/staffAuthorization";
 import { createServerClient } from "../../../lib/supabase/server";
 import type { Database, Tables } from "../../../lib/supabase/database.types";
@@ -43,12 +44,14 @@ async function requireController(request: NextRequest) {
     .eq("id", data.user.id)
     .maybeSingle();
   if (profileError) return { error: jsonError(profileError.message, 500) };
-  if (!profile?.active) return { error: jsonError("Forbidden", 403) };
+  if (!profile?.active || !STAFF_ROLES.has(profile.role || "")) {
+    return { error: jsonError("Forbidden", 403) };
+  }
 
   try {
     const staffPermissions = await loadStaffPermissions(sb, profile.id);
-    if (!isInvoiceControllerProfile({ staffPermissions })) {
-      return { error: jsonError("Invoice controller permission required", 403) };
+    if (!canExportQuickBooksProfile({ staffPermissions })) {
+      return { error: jsonError("QuickBooks export permission required", 403) };
     }
     return { sb, profile: { ...profile, staffPermissions } };
   } catch (permissionError) {

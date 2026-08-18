@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
 import {
-  isInvoiceController,
+  canExportQuickBooks,
   type StaffPermissionProfile,
 } from "../../lib/staffPermissions";
 import { supabase } from "../../lib/supabase/client";
@@ -33,21 +33,21 @@ export default function ControllerExportPanel({
   compact?: boolean;
 }) {
   const queryClient = useQueryClient();
-  const controller = isInvoiceController(currentUser);
+  const canExport = canExportQuickBooks(currentUser);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const approvedInvoices = useMemo(
-    () => controller
+    () => canExport
       ? invoices.filter(invoice =>
           (invoice.invoiceType || "contractor") === "contractor"
           && invoice.state === "approved",
         )
       : [],
-    [controller, invoices],
+    [canExport, invoices],
   );
   const overLimit = approvedInvoices.length > MAX_CONTROLLER_EXPORT_INVOICES;
 
-  if (!controller) return null;
+  if (!canExport) return null;
 
   const downloadAll = async () => {
     if (approvedInvoices.length === 0 || overLimit || busy) return;
@@ -104,7 +104,7 @@ export default function ControllerExportPanel({
 
   return (
     <section
-      aria-label="Controller QuickBooks handoff"
+      aria-label="Accounting QuickBooks handoff"
       className="card"
       style={{
         padding: compact ? 14 : 16,
@@ -116,7 +116,7 @@ export default function ControllerExportPanel({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: T.ink }}>
-            Controller · QuickBooks handoff
+            Accounting · QuickBooks handoff
           </div>
           <div style={{ fontSize: 11, color: T.muted, marginTop: 4, lineHeight: 1.5 }}>
             {approvedInvoices.length} approved invoice{approvedInvoices.length === 1 ? "" : "s"} waiting. One ZIP includes every source PDF and one consolidated QuickBooks CSV.
