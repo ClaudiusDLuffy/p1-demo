@@ -28,6 +28,7 @@ export type InvoiceLine = {
 
 export type Invoice = {
   num: string;
+  documentKind?: "invoice" | "capital_quote";
   wot: string;
   store: string;
   storeAddr?: string;
@@ -73,6 +74,7 @@ type InvoicePdfOpts = {
 };
 export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): jsPDF {
   const isContractor = opts.perspective === "contractor";
+  const isCapitalQuote = !isContractor && inv.documentKind === "capital_quote";
   const fromName = opts.fromName || "Contractor";
   const fromEmail = String(opts.fromEmail || "").trim();
   const fromPhone = String(opts.fromPhone || "").trim();
@@ -134,12 +136,12 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
   doc.setFont("helvetica", "bold");
   doc.setFontSize(28);
   doc.setTextColor(193, 95, 60); // T.accent (terracotta)
-  doc.text("INVOICE", W - M, y + 24, { align: "right" });
+  doc.text(isCapitalQuote ? "CAPITAL QUOTE" : "INVOICE", W - M, y + 24, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(120, 116, 108);
-  doc.text(`Invoice #`, W - M - 100, y + 50);
+  doc.text(isCapitalQuote ? "Quote #" : "Invoice #", W - M - 100, y + 50);
   doc.text(`Service date`, W - M - 100, y + 65);
   doc.text(`Invoice date`, W - M - 100, y + 80);
   doc.text(`Terms`, W - M - 100, y + 95);

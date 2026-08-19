@@ -147,7 +147,7 @@ export function buildDashboardWorkBuckets({
     bucket(
       "pending_capital_completion",
       "Pending capital completion",
-      "Capital quotes sent to 7-Eleven and waiting for approval before work resumes.",
+      "Capital quotes sent to 7-Eleven with equipment work still in progress.",
       workOrder => workOrder.status === "pending_capital_completion",
     ),
   ];

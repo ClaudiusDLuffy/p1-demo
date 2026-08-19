@@ -60,6 +60,7 @@ export const FUNCTIONAL_STATUS = {
   Dispatched: { color: T.danger, bg: T.dangerSoft },
   "Work in Progress": { color: T.violet, bg: T.violetSoft },
   "Pending Capital Approval": { color: "#5B4B8A", bg: "#EDE9F5" },
+  "Pending Capital Completion": { color: "#5B4B8A", bg: "#EDE9F5" },
   "Awaiting Parts": { color: T.warn, bg: T.warnSoft },
   Completed: { color: T.success, bg: T.successSoft },
   Cancelled: { color: T.muted, bg: T.borderSoft },

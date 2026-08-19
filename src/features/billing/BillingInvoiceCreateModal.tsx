@@ -270,6 +270,14 @@ export default function BillingInvoiceCreateModal(props: any) {
       : selectedWorkOrderBase,
     [selectedWorkOrderBase, selectedWorkOrderDetails],
   );
+  const isCapitalQuote = editingInvoice?.documentKind === "capital_quote"
+    || (!editingInvoice && selectedWorkOrder?.isCapital && selectedWorkOrder?.status === "capital");
+  const isCapitalFinalInvoice = Boolean(
+    editingInvoice?.sourceCapitalQuoteId
+    || (!editingInvoice
+      && selectedWorkOrder?.isCapital
+      && ["pending_invoice", "pending_payment"].includes(selectedWorkOrder?.status)),
+  );
   const selectedTimeZone = timezoneForWorkOrder(selectedWorkOrder);
   const selectedTrips = useMemo(() => {
     const visits = (selectedWorkOrder?.visits || [])
@@ -880,7 +888,8 @@ export default function BillingInvoiceCreateModal(props: any) {
 
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "Billing invoice save failed");
-      fire?.(`Invoice #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
+      const documentLabel = isCapitalQuote ? "Capital quote" : "Invoice";
+      fire?.(`${documentLabel} #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
       onCreated?.(payload.invoice);
       discardAndClose();
     } catch (err: any) {
@@ -893,13 +902,21 @@ export default function BillingInvoiceCreateModal(props: any) {
   return (
     <Modal
       onClose={closeKeepingDraft}
-      title={isEditing ? `Edit invoice #${editingInvoice.num}` : "Create P1 to 7-Eleven invoice"}
+      title={isEditing
+        ? `Edit ${isCapitalQuote ? "capital quote" : "invoice"} #${editingInvoice.num}`
+        : isCapitalQuote
+          ? "Create capital quote for 7-Eleven"
+          : "Create P1 to 7-Eleven invoice"}
       width={1240}
       closeOnBackdrop={false}
     >
       <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
-          {isEditing
+          {isCapitalQuote
+            ? "This capital quote is separate from the final invoice. Submitting it will move the work order into Pending Capital Completion."
+            : isCapitalFinalInvoice
+              ? "This is the final capital invoice linked to the previously submitted quote."
+              : isEditing
             ? `Update this ${editingInvoice.state} invoice. Approved, paid, and QuickBooks-synced invoices stay locked.`
             : "Direction is fixed: P1 Pros bills 7-Eleven. Linking a work order is optional."}
         </div>
@@ -1507,8 +1524,8 @@ export default function BillingInvoiceCreateModal(props: any) {
             {submitting
               ? <><BtnSpinner />{isEditing ? "Updating..." : "Submitting..."}</>
               : isEditing
-                ? "Update Invoice"
-                : "Submit Invoice"}
+                ? isCapitalQuote ? "Update Quote" : "Update Invoice"
+                : isCapitalQuote ? "Prepare Quote" : "Submit Invoice"}
           </button>
         </div>
       </form>

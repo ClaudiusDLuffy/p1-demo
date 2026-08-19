@@ -11,11 +11,11 @@ const workOrderHook = read("src/features/work-orders/useWorkOrders.ts");
 const portalShell = read("src/components/PortalShell.tsx");
 const db = read("src/lib/db.ts");
 
-test("ready-to-bill rows are behind an accessible collapsed section", () => {
-  assert.match(billingList, /useState\(false\)/);
-  assert.match(billingList, /aria-expanded=\{readyToBillExpanded\}/);
-  assert.match(billingList, /aria-controls="billing-ready-work-orders"/);
-  assert.match(billingList, /readyToBillExpanded &&/);
+test("ready-to-bill rows use an accessible collapsible bucket that starts open", () => {
+  assert.match(billingList, /ready: true/);
+  assert.match(billingList, /aria-expanded=\{expanded\.ready !== false\}/);
+  assert.match(billingList, /aria-controls="billing-bucket-ready"/);
+  assert.match(billingList, /expanded\.ready !== false &&/);
 });
 
 test("staff can toggle every billing line taxable from the header", () => {

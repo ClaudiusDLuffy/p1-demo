@@ -56,7 +56,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
+  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
@@ -163,6 +163,17 @@ export default function WorkOrderDetail(props: any) {
     () => woData ? billingInvoices.filter(invoice => invoice.wot === woData.id) : [],
     [billingInvoices, woData],
   );
+  const currentBillingDocument = useMemo(() => {
+    const wantsCapitalQuote = ["capital", "pending_capital_completion"].includes(woData?.status);
+    return woBillingInvoices
+      .filter((invoice: any) => wantsCapitalQuote
+        ? invoice.documentKind === "capital_quote"
+        : invoice.documentKind !== "capital_quote")
+      .sort((a: any, b: any) =>
+        new Date(b.updatedAt || b.createdAt || 0).getTime()
+        - new Date(a.updatedAt || a.createdAt || 0).getTime(),
+      )[0] || null;
+  }, [woBillingInvoices, woData?.status]);
   const hasAnyLiveInvoice = woAllInvoices.length > 0 || woBillingInvoices.length > 0;
   const canInvoice = !isManager && currentUser?.canInvoice === true;
   // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
@@ -430,6 +441,21 @@ export default function WorkOrderDetail(props: any) {
                             : "Straight to Billing"}
                         </button>
                       )}
+                      {isManager && !invoiceController && woData.status !== "closed" && onOpenBillingForWorkOrder && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenBillingForWorkOrder(woData.id, currentBillingDocument?.id || null)}
+                          className="btn-primary"
+                        >
+                          {currentBillingDocument
+                            ? currentBillingDocument.documentKind === "capital_quote"
+                              ? "Open capital quote"
+                              : "Open P1 to 7-Eleven invoice"
+                            : woData.status === "capital"
+                              ? "Create capital quote"
+                              : "Create P1 to 7-Eleven invoice"}
+                        </button>
+                      )}
                       {/* Quick-assign shows the FULL contractor list (same source as
                           the Create WO dropdown) so no contractor is unreachable. */}
                       {woData.status === "unassigned" && isManager && contractorsOnly.map(c => (
@@ -487,8 +513,8 @@ export default function WorkOrderDetail(props: any) {
                         </button>
                       )}
                       {woData.status === "pending_capital_completion" && isManager && (
-                        <button onClick={() => doCapitalResume(woData.id)} disabled={isLoading("capitalResume_" + woData.id)} className="btn-accent" style={loadingStyle("capitalResume_" + woData.id)}>
-                          {isLoading("capitalResume_" + woData.id) ? <><BtnSpinner />Resuming...</> : "Capital approved - resume work"}
+                        <button onClick={() => void doCapitalComplete(woData.id)} disabled={isLoading("capitalComplete_" + woData.id)} className="btn-accent" style={loadingStyle("capitalComplete_" + woData.id)}>
+                          {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
                         </button>
                       )}
                       {woData.status === "parts" && (

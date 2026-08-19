@@ -13,7 +13,7 @@ import {
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
   moveWorkOrderStraightToBilling,
-  resumeCapitalWork,
+  completeCapitalWork,
   closeWorkOrderWithoutInvoice,
   assignContractorTechnician,
   reviewContractorInvoice,
@@ -913,11 +913,11 @@ export default function useWorkOrders({
   const doCapitalFlag = async (woId: string) => {
     setLoading("capitalFlag_" + woId, true);
     try {
-    const text = "Flagged as capital replacement — pending approval.";
+    const text = "Marked as a capital replacement and ready for quote preparation.";
     const patch = {
       status: "capital",
-      functionalStatus: "Pending Capital Approval",
-      capitalStatus: "Pending approval",
+      functionalStatus: "Work in Progress",
+      capitalStatus: null,
       isCapital: true,
     };
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -954,35 +954,41 @@ export default function useWorkOrders({
     }
   };
 
-  const doCapitalResume = async (woId: string) => {
-    setLoading("capitalResume_" + woId, true);
+  const doCapitalComplete = async (woId: string) => {
+    setLoading("capitalComplete_" + woId, true);
     try {
       const workOrder = workOrders.find((item: any) => item.id === woId);
       if (!workOrder || workOrder.status !== "pending_capital_completion") {
-        fire("This work order is not waiting for capital approval");
-        return;
+        fire("This work order is not pending capital completion");
+        return false;
       }
+      const completedAt = new Date().toISOString();
       const patch = {
-        status: workOrder.contractor ? "assigned" : "unassigned",
-        functionalStatus: workOrder.contractor ? "Dispatched" : "New",
-        capitalStatus: "Approved - work authorized",
+        status: "pending_invoice",
+        functionalStatus: "Completed",
+        capitalStatus: "Installed",
         isCapital: true,
+        billingReadyAt: completedAt,
+        billingReadyBy: currentUser.id,
       };
       const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
       patchLocalWO(
         woId,
         patch,
         localActivity(
-          `Capital work authorized by 7-Eleven and resumed by ${currentUser.name}.`,
+          `Capital work marked completed by ${currentUser.name} and moved to final billing.`,
           "system",
         ),
       );
-      const resumed = await dbCall(async () => {
-        await resumeCapitalWork(woId);
-      }, "Capital resume failed", () => restoreWorkOrders(snapshot));
-      if (resumed) fire("Capital approved — work can resume");
+      const completed = await dbCall(
+        () => completeCapitalWork(woId),
+        "Capital completion failed",
+        () => restoreWorkOrders(snapshot),
+      );
+      if (completed) fire("Capital completed — ready for final billing");
+      return completed;
     } finally {
-      setLoading("capitalResume_" + woId, false);
+      setLoading("capitalComplete_" + woId, false);
     }
   };
 
@@ -1288,7 +1294,7 @@ export default function useWorkOrders({
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
-    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart,

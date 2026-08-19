@@ -1263,7 +1263,7 @@ export default function PortalShell() {
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
-    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
     doAddPart, doUpdatePart, doDeletePart,
@@ -1726,17 +1726,24 @@ export default function PortalShell() {
     [billingInvoices, selectedBillingInvoice]
   );
   const billingReadyWorkOrders = useMemo(() => {
-    const workOrdersWithInvoices = new Set(
-      (billingInvoices || [])
-        .map((invoice: any) => invoice.wot)
-        .filter(Boolean),
-    );
+    const finalInvoiceByWorkOrder = new Map<string, any>();
+    for (const invoice of billingInvoices || []) {
+      if (!invoice.wot || invoice.documentKind === "capital_quote") continue;
+      const current = finalInvoiceByWorkOrder.get(invoice.wot);
+      const currentTime = new Date(current?.updatedAt || current?.createdAt || 0).getTime();
+      const invoiceTime = new Date(invoice.updatedAt || invoice.createdAt || 0).getTime();
+      if (!current || invoiceTime >= currentTime) {
+        finalInvoiceByWorkOrder.set(invoice.wot, invoice);
+      }
+    }
     return maskedWorkOrders
       .filter((workOrder: any) =>
-        workOrder.billingOnly
-        && workOrder.status === "pending_invoice"
-        && !workOrdersWithInvoices.has(workOrder.id),
+        ["pending_invoice", "pending_payment"].includes(workOrder.status),
       )
+      .map((workOrder: any) => ({
+        ...workOrder,
+        billingInvoice: finalInvoiceByWorkOrder.get(workOrder.id) || null,
+      }))
       .sort((a: any, b: any) =>
         new Date(b.billingReadyAt || b.updatedAt || 0).getTime()
         - new Date(a.billingReadyAt || a.updatedAt || 0).getTime(),
@@ -1823,6 +1830,7 @@ export default function PortalShell() {
       const logoDataUrl = await loadLogoDataUrl();
       const blob = generateStaffInvoicePDFBlob({
         num: exportInvoice.num,
+        documentKind: exportInvoice.documentKind || "invoice",
         wot: exportInvoice.wot || "Standalone",
         store: exportInvoice.store || "",
         storeAddr: exportInvoice.storeAddr || "",
@@ -1835,8 +1843,9 @@ export default function PortalShell() {
         salesTax: exportInvoice.salesTax || 0,
         total: exportInvoice.total || 0,
       }, logoDataUrl);
-      triggerBlobDownload(blob, `Invoice-${exportInvoice.num}-${exportInvoice.wot || "Standalone"}.pdf`);
-      fire(`Invoice ${exportInvoice.num} downloaded`);
+      const documentLabel = exportInvoice.documentKind === "capital_quote" ? "Capital-Quote" : "Invoice";
+      triggerBlobDownload(blob, `${documentLabel}-${exportInvoice.num}-${exportInvoice.wot || "Standalone"}.pdf`);
+      fire(`${documentLabel === "Capital-Quote" ? "Capital quote" : "Invoice"} ${exportInvoice.num} downloaded`);
     } catch (e: any) {
       fire(`Download failed: ${e.message || e}`);
     }
@@ -1879,7 +1888,7 @@ export default function PortalShell() {
         qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
       ]);
       fire(payload.finalization?.pendingCapitalCompletion
-        ? `Invoice #${invoice.num} sent to 7-Eleven; capital work remains open awaiting approval`
+        ? `Capital quote #${invoice.num} submitted to 7-Eleven; work remains open pending completion`
         : `Invoice #${invoice.num} sent to 7-Eleven; work order closed`);
     } catch (e: any) {
       fire(`Billing update failed: ${e.message || e}`);
@@ -1913,6 +1922,20 @@ export default function PortalShell() {
     setSelectedBillingInvoice(null);
     setPage("billing");
     setModal("createBillingInvoice");
+  };
+  const openBillingFromWorkOrder = (workOrderId: string, billingInvoiceId?: string | null) => {
+    rememberWorkOrderReturn(workOrderId);
+    setSelectedWO(null);
+    setAiNote(null);
+    if (billingInvoiceId) {
+      setBillingDraftToEdit(null);
+      setBillingSourceToStart(null);
+      setBillingWorkOrderToStart(null);
+      setSelectedBillingInvoice(billingInvoiceId);
+      setPage("billing");
+      return;
+    }
+    openBillingForWorkOrder(workOrderId);
   };
   const approveInvoiceAndOpenBilling = async (invoice: any) => {
     if (!invoice?.id || !invoice?.wot) return false;
@@ -1968,6 +1991,12 @@ export default function PortalShell() {
     setSelectedWO(null);
     setAiNote(null);
     openBillingForWorkOrder(workOrderId);
+  };
+  const handleCapitalCompleted = async (workOrderId: string) => {
+    const completed = await doCapitalComplete(workOrderId);
+    if (!completed) return false;
+    openBillingFromWorkOrder(workOrderId);
+    return true;
   };
 
   useEffect(() => {
@@ -2908,6 +2937,7 @@ export default function PortalShell() {
                 setModal("createBillingInvoice");
               }}
               onCreateFromWorkOrder={(workOrder: any) => openBillingForWorkOrder(workOrder.id)}
+              onOpenReadyInvoice={(invoice: any) => setSelectedBillingInvoice(invoice.id)}
               fmt={fmt}
             />
           )}
@@ -2999,7 +3029,8 @@ export default function PortalShell() {
             setModal={setModal}
             doCapitalFlag={doCapitalFlag}
             doCapitalDecline={doCapitalDecline}
-            doCapitalResume={doCapitalResume}
+            doCapitalComplete={handleCapitalCompleted}
+            onOpenBillingForWorkOrder={openBillingFromWorkOrder}
             doMoveToInvoice={doMoveToInvoice}
             doApproveInvoice={doApproveInvoice}
             onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
