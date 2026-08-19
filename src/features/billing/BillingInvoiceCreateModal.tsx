@@ -183,7 +183,6 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [taxRates, setTaxRates] = useState<any[]>([]);
   const [taxRateLoadError, setTaxRateLoadError] = useState("");
   const [numberEdited, setNumberEdited] = useState(false);
-  const [numberPreview, setNumberPreview] = useState("");
   const [numberPreviewError, setNumberPreviewError] = useState("");
   const [draftState, setDraftState] = useState<"idle" | "restored" | "saved" | "error">("idle");
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
@@ -193,6 +192,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const skipRestoredWorkOrderHydration = useRef<string | null>(null);
   const draftHydrated = useRef(false);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const numberEditedRef = useRef(false);
   const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
   const isEditing = !!editingInvoice?.id;
   const controller = isInvoiceController(currentUser);
@@ -473,16 +473,17 @@ export default function BillingInvoiceCreateModal(props: any) {
         if (!token) throw new Error("Your session expired. Sign in again.");
         const response = await fetch("/api/billing-invoices?nextNumber=1", {
           headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || "Invoice number is unavailable");
         if (cancelled) return;
         const preview = String(payload.num || "").trim();
         if (!preview) throw new Error("Invoice number is unavailable");
-        setNumberPreview(preview);
         setNumberPreviewError("");
-        // Never overwrite a restored draft or something staff already typed.
-        if (!String(getValues("num") || "").trim()) {
+        // Auto-generated values are previews only. Refresh an untouched value
+        // every time the form opens, while preserving an intentional override.
+        if (!numberEditedRef.current) {
           setValue("num", preview, { shouldValidate: true });
         }
       } catch (error) {
@@ -493,7 +494,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     return () => {
       cancelled = true;
     };
-  }, [getValues, isEditing, modal, setValue]);
+  }, [isEditing, modal, setValue]);
 
   useEffect(() => {
     if (modal !== "createBillingInvoice") {
@@ -518,7 +519,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       || initialWorkOrderId
       || "";
     const initialForm = {
-      num: editingInvoice?.num || numberPreview,
+      num: editingInvoice?.num || "",
       invoiceDate: initialInvoiceDate,
       serviceDate: editingInvoice?.serviceDateRaw || "",
       dueDate: editingInvoice?.dueDateRaw || addDays(initialInvoiceDate, 30),
@@ -591,7 +592,9 @@ export default function BillingInvoiceCreateModal(props: any) {
       !!editingInvoice?.territory
       && !KNOWN_TERRITORIES.includes(editingInvoice.territory)
     ));
-    setNumberEdited(restoredDraft?.numberEdited ?? isEditing);
+    const restoredNumberEdited = restoredDraft?.numberEdited ?? isEditing;
+    numberEditedRef.current = restoredNumberEdited;
+    setNumberEdited(restoredNumberEdited);
     setDraftSavedAt(restoredDraft?.savedAt || null);
     setDraftState(restoredDraft ? "restored" : "idle");
     skipRestoredWorkOrderHydration.current = restoredDraft
@@ -608,7 +611,6 @@ export default function BillingInvoiceCreateModal(props: any) {
     initialWorkOrderId,
     isEditing,
     modal,
-    numberPreview,
     reset,
     draftStorageKey,
   ]);
@@ -729,6 +731,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     setSourceSnapshots({});
     setPartsMarkup("25");
     setCustomTerritory(false);
+    numberEditedRef.current = false;
     setNumberEdited(false);
     setDraftState("idle");
     setDraftSavedAt(null);
@@ -927,7 +930,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => setNumberEdited(true) })} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => { numberEditedRef.current = true; setNumberEdited(true); } })} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>

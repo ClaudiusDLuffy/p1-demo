@@ -18,11 +18,43 @@ const atomicSaveMigration = readFileSync(
   ),
   "utf8",
 );
+const reconciliationMigration = readFileSync(
+  resolve(
+    process.cwd(),
+    "supabase/migrations/0072_reconcile_staff_invoice_number_series.sql",
+  ),
+  "utf8",
+);
 
 test("auto-populated P1 invoice numbers are editable before lifecycle lock", () => {
   assert.doesNotMatch(modal, /readOnly=\{!isEditing\}/);
   assert.match(modal, /Auto-populated, but editable until approval or QuickBooks sync/);
   assert.match(modal, /setNumberEdited\(true\)/);
+});
+
+test("an untouched invoice-number preview refreshes every time create opens", () => {
+  assert.match(modal, /const numberEditedRef = useRef\(false\)/);
+  assert.match(modal, /billing-invoices\?nextNumber=1[\s\S]*cache: "no-store"/);
+  assert.match(modal, /if \(!numberEditedRef\.current\) \{\s*setValue\("num", preview/);
+  assert.match(modal, /num: editingInvoice\?\.num \|\| ""/);
+  assert.doesNotMatch(modal, /num: editingInvoice\?\.num \|\| numberPreview/);
+  assert.match(modal, /numberEditedRef\.current = restoredNumberEdited/);
+});
+
+test("staff invoice allocation reconciles counters with persisted numbers", () => {
+  assert.match(
+    reconciliationMigration,
+    /update public\.staff_invoice_default_series default_series[\s\S]*max\([\s\S]*invoice\.num[\s\S]*\) \+ 1/,
+  );
+  assert.match(
+    reconciliationMigration,
+    /create or replace function public\.next_staff_invoice_num[\s\S]*greatest\([\s\S]*series\.next_number[\s\S]*\) \+ 1/,
+  );
+  assert.match(
+    reconciliationMigration,
+    /create or replace function public\.peek_staff_invoice_num[\s\S]*greatest\([\s\S]*default_series\.next_number/,
+  );
+  assert.doesNotMatch(reconciliationMigration, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
 });
 
 test("the server validates the requested number and preserves lifecycle locks", () => {
