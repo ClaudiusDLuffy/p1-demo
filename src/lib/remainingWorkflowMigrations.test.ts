@@ -14,6 +14,8 @@ const procurement = migration("0065_p1_parts_procurement.sql");
 const technicians = migration("0066_staff_managed_contractor_technicians.sql");
 const capitalEnums = migration("0067_pending_capital_completion_enums.sql");
 const capitalWorkflow = migration("0068_pending_capital_completion_workflow.sql");
+const capitalCompletionStatus = migration("0074_pending_capital_completion_functional_status.sql");
+const capitalCompletionFlow = migration("0075_capital_quote_completion_billing_flow.sql");
 
 test("controller permissions and invoice numbering are data-driven and atomic", () => {
   assert.match(controller, /staff_permission_grants/);
@@ -73,16 +75,16 @@ test("staff-managed technician access preserves history and uses service-side tr
   assert.doesNotMatch(technicians, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
 });
 
-test("capital authorization is a two-stage server-enforced workflow", () => {
+test("legacy capital authorization is superseded by completion-driven final billing", () => {
   assert.match(capitalEnums, /pending_capital_completion/);
   assert.match(capitalEnums, /Approved - work authorized/);
   assert.match(capitalWorkflow, /v_requires_capital_authorization/);
-  assert.match(capitalWorkflow, /capital_status = 'Pending approval'/);
   assert.match(capitalWorkflow, /create or replace function public\.resume_capital_work/);
-  assert.match(capitalWorkflow, /v_work_order\.status <> 'pending_capital_completion'/);
-  assert.match(capitalWorkflow, /capital_status = 'Approved - work authorized'/);
-  assert.match(capitalWorkflow, /'capital_work_authorized'/);
-  assert.match(capitalWorkflow, /profile\.active = true/);
-  assert.match(capitalWorkflow, /profile_has_staff_permission\(p_actor_id, 'invoice_controller'\)/);
-  assert.match(capitalWorkflow, /profile_has_staff_permission\(v_actor\.id, 'invoice_controller'\)/);
+  assert.match(capitalCompletionStatus, /Pending Capital Completion/);
+  assert.match(capitalCompletionFlow, /document_kind = 'capital_quote'/);
+  assert.match(capitalCompletionFlow, /create or replace function public\.complete_capital_work/);
+  assert.match(capitalCompletionFlow, /status = 'pending_invoice'/);
+  assert.match(capitalCompletionFlow, /profile\.active = true/);
+  assert.match(capitalCompletionFlow, /profile_has_staff_permission\(p_actor_id, 'invoice_controller'\)/);
+  assert.match(capitalCompletionFlow, /profile_has_staff_permission\(v_actor\.id, 'invoice_controller'\)/);
 });

@@ -35,6 +35,8 @@ export const InvoiceSchema = z.object({
   num: z.string().min(1),
   work_order_id: z.string().optional().nullable(),
   invoice_type: z.enum(["contractor", "staff"]).optional().nullable(),
+  document_kind: z.enum(["invoice", "capital_quote"]).optional().nullable(),
+  source_capital_quote_id: z.string().uuid().optional().nullable(),
   store_number: z.string().optional().nullable(),
   store_address: z.string().optional().nullable(),
   contractor_id: z.string().optional().nullable(),

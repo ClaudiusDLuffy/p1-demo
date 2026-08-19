@@ -126,6 +126,8 @@ const mapInvoice = (invoice: any, lines: any[]) => ({
   storeAddr: invoice.store_address,
   contractor: invoice.contractor_id,
   invoiceType: invoice.invoice_type || "staff",
+  documentKind: invoice.document_kind || "invoice",
+  sourceCapitalQuoteId: invoice.source_capital_quote_id || null,
   cme: invoice.cme,
   invoiceDate: formatDate(invoice.invoice_date),
   invoiceDateRaw: invoice.invoice_date,

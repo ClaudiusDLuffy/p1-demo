@@ -44,12 +44,9 @@ export default function BillingInvoiceDetail(props: any) {
     && !invoice.qboInvoiceId
     && !invoice.qboSyncedAt;
   const canMarkBilled = canDelete && invoice.state === "submitted";
-  const capitalHandoff = Boolean(
-    workOrder?.isCapital
-    && (
-      ["capital", "pending_capital_completion"].includes(workOrder?.status)
-      || workOrder?.capitalStatus === "Pending approval"
-    ),
+  const capitalHandoff = invoice.documentKind === "capital_quote";
+  const capitalFinalInvoice = Boolean(
+    invoice.documentKind === "invoice" && invoice.sourceCapitalQuoteId,
   );
 
   return (
@@ -63,7 +60,7 @@ export default function BillingInvoiceDetail(props: any) {
           </button>
           {canMarkBilled && (
             <button onClick={() => setConfirmBilled(true)} className="btn-accent">
-              {capitalHandoff ? "Send capital quote to 7-Eleven" : "Billed to 7-Eleven"}
+              {capitalHandoff ? "Submit Quote to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           )}
           {canEdit && (
@@ -104,10 +101,10 @@ export default function BillingInvoiceDetail(props: any) {
       )}
 
       {confirmBilled && (
-        <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} title="Confirm 7-Eleven billing" width={440}>
+        <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} title={capitalHandoff ? "Confirm capital quote" : "Confirm 7-Eleven billing"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             {capitalHandoff ? (
-              <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven? The work order will remain open in Pending Capital Completion until 7-Eleven authorizes the work.</>
+              <>Submit quote <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> to 7-Eleven? The work order will remain open in Pending Capital Completion until the capital work is finished.</>
             ) : (
               <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven and close its linked work order? Linked contractor invoices will remain Approved.</>
             )}
@@ -130,7 +127,7 @@ export default function BillingInvoiceDetail(props: any) {
             >
               {billing
                 ? <><BtnSpinner />Updating...</>
-                : capitalHandoff ? "Send and await approval" : "Billed to 7-Eleven"}
+                : capitalHandoff ? "Submit Quote to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           </div>
         </Modal>
@@ -140,8 +137,13 @@ export default function BillingInvoiceDetail(props: any) {
         <div style={{ padding: "28px 32px", borderBottom: `1px solid ${T.borderSoft}` }}>
           <div className="invoice-top-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
             <div className="invoice-top-header-left">
-              <div className="display invoice-title-text" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>Invoice</div>
+              <div className="display invoice-title-text" style={{ fontSize: 36, color: T.ink, letterSpacing: -0.8, lineHeight: 1 }}>{capitalHandoff ? "Capital Quote" : "Invoice"}</div>
               <div className="mono" style={{ fontSize: 16, color: T.accent, marginTop: 8, fontWeight: 600 }}>#{invoice.num}</div>
+              {(capitalHandoff || capitalFinalInvoice) && (
+                <div style={{ display: "inline-flex", marginTop: 9, padding: "4px 8px", borderRadius: 999, background: T.violetSoft, color: T.violet, fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.45 }}>
+                  {capitalHandoff ? "Capital quote" : "Capital final invoice"}
+                </div>
+              )}
             </div>
             <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
               <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{P1_BUSINESS.dba}</div>

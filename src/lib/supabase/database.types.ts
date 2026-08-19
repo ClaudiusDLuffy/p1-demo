@@ -414,6 +414,7 @@ export type Database = {
           created_by: string | null
           deleted_at: string | null
           deleted_by: string | null
+          document_kind: string
           due_date: string | null
           id: string
           invoice_date: string
@@ -431,6 +432,7 @@ export type Database = {
           review_revision: number
           sales_tax: number | null
           service_date: string | null
+          source_capital_quote_id: string | null
           state: Database["public"]["Enums"]["invoice_state"]
           store_address: string | null
           store_number: string | null
@@ -451,6 +453,7 @@ export type Database = {
           created_by?: string | null
           deleted_at?: string | null
           deleted_by?: string | null
+          document_kind?: string
           due_date?: string | null
           id?: string
           invoice_date: string
@@ -468,6 +471,7 @@ export type Database = {
           review_revision?: number
           sales_tax?: number | null
           service_date?: string | null
+          source_capital_quote_id?: string | null
           state?: Database["public"]["Enums"]["invoice_state"]
           store_address?: string | null
           store_number?: string | null
@@ -488,6 +492,7 @@ export type Database = {
           created_by?: string | null
           deleted_at?: string | null
           deleted_by?: string | null
+          document_kind?: string
           due_date?: string | null
           id?: string
           invoice_date?: string
@@ -505,6 +510,7 @@ export type Database = {
           review_revision?: number
           sales_tax?: number | null
           service_date?: string | null
+          source_capital_quote_id?: string | null
           state?: Database["public"]["Enums"]["invoice_state"]
           store_address?: string | null
           store_number?: string | null
@@ -545,6 +551,13 @@ export type Database = {
             columns: ["resubmitted_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_source_capital_quote_id_fkey"
+            columns: ["source_capital_quote_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
             referencedColumns: ["id"]
           },
           {
@@ -2031,6 +2044,10 @@ export type Database = {
         Args: { p_work_order_id: string }
         Returns: Json
       }
+      complete_capital_work: {
+        Args: { p_work_order_id: string }
+        Returns: Database["public"]["Tables"]["work_orders"]["Row"]
+      }
       mark_staff_work_order_read: {
         Args: { p_read_through_at: string; p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_notification_reads"]["Row"]
@@ -2161,6 +2178,7 @@ export type Database = {
         | "Dispatched"
         | "Work in Progress"
         | "Pending Capital Approval"
+        | "Pending Capital Completion"
         | "Awaiting Parts"
         | "Completed"
         | "Cancelled"
@@ -2325,6 +2343,7 @@ export const Constants = {
         "Dispatched",
         "Work in Progress",
         "Pending Capital Approval",
+        "Pending Capital Completion",
         "Awaiting Parts",
         "Completed",
         "Cancelled",

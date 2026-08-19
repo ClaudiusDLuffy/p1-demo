@@ -576,6 +576,8 @@ const mapInvoice = (i: any) => ({
   submissionKey: i.submission_key || null,
   contractor: i.contractor_id,
   invoiceType: i.invoice_type || "contractor",
+  documentKind: i.document_kind || "invoice",
+  sourceCapitalQuoteId: i.source_capital_quote_id || null,
   cme: i.cme,
   invoiceDate: formatDate(i.invoice_date),
   invoiceDateRaw: i.invoice_date || null,
@@ -799,10 +801,10 @@ export async function moveWorkOrderStraightToBilling(id: string): Promise<any> {
   return data;
 }
 
-export async function resumeCapitalWork(id: string): Promise<any> {
+export async function completeCapitalWork(id: string): Promise<any> {
   const sb = supabase();
   const { data, error } = await sb.rpc(
-    "resume_capital_work",
+    "complete_capital_work",
     { p_work_order_id: id },
   );
   if (error) throw error;
