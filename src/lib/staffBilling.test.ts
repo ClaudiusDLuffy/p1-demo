@@ -5,6 +5,7 @@ import {
   importedStaffBillingRate,
   normalizeImportedStaffBillingLineType,
   normalizeStaffBillingLineType,
+  roundStaffBillingMarkupPercent,
   staffBillingDescriptionPlaceholder,
   staffBillingMarkupPercent,
 } from "./staffBilling";
@@ -65,7 +66,17 @@ test("manual parts establish their cost when markup is first applied", () => {
 test("manual final-rate edits keep the displayed parts markup accurate", () => {
   assert.equal(staffBillingMarkupPercent(80, 120), 50);
   assert.equal(staffBillingMarkupPercent(80, 100), 25);
+  assert.equal(staffBillingMarkupPercent(100, 244.23), 144.2);
   assert.equal(staffBillingMarkupPercent(80, 79), null);
+});
+
+test("parts markup is normalized to the UI's one-decimal increment", () => {
+  assert.equal(roundStaffBillingMarkupPercent(144.23), 144.2);
+  assert.deepEqual(applyStaffBillingPartsMarkup(100, 244.23, 144.23), {
+    sourceUnitCost: 100,
+    markupPercent: 144.2,
+    rate: 244.2,
+  });
 });
 
 test("labor prompts for job notes while travel remains optional", () => {

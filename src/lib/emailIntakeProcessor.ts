@@ -25,6 +25,11 @@ import {
   type WorkOrderMatchCandidate,
 } from "./emailIntakeMatching";
 import { intakeErrorMessage } from "./intakeError";
+import {
+  BILLING_ONLY_ACTIVITY,
+  BILLING_ONLY_INTAKE_REASON,
+  billingOnlyIntakeFields,
+} from "./emailIntakeWorkflow";
 import type { Database } from "./supabase/database.types";
 
 type WorkOrderInsert = Database["public"]["Tables"]["work_orders"]["Insert"];
@@ -129,13 +134,19 @@ const findWorkOrderMatch = async (parsed: ParsedWorkOrder): Promise<IntakeWorkOr
   return chooseIntakeWorkOrderMatch(candidates);
 };
 
-const addSystemActivity = async (workOrderId: string, text: string) => {
+const addSystemActivity = async (
+  workOrderId: string,
+  text: string,
+  options: { eventKey?: string; staffOnly?: boolean } = {},
+) => {
   const sb = createServerClient();
   const { error } = await sb.from("activities").insert({
     work_order_id: workOrderId,
     author_name: "System",
     text,
     type: "system",
+    is_staff_only: options.staffOnly || false,
+    ...(options.eventKey ? { event_key: options.eventKey } : {}),
   });
   if (error) throw error;
 };
@@ -213,8 +224,6 @@ export async function processEmail(
 
     if (parsed.emailType === "TYPE_NTE_APPROVED") {
       result = skippedResult(result, "NTE email ignored by intake policy");
-    } else if (parsed.doNotDispatch) {
-      result = skippedResult(result, "do not dispatch flag detected");
     } else if (parsed.emailType === "TYPE_UNKNOWN") {
       result = skippedResult(result, "unknown email type");
     } else if (parsed.emailType === "TYPE_DISPATCHED") {
@@ -255,32 +264,50 @@ export async function processEmail(
               match.id,
             );
           } else if (match) {
+            const patch: WorkOrderUpdate = {
+              ...compactPatch(parsed),
+              ...(parsed.doNotDispatch
+                ? billingOnlyIntakeFields(email.receivedDateTime || processedAt)
+                : {}),
+            };
             const { error } = await sb
               .from("work_orders")
-              .update(compactPatch(parsed))
+              .update(patch)
               .eq("id", match.id)
               .is("deleted_at", null);
 
             if (error) throw error;
             await saveAfmContact(match.id, parsed.afmEmail);
+            if (parsed.doNotDispatch) {
+              await addSystemActivity(match.id, BILLING_ONLY_ACTIVITY, {
+                eventKey: "straight_to_billing",
+                staffOnly: true,
+              });
+            }
             result = {
               ...result,
               action: "updated",
               workOrderId: match.id,
-              reason: "existing active work order refreshed from initial dispatch",
+              reason: parsed.doNotDispatch
+                ? "existing active work order refreshed and routed to billing without contractor dispatch"
+                : "existing active work order refreshed from initial dispatch",
             };
           } else {
-            const contractor = await resolveContractor(parsed);
+            const billingOnly = parsed.doNotDispatch;
+            const contractor = billingOnly ? null : await resolveContractor(parsed);
             const workOrderId = parsed.wotId;
+            const billingOnlyFields = billingOnly
+              ? billingOnlyIntakeFields(email.receivedDateTime || processedAt)
+              : {};
             const row: WorkOrderInsert = {
               id: workOrderId,
               store_number: parsed.storeNumber,
               summary: parsed.summary,
               description: parsed.description,
               priority: parsed.priority || "p2",
-              status: contractor.contractorId ? "assigned" : "unassigned",
+              status: contractor?.contractorId ? "assigned" : "unassigned",
               functional_status: "New",
-              contractor_id: contractor.contractorId,
+              contractor_id: contractor?.contractorId || null,
               afm_name: parsed.afmName,
               afm_email: null,
               city: parsed.city,
@@ -297,35 +324,45 @@ export async function processEmail(
               dispatched_at: email.receivedDateTime || processedAt,
               sla_started_at: email.receivedDateTime || processedAt,
               created_at: processedAt,
+              ...billingOnlyFields,
             };
 
             const { error } = await sb.from("work_orders").insert(row);
             if (error) throw error;
             await saveAfmContact(workOrderId, parsed.afmEmail);
 
-            await sendDispatchNotification({
-              workOrder: {
-                id: workOrderId,
-                incidentId: parsed.incidentId,
-                storeNumber: parsed.storeNumber,
-                city: parsed.city,
-                state: parsed.state,
-                address: parsed.address,
-                priority: parsed.priority || "p2",
-                summary: parsed.summary,
-                description: parsed.description,
-              },
-              contractorAssigned: Boolean(contractor.contractorId),
-              contractorEmail: contractor.contractorEmail,
-              contractorName: contractor.contractorName,
-            }).catch(err => console.error("Dispatch notification failed", err));
+            if (billingOnly) {
+              await addSystemActivity(workOrderId, BILLING_ONLY_ACTIVITY, {
+                eventKey: "straight_to_billing",
+                staffOnly: true,
+              });
+            } else if (contractor) {
+              await sendDispatchNotification({
+                workOrder: {
+                  id: workOrderId,
+                  incidentId: parsed.incidentId,
+                  storeNumber: parsed.storeNumber,
+                  city: parsed.city,
+                  state: parsed.state,
+                  address: parsed.address,
+                  priority: parsed.priority || "p2",
+                  summary: parsed.summary,
+                  description: parsed.description,
+                },
+                contractorAssigned: Boolean(contractor.contractorId),
+                contractorEmail: contractor.contractorEmail,
+                contractorName: contractor.contractorName,
+              }).catch(err => console.error("Dispatch notification failed", err));
+            }
 
             result = {
               ...result,
               action: "created",
               workOrderId,
-              reason: contractor.reason,
-              contractorAssigned: contractor.contractorId,
+              reason: billingOnly
+                ? BILLING_ONLY_INTAKE_REASON
+                : contractor?.reason || "work order created without an assignment",
+              contractorAssigned: contractor?.contractorId || null,
             };
           }
         }

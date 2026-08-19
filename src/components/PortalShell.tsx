@@ -20,6 +20,7 @@ import { Field } from "./ui/Field";
 import { Ico } from "./ui/Ico";
 import { BtnSpinner, BtnSpinnerDark } from "./ui/BtnSpinner";
 import { CopyWorkOrderButton } from "./ui/CopyWorkOrderButton";
+import ClientDiagnostics from "./ClientDiagnostics";
 import LoginForm from "../features/auth/LoginForm";
 import useAuth from "../features/auth/useAuth";
 import useWorkOrders from "../features/work-orders/useWorkOrders";
@@ -316,6 +317,7 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
 .app-root { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .main-wrap { flex: 0 0 calc(100% - 232px) !important; min-width: 0; width: calc(100% - 232px); max-width: calc(100% - 232px); overflow-x: hidden; }
 .content-pad { min-width: 0; overflow-x: hidden; box-sizing: border-box; }
+.pull-refresh-indicator { overflow: hidden; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: ${T.muted}; font-size: 11px; font-weight: 700; background: ${T.bg}; }
 .kcard { background: ${T.surface}; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.03); transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
 .kcard:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(31,30,28,0.07); border-color: ${T.border}; }
 .kcol { border-radius: 16px; border: 1px solid ${T.borderSoft}; box-shadow: 0 1px 2px rgba(31,30,28,0.02); overflow: hidden; }
@@ -463,6 +465,8 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   .mobile-drawer-panel { display: flex !important; }
   .content-pad {
     overflow-x: hidden !important;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
     max-width: 100% !important;
     padding-bottom: var(--mobile-bottom-nav-space) !important;
     box-sizing: border-box !important;
@@ -1132,6 +1136,11 @@ export default function PortalShell() {
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const [reassignSearch, setReassignSearch] = useState("");
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const pullStartYRef = useRef<number | null>(null);
+  const pullEligibleRef = useRef(false);
+  const pullDistanceRef = useRef(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const portalHistoryInitializedRef = useRef(false);
   const applyingPortalHistoryRef = useRef(false);
   const portalHistoryDepthRef = useRef(0);
@@ -1143,6 +1152,40 @@ export default function PortalShell() {
   const [noteText, setNoteText] = useState("");
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const updatePullDistance = useCallback((distance: number) => {
+    pullDistanceRef.current = distance;
+    setPullDistance(distance);
+  }, []);
+  const refreshPortal = useCallback(() => {
+    if (typeof window === "undefined" || isRefreshing) return;
+    setIsRefreshing(true);
+    window.requestAnimationFrame(() => window.location.reload());
+  }, [isRefreshing]);
+  const handlePullStart = useCallback((event: any) => {
+    if (event.touches?.length !== 1) return;
+    const contentAtTop = (contentScrollRef.current?.scrollTop || 0) <= 0;
+    const windowAtTop = typeof window === "undefined" || window.scrollY <= 0;
+    pullEligibleRef.current = contentAtTop && windowAtTop;
+    pullStartYRef.current = pullEligibleRef.current
+      ? event.touches[0].clientY
+      : null;
+  }, []);
+  const handlePullMove = useCallback((event: any) => {
+    if (!pullEligibleRef.current || pullStartYRef.current == null) return;
+    const delta = event.touches?.[0]?.clientY - pullStartYRef.current;
+    if (!Number.isFinite(delta) || delta <= 0) {
+      updatePullDistance(0);
+      return;
+    }
+    updatePullDistance(Math.min(88, delta * 0.45));
+  }, [updatePullDistance]);
+  const handlePullEnd = useCallback(() => {
+    const shouldRefresh = pullDistanceRef.current >= 64;
+    pullEligibleRef.current = false;
+    pullStartYRef.current = null;
+    updatePullDistance(0);
+    if (shouldRefresh) refreshPortal();
+  }, [refreshPortal, updatePullDistance]);
   const [startDateInput, setStartDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
   const [startTimeInput, setStartTimeInput] = useState(() => dateTimeInputPartsInTimeZone().time);
   const [pauseDateInput, setPauseDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
@@ -2263,6 +2306,7 @@ export default function PortalShell() {
   return (
     <div className="app-root" style={{ display: "flex", minHeight: "100vh", fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
       <style>{CSS}</style>
+      <ClientDiagnostics portalView={page} />
 
       <div
         className="mobile-only-cards"
@@ -2604,8 +2648,12 @@ export default function PortalShell() {
               <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
               <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
             </div>
-            {isManager && !invoiceController && (
-              <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={refreshPortal} className="btn-soft" aria-label="Refresh portal" title="Refresh portal" style={{ width: 40, height: 40, minHeight: 40, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Ico d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18.5 7M17.9 15A7 7 0 0 1 5.5 17" size={17} color={T.ink} />
+              </button>
+              {isManager && !invoiceController && (
+                <>
                 <button
                   type="button"
                   onClick={openUnreadStaffWork}
@@ -2623,8 +2671,9 @@ export default function PortalShell() {
                 </button>
                 <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
                 <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </div>
           <div className="mobile-only-header">
             <div className="mobile-header-top">
@@ -2653,8 +2702,18 @@ export default function PortalShell() {
                 <div className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
               </div>
-              {isManager && !invoiceController ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <button
+                  type="button"
+                  onClick={refreshPortal}
+                  aria-label="Refresh portal"
+                  title="Refresh portal"
+                  style={{ width: 40, height: 40, borderRadius: 10, border: `1px solid ${T.border}`, background: T.bgWarm, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                >
+                  <Ico d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18.5 7M17.9 15A7 7 0 0 1 5.5 17" size={17} color={T.ink} />
+                </button>
+                {isManager && !invoiceController && (
+                  <button
                   type="button"
                   onClick={openUnreadStaffWork}
                   aria-label={`Open unread staff work${staffUnreadCount ? `, ${staffUnreadCount} unread` : ""}`}
@@ -2666,8 +2725,9 @@ export default function PortalShell() {
                       {staffUnreadCount > 99 ? "99+" : staffUnreadCount}
                     </span>
                   )}
-                </button>
-              ) : <div style={{ width: 40, height: 40 }} />}
+                  </button>
+                )}
+              </div>
             </div>
             {isManager && !invoiceController && (
               <div className="mobile-header-actions">
@@ -2679,8 +2739,30 @@ export default function PortalShell() {
         </div>
 
         <div
+          className="pull-refresh-indicator"
+          role="status"
+          aria-live="polite"
+          style={{
+            height: isRefreshing ? 44 : Math.min(44, pullDistance),
+            transition: pullDistance > 0 ? "none" : "height 160ms ease",
+          }}
+        >
+          {isRefreshing
+            ? "Refreshing portal…"
+            : pullDistance >= 64
+              ? "Release to refresh"
+              : pullDistance > 0
+                ? "Pull to refresh"
+                : ""}
+        </div>
+
+        <div
           ref={contentScrollRef}
           className="content-pad"
+          onTouchStart={handlePullStart}
+          onTouchMove={handlePullMove}
+          onTouchEnd={handlePullEnd}
+          onTouchCancel={handlePullEnd}
           onScroll={(event: any) => {
             if (typeof window === "undefined") return;
             const state = window.history.state;

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -6,6 +6,23 @@ import { Providers } from "./providers";
 export const metadata: Metadata = {
   title: "P1 Service Portal",
   description: "Operations management for 7-Eleven facility services",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "P1 Portal",
+  },
+  icons: {
+    icon: "/p1-icon-192.png",
+    apple: "/p1-icon-192.png",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#1F1E1C",
 };
 
 const inter = Inter({

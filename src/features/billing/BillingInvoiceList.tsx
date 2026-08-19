@@ -129,7 +129,16 @@ export default function BillingInvoiceList(props: any) {
                     <CopyWorkOrderButton value={workOrder.id} />
                   </span>
                   <span style={{ color: T.ink, fontSize: 12 }}>Store #{workOrder.store || "-"}</span>
-                  <span style={{ minWidth: 0, color: T.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workOrder.summary || "Billing-only work order"}</span>
+                  <span style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
+                    {workOrder.billingOnly && (
+                      <span style={{ flex: "0 0 auto", padding: "3px 7px", borderRadius: 999, background: "#FEF3C7", color: "#92400E", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.35 }}>
+                        Billing only · no dispatch
+                      </span>
+                    )}
+                    <span style={{ minWidth: 0, color: T.muted, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {workOrder.summary || "Billing-only work order"}
+                    </span>
+                  </span>
                   <button type="button" className="btn-primary" onClick={() => onCreateFromWorkOrder?.(workOrder)}>Create invoice</button>
                 </div>
               ))}
