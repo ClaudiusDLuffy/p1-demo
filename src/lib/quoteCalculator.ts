@@ -1,5 +1,8 @@
 import { defaultLineTaxable } from "./billingRules";
-import { normalizeStaffBillingLineType } from "./staffBilling";
+import {
+  normalizeStaffBillingLineType,
+  roundStaffBillingMarkupPercent,
+} from "./staffBilling";
 
 export type QuoteCalculatorLine = {
   id: string;
@@ -112,7 +115,7 @@ export function quoteLineToBillingLine(line: QuoteCalculatorLine) {
   const rate = finiteNonNegative(line.rate);
   const markup = sourceRate > 0 ? ((rate / sourceRate) - 1) * 100 : null;
   const markupPercent = markup != null && markup >= 0
-    ? roundMoney(markup)
+    ? roundStaffBillingMarkupPercent(markup)
     : null;
 
   return {

@@ -196,6 +196,15 @@ export default function WorkOrderDetail(props: any) {
               <div style={{ animation: "fadeUp 0.25s" }}>
                 <button onClick={() => onBackFromWorkOrder?.()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
 
+                {isManager && woData.billingOnly && (
+                  <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
+                    <div style={{ color: "#92400E", fontSize: 12, fontWeight: 800 }}>Billing only · do not dispatch</div>
+                    <div style={{ color: "#A16207", fontSize: 10, marginTop: 3 }}>
+                      This work order was sent directly to Ready to Bill. Contractor assignment and dispatch notifications are disabled.
+                    </div>
+                  </div>
+                )}
+
                 {isManager && woData.status !== "closed" && (
                   <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 16px", marginBottom: 12 }}>
                     <div>

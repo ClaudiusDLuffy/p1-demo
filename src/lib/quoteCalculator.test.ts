@@ -99,3 +99,13 @@ test("allows a manually reduced P1 rate without invalid negative markup", () => 
   assert.equal(converted.rate, 175);
   assert.equal(converted.markupPercent, null);
 });
+
+test("rounds converted quote markup to the billing input increment", () => {
+  const converted = quoteLineToBillingLine({
+    ...lines[1],
+    sourceRate: 100,
+    rate: 244.23,
+  });
+
+  assert.equal(converted.markupPercent, 144.2);
+});

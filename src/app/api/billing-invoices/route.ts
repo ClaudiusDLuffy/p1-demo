@@ -7,7 +7,10 @@ import {
 } from "../../../lib/billingRules";
 import { roundInvoiceNumber } from "../../../lib/invoiceMath";
 import { collectSupabasePages } from "../../../lib/paginatedQuery";
-import { normalizeStaffBillingLineType } from "../../../lib/staffBilling";
+import {
+  normalizeStaffBillingLineType,
+  roundStaffBillingMarkupPercent,
+} from "../../../lib/staffBilling";
 import {
   isInvoiceControllerProfile,
   loadStaffPermissions,
@@ -192,9 +195,7 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
         sourceUnitCost: sourceUnitCost != null && Number.isFinite(sourceUnitCost)
           ? roundInvoiceNumber(sourceUnitCost)
           : null,
-        markupPercent: markupPercent != null && Number.isFinite(markupPercent)
-          ? roundInvoiceNumber(markupPercent)
-          : null,
+        markupPercent: roundStaffBillingMarkupPercent(markupPercent),
       };
     })
     .filter(line =>

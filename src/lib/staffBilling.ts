@@ -38,6 +38,13 @@ export function normalizeImportedStaffBillingLineType(
 export const isStaffBillingPartsLine = (type: unknown) =>
   /part|hardware|material/i.test(String(type || ""));
 
+export function roundStaffBillingMarkupPercent(value: unknown) {
+  if (value == null || value === "") return null;
+  const markup = Number(value);
+  if (!Number.isFinite(markup) || markup < 0 || markup > 999) return null;
+  return Math.round((markup + Number.EPSILON) * 10) / 10;
+}
+
 export function importedStaffBillingRate(
   type: unknown,
   sourceUnitCost: unknown,
@@ -77,14 +84,15 @@ export function applyStaffBillingPartsMarkup(
   const sourceCost = sourceUnitCost != null && Number.isFinite(explicitSourceCost)
     ? explicitSourceCost
     : displayedRate;
+  const roundedMarkup = roundStaffBillingMarkupPercent(markup);
 
   if (!Number.isFinite(sourceCost) || sourceCost <= 0) return null;
-  if (!Number.isFinite(markup) || markup < 0 || markup > 999) return null;
+  if (roundedMarkup == null) return null;
 
   return {
     sourceUnitCost: Math.round(sourceCost * 100) / 100,
-    markupPercent: markup,
-    rate: Math.round(sourceCost * (1 + markup / 100) * 100) / 100,
+    markupPercent: roundedMarkup,
+    rate: Math.round(sourceCost * (1 + roundedMarkup / 100) * 100) / 100,
   };
 }
 
@@ -98,6 +106,5 @@ export function staffBillingMarkupPercent(
   if (!Number.isFinite(billedRate) || billedRate < sourceCost) return null;
 
   const markup = ((billedRate - sourceCost) / sourceCost) * 100;
-  if (!Number.isFinite(markup) || markup > 999) return null;
-  return Math.round(markup * 100) / 100;
+  return roundStaffBillingMarkupPercent(markup);
 }
