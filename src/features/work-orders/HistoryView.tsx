@@ -5,12 +5,39 @@ import { T } from "../../lib/constants";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { DatePickerField } from "../../components/ui/DateTimePicker";
+import { useDeferredValue } from "react";
+import { useCursorPagination } from "../../lib/useCursorPagination";
+import { useWorkOrdersPageQuery } from "./queries";
 
 export default function HistoryView(props: any) {
   const { page, isManager, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
-  if (page !== "history" || selectedWO) return null;
+  const deferredSearch = useDeferredValue(histSearch || "");
+  const pageSize = 24;
+  const cursorSignature = JSON.stringify({
+    search: deferredSearch.trim(),
+    histContractor,
+    histReso,
+    histFrom,
+    histTo,
+  });
+  const {
+    position: effectiveCursor,
+    previous: previousPage,
+    next: nextPage,
+  } = useCursorPagination(cursorSignature);
+  const historyPageQuery = useWorkOrdersPageQuery({
+    scope: "history",
+    search: deferredSearch,
+    contractorId: histContractor !== "all" ? histContractor : null,
+    resolution: histReso,
+    from: histFrom || undefined,
+    to: histTo || undefined,
+    sort: "newest",
+    limit: pageSize,
+    cursor: effectiveCursor.cursor,
+  }, page === "history" && !selectedWO);
 
-  const filteredClosedWOs = (closedWOs || []).filter((w: any) => {
+  const fallbackClosedWOs = (closedWOs || []).filter((w: any) => {
     const search = (histSearch || "").toLowerCase();
     const closedAt = w.closedAt ? new Date(w.closedAt) : null;
     if (search && !String(w.id || "").toLowerCase().includes(search)
@@ -22,6 +49,7 @@ export default function HistoryView(props: any) {
     if (histTo && closedAt && closedAt > new Date(`${histTo}T23:59:59`)) return false;
     return true;
   });
+  const filteredClosedWOs = historyPageQuery.data?.items || fallbackClosedWOs;
 
   // Multi-invoice safe: sum every non-draft, non-rejected invoice on the WO.
   // The legacy work_orders.invoice_total column (w.invoiceTotal) was the
@@ -31,8 +59,16 @@ export default function HistoryView(props: any) {
     .filter((i: any) => i.wot === woId && i.state !== "draft" && i.state !== "rejected")
     .reduce((s: number, i: any) => s + (i.total || 0), 0);
 
-  const totalClosedValue = filteredClosedWOs.reduce((sum: number, w: any) => sum + sumInvoicesFor(w.id), 0);
-  const invTotalFor = (woId: string) => sumInvoicesFor(woId);
+  const invTotalFor = (woId: string) => {
+    const row = filteredClosedWOs.find((workOrder: any) => workOrder.id === woId);
+    return row?.historyInvoiceTotal ?? sumInvoicesFor(woId);
+  };
+  const totalClosedValue = historyPageQuery.data?.aggregates?.invoiceTotal
+    ?? filteredClosedWOs.reduce((sum: number, w: any) => sum + invTotalFor(w.id), 0);
+  const totalCount = historyPageQuery.data?.totalCount ?? filteredClosedWOs.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  if (page !== "history" || selectedWO) return null;
 
   const stateOf = (w: any) => {
     const city = String(w.city || "");
@@ -47,7 +83,7 @@ export default function HistoryView(props: any) {
           <div>
             <h1 className="display" style={{ fontSize: 28, color: T.ink, margin: 0 }}>History</h1>
             <div style={{ fontSize: 13, color: T.muted, marginTop: 6 }}>
-              {filteredClosedWOs.length} closed work order{filteredClosedWOs.length === 1 ? "" : "s"} - {fmt(totalClosedValue)}
+              {totalCount} closed work order{totalCount === 1 ? "" : "s"} - {fmt(totalClosedValue)}
             </div>
           </div>
           <div className="filter-bar" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -87,8 +123,8 @@ export default function HistoryView(props: any) {
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
               {filteredClosedWOs.map((w: any) => {
-                const woTotal = sumInvoicesFor(w.id);
-                const woInvCount = (invoices ?? []).filter((i: any) => i.wot === w.id && i.state !== "draft" && i.state !== "rejected").length;
+                const woTotal = invTotalFor(w.id);
+                const woInvCount = w.historyInvoiceCount ?? (invoices ?? []).filter((i: any) => i.wot === w.id && i.state !== "draft" && i.state !== "rejected").length;
                 return (
                   <div
                     key={w.id}
@@ -183,6 +219,27 @@ export default function HistoryView(props: any) {
             </div>
           )}
         </div>
+        {totalCount > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: T.muted }}>
+              Page {effectiveCursor.page} of {totalPages}
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn-soft"
+                disabled={effectiveCursor.page <= 1 || historyPageQuery.isFetching}
+                onClick={previousPage}
+              >Previous</button>
+              <button
+                type="button"
+                className="btn-soft"
+                disabled={!historyPageQuery.data?.hasMore || historyPageQuery.isFetching}
+                onClick={() => nextPage(historyPageQuery.data?.nextCursor || null)}
+              >Next</button>
+            </div>
+          </div>
+        )}
       </section>
     </>
   );

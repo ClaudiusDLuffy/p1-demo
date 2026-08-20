@@ -1,8 +1,9 @@
 "use client";
 // @ts-nocheck
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
+import { useQuery } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Modal } from "../../components/ui/Modal";
@@ -39,7 +40,14 @@ import {
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
-import { useWorkOrderDetailsQuery } from "../work-orders/queries";
+import {
+  useWorkOrderByIdQuery,
+  useWorkOrderDetailsQuery,
+  useWorkOrdersPageQuery,
+} from "../work-orders/queries";
+import { useInvoiceByIdQuery, useInvoicesPageQuery } from "../invoices/queries";
+import { useBillingInvoicePageQuery } from "./queries";
+import { loadAllWorkOrderVisits } from "../../lib/db";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -161,9 +169,9 @@ export default function BillingInvoiceCreateModal(props: any) {
   const {
     modal,
     currentUser,
-    workOrders,
-    contractorInvoices,
-    billingInvoices,
+    workOrders: suppliedWorkOrders = [],
+    contractorInvoices: suppliedContractorInvoices = [],
+    billingInvoices: suppliedBillingInvoices = [],
     editingInvoice,
     initialSourceInvoiceId,
     initialWorkOrderId,
@@ -250,8 +258,73 @@ export default function BillingInvoiceCreateModal(props: any) {
   const taxRateOverride = watch("taxRateOverride");
   const salesTaxOverride = watch("salesTaxOverride");
 
+  const deferredWoSearch = useDeferredValue(woSearch.trim());
+  const requestedWorkOrderId = selectedWorkOrderId
+    || editingInvoice?.wot
+    || initialWorkOrderId
+    || "";
+  const workOrderOptionsQuery = useWorkOrdersPageQuery({
+    scope: "all",
+    search: deferredWoSearch,
+    sort: "newest",
+    limit: 30,
+  }, modal === "createBillingInvoice");
+  const { data: exactWorkOrder } = useWorkOrderByIdQuery(
+    requestedWorkOrderId,
+    modal === "createBillingInvoice" && Boolean(requestedWorkOrderId),
+  );
+  const { data: initialSourceInvoice } = useInvoiceByIdQuery(
+    initialSourceInvoiceId,
+    modal === "createBillingInvoice" && Boolean(initialSourceInvoiceId),
+  );
+  const initialSourceWorkOrderId = String(
+    (initialSourceInvoice as { wot?: string | null } | null | undefined)?.wot
+      || initialSourceInvoice?.work_order_id
+      || "",
+  );
+  const sourceInvoiceQuery = useInvoicesPageQuery({
+    state: "all",
+    workOrderId: selectedWorkOrderId || initialSourceWorkOrderId || null,
+    sort: "recent",
+    limit: 100,
+  }, modal === "createBillingInvoice" && Boolean(
+    selectedWorkOrderId || initialSourceWorkOrderId,
+  ));
+  const staffInvoiceQuery = useBillingInvoicePageQuery({
+    queue: "work_order",
+    workOrderId: selectedWorkOrderId || editingInvoice?.wot || initialWorkOrderId || null,
+    sort: "recent",
+    direction: "desc",
+    limit: 100,
+  }, modal === "createBillingInvoice" && Boolean(
+    selectedWorkOrderId || editingInvoice?.wot || initialWorkOrderId,
+  ));
+  const workOrders = useMemo(() => {
+    const rows = [
+      ...(workOrderOptionsQuery.data?.items || []),
+      ...suppliedWorkOrders,
+      ...(exactWorkOrder ? [exactWorkOrder] : []),
+    ];
+    return [...new Map(rows.map((workOrder: any) => [workOrder.id, workOrder])).values()];
+  }, [exactWorkOrder, suppliedWorkOrders, workOrderOptionsQuery.data?.items]);
+  const contractorInvoices = useMemo(() => {
+    const rows = [
+      ...(sourceInvoiceQuery.data?.items || []),
+      ...suppliedContractorInvoices,
+      ...(initialSourceInvoice ? [initialSourceInvoice] : []),
+    ];
+    return [...new Map(rows.map((invoice: any) => [invoice.id, invoice])).values()];
+  }, [initialSourceInvoice, sourceInvoiceQuery.data?.items, suppliedContractorInvoices]);
+  const billingInvoices = useMemo(() => {
+    const rows = [
+      ...(staffInvoiceQuery.data?.items || []),
+      ...suppliedBillingInvoices,
+      ...(editingInvoice ? [editingInvoice] : []),
+    ];
+    return [...new Map(rows.map((invoice: any) => [invoice.id, invoice])).values()];
+  }, [editingInvoice, staffInvoiceQuery.data?.items, suppliedBillingInvoices]);
   const activeWorkOrders = useMemo(
-    () => (workOrders || []).filter((wo: any) =>
+    () => workOrders.filter((wo: any) =>
       wo.status !== "closed" || wo.id === editingInvoice?.wot,
     ),
     [editingInvoice?.wot, workOrders],
@@ -264,11 +337,23 @@ export default function BillingInvoiceCreateModal(props: any) {
     selectedWorkOrderBase,
     modal === "createBillingInvoice" && Boolean(selectedWorkOrderId),
   );
+  const completeVisitsQuery = useQuery({
+    queryKey: ["work-order-visits", "billing", selectedWorkOrderId],
+    queryFn: () => loadAllWorkOrderVisits(String(selectedWorkOrderId)),
+    enabled: modal === "createBillingInvoice" && Boolean(selectedWorkOrderId),
+    staleTime: 30_000,
+  });
   const selectedWorkOrder = useMemo(
-    () => selectedWorkOrderBase && selectedWorkOrderDetails
-      ? { ...selectedWorkOrderBase, ...selectedWorkOrderDetails }
-      : selectedWorkOrderBase,
-    [selectedWorkOrderBase, selectedWorkOrderDetails],
+    () => {
+      if (!selectedWorkOrderBase) return null;
+      const merged = selectedWorkOrderDetails
+        ? { ...selectedWorkOrderBase, ...selectedWorkOrderDetails }
+        : selectedWorkOrderBase;
+      return completeVisitsQuery.data
+        ? { ...merged, visits: completeVisitsQuery.data }
+        : merged;
+    },
+    [completeVisitsQuery.data, selectedWorkOrderBase, selectedWorkOrderDetails],
   );
   const isCapitalQuote = editingInvoice?.documentKind === "capital_quote"
     || (!editingInvoice && selectedWorkOrder?.isCapital && selectedWorkOrder?.status === "capital");
@@ -280,6 +365,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   );
   const selectedTimeZone = timezoneForWorkOrder(selectedWorkOrder);
   const selectedTrips = useMemo(() => {
+    if (selectedWorkOrderId && !completeVisitsQuery.isSuccess) return [];
     const visits = (selectedWorkOrder?.visits || [])
       .filter((visit: any) => visit?.checkInAt)
       .map((visit: any) => ({
@@ -294,7 +380,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       checkInAt: selectedWorkOrder.startTimeRaw,
       checkOutAt: selectedWorkOrder.endTimeRaw || null,
     }], selectedTimeZone);
-  }, [selectedTimeZone, selectedWorkOrder]);
+  }, [completeVisitsQuery.isSuccess, selectedTimeZone, selectedWorkOrder, selectedWorkOrderId]);
   const tripTotals = useMemo(
     () => selectedTrips.reduce(
       (totals: any, trip: any) => ({
@@ -510,6 +596,10 @@ export default function BillingInvoiceCreateModal(props: any) {
       draftHydrated.current = false;
       return;
     }
+    // A direct "create from contractor invoice" route resolves its source
+    // asynchronously. Do not claim the initialization key until that exact
+    // invoice is available or the form would remain permanently unhydrated.
+    if (initialSourceInvoiceId && !initialSourceInvoice) return;
     const initializationKey = editingInvoice?.id
       ? `edit:${editingInvoice.id}`
       : `create:${initialSourceInvoiceId || ""}:${initialWorkOrderId || ""}`;
@@ -519,11 +609,11 @@ export default function BillingInvoiceCreateModal(props: any) {
 
     const today = todayIso();
     const initialInvoiceDate = editingInvoice?.invoiceDateRaw || today;
-    const initialSourceInvoice = (contractorInvoices || []).find(
+    const resolvedInitialSourceInvoice = (contractorInvoices || []).find(
       (invoice: any) => invoice.id === initialSourceInvoiceId,
     );
     const resolvedInitialWorkOrderId = editingInvoice?.wot
-      || initialSourceInvoice?.wot
+      || resolvedInitialSourceInvoice?.wot
       || initialWorkOrderId
       || "";
     const initialForm = {
@@ -590,7 +680,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     setWoSearch("");
     setSelectedSourceIds(restoredDraft?.selectedSourceIds || (
       editingInvoice?.sourceInvoiceIds
-      || (initialSourceInvoice?.id ? [initialSourceInvoice.id] : [])
+      || (resolvedInitialSourceInvoice?.id ? [resolvedInitialSourceInvoice.id] : [])
     ));
     setSourceSnapshots(restoredDraft?.sourceSnapshots || Object.fromEntries(
       (editingInvoice?.sourceInvoices || []).map((invoice: any) => [invoice.id, invoice]),
@@ -615,6 +705,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     contractorInvoices,
     currentUser,
     editingInvoice,
+    initialSourceInvoice,
     initialSourceInvoiceId,
     initialWorkOrderId,
     isEditing,
@@ -1049,7 +1140,13 @@ export default function BillingInvoiceCreateModal(props: any) {
                 </div>
               )}
             </div>
-            {selectedTrips.length === 0 ? (
+            {completeVisitsQuery.isPending ? (
+              <div style={{ fontSize: 12, color: T.subtle }}>Loading complete visit history...</div>
+            ) : completeVisitsQuery.isError ? (
+              <div style={{ fontSize: 12, color: T.danger }}>
+                Complete visit history could not be loaded. Refresh before calculating trip or overtime charges.
+              </div>
+            ) : selectedTrips.length === 0 ? (
               <div style={{ fontSize: 12, color: T.subtle }}>No check-in/clock-out trips have been recorded.</div>
             ) : (
               <div style={{ display: "grid", gap: 7 }}>

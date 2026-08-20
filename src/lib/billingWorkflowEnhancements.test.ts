@@ -35,8 +35,9 @@ test("approve-and-bill waits for server approval before opening Billing", () => 
 test("selected work-order photo history is scoped, paged, and reconciled after uploads", () => {
   assert.match(
     db,
-    /loadWorkOrderDetails[\s\S]*?\.from\("photos"\)[\s\S]*?\.eq\("work_order_id", workOrder\.id\)[\s\S]*?\.range\(from, to\)/,
+    /loadWorkOrderPhotosPage[\s\S]*?rpc\("list_work_order_photos_page"[\s\S]*?p_work_order_id: workOrderId[\s\S]*?p_cursor: cursor/,
   );
+  assert.match(db, /loadWorkOrderDetails[\s\S]*?loadWorkOrderPhotosPage\(workOrder\.id\)/);
   assert.match(workOrderHook, /photos: \[\.\.\.\(w\.photos \|\| \[\]\), \.\.\.paths\]/);
   assert.match(workOrderHook, /invalidateBoth\(\)/);
 });

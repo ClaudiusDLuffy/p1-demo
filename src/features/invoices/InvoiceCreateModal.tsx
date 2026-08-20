@@ -12,6 +12,7 @@ import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 import { parseInvoicePdf } from "../../lib/invoicePdfParserClient";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
+import { useWorkOrderPartsQuery } from "../work-orders/queries";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 const todayIso = () => {
@@ -37,7 +38,12 @@ const createSubmissionKey = () => {
 const initialLines = () => [];
 
 export default function InvoiceCreateModal(props: any) {
-  const { modal, woData, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts = [] } = props;
+  const { modal, woData, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts: suppliedWoParts = [] } = props;
+  const partsQuery = useWorkOrderPartsQuery(
+    woData?.id,
+    modal === "createInvoice" && Boolean(woData?.id),
+  );
+  const woParts = partsQuery.data || suppliedWoParts;
   // Parts on this WO that have been received (and so are billable) — feeds
   // the "Add from parts list" button below the line items grid. Description
   // + qty pre-fill only; the contractor types their own rate.

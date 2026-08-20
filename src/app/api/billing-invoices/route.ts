@@ -8,6 +8,11 @@ import {
 import { roundInvoiceNumber } from "../../../lib/invoiceMath";
 import { collectSupabasePages } from "../../../lib/paginatedQuery";
 import {
+  chunkArray,
+  clampPageSize,
+  mapChunksWithConcurrency,
+} from "../../../lib/cursorPagination";
+import {
   normalizeStaffBillingLineType,
   roundStaffBillingMarkupPercent,
 } from "../../../lib/staffBilling";
@@ -379,73 +384,126 @@ const billingSaveErrorStatus = (error: any) => {
   }
 };
 
-async function loadStaffInvoices(sb: ReturnType<typeof createServerClient>) {
-  // PostgREST caps an unpaged response (1,000 rows in production). Billing
-  // joins four global tables in memory, so truncating any one of them makes
-  // an otherwise valid invoice appear to have missing lines or sources while
-  // its persisted header total remains correct. Page every source with a
-  // deterministic tie-breaker before assembling invoices.
-  const [invoiceRows, contractorRows, lineRows, sourceRows] = await Promise.all([
-    collectSupabasePages<any>((from, to) => (sb as any)
-      .from("invoices")
-      .select("*")
-      .eq("invoice_type", "staff")
-      .is("deleted_at", null)
-      .order("invoice_date", { ascending: false })
-      .order("id", { ascending: true })
-      .range(from, to)),
-    collectSupabasePages<any>((from, to) => (sb as any)
-      .from("invoices")
-      .select("*")
-      .eq("invoice_type", "contractor")
-      .is("deleted_at", null)
-      .order("id", { ascending: true })
-      .range(from, to)),
-    collectSupabasePages<any>((from, to) => sb
+type StaffInvoicePage = {
+  items: any[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalCount: number;
+};
+
+const rpcPage = (value: any): StaffInvoicePage => {
+  const page = Array.isArray(value) ? value[0] : value;
+  return {
+    items: Array.isArray(page?.items) ? page.items : [],
+    nextCursor: page?.nextCursor || null,
+    hasMore: Boolean(page?.hasMore),
+    totalCount: Number(page?.totalCount || 0),
+  };
+};
+
+async function loadChunkedRows(
+  ids: string[],
+  loader: (chunk: string[]) => Promise<{ data: any[] | null; error: any }>,
+) {
+  if (ids.length === 0) return [];
+  const chunks = chunkArray(Array.from(new Set(ids)), 100);
+  const rows = await mapChunksWithConcurrency(chunks, async chunk => {
+    const result = await loader(chunk);
+    if (result.error) throw result.error;
+    return result.data || [];
+  }, 3);
+  return rows.flat();
+}
+
+async function loadStaffInvoicesPage(
+  sb: ReturnType<typeof createServerClient>,
+  input: {
+    queue: string;
+    search: string | null;
+    sort: string;
+    direction: string;
+    limit: number;
+    cursor: string | null;
+    workOrderId: string | null;
+  },
+): Promise<StaffInvoicePage> {
+  const { data, error } = await (sb as any).rpc("list_staff_invoices_page", {
+    p_queue: input.queue,
+    p_search: input.search,
+    p_sort: input.sort,
+    p_direction: input.direction,
+    p_limit: clampPageSize(input.limit),
+    p_cursor: input.cursor,
+    p_work_order_id: input.workOrderId,
+  });
+  if (error) throw error;
+  const page = rpcPage(data);
+  const staffIds = page.items.map(invoice => String(invoice.id));
+  if (staffIds.length === 0) return page;
+
+  const [staffLines, sourceLinks] = await Promise.all([
+    loadChunkedRows(staffIds, chunk => (sb as any)
       .from("invoice_lines")
       .select("*")
+      .in("invoice_id", chunk)
       .order("invoice_id", { ascending: true })
       .order("position", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to)),
-    collectSupabasePages<any>((from, to) => (sb as any)
+      .order("id", { ascending: true })),
+    loadChunkedRows(staffIds, chunk => (sb as any)
       .from("staff_invoice_sources")
       .select("*")
+      .in("staff_invoice_id", chunk)
       .order("staff_invoice_id", { ascending: true })
       .order("contractor_invoice_id", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to)),
+      .order("id", { ascending: true })),
+  ]);
+  const sourceIds = sourceLinks.map(link => String(link.contractor_invoice_id));
+  const [sourceRows, sourceLines] = await Promise.all([
+    loadChunkedRows(sourceIds, chunk => (sb as any)
+      .from("invoices")
+      .select("*")
+      .in("id", chunk)
+      .eq("invoice_type", "contractor")
+      .is("deleted_at", null)),
+    loadChunkedRows(sourceIds, chunk => (sb as any)
+      .from("invoice_lines")
+      .select("*")
+      .in("invoice_id", chunk)
+      .order("invoice_id", { ascending: true })
+      .order("position", { ascending: true })
+      .order("id", { ascending: true })),
   ]);
 
   const linesByInvoice: Record<string, any[]> = {};
-  for (const line of lineRows) {
+  for (const line of [...staffLines, ...sourceLines]) {
     (linesByInvoice[line.invoice_id] ||= []).push(line);
   }
-
-  const contractorById = new Map<string, any>(
-    contractorRows.map((invoice: any) => [invoice.id, invoice]),
+  const sourceById = new Map(
+    sourceRows.map(source => [
+      source.id,
+      mapInvoice(source, linesByInvoice[source.id] || []),
+    ]),
   );
-  const sourcesByStaffInvoice: Record<string, any[]> = {};
-  for (const source of sourceRows) {
-    const contractorInvoice = contractorById.get(source.contractor_invoice_id);
-    if (!contractorInvoice) continue;
-    const mapped = mapInvoice(
-      contractorInvoice,
-      linesByInvoice[contractorInvoice.id] || [],
-    );
-    (sourcesByStaffInvoice[source.staff_invoice_id] ||= []).push(mapped);
+  const sourceIdsByStaff: Record<string, string[]> = {};
+  for (const link of sourceLinks) {
+    (sourceIdsByStaff[link.staff_invoice_id] ||= []).push(link.contractor_invoice_id);
   }
 
-  return invoiceRows.map((invoice: any) => {
-    const mapped = mapInvoice(invoice, linesByInvoice[invoice.id] || []);
-    const sourceInvoices = sourcesByStaffInvoice[invoice.id] || [];
-    return {
-      ...mapped,
-      sourceInvoices,
-      sourceInvoiceIds: sourceInvoices.map((source: any) => source.id),
-      ...sourceMetrics(sourceInvoices, mapped.subtotal),
-    };
-  });
+  return {
+    ...page,
+    items: page.items.map(invoice => {
+      const mapped = mapInvoice(invoice, linesByInvoice[invoice.id] || []);
+      const sourceInvoices = (sourceIdsByStaff[invoice.id] || [])
+        .map(sourceId => sourceById.get(sourceId))
+        .filter(Boolean);
+      return {
+        ...mapped,
+        sourceInvoices,
+        sourceInvoiceIds: sourceInvoices.map(source => source.id),
+        ...sourceMetrics(sourceInvoices, mapped.subtotal),
+      };
+    }),
+  };
 }
 
 async function loadStaffInvoiceById(
@@ -626,8 +684,31 @@ export async function GET(req: NextRequest) {
       if (!invoice) return jsonError("Billing invoice not found", 404);
       return NextResponse.json({ invoice });
     }
-    const invoices = await loadStaffInvoices(auth.sb);
-    return NextResponse.json({ invoices });
+    const queueValue = String(req.nextUrl.searchParams.get("queue") || "active").toLowerCase();
+    const queue = ["active", "all", "draft", "submitted", "sent", "work_order"].includes(queueValue)
+      ? queueValue
+      : "active";
+    const sortValue = String(req.nextUrl.searchParams.get("sort") || "invoice").toLowerCase();
+    const sort = ["invoice", "status", "recent"].includes(sortValue)
+      ? sortValue
+      : "invoice";
+    const direction = req.nextUrl.searchParams.get("direction") === "asc" ? "asc" : "desc";
+    const page = await loadStaffInvoicesPage(auth.sb, {
+      queue,
+      search: String(req.nextUrl.searchParams.get("search") || "").trim() || null,
+      sort,
+      direction,
+      limit: Number(req.nextUrl.searchParams.get("limit") || 25),
+      cursor: String(req.nextUrl.searchParams.get("cursor") || "").trim() || null,
+      workOrderId: String(req.nextUrl.searchParams.get("workOrderId") || "").trim() || null,
+    });
+    return NextResponse.json({
+      invoices: page.items,
+      items: page.items,
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      totalCount: page.totalCount,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load billing invoices";
     return jsonError(message, 500);

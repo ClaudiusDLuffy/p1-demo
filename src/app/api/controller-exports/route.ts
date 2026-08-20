@@ -116,6 +116,53 @@ const archiveFilename = (batchId: string) => {
   return `QuickBooks-Handoff-${day}-${batchId.slice(0, 8)}.zip`;
 };
 
+export async function GET(request: NextRequest) {
+  const auth = await requireController(request);
+  if ("error" in auth) return auth.error;
+
+  const batchId = request.nextUrl.searchParams.get("batch")?.trim();
+  if (batchId) {
+    const { data: batch, error: batchError } = await auth.sb
+      .from("controller_invoice_export_batches")
+      .select("id,object_path")
+      .eq("id", batchId)
+      .maybeSingle();
+    if (batchError) return jsonError(batchError.message, 500);
+    if (!batch) return jsonError("Export batch not found", 404);
+
+    const { data: archive, error: downloadError } = await auth.sb.storage
+      .from("controller-exports")
+      .download(batch.object_path);
+    if (downloadError || !archive) {
+      return jsonError(downloadError?.message || "Stored export is unavailable", 500);
+    }
+
+    return new NextResponse(Buffer.from(await archive.arrayBuffer()), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${archiveFilename(batch.id)}"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+
+  const { count, error } = await auth.sb
+    .from("invoices")
+    .select("id", { count: "exact", head: true })
+    .eq("invoice_type", "contractor")
+    .eq("state", "approved")
+    .is("deleted_at", null);
+  if (error) return jsonError(error.message, 500);
+
+  return NextResponse.json({
+    count: Number(count || 0),
+    limit: MAX_INVOICES,
+  }, {
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
 export async function POST(request: NextRequest) {
   const auth = await requireController(request);
   if ("error" in auth) return auth.error;
@@ -133,6 +180,18 @@ export async function POST(request: NextRequest) {
   }
   if (requestedIds.length > MAX_INVOICES) {
     return jsonError(`A controller batch is limited to ${MAX_INVOICES} invoices`, 400);
+  }
+  if (requestedIds.length === 0) {
+    const { count, error: countError } = await auth.sb
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("invoice_type", "contractor")
+      .eq("state", "approved")
+      .is("deleted_at", null);
+    if (countError) return jsonError(countError.message, 500);
+    if (Number(count || 0) > MAX_INVOICES) {
+      return jsonError(`The approved queue exceeds the safe ${MAX_INVOICES}-invoice batch limit`, 409);
+    }
   }
 
   const invoiceQuery = auth.sb
@@ -316,38 +375,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Controller export failed", 500);
   }
-}
-
-export async function GET(request: NextRequest) {
-  const auth = await requireController(request);
-  if ("error" in auth) return auth.error;
-
-  const batchId = request.nextUrl.searchParams.get("batch")?.trim();
-  if (!batchId) return jsonError("Batch id is required", 400);
-
-  // This table is introduced by migration 0064 and may not yet be present in
-  // the checked-in generated Supabase types when this route is deployed.
-  const { data: batch, error: batchError } = await auth.sb
-    .from("controller_invoice_export_batches")
-    .select("id,object_path")
-    .eq("id", batchId)
-    .maybeSingle();
-  if (batchError) return jsonError(batchError.message, 500);
-  if (!batch) return jsonError("Export batch not found", 404);
-
-  const { data: archive, error: downloadError } = await auth.sb.storage
-    .from("controller-exports")
-    .download(batch.object_path);
-  if (downloadError || !archive) {
-    return jsonError(downloadError?.message || "Stored export is unavailable", 500);
-  }
-
-  return new NextResponse(Buffer.from(await archive.arrayBuffer()), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${archiveFilename(batch.id)}"`,
-      "Cache-Control": "private, no-store",
-    },
-  });
 }

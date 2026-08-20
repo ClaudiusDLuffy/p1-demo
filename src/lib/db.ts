@@ -5,6 +5,10 @@
 import { supabase } from "./supabase/client";
 import { stateCodeFromWorkOrder, timezoneForWorkOrder } from "./billingRules";
 import { collectSupabasePages } from "./paginatedQuery";
+import {
+  clampPageSize,
+  type CursorPage,
+} from "./cursorPagination";
 import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
 import type { Invoice, WorkOrder } from "./schemas";
@@ -123,14 +127,6 @@ const mapProfile = (p: any, staffPermissions: string[] = []) => ({
 
 // ── WORK ORDERS ─────────────────────────────────────────────────────────────
 
-type WorkOrderActivitySummary = {
-  workOrderId: string;
-  latestNoteAt: string | null;
-  latestContractorActivityAt: string | null;
-  pendingSevenElevenSyncCount: number;
-  pendingContractorAttentionCount: number;
-};
-
 export type WorkOrderDetails = {
   activities: any[];
   photos: string[];
@@ -144,190 +140,247 @@ export type WorkOrderDetails = {
   pendingContractorActivities: any[];
   pendingContractorAttentionCount: number;
   hasPendingContractorAttention: boolean;
+  activityPage: Omit<CursorPage<any>, "items">;
+  photoPage: Omit<CursorPage<string>, "items">;
+  visitPage: Omit<CursorPage<any>, "items">;
+  assignmentHistory: any[];
   detailsLoaded: true;
 };
 
-const activitySummaryFromRows = (rows: any[]): WorkOrderActivitySummary[] => {
-  const summaries = new Map<string, WorkOrderActivitySummary>();
-  const latest = (left: string | null, right: string | null) => {
-    if (!left) return right;
-    if (!right) return left;
-    return new Date(right).getTime() > new Date(left).getTime() ? right : left;
-  };
-
-  for (const row of rows) {
-    const workOrderId = String(row.work_order_id || "");
-    if (!workOrderId) continue;
-    const summary = summaries.get(workOrderId) || {
-      workOrderId,
-      latestNoteAt: null,
-      latestContractorActivityAt: null,
-      pendingSevenElevenSyncCount: 0,
-      pendingContractorAttentionCount: 0,
-    };
-    if (row.type === "note") {
-      summary.latestNoteAt = latest(summary.latestNoteAt, row.created_at || null);
-    }
-    if (row.entered_by_role === "contractor") {
-      summary.latestContractorActivityAt = latest(
-        summary.latestContractorActivityAt,
-        row.created_at || null,
-      );
-    }
-    if (row.requires_7eleven_sync && !row.synced_to_7eleven_at) {
-      summary.pendingSevenElevenSyncCount += 1;
-    }
-    if (row.requires_contractor_attention && !row.contractor_attention_acknowledged_at) {
-      summary.pendingContractorAttentionCount += 1;
-    }
-    summaries.set(workOrderId, summary);
-  }
-  return [...summaries.values()];
+export type WorkOrderPageParams = {
+  scope?: "active" | "operations" | "operations_all" | "history" | "capital" | "ready_to_bill" | "all"
+    | "staff_work" | "staff_work_unread" | "staff_work_todo" | "staff_work_ready"
+    | "dashboard_unassigned" | "dashboard_pending_submission"
+    | "dashboard_pending_approval" | "dashboard_awaiting_parts"
+    | "dashboard_seven_eleven_updates" | "dashboard_p1_parts_to_order"
+    | "dashboard_pending_capital_completion";
+  search?: string;
+  contractorId?: string | null;
+  contractorIds?: string[] | null;
+  priority?: string;
+  status?: string;
+  state?: string;
+  resolution?: string;
+  from?: string;
+  to?: string;
+  needsAction?: boolean;
+  sort?: "sla_due" | "newest" | "oldest" | "priority";
+  pendingFirst?: boolean;
+  limit?: number;
+  cursor?: string | null;
+  storeNumber?: string | null;
 };
 
-const missingActivitySummaryRpc = (error: any) =>
-  error?.code === "PGRST202"
-  || error?.code === "42883"
-  || /get_work_order_activity_summaries/i.test(String(error?.message || ""))
-    && /schema cache|does not exist|could not find/i.test(String(error?.message || ""));
+export type PortalNavigationSummary = {
+  openCount: number;
+  p1UnassignedCount: number;
+  capitalCount: number;
+  pendingApprovalCount: number;
+  historyCount: number;
+  slaBreachedCount: number;
+  contractorActiveCount: number;
+  contractorAttentionCount: number;
+  contractorInvoiceCount: number;
+  staffUnreadCount: number;
+  myTodoCount: number;
+  readyToBillCount: number;
+  staffWorkCount: number;
+};
 
-async function loadWorkOrderActivitySummaries(sb: ReturnType<typeof supabase>) {
-  const { data, error } = await sb.rpc("get_work_order_activity_summaries");
-  if (!error) {
-    return (data || []).map(row => ({
-      workOrderId: row.work_order_id,
-      latestNoteAt: row.latest_note_at || null,
-      latestContractorActivityAt: row.latest_contractor_activity_at || null,
-      pendingSevenElevenSyncCount: Number(row.pending_7eleven_sync_count || 0),
-      pendingContractorAttentionCount: Number(row.pending_contractor_attention_count || 0),
-    }));
+const EMPTY_PORTAL_NAVIGATION_SUMMARY: PortalNavigationSummary = {
+  openCount: 0,
+  p1UnassignedCount: 0,
+  capitalCount: 0,
+  pendingApprovalCount: 0,
+  historyCount: 0,
+  slaBreachedCount: 0,
+  contractorActiveCount: 0,
+  contractorAttentionCount: 0,
+  contractorInvoiceCount: 0,
+  staffUnreadCount: 0,
+  myTodoCount: 0,
+  readyToBillCount: 0,
+  staffWorkCount: 0,
+};
+
+export type ContractorWorkloadSummary = Record<string, {
+  active: number;
+  capital: number;
+}>;
+
+const cursorPageFromRpc = <T>(value: unknown): CursorPage<T> => {
+  const page = typeof value === "string" ? JSON.parse(value) : value;
+  if (!page || typeof page !== "object" || Array.isArray(page)) {
+    throw new Error("The server returned an invalid page");
   }
-  if (!missingActivitySummaryRpc(error)) throw error;
+  const row = page as Record<string, unknown>;
+  const items = Array.isArray(row.items) ? row.items as T[] : [];
+  return {
+    items,
+    nextCursor: typeof row.nextCursor === "string" ? row.nextCursor : null,
+    hasMore: Boolean(row.hasMore),
+    totalCount: Number(row.totalCount || 0),
+    aggregates: row.aggregates && typeof row.aggregates === "object" && !Array.isArray(row.aggregates)
+      ? Object.fromEntries(Object.entries(row.aggregates as Record<string, unknown>)
+        .map(([key, value]) => [key, Number(value || 0)]))
+      : undefined,
+  };
+};
 
-  // Safe rollout fallback: if the web build reaches production just before
-  // migration 0070, transfer only the columns needed for list summaries.
-  // This preserves behavior without restoring the former select=* payload.
-  const rows = await collectSupabasePages<any>((from, to) => sb
-    .from("activities")
-    .select("work_order_id, created_at, type, entered_by_role, requires_7eleven_sync, synced_to_7eleven_at, requires_contractor_attention, contractor_attention_acknowledged_at")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .range(from, to));
-  return activitySummaryFromRows(rows);
+const mapAssignmentHistory = (rows: any[] = []) => rows.map(assignment => ({
+  id: assignment.id,
+  contractorId: assignment.contractor_id,
+  nextContractorId: assignment.next_contractor_id || null,
+  assignmentVersion: assignment.assignment_version,
+  assignmentStartedAt: assignment.assignment_started_at || null,
+  assignmentEndedAt: assignment.assignment_ended_at,
+  assignmentEndedBy: assignment.assignment_ended_by || null,
+  workflowSnapshot: assignment.workflow_snapshot || {},
+}));
+
+const mapEmbeddedStaffTodo = (todo: any) => todo ? ({
+  id: todo.id,
+  workOrderId: todo.work_order_id,
+  ownerId: todo.owner_id,
+  createdBy: todo.created_by,
+  note: todo.note || null,
+  createdAt: todo.created_at,
+  updatedAt: todo.updated_at,
+}) : null;
+
+const mapWorkOrderListRow = (wo: any): WorkOrder => {
+  const latestNoteAt = wo.latest_note_at || null;
+  const seenAt = wo.staff_notes_seen_at || null;
+  const pendingSevenElevenSyncCount = Number(wo.pending_7eleven_sync_count || 0);
+  const pendingContractorAttentionCount = Number(wo.pending_contractor_attention_count || 0);
+  const assignmentRows = Array.isArray(wo.assignment_history)
+    ? wo.assignment_history
+    : [];
+
+  WorkOrderSchema.safeParse({
+    id: wo.id,
+    status: wo.status,
+    priority: wo.priority,
+    contractor_id: wo.contractor_id,
+    nte: wo.nte == null ? null : Number(wo.nte),
+    created_at: wo.created_at,
+    store_number: wo.store_number,
+    city: wo.city,
+    functional_status: wo.functional_status,
+  });
+
+  return {
+    ...mapWO(wo),
+    incidentReuse: wo.incident_reuse || null,
+    assignmentHistory: mapAssignmentHistory(assignmentRows),
+    activities: [],
+    latestNoteAt,
+    latestContractorActivityAt: wo.latest_contractor_activity_at || null,
+    hasUnreadNotes: !!latestNoteAt && (
+      !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
+    ),
+    pendingSevenElevenActivities: [],
+    pendingSevenElevenSyncCount,
+    hasPendingSevenElevenSync: pendingSevenElevenSyncCount > 0,
+    pendingContractorActivities: [],
+    pendingContractorAttentionCount,
+    hasPendingContractorAttention: pendingContractorAttentionCount > 0,
+    historyInvoiceTotal: Number(wo.history_invoice_total || 0),
+    historyInvoiceCount: Number(wo.history_invoice_count || 0),
+    billingInvoiceId: wo.billing_invoice_id || null,
+    partsTotal: Number(wo.parts_total || 0),
+    partsReceived: Number(wo.parts_received || 0),
+    staffTodo: mapEmbeddedStaffTodo(wo.staff_todo),
+    staffReadThroughAt: wo.staff_read_through_at || null,
+    visits: [],
+    photos: [],
+    detailsLoaded: false,
+  } as unknown as WorkOrder;
+};
+
+export async function loadWorkOrdersPage(
+  params: WorkOrderPageParams = {},
+): Promise<CursorPage<WorkOrder>> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("list_work_orders_page", {
+    p_scope: params.scope || "active",
+    p_search: params.search?.trim() || null,
+    p_contractor_id: params.contractorId || null,
+    p_priority: params.priority && params.priority !== "all" ? params.priority : null,
+    p_status: params.status && params.status !== "all" ? params.status : null,
+    p_state: params.state && params.state !== "all" ? params.state : null,
+    p_resolution: params.resolution && params.resolution !== "all" ? params.resolution : null,
+    p_from: params.from || null,
+    p_to: params.to || null,
+    p_needs_action: Boolean(params.needsAction),
+    p_sort: params.sort || "newest",
+    p_pending_first: Boolean(params.pendingFirst),
+    p_limit: clampPageSize(params.limit),
+    p_cursor: params.cursor || null,
+    p_store_number: params.storeNumber || null,
+    p_contractor_ids: params.contractorIds?.length ? params.contractorIds : null,
+  });
+  if (error) throw error;
+  const page = cursorPageFromRpc<any>(data);
+  return { ...page, items: page.items.map(mapWorkOrderListRow) };
+}
+
+export async function loadPortalNavigationSummary(): Promise<PortalNavigationSummary> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("get_portal_navigation_summary");
+  if (error) throw error;
+  const value = data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  return Object.fromEntries(
+    Object.keys(EMPTY_PORTAL_NAVIGATION_SUMMARY).map(key => [key, Number(value[key] || 0)]),
+  ) as PortalNavigationSummary;
+}
+
+export async function loadContractorWorkloadSummary(): Promise<ContractorWorkloadSummary> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("get_contractor_workload_summary");
+  if (error) throw new Error(error.message);
+  const raw = typeof data === "string" ? JSON.parse(data) : data;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).map(([contractorId, value]) => {
+    const row = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+    return [contractorId, {
+      active: Number(row.active || 0),
+      capital: Number(row.capital || 0),
+    }];
+  }));
+}
+
+export async function loadWorkOrderById(workOrderId: string): Promise<WorkOrder | null> {
+  if (!workOrderId) return null;
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("get_portal_work_order", {
+    p_work_order_id: workOrderId,
+  });
+  if (error) throw error;
+  return data ? mapWorkOrderListRow(data) : null;
 }
 
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
-  const sb = supabase();
-  // List data stays compact. Exact activity counters come from one aggregate
-  // row per work order; full activities, photos, and visits are fetched by
-  // loadWorkOrderDetails only when a work order is opened.
-  const [rawWorkOrderRows, activitySummaries, afmContactRows, incidentReuseRes, assignmentHistoryRows, financialRows] = await Promise.all([
-    collectSupabasePages<any>((from, to) => sb.from("work_orders").select("*").is("deleted_at", null).order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to)),
-    loadWorkOrderActivitySummaries(sb),
-    collectSupabasePages<any>((from, to) => sb.from("work_order_afm_contacts").select("work_order_id, afm_email").order("work_order_id", { ascending: true }).range(from, to)),
-    sb.rpc("get_incident_reuse_warnings"),
-    collectSupabasePages<any>((from, to) => (sb as any).from("work_order_assignment_history").select("*").order("assignment_ended_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
-    collectSupabasePages<any>((from, to) => (sb as any).from("work_order_financials").select("*").order("work_order_id", { ascending: true }).range(from, to)),
-  ]);
-  if (incidentReuseRes.error) throw incidentReuseRes.error;
-
-  // Contractors receive no financial rows through RLS and the compatibility
-  // columns on work_orders are masked. Staff receive these rows and merge the
-  // real values back before the common mapper runs.
-  const financialByWo = Object.fromEntries(
-    financialRows.map((financial: any) => [
-      financial.work_order_id,
-      financial,
-    ]),
-  );
-  const workOrderRows = rawWorkOrderRows.map((workOrder: any) => {
-    const financial = financialByWo[workOrder.id];
-    if (!financial) return workOrder;
-    return {
-      ...workOrder,
-      nte: financial.nte,
-      nte_flag_threshold: financial.nte_flag_threshold,
-      nte_flagged: financial.nte_flagged,
-      nte_flag_amount: financial.nte_flag_amount,
-    };
-  });
-
-  const activitySummaryByWo = Object.fromEntries(
-    activitySummaries.map(summary => [summary.workOrderId, summary]),
-  );
-  const afmEmailByWo = Object.fromEntries(
-    afmContactRows.map(contact => [
-      contact.work_order_id,
-      contact.afm_email || null,
-    ]),
-  );
-  const incidentReuseByWo = Object.fromEntries(
-    (incidentReuseRes.data || []).map(warning => [
-      warning.work_order_id,
-      {
-        incidentId: warning.incident_id,
-        relatedWorkOrderIds: warning.related_work_order_ids || [],
-        crossesState: warning.crosses_state,
-      },
-    ]),
-  );
-  const assignmentHistoryByWo: Record<string, any[]> = {};
-  for (const assignment of assignmentHistoryRows) {
-    (assignmentHistoryByWo[assignment.work_order_id] ||= []).push({
-      id: assignment.id,
-      contractorId: assignment.contractor_id,
-      nextContractorId: assignment.next_contractor_id || null,
-      assignmentVersion: assignment.assignment_version,
-      assignmentStartedAt: assignment.assignment_started_at || null,
-      assignmentEndedAt: assignment.assignment_ended_at,
-      assignmentEndedBy: assignment.assignment_ended_by || null,
-      workflowSnapshot: assignment.workflow_snapshot || {},
+  // The shared shell retains only the active operational set used by badges,
+  // dashboard buckets, and mutations. Closed history is never downloaded
+  // here; its screen uses loadWorkOrdersPage directly.
+  const items: WorkOrder[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await loadWorkOrdersPage({
+      scope: "active",
+      sort: "newest",
+      limit: 100,
+      cursor,
     });
-  }
-
-  const mapped = workOrderRows.map(wo => {
-    const summary = activitySummaryByWo[wo.id];
-    const latestNoteAt = summary?.latestNoteAt || null;
-    const seenAt = (wo as any).staff_notes_seen_at || null;
-    const hasUnreadNotes = !!latestNoteAt && (
-      !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
-    );
-
-    return {
-      ...mapWO(wo),
-      incidentReuse: incidentReuseByWo[wo.id] || null,
-      assignmentHistory: assignmentHistoryByWo[wo.id] || [],
-      afmEmail: afmEmailByWo[wo.id] || null,
-      activities: [],
-      latestNoteAt,
-      latestContractorActivityAt: summary?.latestContractorActivityAt || null,
-      hasUnreadNotes,
-      pendingSevenElevenActivities: [],
-      pendingSevenElevenSyncCount: summary?.pendingSevenElevenSyncCount || 0,
-      hasPendingSevenElevenSync: (summary?.pendingSevenElevenSyncCount || 0) > 0,
-      pendingContractorActivities: [],
-      pendingContractorAttentionCount: summary?.pendingContractorAttentionCount || 0,
-      hasPendingContractorAttention: (summary?.pendingContractorAttentionCount || 0) > 0,
-      visits: [],
-      photos: [],
-      detailsLoaded: false,
-    };
-  });
-  for (const wo of workOrderRows) {
-    WorkOrderSchema.safeParse({
-      id: wo.id,
-      status: wo.status,
-      priority: wo.priority,
-      contractor_id: wo.contractor_id,
-      nte: wo.nte == null ? null : Number(wo.nte),
-      created_at: wo.created_at,
-      store_number: wo.store_number,
-      city: wo.city,
-      functional_status: wo.functional_status,
-    });
-  }
-  return mapped as unknown as WorkOrder[];
+    items.push(...page.items);
+    cursor = page.hasMore ? page.nextCursor : null;
+  } while (cursor);
+  return items;
 }
 
 const formatWorkOrderDateTime = (
@@ -441,6 +494,88 @@ const mapActivity = (a: any, timeZone?: string) => ({
   contractorAcknowledgedBy: a.contractor_attention_acknowledged_by || null,
 });
 
+const mapVisit = (visit: any) => ({
+  id: visit.id,
+  workOrderId: visit.work_order_id,
+  contractorId: visit.contractor_id || null,
+  checkInAt: visit.check_in_at,
+  checkOutAt: visit.check_out_at || null,
+  createdBy: visit.checked_in_by || null,
+  closedBy: visit.checked_out_by || null,
+});
+
+const pageMeta = <T>(page: CursorPage<T>): Omit<CursorPage<T>, "items"> => ({
+  nextCursor: page.nextCursor,
+  hasMore: page.hasMore,
+  totalCount: page.totalCount,
+});
+
+export async function loadWorkOrderActivitiesPage(
+  workOrder: Parameters<typeof loadWorkOrderDetails>[0],
+  cursor: string | null = null,
+  limit = 30,
+): Promise<CursorPage<any>> {
+  if (!workOrder?.id) throw new Error("A work order ID is required");
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("list_work_order_activities_page", {
+    p_work_order_id: workOrder.id,
+    p_limit: clampPageSize(limit),
+    p_cursor: cursor,
+  });
+  if (error) throw error;
+  const page = cursorPageFromRpc<any>(data);
+  const timeZone = timezoneForWorkOrder(workOrder);
+  return { ...page, items: page.items.map(row => mapActivity(row, timeZone)) };
+}
+
+export async function loadWorkOrderPhotosPage(
+  workOrderId: string,
+  cursor: string | null = null,
+  limit = 24,
+): Promise<CursorPage<string>> {
+  if (!workOrderId) throw new Error("A work order ID is required");
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("list_work_order_photos_page", {
+    p_work_order_id: workOrderId,
+    p_limit: clampPageSize(limit),
+    p_cursor: cursor,
+  });
+  if (error) throw error;
+  const page = cursorPageFromRpc<any>(data);
+  return {
+    ...page,
+    items: page.items.map(photo => photo.storage_path).filter(Boolean),
+  };
+}
+
+export async function loadWorkOrderVisitsPage(
+  workOrderId: string,
+  cursor: string | null = null,
+  limit = 30,
+): Promise<CursorPage<any>> {
+  if (!workOrderId) throw new Error("A work order ID is required");
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("list_work_order_visits_page", {
+    p_work_order_id: workOrderId,
+    p_limit: clampPageSize(limit),
+    p_cursor: cursor,
+  });
+  if (error) throw error;
+  const page = cursorPageFromRpc<any>(data);
+  return { ...page, items: page.items.map(mapVisit) };
+}
+
+export async function loadAllWorkOrderVisits(workOrderId: string): Promise<any[]> {
+  const visits: any[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await loadWorkOrderVisitsPage(workOrderId, cursor, 100);
+    visits.push(...page.items);
+    cursor = page.hasMore ? page.nextCursor : null;
+  } while (cursor);
+  return visits;
+}
+
 export async function loadWorkOrderDetails(workOrder: {
   id: string;
   storeTimezone?: string | null;
@@ -450,35 +585,17 @@ export async function loadWorkOrderDetails(workOrder: {
   staffNotesSeenAt?: string | null;
 }): Promise<WorkOrderDetails> {
   if (!workOrder?.id) throw new Error("A work order ID is required");
-  const sb = supabase();
-  const [activityRows, photoRows, visitRows] = await Promise.all([
-    collectSupabasePages<any>((from, to) => sb
-      .from("activities")
-      .select("*")
-      .eq("work_order_id", workOrder.id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .range(from, to)),
-    collectSupabasePages<any>((from, to) => sb
-      .from("photos")
-      .select("*")
-      .eq("work_order_id", workOrder.id)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .range(from, to)),
-    collectSupabasePages<any>((from, to) => (sb as any)
-      .from("work_order_visits")
-      .select("*")
-      .eq("work_order_id", workOrder.id)
-      .order("check_in_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to)),
+  const [activityResult, photoResult, visitResult, currentWorkOrder] = await Promise.all([
+    loadWorkOrderActivitiesPage(workOrder),
+    loadWorkOrderPhotosPage(workOrder.id),
+    loadWorkOrderVisitsPage(workOrder.id),
+    loadWorkOrderById(workOrder.id),
   ]);
 
-  const timeZone = timezoneForWorkOrder(workOrder);
-  const activities = activityRows.map(row => mapActivity(row, timeZone));
-  const latestNoteAt = activities.find(activity => activity.type === "note")?.createdAt || null;
+  const activities = activityResult.items;
+  const latestNoteAt = (currentWorkOrder as any)?.latestNoteAt
+    || activities.find(activity => activity.type === "note")?.createdAt
+    || null;
   const pendingSevenElevenActivities = activities.filter(activity =>
     activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
   );
@@ -489,29 +606,39 @@ export async function loadWorkOrderDetails(workOrder: {
 
   return {
     activities,
-    photos: photoRows.map(photo => photo.storage_path).filter(Boolean),
-    visits: visitRows.map(visit => ({
-      id: visit.id,
-      workOrderId: visit.work_order_id,
-      contractorId: visit.contractor_id || null,
-      checkInAt: visit.check_in_at,
-      checkOutAt: visit.check_out_at || null,
-      createdBy: visit.checked_in_by || null,
-      closedBy: visit.checked_out_by || null,
-    })),
+    photos: photoResult.items,
+    visits: visitResult.items,
     latestNoteAt,
-    latestContractorActivityAt: activities.find(
-      activity => activity.enteredByRole === "contractor",
-    )?.createdAt || null,
+    latestContractorActivityAt: (currentWorkOrder as any)?.latestContractorActivityAt
+      || activities.find(
+        activity => activity.enteredByRole === "contractor",
+      )?.createdAt
+      || null,
     hasUnreadNotes: !!latestNoteAt && (
       !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
     ),
     pendingSevenElevenActivities,
-    pendingSevenElevenSyncCount: pendingSevenElevenActivities.length,
-    hasPendingSevenElevenSync: pendingSevenElevenActivities.length > 0,
+    pendingSevenElevenSyncCount: Number(
+      (currentWorkOrder as any)?.pendingSevenElevenSyncCount
+      ?? pendingSevenElevenActivities.length,
+    ),
+    hasPendingSevenElevenSync: Boolean(
+      (currentWorkOrder as any)?.hasPendingSevenElevenSync
+      ?? pendingSevenElevenActivities.length > 0,
+    ),
     pendingContractorActivities,
-    pendingContractorAttentionCount: pendingContractorActivities.length,
-    hasPendingContractorAttention: pendingContractorActivities.length > 0,
+    pendingContractorAttentionCount: Number(
+      (currentWorkOrder as any)?.pendingContractorAttentionCount
+      ?? pendingContractorActivities.length,
+    ),
+    hasPendingContractorAttention: Boolean(
+      (currentWorkOrder as any)?.hasPendingContractorAttention
+      ?? pendingContractorActivities.length > 0,
+    ),
+    activityPage: pageMeta(activityResult),
+    photoPage: pageMeta(photoResult),
+    visitPage: pageMeta(visitResult),
+    assignmentHistory: (currentWorkOrder as any)?.assignmentHistory || [],
     detailsLoaded: true,
   };
 }
@@ -532,39 +659,101 @@ function ageString(createdAt: string, dispatchedAt?: string): string {
 
 // ── INVOICES ────────────────────────────────────────────────────────────────
 
-export async function loadInvoices(): Promise<Invoice[]> {
+export type InvoicePageParams = {
+  state?: "all" | "active" | "draft" | "submitted" | "approved" | "rejected" | "revised" | "paid";
+  search?: string;
+  sort?: "recent" | "invoice" | "work_order" | "contractor" | "status" | "date" | "store" | "lines" | "total";
+  direction?: "asc" | "desc";
+  limit?: number;
+  cursor?: string | null;
+  workOrderId?: string | null;
+};
+
+const mapInvoicePageRow = (invoice: any): Invoice => ({
+  ...mapInvoice(invoice),
+  lines: (Array.isArray(invoice.lines) ? invoice.lines : []).map(mapInvoiceLine),
+  pdfIsOriginal: Boolean(invoice.pdf_is_original),
+  originalPdfName: invoice.original_pdf_name || null,
+  contractorName: invoice.contractor_name || null,
+  sourceStaffInvoiceId: invoice.source_staff_invoice_id || null,
+}) as unknown as Invoice;
+
+export async function loadInvoicesPage(
+  params: InvoicePageParams = {},
+): Promise<CursorPage<Invoice>> {
   const sb = supabase();
-  // Soft-deleted invoices are excluded at the source — every list, badge,
-  // stat, and spend calc consumes this array, so one filter covers all.
-  // Page all three sources so an older rejected invoice or its line items do
-  // not vanish once the global table passes the PostgREST response cap.
-  const [invoiceRows, lineRows, uploadActivityRows] = await Promise.all([
-    collectSupabasePages<any>((from, to) => sb.from("invoices").select("*").is("deleted_at", null).eq("invoice_type", "contractor").order("invoice_date", { ascending: false }).order("id", { ascending: true }).range(from, to)),
-    collectSupabasePages<any>((from, to) => sb.from("invoice_lines").select("*").order("invoice_id", { ascending: true }).order("position", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    collectSupabasePages<any>((from, to) => sb.from("activities").select("event_data, created_at, id").eq("event_key", "invoice_uploaded").is("deleted_at", null).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+  const { data, error } = await (sb as any).rpc("list_contractor_invoices_page", {
+    p_state: params.state || "all",
+    p_search: params.search?.trim() || null,
+    p_sort: params.sort || "recent",
+    p_direction: params.direction || "desc",
+    p_limit: clampPageSize(params.limit),
+    p_cursor: params.cursor || null,
+    p_work_order_id: params.workOrderId || null,
+  });
+  if (error) throw error;
+  const page = cursorPageFromRpc<any>(data);
+  return { ...page, items: page.items.map(mapInvoicePageRow) };
+}
+
+export async function loadInvoiceById(invoiceId: string): Promise<Invoice | null> {
+  if (!invoiceId) return null;
+  const sb = supabase();
+  const [invoiceResult, lineResult, uploadResult] = await Promise.all([
+    sb.from("invoices")
+      .select("*")
+      .eq("id", invoiceId)
+      .eq("invoice_type", "contractor")
+      .is("deleted_at", null)
+      .maybeSingle(),
+    sb.from("invoice_lines")
+      .select("*")
+      .eq("invoice_id", invoiceId)
+      .order("position", { ascending: true })
+      .order("id", { ascending: true }),
+    sb.from("activities")
+      .select("event_data,created_at,id")
+      .eq("event_key", "invoice_uploaded")
+      .is("deleted_at", null)
+      .contains("event_data", { invoiceId })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+  if (invoiceResult.error) throw invoiceResult.error;
+  if (lineResult.error) throw lineResult.error;
+  if (uploadResult.error) throw uploadResult.error;
+  if (!invoiceResult.data) return null;
+  const eventData = uploadResult.data?.event_data;
+  return mapInvoicePageRow({
+    ...invoiceResult.data,
+    lines: lineResult.data || [],
+    pdf_is_original: Boolean(uploadResult.data),
+    original_pdf_name: eventData && typeof eventData === "object" && !Array.isArray(eventData)
+      ? eventData.fileName || null
+      : null,
+  });
+}
 
-  const linesByInv: Record<string, any[]> = {};
-  for (const l of lineRows) {
-    (linesByInv[l.invoice_id] ||= []).push(mapInvoiceLine(l));
-  }
-
-  const originalPdfByInv = new Map<string, string | null>();
-  for (const activity of uploadActivityRows) {
-    const eventData = activity.event_data;
-    if (!eventData || typeof eventData !== "object" || Array.isArray(eventData)) continue;
-    const invoiceId = typeof eventData.invoiceId === "string" ? eventData.invoiceId : null;
-    if (!invoiceId) continue;
-    const fileName = typeof eventData.fileName === "string" ? eventData.fileName : null;
-    originalPdfByInv.set(invoiceId, fileName);
-  }
-
-  return invoiceRows.map(i => ({
-    ...mapInvoice(i),
-    lines: linesByInv[i.id] || [],
-    pdfIsOriginal: originalPdfByInv.has(i.id),
-    originalPdfName: originalPdfByInv.get(i.id) || null,
-  })) as unknown as Invoice[];
+export async function loadInvoices(): Promise<Invoice[]> {
+  // Paid invoices are historical and live behind the invoice cursor list.
+  // The shell keeps only workflow-active records needed for badges, review,
+  // billing handoff, and work-order actions.
+  const items: Invoice[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await loadInvoicesPage({
+      state: "active",
+      sort: "recent",
+      direction: "desc",
+      limit: 100,
+      cursor,
+    });
+    items.push(...page.items);
+    cursor = page.hasMore ? page.nextCursor : null;
+  } while (cursor);
+  return items;
 }
 
 const mapInvoice = (i: any) => ({
@@ -880,6 +1069,23 @@ export async function closeWorkOrderVisit(
     .eq("id", visit.id)
     .is("check_out_at", null);
   if (error) throw error;
+}
+
+export async function correctWorkOrderVisit(
+  visitId: string,
+  checkInAt: string,
+  checkOutAt: string,
+  reason: string,
+): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("correct_work_order_visit", {
+    p_visit_id: visitId,
+    p_check_in_at: checkInAt,
+    p_check_out_at: checkOutAt,
+    p_reason: reason.trim(),
+  });
+  if (error) throw error;
+  return data;
 }
 
 export type ActivityAuditOptions = {
@@ -1714,6 +1920,19 @@ export async function loadWoParts(): Promise<any[]> {
     .order("id", { ascending: true })
     .range(from, to));
   return rows.map(mapWoPart);
+}
+
+export async function loadWoPartsForWorkOrder(workOrderId: string): Promise<any[]> {
+  if (!workOrderId) return [];
+  const sb = supabase();
+  const { data, error } = await (sb as any)
+    .from("wo_parts")
+    .select("*")
+    .eq("work_order_id", workOrderId)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapWoPart);
 }
 
 export async function insertWoPart(part: {

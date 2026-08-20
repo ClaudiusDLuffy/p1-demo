@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
@@ -22,6 +22,18 @@ type ControllerInvoice = {
 type ErrorPayload = { error?: string };
 
 const MAX_CONTROLLER_EXPORT_INVOICES = 500;
+const CONTROLLER_EXPORT_QUEUE_KEY = ["controller-export-queue"] as const;
+
+async function controllerExportRequest(path: string, init?: RequestInit) {
+  const sb = supabase();
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Your session expired. Sign in again.");
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (init?.body) headers.set("Content-Type", "application/json");
+  return fetch(path, { ...init, headers });
+}
 
 export default function ControllerExportPanel({
   invoices,
@@ -36,39 +48,45 @@ export default function ControllerExportPanel({
   const canExport = canExportQuickBooks(currentUser);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const approvedInvoices = useMemo(
-    () => canExport
-      ? invoices.filter(invoice =>
-          (invoice.invoiceType || "contractor") === "contractor"
-          && invoice.state === "approved",
-        )
-      : [],
-    [canExport, invoices],
-  );
-  const overLimit = approvedInvoices.length > MAX_CONTROLLER_EXPORT_INVOICES;
+  const fallbackCount = canExport
+    ? invoices.filter(invoice =>
+        (invoice.invoiceType || "contractor") === "contractor"
+        && invoice.state === "approved",
+      ).length
+    : 0;
+  const queueQuery = useQuery({
+    queryKey: CONTROLLER_EXPORT_QUEUE_KEY,
+    queryFn: async () => {
+      const response = await controllerExportRequest("/api/controller-exports");
+      const payload = await response.json().catch(() => ({})) as {
+        count?: number;
+        limit?: number;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "Could not load the export queue");
+      return {
+        count: Number(payload.count || 0),
+        limit: Number(payload.limit || MAX_CONTROLLER_EXPORT_INVOICES),
+      };
+    },
+    enabled: canExport,
+    staleTime: 30_000,
+  });
+  const approvedCount = queueQuery.data?.count ?? fallbackCount;
+  const exportLimit = queueQuery.data?.limit ?? MAX_CONTROLLER_EXPORT_INVOICES;
+  const overLimit = approvedCount > exportLimit;
 
   if (!canExport) return null;
 
   const downloadAll = async () => {
-    if (approvedInvoices.length === 0 || overLimit || busy) return;
+    if (approvedCount === 0 || overLimit || busy) return;
     setBusy(true);
     setError(null);
 
     try {
-      const sb = supabase();
-      const { data: sessionData } = await sb.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Your session expired. Sign in again.");
-
-      const response = await fetch("/api/controller-exports", {
+      const response = await controllerExportRequest("/api/controller-exports", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          invoiceIds: approvedInvoices.map(invoice => invoice.id),
-        }),
+        body: JSON.stringify({}),
       });
       if (!response.ok) {
         const payload = await response.json()
@@ -92,6 +110,7 @@ export default function ControllerExportPanel({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: INVOICES_KEY }),
         queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+        queryClient.invalidateQueries({ queryKey: CONTROLLER_EXPORT_QUEUE_KEY }),
       ]);
     } catch (downloadError) {
       setError(downloadError instanceof Error
@@ -119,15 +138,15 @@ export default function ControllerExportPanel({
             Accounting · QuickBooks handoff
           </div>
           <div style={{ fontSize: 11, color: T.muted, marginTop: 4, lineHeight: 1.5 }}>
-            {approvedInvoices.length} approved invoice{approvedInvoices.length === 1 ? "" : "s"} waiting. One ZIP includes every source PDF and one consolidated QuickBooks CSV.
+            {approvedCount} approved invoice{approvedCount === 1 ? "" : "s"} waiting. One ZIP includes every source PDF and one consolidated QuickBooks CSV.
           </div>
         </div>
         <button
           type="button"
           className="btn-primary"
           onClick={downloadAll}
-          disabled={busy || approvedInvoices.length === 0 || overLimit}
-          style={{ display: "flex", alignItems: "center", gap: 7, opacity: busy || approvedInvoices.length === 0 || overLimit ? 0.55 : 1 }}
+          disabled={busy || approvedCount === 0 || overLimit || queueQuery.isLoading}
+          style={{ display: "flex", alignItems: "center", gap: 7, opacity: busy || approvedCount === 0 || overLimit || queueQuery.isLoading ? 0.55 : 1 }}
         >
           {busy ? <><BtnSpinner />Building package…</> : "Download All + send to QuickBooks"}
         </button>
@@ -137,12 +156,17 @@ export default function ControllerExportPanel({
       </div>
       {overLimit && (
         <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
-          This queue exceeds the safe {MAX_CONTROLLER_EXPORT_INVOICES}-invoice archive limit. Contact an administrator before exporting; no invoice has been changed.
+          This queue exceeds the safe {exportLimit}-invoice archive limit. Contact an administrator before exporting; no invoice has been changed.
         </div>
       )}
       {error && (
         <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
           {error}
+        </div>
+      )}
+      {!error && queueQuery.error && (
+        <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
+          {queueQuery.error instanceof Error ? queueQuery.error.message : "Could not load the export queue"}
         </div>
       )}
     </section>

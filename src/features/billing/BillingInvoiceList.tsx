@@ -1,22 +1,29 @@
 "use client";
 // @ts-nocheck
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { T, INV_STATE, STAFF_INV_STATE } from "../../lib/constants";
 import {
-  sortInvoices,
   type InvoiceSortKey,
   type SortDirection,
 } from "../../lib/invoiceSort";
 import { isInvoiceController } from "../../lib/staffPermissions";
-import {
-  billingInvoiceMatchesSearch,
-  billingReadyWorkOrderMatchesSearch,
-  buildBillingBuckets,
-} from "./billingBuckets";
+import { useCursorBuckets } from "../../lib/useCursorPagination";
+import { useInvoicesPageQuery } from "../invoices/queries";
+import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import { useBillingInvoicePageQuery } from "./queries";
+
+const BILLING_PAGE_KEYS = [
+  "ready",
+  "all",
+  "draft",
+  "submitted",
+  "sent",
+  "recently_approved",
+] as const;
 
 function BillingDocumentBadge({ invoice }: { invoice: any }) {
   if (invoice.documentKind === "capital_quote") {
@@ -170,7 +177,6 @@ export default function BillingInvoiceList(props: any) {
     page,
     currentUser,
     invoices = [],
-    contractorInvoices = [],
     readyWorkOrders = [],
     setSelectedBillingInvoice,
     onCreate,
@@ -191,35 +197,62 @@ export default function BillingInvoiceList(props: any) {
     recently_approved: false,
   });
   const controller = isInvoiceController(currentUser);
+  const deferredSearch = useDeferredValue(search.trim());
+  const staffSort = sortKey === "status" ? "status" : "invoice";
+  const pagingSignature = JSON.stringify({
+    search: deferredSearch,
+    direction: sortDirection,
+    sort: staffSort,
+  });
+  const {
+    positions,
+    previous: previousBucketPage,
+    next: nextBucketPage,
+  } = useCursorBuckets(pagingSignature, BILLING_PAGE_KEYS);
+  const queryEnabled = page === "billing";
+  const allQuery = useBillingInvoicePageQuery({ queue: "all", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.all.cursor }, queryEnabled);
+  const draftQuery = useBillingInvoicePageQuery({ queue: "draft", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.draft.cursor }, queryEnabled);
+  const submittedQuery = useBillingInvoicePageQuery({ queue: "submitted", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.submitted.cursor }, queryEnabled);
+  const sentQuery = useBillingInvoicePageQuery({ queue: "sent", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.sent.cursor }, queryEnabled);
+  const approvedQuery = useInvoicesPageQuery({ state: "approved", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.recently_approved.cursor }, queryEnabled);
+  const readyQuery = useWorkOrdersPageQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", limit: 20, cursor: positions.ready.cursor }, queryEnabled && !controller);
 
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, any>();
     for (const invoice of invoices) {
       for (const sourceId of invoice.sourceInvoiceIds || []) owners.set(sourceId, invoice);
     }
+    for (const invoice of (approvedQuery.data?.items || []) as any[]) {
+      if (invoice.sourceStaffInvoiceId) {
+        owners.set(invoice.id, { id: invoice.sourceStaffInvoiceId });
+      }
+    }
     return owners;
-  }, [invoices]);
+  }, [approvedQuery.data?.items, invoices]);
 
-  const unfilteredBuckets = useMemo(
-    () => buildBillingBuckets(invoices, contractorInvoices),
-    [contractorInvoices, invoices],
-  );
-  const buckets = useMemo(
-    () => unfilteredBuckets.map(bucket => ({
-      ...bucket,
-      invoices: sortInvoices(
-        bucket.invoices.filter(invoice => billingInvoiceMatchesSearch(invoice, search)),
-        sortKey,
-        sortDirection,
-        () => "",
-      ),
-    })),
-    [search, sortDirection, sortKey, unfilteredBuckets],
-  );
-  const visibleReadyWorkOrders = useMemo(
-    () => readyWorkOrders.filter(workOrder => billingReadyWorkOrderMatchesSearch(workOrder, search)),
-    [readyWorkOrders, search],
-  );
+  const buckets = useMemo(() => [
+    { id: "all", label: "All", description: "P1 billing documents still being prepared or waiting to be sent.", color: "#2563EB", kind: "staff", query: allQuery },
+    { id: "draft", label: "Drafts", description: "Billing documents that still need to be completed.", color: "#6B7280", kind: "staff", query: draftQuery },
+    { id: "submitted", label: "Please send to 7-Eleven", description: "Completed billing documents waiting for the 7-Eleven submission step.", color: "#B8478A", kind: "staff", query: submittedQuery },
+    { id: "sent", label: "Sent to 7-Eleven", description: "Finished submissions, retained here without cluttering All.", color: "#2F7D4A", kind: "staff", query: sentQuery },
+    { id: "recently_approved", label: "Recently Approved", description: "Approved contractor invoices available as sources for P1 billing.", color: "#B86B32", kind: "contractor", query: approvedQuery },
+  ], [allQuery, approvedQuery, draftQuery, sentQuery, submittedQuery]);
+  const visibleReadyWorkOrders = useMemo(() => {
+    const localById = new Map<string, any>(readyWorkOrders.map((workOrder: any) => [workOrder.id, workOrder]));
+    const finalInvoiceByWorkOrder = new Map<string, any>();
+    for (const invoice of invoices) {
+      if (!invoice.wot || invoice.documentKind === "capital_quote") continue;
+      finalInvoiceByWorkOrder.set(invoice.wot, invoice);
+    }
+    return (readyQuery.data?.items || []).map((workOrder: any) => ({
+      ...(localById.get(workOrder.id) || {}),
+      ...workOrder,
+      billingInvoice: finalInvoiceByWorkOrder.get(workOrder.id)
+        || localById.get(workOrder.id)?.billingInvoice
+        || (workOrder.billingInvoiceId ? { id: workOrder.billingInvoiceId } : null)
+        || null,
+    }));
+  }, [invoices, readyQuery.data?.items, readyWorkOrders]);
 
   const openInvoice = (invoice: any, contractorBucket: boolean) => {
     if (!contractorBucket) {
@@ -283,7 +316,7 @@ export default function BillingInvoiceList(props: any) {
       </div>
 
       <div style={{ display: "grid", gap: 12 }}>
-        {!controller && readyWorkOrders.length > 0 && (
+        {!controller && (readyQuery.isPending || (readyQuery.data?.totalCount || 0) > 0 || Boolean(deferredSearch)) && (
           <article className="card" style={{ overflow: "hidden" }}>
             <button
               type="button"
@@ -300,7 +333,7 @@ export default function BillingInvoiceList(props: any) {
                 </span>
               </span>
               <span style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: T.accentSoft, color: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
-                {search ? visibleReadyWorkOrders.length : readyWorkOrders.length}
+                {readyQuery.data?.totalCount || 0}
               </span>
             </button>
             {expanded.ready !== false && (
@@ -341,15 +374,32 @@ export default function BillingInvoiceList(props: any) {
                     No Ready to Bill work orders match your search.
                   </div>
                 )}
+                <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color: T.subtle }}>
+                    {readyQuery.isFetching ? "Loading..." : `${readyQuery.data?.totalCount || 0} work order${readyQuery.data?.totalCount === 1 ? "" : "s"} · page ${positions.ready.page}`}
+                  </span>
+                  <div style={{ display: "flex", gap: 7 }}>
+                    <button type="button" className="btn-soft" disabled={positions.ready.page <= 1 || readyQuery.isFetching} onClick={() => previousBucketPage("ready")} style={{ padding: "6px 9px", fontSize: 10 }}>Previous</button>
+                    <button type="button" className="btn-soft" disabled={!readyQuery.data?.hasMore || readyQuery.isFetching} onClick={() => nextBucketPage("ready", readyQuery.data?.nextCursor || null)} style={{ padding: "6px 9px", fontSize: 10 }}>Next</button>
+                  </div>
+                </div>
+                {readyQuery.isError && (
+                  <div role="alert" style={{ padding: "10px 14px", color: T.danger, background: T.dangerSoft, fontSize: 11 }}>
+                    Ready to Bill could not be loaded. Refresh and try again.
+                  </div>
+                )}
               </div>
             )}
           </article>
         )}
 
         {buckets.map(bucket => {
+          const bucketId = bucket.id as keyof typeof positions;
           const isExpanded = expanded[bucket.id] !== false;
           const contractorBucket = bucket.kind === "contractor";
-          const totalCount = unfilteredBuckets.find(item => item.id === bucket.id)?.invoices.length || 0;
+          const invoiceRows = bucket.query.data?.items || [];
+          const totalCount = bucket.query.data?.totalCount || 0;
+          const position = positions[bucketId];
           return (
             <article key={bucket.id} className="card" style={{ overflow: "hidden" }}>
               <button
@@ -367,13 +417,13 @@ export default function BillingInvoiceList(props: any) {
                   </span>
                 </span>
                 <span style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: `${bucket.color}18`, color: bucket.color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
-                  {search ? bucket.invoices.length : totalCount}
+                  {totalCount}
                 </span>
               </button>
               {isExpanded && (
                 <div id={`billing-bucket-${bucket.id}`} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
                   <BillingInvoiceRows
-                    invoices={bucket.invoices}
+                    invoices={invoiceRows}
                     contractorBucket={contractorBucket}
                     sourceOwnerById={sourceOwnerById}
                     onOpen={(invoice: any) => openInvoice(invoice, contractorBucket)}
@@ -381,6 +431,35 @@ export default function BillingInvoiceList(props: any) {
                     fmt={fmt}
                     emptyMessage={search ? "No billing records in this queue match your search." : "Nothing is waiting in this queue."}
                   />
+                  <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, color: T.subtle }}>
+                      {bucket.query.isFetching ? "Loading..." : `${totalCount} record${totalCount === 1 ? "" : "s"} · page ${position.page}`}
+                    </span>
+                    <div style={{ display: "flex", gap: 7 }}>
+                      <button
+                        type="button"
+                        className="btn-soft"
+                        disabled={position.page <= 1 || bucket.query.isFetching}
+                        onClick={() => previousBucketPage(bucketId)}
+                        style={{ padding: "6px 9px", fontSize: 10 }}
+                      >Previous</button>
+                      <button
+                        type="button"
+                        className="btn-soft"
+                        disabled={!bucket.query.data?.hasMore || bucket.query.isFetching}
+                        onClick={() => nextBucketPage(
+                          bucketId,
+                          bucket.query.data?.nextCursor || null,
+                        )}
+                        style={{ padding: "6px 9px", fontSize: 10 }}
+                      >Next</button>
+                    </div>
+                  </div>
+                  {bucket.query.isError && (
+                    <div role="alert" style={{ padding: "10px 14px", color: T.danger, background: T.dangerSoft, fontSize: 11 }}>
+                      This billing queue could not be loaded. Refresh and try again.
+                    </div>
+                  )}
                 </div>
               )}
             </article>

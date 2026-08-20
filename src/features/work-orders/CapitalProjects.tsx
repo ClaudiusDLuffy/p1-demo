@@ -4,18 +4,26 @@
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
-import { T, PRIORITY } from "../../lib/constants";
-import { useMemo } from "react";
+import { T } from "../../lib/constants";
+import { useState } from "react";
+import {
+  firstCursorPosition,
+  nextCursorPosition,
+  previousCursorPosition,
+} from "../../lib/cursorPagination";
+import { useWorkOrdersPageQuery } from "./queries";
 
 export default function CapitalProjects(props: any) {
-  const { page, isManager, capitalCount, workOrders, setSelectedWO, setPage, setAiNote, getUser } = props;
-  const capitalWOs = useMemo(
-    () => workOrders.filter(w =>
-      (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
-      && w.status !== "closed",
-    ),
-    [workOrders]
-  );
+  const { page, isManager, capitalCount, setSelectedWO, setPage, setAiNote, getUser } = props;
+  const [position, setPosition] = useState(firstCursorPosition);
+  const capitalQuery = useWorkOrdersPageQuery({
+    scope: "capital",
+    sort: "newest",
+    limit: 24,
+    cursor: position.cursor,
+  }, page === "capital" && isManager);
+  const capitalWOs: any[] = (capitalQuery.data?.items || []) as any[];
+  const exactCapitalCount = capitalQuery.data?.totalCount ?? capitalCount;
   return (
     <>
           {/* ═════ CAPITAL ═════ */}
@@ -24,8 +32,15 @@ export default function CapitalProjects(props: any) {
               <div className="card mobile-alert" style={{ background: T.violetSoft, border: `1px solid ${T.violet}33`, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
                 <div className="mobile-alert-icon" style={{ width: 40, height: 40, borderRadius: 10, background: T.violet, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#fff" /></div>
                 <div className="mobile-alert-body">
-                  <div style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{capitalCount} capital replacement{capitalCount !== 1 ? "s" : ""}</div>
+                  <div style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
                   <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Equipment orders — separate from regular pipeline, 4-12 week lifecycle</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, color: T.muted }}>{capitalQuery.isFetching ? "Loading capital projects..." : `Page ${position.page}`}</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className="btn-soft" disabled={position.page <= 1 || capitalQuery.isFetching} onClick={() => setPosition(previousCursorPosition)}>Previous</button>
+                  <button type="button" className="btn-soft" disabled={!capitalQuery.data?.hasMore || capitalQuery.isFetching} onClick={() => setPosition(current => nextCursorPosition(current, capitalQuery.data?.nextCursor || null))}>Next</button>
                 </div>
               </div>
               <div className="capital-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
