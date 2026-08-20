@@ -209,7 +209,6 @@ as $$
       coalesce(
         work_order.response_breach_at,
         work_order.resolution_breach_at,
-        work_order.sla_deadline_at,
         'infinity'::timestamptz
       ) as _sla_due,
       coalesce(work_order.created_at, work_order.dispatched_at, 'epoch'::timestamptz) as _created_key
@@ -1246,12 +1245,6 @@ as $$
           or (
             annotated.resolution_breach_at is not null
             and annotated.resolution_breach_at <= now()
-          )
-          or (
-            annotated.response_breach_at is null
-            and annotated.resolution_breach_at is null
-            and annotated.sla_deadline_at is not null
-            and annotated.sla_deadline_at <= now()
           )
         )
     ),

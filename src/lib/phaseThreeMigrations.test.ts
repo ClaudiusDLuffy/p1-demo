@@ -71,6 +71,11 @@ test("shell summaries stay compact and RLS-aware", () => {
   assert.match(pagination, /'staffUnreadCount'/);
   assert.match(pagination, /'readyToBillCount'/);
   assert.match(pagination, /'contractorInvoiceCount'/);
+  assert.doesNotMatch(
+    pagination,
+    /\bsla_deadline_at\b/,
+    "Phase 3 must use the canonical response and resolution SLA fields",
+  );
 });
 
 test("Phase 3 adds indexes for page cursors and database-side search", () => {
