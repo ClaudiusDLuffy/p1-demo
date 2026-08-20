@@ -9,6 +9,27 @@ export type PortalViewState = {
 
 export const PORTAL_HISTORY_KEY = "p1PortalView";
 
+type PortalHistoryWriter = {
+  replaceState: (data: unknown, unused: string, url?: string | URL | null) => void;
+  pushState: (data: unknown, unused: string, url?: string | URL | null) => void;
+};
+
+export const writePortalHistoryStateSafely = (
+  history: PortalHistoryWriter,
+  method: "replaceState" | "pushState",
+  state: unknown,
+  url?: string | URL | null,
+) => {
+  try {
+    history[method].call(history, state, "", url);
+    return true;
+  } catch {
+    // Mobile Safari rate-limits History API writes. Navigation and scrolling
+    // must remain usable even when it declines a non-essential state update.
+    return false;
+  }
+};
+
 const clean = (value: unknown) => {
   const normalized = String(value ?? "").trim();
   return normalized || null;
