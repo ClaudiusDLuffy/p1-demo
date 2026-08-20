@@ -5,6 +5,7 @@ import {
   portalUrlForView,
   portalViewFromHistoryState,
   portalViewKey,
+  writePortalHistoryStateSafely,
 } from "./portalNavigation";
 
 const view = {
@@ -35,5 +36,35 @@ test("portal view keys change when return context changes", () => {
   assert.notEqual(
     portalViewKey(view),
     portalViewKey({ ...view, returnWorkOrderId: null }),
+  );
+});
+
+test("mobile History API limits never escape into the portal", () => {
+  const writes: string[] = [];
+  const availableHistory = {
+    replaceState: () => { writes.push("replace"); },
+    pushState: () => { writes.push("push"); },
+  };
+  assert.equal(
+    writePortalHistoryStateSafely(availableHistory, "replaceState", view, "/"),
+    true,
+  );
+  assert.equal(
+    writePortalHistoryStateSafely(availableHistory, "pushState", view, "/"),
+    true,
+  );
+  assert.deepEqual(writes, ["replace", "push"]);
+
+  const rateLimitedHistory = {
+    replaceState: () => { throw new Error("History API rate limit exceeded"); },
+    pushState: () => { throw new Error("History API rate limit exceeded"); },
+  };
+  assert.equal(
+    writePortalHistoryStateSafely(rateLimitedHistory, "replaceState", view, "/"),
+    false,
+  );
+  assert.equal(
+    writePortalHistoryStateSafely(rateLimitedHistory, "pushState", view, "/"),
+    false,
   );
 });

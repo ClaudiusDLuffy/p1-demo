@@ -93,6 +93,7 @@ import {
   portalUrlForView,
   portalViewFromHistoryState,
   portalViewKey,
+  writePortalHistoryStateSafely,
   type PortalViewState,
 } from "../lib/portalNavigation";
 import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
@@ -1139,7 +1140,8 @@ export default function PortalShell() {
   const applyingPortalHistoryRef = useRef(false);
   const portalHistoryDepthRef = useRef(0);
   const lastPortalViewKeyRef = useRef<string | null>(null);
-  const windowScrollFrameRef = useRef<number | null>(null);
+  const scrollPersistTimerRef = useRef<number | null>(null);
+  const latestScrollTopRef = useRef(0);
   const [activityMenuId, setActivityMenuId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ woId: string; activityId: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -1180,6 +1182,41 @@ export default function PortalShell() {
     updatePullDistance(0);
     if (shouldRefresh) refreshPortal();
   }, [refreshPortal, updatePullDistance]);
+  const persistPortalScrollState = useCallback((scrollTop: number) => {
+    if (typeof window === "undefined") return;
+    const state = window.history.state;
+    if (!portalViewFromHistoryState(state)) return;
+    writePortalHistoryStateSafely(
+      window.history,
+      "replaceState",
+      {
+        ...state,
+        p1PortalScrollTop: Number.isFinite(scrollTop) ? scrollTop : 0,
+      },
+      window.location.href,
+    );
+  }, []);
+  const schedulePortalScrollPersistence = useCallback((scrollTop: number) => {
+    if (typeof window === "undefined") return;
+    latestScrollTopRef.current = Number.isFinite(scrollTop) ? scrollTop : 0;
+    if (scrollPersistTimerRef.current != null) {
+      window.clearTimeout(scrollPersistTimerRef.current);
+    }
+    // Persist once scrolling settles. Writing on every scroll frame can exceed
+    // Mobile Safari's History API quota and crash the active route.
+    scrollPersistTimerRef.current = window.setTimeout(() => {
+      scrollPersistTimerRef.current = null;
+      persistPortalScrollState(latestScrollTopRef.current);
+    }, 500);
+  }, [persistPortalScrollState]);
+  const flushPortalScrollPersistence = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (scrollPersistTimerRef.current != null) {
+      window.clearTimeout(scrollPersistTimerRef.current);
+      scrollPersistTimerRef.current = null;
+    }
+    persistPortalScrollState(latestScrollTopRef.current);
+  }, [persistPortalScrollState]);
   const [startDateInput, setStartDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
   const [startTimeInput, setStartTimeInput] = useState(() => dateTimeInputPartsInTimeZone().time);
   const [pauseDateInput, setPauseDateInput] = useState(() => dateTimeInputPartsInTimeZone().date);
@@ -1344,12 +1381,17 @@ export default function PortalShell() {
       portalHistoryDepthRef.current = Number.isFinite(existingDepth)
         ? existingDepth
         : 0;
-      window.history.replaceState({
-        ...baseState,
-        [PORTAL_HISTORY_KEY]: portalView,
-        p1PortalDepth: portalHistoryDepthRef.current,
-        p1PortalScrollTop: window.scrollY || contentScrollRef.current?.scrollTop || 0,
-      }, "", portalUrlForView(window.location.href, portalView));
+      writePortalHistoryStateSafely(
+        window.history,
+        "replaceState",
+        {
+          ...baseState,
+          [PORTAL_HISTORY_KEY]: portalView,
+          p1PortalDepth: portalHistoryDepthRef.current,
+          p1PortalScrollTop: window.scrollY || contentScrollRef.current?.scrollTop || 0,
+        },
+        portalUrlForView(window.location.href, portalView),
+      );
       portalHistoryInitializedRef.current = true;
       lastPortalViewKeyRef.current = key;
       return;
@@ -1363,48 +1405,42 @@ export default function PortalShell() {
 
     if (lastPortalViewKeyRef.current === key) return;
 
+    flushPortalScrollPersistence();
     portalHistoryDepthRef.current += 1;
-    window.history.pushState({
-      ...baseState,
-      [PORTAL_HISTORY_KEY]: portalView,
-      p1PortalDepth: portalHistoryDepthRef.current,
-      p1PortalScrollTop: 0,
-    }, "", portalUrlForView(window.location.href, portalView));
+    writePortalHistoryStateSafely(
+      window.history,
+      "pushState",
+      {
+        ...window.history.state,
+        [PORTAL_HISTORY_KEY]: portalView,
+        p1PortalDepth: portalHistoryDepthRef.current,
+        p1PortalScrollTop: 0,
+      },
+      portalUrlForView(window.location.href, portalView),
+    );
     lastPortalViewKeyRef.current = key;
     window.requestAnimationFrame(() => {
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
     });
-  }, [currentUser?.id, portalView]);
+  }, [currentUser?.id, flushPortalScrollPersistence, portalView]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !currentUser?.id) return;
     const previousScrollRestoration = window.history.scrollRestoration;
     window.history.scrollRestoration = "manual";
 
-    const persistWindowScroll = () => {
-      if (windowScrollFrameRef.current != null) return;
-      windowScrollFrameRef.current = window.requestAnimationFrame(() => {
-        windowScrollFrameRef.current = null;
-        const state = window.history.state;
-        if (!portalViewFromHistoryState(state)) return;
-        window.history.replaceState({
-          ...state,
-          p1PortalScrollTop: window.scrollY,
-        }, "", window.location.href);
-      });
-    };
+    const persistWindowScroll = () => schedulePortalScrollPersistence(window.scrollY);
 
     window.addEventListener("scroll", persistWindowScroll, { passive: true });
+    window.addEventListener("pagehide", flushPortalScrollPersistence);
     return () => {
       window.removeEventListener("scroll", persistWindowScroll);
-      if (windowScrollFrameRef.current != null) {
-        window.cancelAnimationFrame(windowScrollFrameRef.current);
-        windowScrollFrameRef.current = null;
-      }
+      window.removeEventListener("pagehide", flushPortalScrollPersistence);
+      flushPortalScrollPersistence();
       window.history.scrollRestoration = previousScrollRestoration;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, flushPortalScrollPersistence, schedulePortalScrollPersistence]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !currentUser?.id) return;
@@ -2837,12 +2873,7 @@ export default function PortalShell() {
           onTouchCancel={handlePullEnd}
           onScroll={(event: any) => {
             if (typeof window === "undefined") return;
-            const state = window.history.state;
-            if (!portalViewFromHistoryState(state)) return;
-            window.history.replaceState({
-              ...state,
-              p1PortalScrollTop: event.currentTarget.scrollTop,
-            }, "", window.location.href);
+            schedulePortalScrollPersistence(event.currentTarget.scrollTop);
           }}
           style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: 28, paddingBottom: 80 }}
         >
