@@ -21,6 +21,7 @@ import { Ico } from "./ui/Ico";
 import { BtnSpinner, BtnSpinnerDark } from "./ui/BtnSpinner";
 import { CopyWorkOrderButton } from "./ui/CopyWorkOrderButton";
 import ClientDiagnostics from "./ClientDiagnostics";
+import { reportClientFailure } from "../lib/clientDiagnostics";
 import LoginForm from "../features/auth/LoginForm";
 import useAuth from "../features/auth/useAuth";
 import useWorkOrders from "../features/work-orders/useWorkOrders";
@@ -1263,6 +1264,19 @@ export default function PortalShell() {
     isAuthenticated && Boolean(selectedWO),
   );
   const selectedWorkOrderLookup = selectedWorkOrderQuery.data;
+  const selectedWorkOrderError = selectedWorkOrderQuery.error instanceof Error
+    ? selectedWorkOrderQuery.error.message
+    : selectedWorkOrderQuery.error
+      ? String(selectedWorkOrderQuery.error)
+      : null;
+  useEffect(() => {
+    if (!selectedWorkOrderError || !selectedWO) return;
+    void reportClientFailure({
+      source: "selected-work-order-query",
+      message: selectedWorkOrderError,
+      portalView: page,
+    });
+  }, [page, selectedWO, selectedWorkOrderError]);
   const shellWorkOrdersData = useMemo(() => {
     return selectedWorkOrderLookup ? [selectedWorkOrderLookup] : [];
   }, [selectedWorkOrderLookup]);
@@ -1574,6 +1588,17 @@ export default function PortalShell() {
       : workOrders,
     [contractorNteCap, isContractorRole, workOrders],
   );
+  const selectedWorkOrderForView = useMemo(() => {
+    if (!selectedWorkOrderLookup) return null;
+    if (!isContractorRole) return selectedWorkOrderLookup;
+    return {
+      ...selectedWorkOrderLookup,
+      nte: contractorNteCap,
+      nteFlagThreshold: null,
+      nteFlagged: false,
+      nteFlagAmount: null,
+    };
+  }, [contractorNteCap, isContractorRole, selectedWorkOrderLookup]);
   const invoiceDetailWorkOrders = useMemo(() => {
     if (!selectedInvoiceWorkOrder) return [];
     return [isContractorRole
@@ -1588,8 +1613,11 @@ export default function PortalShell() {
   }, [contractorNteCap, isContractorRole, selectedInvoiceWorkOrder]);
 
   const woData = useMemo(
-    () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
-    [maskedWorkOrders, selectedWO]
+    () => selectedWO
+      ? maskedWorkOrders.find((w: any) => w.id === selectedWO)
+        || selectedWorkOrderForView
+      : null,
+    [maskedWorkOrders, selectedWO, selectedWorkOrderForView]
   );
   const invoiceFormWorkOrder = useMemo(
     () => resumeDraft?.wot
@@ -1601,11 +1629,24 @@ export default function PortalShell() {
   );
 
   useEffect(() => {
-    if (isManager || !selectedWorkOrderQuery.isFetched || !selectedWO || woData) return;
+    if (
+      isManager
+      || !selectedWO
+      || !selectedWorkOrderQuery.isSuccess
+      || selectedWorkOrderQuery.data !== null
+    ) return;
     setSelectedWO(null);
     setAiNote(null);
     setPage("my_jobs");
-  }, [isManager, selectedWO, selectedWorkOrderQuery.isFetched, setAiNote, setPage, setSelectedWO, woData]);
+  }, [
+    isManager,
+    selectedWO,
+    selectedWorkOrderQuery.data,
+    selectedWorkOrderQuery.isSuccess,
+    setAiNote,
+    setPage,
+    setSelectedWO,
+  ]);
 
   useEffect(() => {
     if (!isManager || !selectedWO || !woData?.hasUnreadNotes || !woData?.latestNoteAt) return;
@@ -3072,6 +3113,29 @@ export default function PortalShell() {
           />
 
           <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
+
+          {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderQuery.isLoading && (
+            <div className="card" role="status" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
+              Loading work order...
+            </div>
+          )}
+
+          {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderQuery.isError && (
+            <div className="card" role="alert" style={{ padding: "24px 20px", textAlign: "center" }}>
+              <div style={{ color: T.ink, fontWeight: 700, marginBottom: 6 }}>Work order could not load</div>
+              <div style={{ color: T.muted, fontSize: 12, marginBottom: 14 }}>
+                Retry the secure connection to open this work order.
+              </div>
+              <button
+                type="button"
+                className="btn-soft"
+                onClick={() => void selectedWorkOrderQuery.refetch()}
+                disabled={selectedWorkOrderQuery.isFetching}
+              >
+                {selectedWorkOrderQuery.isFetching ? "Retrying..." : "Retry"}
+              </button>
+            </div>
+          )}
 
           <WorkOrderDetail
             page={page}
