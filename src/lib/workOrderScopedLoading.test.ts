@@ -8,6 +8,7 @@ const db = read("src/lib/db.ts");
 const portal = read("src/components/PortalShell.tsx");
 const workOrderHook = read("src/features/work-orders/useWorkOrders.ts");
 const billingModal = read("src/features/billing/BillingInvoiceCreateModal.tsx");
+const myJobs = read("src/features/work-orders/MyJobs.tsx");
 const migration = read("supabase/migrations/0076_cursor_pagination_and_portal_indexes.sql");
 
 test("work-order lists use RLS-aware cursor pages instead of global detail rows", () => {
@@ -62,6 +63,18 @@ test("the portal shell does not restore hidden global preload queries", () => {
   assert.match(portal, /usePortalNavigationSummaryQuery\(/);
   assert.match(portal, /useWorkOrderByIdQuery\(/);
   assert.match(portal, /useWorkOrderDetailsQuery\(/);
+});
+
+test("contractor work-order page failures are reported and remain retryable", () => {
+  assert.match(myJobs, /reportClientFailure/);
+  assert.match(myJobs, /source:\s*"my-jobs-query"/);
+  assert.match(myJobs, /jobsQuery\.isError/);
+  assert.match(myJobs, /jobsQuery\.refetch\(\)/);
+  assert.match(myJobs, /Your work orders are still saved/);
+  assert.match(
+    myJobs,
+    /!jobsQuery\.isLoading && !jobsQuery\.isError && visibleJobs\.length === 0/,
+  );
 });
 
 test("invoice workflow mutations use exact or work-order-scoped reads", () => {

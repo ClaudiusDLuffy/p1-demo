@@ -5,7 +5,8 @@ import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { reportClientFailure } from "../../lib/clientDiagnostics";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
 
@@ -25,6 +26,27 @@ export default function MyJobs(props: any) {
   const pendingCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, status: "pending_invoice", sort: "newest", limit: 1 }, enabled);
   const capitalCountQuery = useWorkOrdersPageQuery({ scope: "capital", contractorId, sort: "newest", limit: 1 }, enabled);
   const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
+  const jobsError = jobsQuery.error instanceof Error
+    ? jobsQuery.error.message
+    : jobsQuery.error
+      ? String(jobsQuery.error)
+      : null;
+  useEffect(() => {
+    if (!jobsError) return;
+    void reportClientFailure({
+      source: "my-jobs-query",
+      message: jobsError,
+      portalView: "my_jobs",
+    });
+  }, [jobsError]);
+  const retryJobs = () => {
+    void Promise.all([
+      jobsQuery.refetch(),
+      activeCountQuery.refetch(),
+      pendingCountQuery.refetch(),
+      capitalCountQuery.refetch(),
+    ]);
+  };
   const jobCounts = {
     active: activeCountQuery.data?.totalCount || 0,
     pendingInvoice: pendingCountQuery.data?.totalCount || 0,
@@ -67,7 +89,23 @@ export default function MyJobs(props: any) {
                 placeholder="Search WO#, store, address, keyword..."
                 style={{ width: "100%", marginBottom: 18, padding: "11px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
               />
-              {visibleJobs.length === 0 && (
+              {jobsQuery.isLoading && (
+                <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
+                  Loading work orders...
+                </div>
+              )}
+              {jobsQuery.isError && (
+                <div className="card" role="alert" style={{ padding: "24px 20px", textAlign: "center" }}>
+                  <div style={{ color: T.ink, fontWeight: 700, marginBottom: 6 }}>Work orders could not load</div>
+                  <div style={{ color: T.muted, fontSize: 12, marginBottom: 14 }}>
+                    Your work orders are still saved. Retry the secure connection to load them.
+                  </div>
+                  <button type="button" className="btn-soft" onClick={retryJobs} disabled={jobsQuery.isFetching}>
+                    {jobsQuery.isFetching ? "Retrying..." : "Retry"}
+                  </button>
+                </div>
+              )}
+              {!jobsQuery.isLoading && !jobsQuery.isError && visibleJobs.length === 0 && (
                 <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
                   No matching work orders.
                 </div>
@@ -120,7 +158,13 @@ export default function MyJobs(props: any) {
                 );
               })}
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 11, color: T.muted }}>{jobsQuery.isFetching ? "Loading jobs..." : `${jobsQuery.data?.totalCount || 0} jobs · page ${position.page}`}</span>
+                <span style={{ fontSize: 11, color: T.muted }}>
+                  {jobsQuery.isError
+                    ? "Work orders unavailable"
+                    : jobsQuery.isFetching
+                      ? "Loading jobs..."
+                      : `${jobsQuery.data?.totalCount || 0} jobs · page ${position.page}`}
+                </span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button type="button" className="btn-soft" disabled={position.page <= 1 || jobsQuery.isFetching} onClick={previousPage}>Previous</button>
                   <button type="button" className="btn-soft" disabled={!jobsQuery.data?.hasMore || jobsQuery.isFetching} onClick={() => nextPage(jobsQuery.data?.nextCursor || null)}>Next</button>
