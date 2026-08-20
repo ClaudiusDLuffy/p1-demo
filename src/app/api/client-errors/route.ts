@@ -12,6 +12,23 @@ const anonClient = () =>
 const text = (value: unknown, maxLength: number) =>
   String(value || "").slice(0, maxLength);
 
+const diagnosticDetails = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const sanitized: Record<string, string | number | boolean | null> = {};
+  for (const [rawKey, detail] of Object.entries(value).slice(0, 20)) {
+    const key = rawKey.slice(0, 80);
+    if (!/^[A-Za-z0-9_.-]+$/.test(key)) continue;
+    if (detail === null || typeof detail === "boolean") {
+      sanitized[key] = detail;
+    } else if (typeof detail === "number" && Number.isFinite(detail)) {
+      sanitized[key] = detail;
+    } else if (typeof detail === "string") {
+      sanitized[key] = detail.slice(0, 200);
+    }
+  }
+  return sanitized;
+};
+
 export async function POST(req: NextRequest) {
   const token = req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -36,14 +53,19 @@ export async function POST(req: NextRequest) {
   const failedRequest = body.lastFailedRequest && typeof body.lastFailedRequest === "object"
     ? body.lastFailedRequest as Record<string, unknown>
     : null;
+  const level = body.level === "info" || body.level === "warning"
+    ? body.level
+    : "error";
 
-  console.error("P1 client error", JSON.stringify({
+  const diagnostic = JSON.stringify({
     userId: data.user.id,
+    level,
     source: text(body.source, 120),
     message: text(body.message, 2_000),
     stack: text(body.stack, 8_000) || null,
     route: text(body.route, 500),
     portalView: text(body.portalView, 120) || null,
+    details: diagnosticDetails(body.details),
     appVersion: process.env.VERCEL_GIT_COMMIT_SHA || "local",
     userAgent: text(body.userAgent, 600),
     viewport: text(body.viewport, 60),
@@ -55,7 +77,15 @@ export async function POST(req: NextRequest) {
       status: typeof failedRequest.status === "number" ? failedRequest.status : null,
       occurredAt: text(failedRequest.occurredAt, 80),
     } : null,
-  }));
+  });
+
+  if (level === "info") {
+    console.info("P1 client diagnostic", diagnostic);
+  } else if (level === "warning") {
+    console.warn("P1 client diagnostic", diagnostic);
+  } else {
+    console.error("P1 client error", diagnostic);
+  }
 
   return new NextResponse(null, { status: 202 });
 }

@@ -27,9 +27,12 @@ export async function signIn(email: string, password: string): Promise<any> {
   return data;
 }
 
-export async function signOut(): Promise<void> {
+export type SignOutScope = "global" | "local" | "others";
+
+export async function signOut(scope: SignOutScope = "local"): Promise<void> {
   const sb = supabase();
-  await sb.auth.signOut();
+  const { error } = await sb.auth.signOut({ scope });
+  if (error) throw error;
 }
 
 export async function getSession(): Promise<any> {

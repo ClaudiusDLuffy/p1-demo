@@ -5,8 +5,11 @@ import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { reportClientFailure } from "../../lib/clientDiagnostics";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  reportClientDiagnostic,
+  reportClientFailure,
+} from "../../lib/clientDiagnostics";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
 
@@ -26,6 +29,7 @@ export default function MyJobs(props: any) {
   const pendingCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, status: "pending_invoice", sort: "newest", limit: 1 }, enabled);
   const capitalCountQuery = useWorkOrdersPageQuery({ scope: "capital", contractorId, sort: "newest", limit: 1 }, enabled);
   const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
+  const resultDiagnosticRef = useRef<string | null>(null);
   const jobsError = jobsQuery.error instanceof Error
     ? jobsQuery.error.message
     : jobsQuery.error
@@ -39,6 +43,47 @@ export default function MyJobs(props: any) {
       portalView: "my_jobs",
     });
   }, [jobsError]);
+  useEffect(() => {
+    if (
+      !enabled
+      || deferredSearch !== ""
+      || position.page !== 1
+      || !jobsQuery.isSuccess
+      || jobsQuery.isFetching
+    ) return;
+
+    const itemCount = jobsQuery.data?.items.length || 0;
+    const totalCount = jobsQuery.data?.totalCount || 0;
+    const hasMore = jobsQuery.data?.hasMore === true;
+    const signature = [contractorId, itemCount, totalCount, hasMore].join(":");
+    if (resultDiagnosticRef.current === signature) return;
+    resultDiagnosticRef.current = signature;
+
+    void reportClientDiagnostic({
+      level: itemCount === 0 ? "warning" : "info",
+      source: "my-jobs-result",
+      message: itemCount === 0
+        ? "My Jobs first page returned no work orders"
+        : "My Jobs first page loaded",
+      portalView: "my_jobs",
+      details: {
+        scope: "active",
+        page: position.page,
+        itemCount,
+        totalCount,
+        hasMore,
+        contractorScopeResolved: Boolean(contractorId),
+      },
+    });
+  }, [
+    contractorId,
+    deferredSearch,
+    enabled,
+    jobsQuery.data,
+    jobsQuery.isFetching,
+    jobsQuery.isSuccess,
+    position.page,
+  ]);
   const retryJobs = () => {
     void Promise.all([
       jobsQuery.refetch(),

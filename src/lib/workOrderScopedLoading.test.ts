@@ -88,6 +88,26 @@ test("contractor work-order page failures are reported and remain retryable", ()
   );
 });
 
+test("My Jobs reports a safe first-page result summary without row contents", () => {
+  assert.match(myJobs, /reportClientDiagnostic/);
+  assert.match(myJobs, /source:\s*"my-jobs-result"/);
+  assert.match(myJobs, /deferredSearch\s*!==\s*""/);
+  assert.match(myJobs, /position\.page\s*!==\s*1/);
+  for (const detail of [
+    "itemCount",
+    "totalCount",
+    "hasMore",
+    "contractorScopeResolved",
+  ]) assert.match(myJobs, new RegExp(`${detail}\\s*[:,}]`));
+  assert.doesNotMatch(
+    myJobs.slice(
+      myJobs.indexOf('source: "my-jobs-result"'),
+      myJobs.indexOf("});", myJobs.indexOf('source: "my-jobs-result"')),
+    ),
+    /items:|workOrder|summary|address|search:/i,
+  );
+});
+
 test("invoice workflow mutations use exact or work-order-scoped reads", () => {
   assert.match(workOrderHook, /loadInvoiceById\(invoiceId\)/);
   assert.match(workOrderHook, /loadWorkOrderInvoicesForMutation/);

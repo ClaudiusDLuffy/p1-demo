@@ -12,6 +12,13 @@ export type ClientFailureContext = {
   portalView?: string | null;
 };
 
+export type ClientDiagnosticLevel = "error" | "warning" | "info";
+export type ClientDiagnosticValue = string | number | boolean | null;
+export type ClientDiagnosticContext = ClientFailureContext & {
+  level?: ClientDiagnosticLevel;
+  details?: Record<string, ClientDiagnosticValue>;
+};
+
 export type LastFailedRequest = {
   method: string;
   path: string;
@@ -21,6 +28,24 @@ export type LastFailedRequest = {
 
 const trimText = (value: unknown, maxLength: number) =>
   String(value || "").slice(0, maxLength);
+
+export function sanitizeDiagnosticDetails(
+  details: ClientDiagnosticContext["details"],
+) {
+  const sanitized: Record<string, ClientDiagnosticValue> = {};
+  for (const [rawKey, value] of Object.entries(details || {}).slice(0, 20)) {
+    const key = rawKey.slice(0, 80);
+    if (!/^[A-Za-z0-9_.-]+$/.test(key)) continue;
+    if (value === null || typeof value === "boolean") {
+      sanitized[key] = value;
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      sanitized[key] = value;
+    } else if (typeof value === "string") {
+      sanitized[key] = value.slice(0, 200);
+    }
+  }
+  return sanitized;
+}
 
 export function diagnosticRequestPath(input: RequestInfo | URL) {
   try {
@@ -72,10 +97,15 @@ const shouldReport = (source: string, message: string) => {
   return true;
 };
 
-export async function reportClientFailure(context: ClientFailureContext) {
+export async function reportClientDiagnostic(context: ClientDiagnosticContext) {
   if (typeof window === "undefined") return;
   const message = trimText(context.message, 2_000) || "Unknown client error";
-  if (!shouldReport(context.source, message)) return;
+  const level = context.level || "error";
+  const details = sanitizeDiagnosticDetails(context.details);
+  if (!shouldReport(
+    `${level}:${context.source}`,
+    `${message}:${JSON.stringify(details)}`,
+  )) return;
 
   try {
     const sb = supabase();
@@ -91,10 +121,12 @@ export async function reportClientFailure(context: ClientFailureContext) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        level,
         source: trimText(context.source, 120),
         message,
         stack: trimText(context.stack, 8_000) || null,
         portalView: trimText(context.portalView, 120) || null,
+        details,
         route: window.location.pathname.slice(0, 500),
         lastFailedRequest: readLastFailedRequest(),
         userAgent: trimText(window.navigator.userAgent, 600),
@@ -107,4 +139,8 @@ export async function reportClientFailure(context: ClientFailureContext) {
   } catch (reportError) {
     console.warn("Client diagnostic could not be sent", reportError);
   }
+}
+
+export async function reportClientFailure(context: ClientFailureContext) {
+  return reportClientDiagnostic({ ...context, level: "error" });
 }
