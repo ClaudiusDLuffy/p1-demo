@@ -46,6 +46,17 @@ test("portal and billing merge scoped detail queries without a second initial re
   assert.match(billingModal, /useWorkOrderDetailsQuery\(/);
   assert.match(workOrderHook, /existing\?\.detailsLoaded/);
   assert.match(portal, /useWorkOrderByIdQuery\(/);
+  assert.match(portal, /selectedWorkOrderForView/);
+  assert.match(
+    portal,
+    /maskedWorkOrders\.find[\s\S]*?\|\| selectedWorkOrderForView/,
+    "the exact lookup row must render without waiting for the local detail mirror",
+  );
+  assert.match(
+    portal,
+    /selectedWorkOrderQuery\.isSuccess[\s\S]*?selectedWorkOrderQuery\.data !== null/,
+    "contractors should return to My Jobs only after a successful not-found lookup",
+  );
   assert.doesNotMatch(portal, /qc\.resetQueries/);
   assert.match(portal, /const isAuthenticated = !!currentUser\?\.id/);
 });
