@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { Sel } from "../../components/ui/Sel";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
@@ -19,6 +19,8 @@ import {
   workOrderNeedsAction,
   type WorkOrderSortKey,
 } from "../../lib/workOrderView";
+import { useCursorPagination } from "../../lib/useCursorPagination";
+import { useWorkOrdersPageQuery } from "./queries";
 
 export default function WorkOrderList(props: any) {
   const {
@@ -42,15 +44,15 @@ export default function WorkOrderList(props: any) {
     getUser,
   } = props;
 
-  const [listPage, setListPage] = useState(1);
   const [sortBy, setSortBy] = useState<WorkOrderSortKey>(isManager ? "sla_due" : "newest");
   const [viewMode, setViewMode] = useState<"recent" | "needs_action">("recent");
   const [filterState, setFilterState] = useState("all");
   const [hideClosed, setHideClosed] = useState(true);
-  const [pagingBusy, setPagingBusy] = useState<"prev" | "next" | null>(null);
+  const [pagingDirection, setPagingDirection] = useState<"prev" | "next" | null>(null);
   const pageSize = 10;
+  const deferredSearch = useDeferredValue(search);
 
-  const stateFilteredWOs = useMemo(
+  const fallbackStateFilteredWOs = useMemo(
     () => filterState === "all"
       ? filteredWOs
       : filteredWOs.filter((workOrder: Record<string, unknown>) =>
@@ -59,9 +61,9 @@ export default function WorkOrderList(props: any) {
     [filteredWOs, filterState],
   );
 
-  const tableWOs = useMemo(() => {
+  const fallbackTableWOs = useMemo(() => {
     const sorted = sortWorkOrders(
-      stateFilteredWOs.filter((w: any) =>
+      fallbackStateFilteredWOs.filter((w: any) =>
         !["capital", "pending_capital_completion"].includes(w.status)
         && (!isManager || !hideClosed || w.status !== "closed")
         && (viewMode !== "needs_action" || workOrderNeedsAction(w, isManager)),
@@ -72,35 +74,59 @@ export default function WorkOrderList(props: any) {
     return isManager
       ? prioritizePendingSevenElevenUpdates(sorted)
       : sorted;
-  }, [stateFilteredWOs, hideClosed, isManager, sortBy, viewMode]);
-  const hiddenClosedCount = isManager && hideClosed
-    ? stateFilteredWOs.filter((w: any) => w.status === "closed").length
-    : 0;
+  }, [fallbackStateFilteredWOs, hideClosed, isManager, sortBy, viewMode]);
 
-  const totalPages = Math.max(1, Math.ceil(tableWOs.length / pageSize));
-  const safePage = Math.min(listPage, totalPages);
+  const cursorSignature = JSON.stringify({
+    search: deferredSearch.trim(),
+    filterC,
+    filterP,
+    filterStatus,
+    filterState,
+    sortBy,
+    hideClosed,
+    viewMode,
+    isManager,
+  });
+  const {
+    position: effectiveCursor,
+    previous: previousPage,
+    next: nextPage,
+  } = useCursorPagination(cursorSignature);
+  const workOrderPageQuery = useWorkOrdersPageQuery({
+    scope: hideClosed ? "operations" : "operations_all",
+    search: deferredSearch,
+    contractorId: filterC !== "all" ? filterC : null,
+    priority: filterP,
+    status: filterStatus,
+    state: filterState,
+    needsAction: viewMode === "needs_action",
+    sort: sortBy,
+    pendingFirst: isManager,
+    limit: pageSize,
+    cursor: effectiveCursor.cursor,
+  }, page === "work_orders" && !selectedWO);
+
+  const serverPage = workOrderPageQuery.data;
+  const paginatedWOs = serverPage?.items
+    || fallbackTableWOs.slice(0, pageSize);
+  const totalRows = serverPage?.totalCount ?? fallbackTableWOs.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safePage = effectiveCursor.page;
   const startIndex = (safePage - 1) * pageSize;
-  const paginatedWOs = tableWOs.slice(startIndex, startIndex + pageSize);
-  const showingStart = tableWOs.length === 0 ? 0 : startIndex + 1;
-  const showingEnd = Math.min(startIndex + pageSize, tableWOs.length);
+  const showingStart = totalRows === 0 ? 0 : startIndex + 1;
+  const showingEnd = Math.min(startIndex + paginatedWOs.length, totalRows);
 
-  useEffect(() => {
-    setListPage(1);
-  }, [search, filterC, filterP, filterStatus, filterState, sortBy, hideClosed, viewMode]);
-
-  useEffect(() => {
-    setListPage((prev) => Math.min(prev, totalPages));
-  }, [totalPages]);
+  const pagingBusy = workOrderPageQuery.isFetching
+    ? pagingDirection
+    : null;
 
   const goToPage = (direction: "prev" | "next") => {
-    setPagingBusy(direction);
-    setListPage((prev) => direction === "prev"
-      ? Math.max(1, prev - 1)
-      : Math.min(totalPages, prev + 1));
-    window.setTimeout(() => setPagingBusy(null), 260);
+    setPagingDirection(direction);
+    if (direction === "prev") previousPage();
+    else nextPage(serverPage?.nextCursor || null);
   };
 
-  const renderPaginationControls = () => tableWOs.length > 0 && (
+  const renderPaginationControls = () => totalRows > 0 && (
     <div
       className="work-order-pagination"
       style={{
@@ -113,7 +139,7 @@ export default function WorkOrderList(props: any) {
       }}
     >
       <div style={{ fontSize: 12, color: T.muted }}>
-        Showing <span style={{ color: T.ink, fontWeight: 700 }}>{showingStart}-{showingEnd}</span> of <span style={{ color: T.ink, fontWeight: 700 }}>{tableWOs.length}</span>
+        Showing <span style={{ color: T.ink, fontWeight: 700 }}>{showingStart}-{showingEnd}</span> of <span style={{ color: T.ink, fontWeight: 700 }}>{totalRows}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <button
@@ -137,9 +163,9 @@ export default function WorkOrderList(props: any) {
             e.currentTarget.blur();
             goToPage("next");
           }}
-          disabled={safePage >= totalPages || !!pagingBusy}
+          disabled={!serverPage?.hasMore || !!pagingBusy}
           className="btn-soft"
-          style={{ padding: "8px 12px", minHeight: 36, minWidth: 92, fontSize: 12, background: T.surface, color: T.ink, opacity: safePage >= totalPages ? 0.45 : 1, cursor: safePage >= totalPages || pagingBusy ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+          style={{ padding: "8px 12px", minHeight: 36, minWidth: 92, fontSize: 12, background: T.surface, color: T.ink, opacity: !serverPage?.hasMore ? 0.45 : 1, cursor: !serverPage?.hasMore || pagingBusy ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
         >
           {pagingBusy === "next" ? <><BtnSpinnerDark />Loading</> : "Next"}
         </button>
@@ -237,7 +263,7 @@ export default function WorkOrderList(props: any) {
                   onChange={(event) => setHideClosed(event.target.checked)}
                   style={{ width: 15, height: 15, accentColor: T.accent, cursor: "inherit" }}
                 />
-                Hide closed calls{hiddenClosedCount > 0 ? ` (${hiddenClosedCount})` : ""}
+                Hide closed calls
               </label>
             )}
             {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent") && (

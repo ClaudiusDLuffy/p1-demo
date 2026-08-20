@@ -13,6 +13,7 @@ import type {
   DashboardPart,
   DashboardWorkOrder,
 } from "./workBuckets";
+import { useWorkOrdersPageQuery } from "../work-orders/queries";
 
 type DashboardProps = {
   page: string;
@@ -43,7 +44,17 @@ type DashboardProps = {
 export default function Dashboard(props: DashboardProps) {
   const { page, isManager, workOrders, p1Unassigned, slaBreached, nav, onViewUnassigned, doAutoAssign, invoices, currentUser, getUser, setSelectedWO, setAiNote, setPage, search, setSearch, woParts = [], staffProfiles = [] } = props;
   const controller = isInvoiceController(currentUser);
-  const unassignedCount = workOrders.filter(workOrder => workOrder.status === "unassigned").length;
+  const unassignedQuery = useWorkOrdersPageQuery(
+    { scope: "dashboard_unassigned", limit: 1 },
+    page === "dashboard" && isManager && !controller,
+  );
+  const p1UnassignedQuery = useWorkOrdersPageQuery(
+    { scope: "active", status: "unassigned", priority: "p1", limit: 1 },
+    page === "dashboard" && isManager && !controller,
+  );
+  const unassignedCount = unassignedQuery.data?.totalCount
+    ?? workOrders.filter(workOrder => workOrder.status === "unassigned").length;
+  const exactP1Unassigned = p1UnassignedQuery.data?.totalCount ?? p1Unassigned;
   const hasUnassignedWork = unassignedCount > 0;
   const unassignedColor = hasUnassignedWork ? T.danger : T.success;
   const unassignedBackground = hasUnassignedWork ? T.dangerSoft : T.successSoft;
@@ -90,7 +101,7 @@ export default function Dashboard(props: DashboardProps) {
                     </div>
                     <div style={{ marginTop: 3, color: T.muted, fontSize: 10, lineHeight: 1.45 }}>
                       {hasUnassignedWork
-                        ? `${p1Unassigned > 0 ? `${p1Unassigned} P1 critical. ` : ""}Includes all priorities and states that still need a contractor assignment.`
+                        ? `${exactP1Unassigned > 0 ? `${exactP1Unassigned} P1 critical. ` : ""}Includes all priorities and states that still need a contractor assignment.`
                         : "Every active work order currently has an assignment."}
                     </div>
                   </div>
@@ -103,7 +114,7 @@ export default function Dashboard(props: DashboardProps) {
                     >
                       View unassigned →
                     </button>
-                    {p1Unassigned > 0 && (
+                    {exactP1Unassigned > 0 && (
                       <button type="button" onClick={doAutoAssign} className="btn-accent dashboard-unassigned-summary-action">
                         Auto-dispatch
                       </button>

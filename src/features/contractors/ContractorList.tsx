@@ -8,9 +8,11 @@ import { Modal } from "../../components/ui/Modal";
 import { T } from "../../lib/constants";
 import { supabase } from "../../lib/supabase/client";
 import {
+  CONTRACTOR_WORKLOAD_SUMMARY_KEY,
   PROFILES_KEY,
   TECHNICIANS_KEY,
   WORK_ORDERS_KEY,
+  useContractorWorkloadSummaryQuery,
 } from "../work-orders/queries";
 
 type ContractorProfile = {
@@ -56,7 +58,7 @@ type ContractorListProps = {
   contractorsOnly: ContractorProfile[];
   technicians?: ContractorTechnician[];
   users?: PortalProfile[];
-  workOrders: ContractorWorkOrder[];
+  workOrders?: ContractorWorkOrder[];
   activeStatuses: readonly string[];
   nav: (page: string) => void;
   setFilterC: (contractorId: string) => void;
@@ -118,7 +120,7 @@ export default function ContractorList(props: ContractorListProps) {
     contractorsOnly,
     technicians = [],
     users = [],
-    workOrders,
+    workOrders = [],
     activeStatuses,
     nav,
     setFilterC,
@@ -130,6 +132,9 @@ export default function ContractorList(props: ContractorListProps) {
   const [error, setError] = useState("");
   const [deactivateTarget, setDeactivateTarget] = useState<DeactivateTarget | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const workloadQuery = useContractorWorkloadSummaryQuery(
+    page === "contractors" && isManager,
+  );
 
   const profilesById = useMemo<Map<string, PortalProfile>>(
     () => new Map(users.map(profile => [profile.id, profile])),
@@ -157,7 +162,7 @@ export default function ContractorList(props: ContractorListProps) {
     }
     return grouped;
   }, [technicians]);
-  const contractorCounts = useMemo(() => {
+  const fallbackContractorCounts = useMemo(() => {
     const counts: Record<string, { active: number; capital: number }> = {};
     for (const contractor of contractorsOnly) {
       const contractorWorkOrders = workOrdersByContractor[contractor.id] || [];
@@ -170,12 +175,14 @@ export default function ContractorList(props: ContractorListProps) {
     }
     return counts;
   }, [activeStatuses, contractorsOnly, workOrdersByContractor]);
+  const contractorCounts = workloadQuery.data || fallbackContractorCounts;
 
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: PROFILES_KEY }),
       queryClient.invalidateQueries({ queryKey: TECHNICIANS_KEY }),
       queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      queryClient.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY }),
     ]);
   };
 

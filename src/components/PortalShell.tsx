@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   insertActivity, insertWorkOrder, findExistingWoId, markWorkOrderNotesSeen,
   subscribeToChanges,
@@ -32,19 +32,28 @@ import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import {
   WORK_ORDER_DETAILS_KEY,
+  WORK_ORDER_BY_ID_KEY,
+  WORK_ORDER_PAGES_KEY,
   WORK_ORDERS_KEY,
   WO_PARTS_KEY,
+  CONTRACTOR_WORKLOAD_SUMMARY_KEY,
+  PORTAL_NAVIGATION_SUMMARY_KEY,
+  useWorkOrderByIdQuery,
   useWorkOrderDetailsQuery,
+  usePortalNavigationSummaryQuery,
   useProfilesQuery,
   useTechniciansQuery,
-  useWorkOrdersQuery,
-  useWoPartsQuery,
   workOrderDetailsKey,
 } from "../features/work-orders/queries";
 import InvoiceList from "../features/invoices/InvoiceList";
 import InvoiceDetail from "../features/invoices/InvoiceDetail";
 import useInvoices from "../features/invoices/useInvoices";
-import { INVOICES_KEY, useInvoicesQuery } from "../features/invoices/queries";
+import {
+  INVOICE_BY_ID_KEY,
+  INVOICE_PAGES_KEY,
+  INVOICES_KEY,
+  useInvoiceByIdQuery,
+} from "../features/invoices/queries";
 import ContractorList from "../features/contractors/ContractorList";
 import SubDispatchView from "../features/contractors/SubDispatchView";
 import StaffWorkHub from "../features/staff-work/StaffWorkHub";
@@ -55,8 +64,6 @@ import {
   completeStaffWorkTodo,
   markStaffWorkOrderRead,
   transferStaffWorkTodo,
-  useStaffNotificationReadsQuery,
-  useStaffWorkTodosQuery,
 } from "../features/staff-work/queries";
 import {
   buildStaffWorkRows,
@@ -67,6 +74,12 @@ import {
 import Dashboard from "../features/dashboard/Dashboard";
 import AddressBookModal from "../features/contacts/AddressBookModal";
 import FloatingProfitCalculator from "../features/billing/FloatingProfitCalculator";
+import {
+  BILLING_INVOICE_BY_ID_KEY,
+  BILLING_INVOICE_PAGES_KEY,
+  BILLING_INVOICES_KEY,
+  useBillingInvoiceByIdQuery,
+} from "../features/billing/queries";
 import {
   T, DEMO_ACCOUNTS, PRIORITY, MONTHS, WEEKDAYS,
 } from "../lib/constants";
@@ -90,6 +103,7 @@ import {
   type PortalRealtimeTable,
   workOrderIdFromRealtimeChange,
 } from "../lib/realtimeInvalidation";
+import { billingApiFetch as billingFetch } from "../lib/billingApi";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -120,26 +134,6 @@ const ManageAccountModal = dynamic(
   () => import("../features/auth/ManageAccountModal"),
   { ssr: false }
 );
-
-const BILLING_INVOICES_KEY = ["billing-invoices"] as const;
-
-async function billingFetch(path: string, init: RequestInit = {}) {
-  const sb = supabase();
-  const { data } = await sb.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error("Missing session");
-
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  if (init.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const res = await fetch(path, { ...init, headers });
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.error || "Billing request failed");
-  return payload;
-}
 
 async function notificationFetch(path: string, body: Record<string, unknown>) {
   const sb = supabase();
@@ -1226,32 +1220,24 @@ export default function PortalShell() {
   const notesSeenInFlight = useRef(new Set<string>());
   const staffReadInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
-  const {
-    data: workOrdersData,
-    isLoading: woLoading,
-    isSuccess: workOrdersLoaded,
-  } = useWorkOrdersQuery(isAuthenticated);
-  const selectedWorkOrderBase = useMemo(
-    () => selectedWO
-      ? workOrdersData?.find((workOrder: any) => workOrder.id === selectedWO) || null
-      : null,
-    [selectedWO, workOrdersData],
+  const { data: navigationSummary } = usePortalNavigationSummaryQuery(isAuthenticated);
+  const selectedWorkOrderQuery = useWorkOrderByIdQuery(
+    selectedWO,
+    isAuthenticated && Boolean(selectedWO),
   );
-  const { data: selectedWorkOrderDetails } = useWorkOrderDetailsQuery(
+  const selectedWorkOrderLookup = selectedWorkOrderQuery.data;
+  const shellWorkOrdersData = useMemo(() => {
+    return selectedWorkOrderLookup ? [selectedWorkOrderLookup] : [];
+  }, [selectedWorkOrderLookup]);
+  const selectedWorkOrderBase = selectedWorkOrderLookup || null;
+  const workOrderDetailsQuery = useWorkOrderDetailsQuery(
     selectedWorkOrderBase,
     isAuthenticated && Boolean(selectedWO),
   );
+  const selectedWorkOrderDetails = workOrderDetailsQuery.data;
   const { data: profilesData } = useProfilesQuery(isAuthenticated);
-  const { data: invoicesData } = useInvoicesQuery(isAuthenticated);
   const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
-  const { data: woPartsData } = useWoPartsQuery(isAuthenticated);
-  const { data: staffWorkTodosData = [] } = useStaffWorkTodosQuery(
-    isAuthenticated && isManager && !invoiceController,
-  );
-  const { data: staffNotificationReadsData = [] } = useStaffNotificationReadsQuery(
-    isAuthenticated && isManager && !invoiceController,
-  );
-  const woParts = woPartsData ?? [];
+  const woParts: any[] = [];
   const USERS = useMemo(
     () => profilesData ?? DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })),
     [profilesData]
@@ -1270,7 +1256,7 @@ export default function PortalShell() {
     doRequestP1PartOrder, doSetP1PartOrderStatus,
     doMarkSevenElevenSynced,
     doMarkContractorAttention, doAcknowledgeContractorAttention } = useWorkOrders({
-      currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
+      currentUser, USERS, workOrdersData: shellWorkOrdersData, invoices, setInvoices, fire,
       selectedWorkOrderId: selectedWO,
       selectedWorkOrderDetails,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
@@ -1296,7 +1282,6 @@ export default function PortalShell() {
     alignItems: "center",
     gap: 6,
   };
-  const dataLoading = woLoading;
   const {
     newInv, setNewInv,
     selectedInvoice, setSelectedInvoice,
@@ -1308,6 +1293,21 @@ export default function PortalShell() {
     doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, profiles: USERS, fire });
+  const selectedInvoiceInBootstrap = selectedInvoice
+    ? invoices.find((invoice: any) => invoice.id === selectedInvoice) || null
+    : null;
+  const { data: selectedInvoiceLookup } = useInvoiceByIdQuery(
+    selectedInvoice,
+    isAuthenticated && Boolean(selectedInvoice) && !selectedInvoiceInBootstrap,
+  );
+  const invoiceDetailRows = selectedInvoiceLookup && !selectedInvoiceInBootstrap
+    ? [...invoices, selectedInvoiceLookup]
+    : invoices;
+  const selectedInvoiceData = selectedInvoiceInBootstrap || selectedInvoiceLookup || null;
+  const { data: selectedInvoiceWorkOrder } = useWorkOrderByIdQuery(
+    selectedInvoiceData?.wot,
+    isAuthenticated && Boolean(selectedInvoice) && Boolean(selectedInvoiceData?.wot),
+  );
   const portalView = useMemo<PortalViewState>(() => ({
     page,
     selectedWorkOrderId: selectedWO || null,
@@ -1477,6 +1477,10 @@ export default function PortalShell() {
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
   // on modal close. Passed to InvoiceCreateModal to hydrate the form.
   const [resumeDraft, setResumeDraft] = useState<any>(null);
+  const { data: resumeDraftWorkOrder } = useWorkOrderByIdQuery(
+    resumeDraft?.wot,
+    isAuthenticated && modal === "createInvoice" && Boolean(resumeDraft?.wot),
+  );
   const doSubmitInvoice = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
     const ok = await submitInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null);
     if (ok) { setResumeDraft(null); setModal("invoiceSubmitted"); }
@@ -1534,6 +1538,18 @@ export default function PortalShell() {
       : workOrders,
     [contractorNteCap, isContractorRole, workOrders],
   );
+  const invoiceDetailWorkOrders = useMemo(() => {
+    if (!selectedInvoiceWorkOrder) return [];
+    return [isContractorRole
+      ? {
+          ...selectedInvoiceWorkOrder,
+          nte: contractorNteCap,
+          nteFlagThreshold: null,
+          nteFlagged: false,
+          nteFlagAmount: null,
+        }
+      : selectedInvoiceWorkOrder];
+  }, [contractorNteCap, isContractorRole, selectedInvoiceWorkOrder]);
 
   const woData = useMemo(
     () => selectedWO ? maskedWorkOrders.find((w: any) => w.id === selectedWO) : null,
@@ -1541,17 +1557,19 @@ export default function PortalShell() {
   );
   const invoiceFormWorkOrder = useMemo(
     () => resumeDraft?.wot
-      ? maskedWorkOrders.find((workOrder: any) => workOrder.id === resumeDraft.wot) || null
+      ? maskedWorkOrders.find((workOrder: any) => workOrder.id === resumeDraft.wot)
+        || resumeDraftWorkOrder
+        || null
       : woData,
-    [maskedWorkOrders, resumeDraft?.wot, woData],
+    [maskedWorkOrders, resumeDraft?.wot, resumeDraftWorkOrder, woData],
   );
 
   useEffect(() => {
-    if (isManager || !workOrdersLoaded || !selectedWO || woData) return;
+    if (isManager || !selectedWorkOrderQuery.isFetched || !selectedWO || woData) return;
     setSelectedWO(null);
     setAiNote(null);
     setPage("my_jobs");
-  }, [isManager, selectedWO, setAiNote, setPage, setSelectedWO, woData, workOrdersLoaded]);
+  }, [isManager, selectedWO, selectedWorkOrderQuery.isFetched, setAiNote, setPage, setSelectedWO, woData]);
 
   useEffect(() => {
     if (!isManager || !selectedWO || !woData?.hasUnreadNotes || !woData?.latestNoteAt) return;
@@ -1570,6 +1588,9 @@ export default function PortalShell() {
         );
         setWorkOrders((items: any[]) => markSeen(items) || []);
         qc.setQueryData(WORK_ORDERS_KEY, markSeen);
+        void qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY });
+        void qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
+        void qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY });
       })
       .catch((error: any) => {
         fire(`Could not clear new-note indicator: ${error.message || error}`);
@@ -1634,10 +1655,6 @@ export default function PortalShell() {
     }
   }, [modal, woData]);
 
-  useEffect(() => {
-    if (invoicesData) setInvoices(invoicesData);
-  }, [invoicesData]);
-
   // Subscribe to realtime so changes from other clients propagate.
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -1651,10 +1668,27 @@ export default function PortalShell() {
       const datasets = datasetsForRealtimeTables(pendingTables);
       pendingTables.clear();
 
+      if (datasets.length > 0) {
+        void qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY });
+        void qc.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY });
+      }
+
       for (const dataset of datasets) {
-        if (dataset === "workOrders") void qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-        if (dataset === "invoices") void qc.invalidateQueries({ queryKey: INVOICES_KEY });
-        if (dataset === "billingInvoices") void qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+        if (dataset === "workOrders") {
+          void qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+          void qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
+          void qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY });
+        }
+        if (dataset === "invoices") {
+          void qc.invalidateQueries({ queryKey: INVOICES_KEY });
+          void qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY });
+          void qc.invalidateQueries({ queryKey: INVOICE_BY_ID_KEY });
+        }
+        if (dataset === "billingInvoices") {
+          void qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+          void qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
+          void qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
+        }
         if (dataset === "woParts") void qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
         if (dataset === "staffWorkTodos") void qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY });
         if (dataset === "staffNotificationReads") void qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
@@ -1712,43 +1746,37 @@ export default function PortalShell() {
     nav("work_orders");
   }, [nav]);
 
-  const { data: billingInvoices = [] } = useQuery({
-    queryKey: BILLING_INVOICES_KEY,
-    queryFn: async () => {
-      const payload = await billingFetch("/api/billing-invoices");
-      return payload.invoices || [];
-    },
-    enabled: isAuthenticated && isManager,
-    staleTime: 30_000,
-  });
-  const selectedBillingInvoiceData = useMemo(
-    () => billingInvoices.find((invoice: any) => invoice.id === selectedBillingInvoice) || null,
-    [billingInvoices, selectedBillingInvoice]
+  // Lists own their cursor pages; the shell retains only exact records needed
+  // by the active detail or editor flow.
+  const billingInvoices: any[] = [];
+  const { data: selectedBillingInvoiceLookup } = useBillingInvoiceByIdQuery(
+    selectedBillingInvoice,
+    isAuthenticated && isManager && Boolean(selectedBillingInvoice),
+  );
+  const selectedBillingInvoiceData = selectedBillingInvoiceLookup || null;
+  const { data: selectedBillingWorkOrder } = useWorkOrderByIdQuery(
+    selectedBillingInvoiceData?.wot,
+    isAuthenticated
+      && isManager
+      && Boolean(selectedBillingInvoice)
+      && Boolean(selectedBillingInvoiceData?.wot),
   );
   const billingReadyWorkOrders = useMemo(() => {
-    const finalInvoiceByWorkOrder = new Map<string, any>();
-    for (const invoice of billingInvoices || []) {
-      if (!invoice.wot || invoice.documentKind === "capital_quote") continue;
-      const current = finalInvoiceByWorkOrder.get(invoice.wot);
-      const currentTime = new Date(current?.updatedAt || current?.createdAt || 0).getTime();
-      const invoiceTime = new Date(invoice.updatedAt || invoice.createdAt || 0).getTime();
-      if (!current || invoiceTime >= currentTime) {
-        finalInvoiceByWorkOrder.set(invoice.wot, invoice);
-      }
-    }
     return maskedWorkOrders
       .filter((workOrder: any) =>
         ["pending_invoice", "pending_payment"].includes(workOrder.status),
       )
       .map((workOrder: any) => ({
         ...workOrder,
-        billingInvoice: finalInvoiceByWorkOrder.get(workOrder.id) || null,
+        billingInvoice: workOrder.billingInvoiceId
+          ? { id: workOrder.billingInvoiceId }
+          : null,
       }))
       .sort((a: any, b: any) =>
         new Date(b.billingReadyAt || b.updatedAt || 0).getTime()
         - new Date(a.billingReadyAt || a.updatedAt || 0).getTime(),
       );
-  }, [billingInvoices, maskedWorkOrders]);
+  }, [maskedWorkOrders]);
   const staffProfiles = useMemo(
     () => USERS.filter((profile: any) =>
       profile.active !== false
@@ -1757,21 +1785,32 @@ export default function PortalShell() {
     [USERS],
   );
   const staffWorkRows = useMemo(
-    () => buildStaffWorkRows({
-      workOrders: maskedWorkOrders,
-      todos: staffWorkTodosData,
-      reads: staffNotificationReadsData,
-      profiles: staffProfiles,
-      readyWorkOrderIds: new Set(billingReadyWorkOrders.map((workOrder: any) => workOrder.id)),
-      currentUserId: currentUser?.id || "",
-    }),
+    () => {
+      const embeddedTodos = maskedWorkOrders
+        .map((workOrder: any) => workOrder.staffTodo)
+        .filter(Boolean);
+      const embeddedReads = maskedWorkOrders
+        .filter((workOrder: any) => workOrder.staffReadThroughAt)
+        .map((workOrder: any) => ({
+          userId: currentUser?.id || "",
+          workOrderId: workOrder.id,
+          readThroughAt: workOrder.staffReadThroughAt,
+        }));
+
+      return buildStaffWorkRows({
+        workOrders: maskedWorkOrders,
+        todos: embeddedTodos,
+        reads: embeddedReads,
+        profiles: staffProfiles,
+        readyWorkOrderIds: new Set(billingReadyWorkOrders.map((workOrder: any) => workOrder.id)),
+        currentUserId: currentUser?.id || "",
+      });
+    },
     [
       billingReadyWorkOrders,
       currentUser?.id,
       maskedWorkOrders,
-      staffNotificationReadsData,
       staffProfiles,
-      staffWorkTodosData,
     ],
   );
   const dashboardWorkOrders = useMemo(() => {
@@ -1788,18 +1827,18 @@ export default function PortalShell() {
     }));
   }, [maskedWorkOrders, staffWorkRows]);
   const staffUnreadCount = useMemo(
-    () => staffWorkRows.filter(row => row.isUnread).length,
-    [staffWorkRows],
+    () => navigationSummary?.staffUnreadCount
+      ?? staffWorkRows.filter(row => row.isUnread).length,
+    [navigationSummary?.staffUnreadCount, staffWorkRows],
   );
   const staffMyTodoCount = useMemo(
-    () => staffWorkTodosData.filter(todo => todo.ownerId === currentUser?.id).length,
-    [currentUser?.id, staffWorkTodosData],
+    () => navigationSummary?.myTodoCount
+      ?? staffWorkRows.filter(row => row.isMyTodo).length,
+    [navigationSummary?.myTodoCount, staffWorkRows],
   );
   const selectedStaffTodo = useMemo(
-    () => selectedWO
-      ? staffWorkTodosData.find(todo => todo.workOrderId === selectedWO) || null
-      : null,
-    [selectedWO, staffWorkTodosData],
+    () => woData?.staffTodo || null,
+    [woData?.staffTodo],
   );
   const selectedStaffTodoOwner = useMemo(
     () => selectedStaffTodo
@@ -1865,6 +1904,8 @@ export default function PortalShell() {
       await billingFetch(`/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`, { method: "DELETE" });
       setSelectedBillingInvoice(null);
       qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+      qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
+      qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
       fire(`Invoice #${invoice.num} deleted`);
     } catch (e: any) {
       fire(`Delete failed: ${e.message || e}`);
@@ -1884,8 +1925,12 @@ export default function PortalShell() {
       );
       await Promise.all([
         qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY }),
+        qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY }),
         qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY }),
         qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
       ]);
       fire(payload.finalization?.pendingCapitalCompletion
         ? `Capital quote #${invoice.num} submitted to 7-Eleven; work remains open pending completion`
@@ -1906,6 +1951,7 @@ export default function PortalShell() {
       return [invoice, ...(items || []).filter((item) => item.id !== invoice.id)];
     });
     await qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+    await qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
     fire(`Invoice #${invoice?.num || ""} draft created`);
     if (invoice?.id) {
       setSelectedWO(null);
@@ -1956,6 +2002,8 @@ export default function PortalShell() {
       qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY }),
       qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }),
       qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
+      qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
     ]);
   };
   const runStaffWorkAction = async (
@@ -2004,12 +2052,10 @@ export default function PortalShell() {
     const latestNotificationAt = latestContractorActivityAt(woData);
     if (!latestNotificationAt) return;
 
-    const existingRead = staffNotificationReadsData.find(
-      read => read.workOrderId === selectedWO,
-    );
+    const existingReadThroughAt = woData.staffReadThroughAt || null;
     if (
-      existingRead
-      && new Date(existingRead.readThroughAt).getTime()
+      existingReadThroughAt
+      && new Date(existingReadThroughAt).getTime()
         >= new Date(latestNotificationAt).getTime()
     ) return;
     if (staffReadInFlight.current.has(selectedWO)) return;
@@ -2017,7 +2063,12 @@ export default function PortalShell() {
     const workOrderId = selectedWO;
     staffReadInFlight.current.add(workOrderId);
     void markStaffWorkOrderRead(workOrderId, latestNotificationAt)
-      .then(() => qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }))
+      .then(() => Promise.all([
+        qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
+        qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
+      ]))
       .catch((error: any) => {
         fire(`Could not mark update read: ${error.message || error}`);
       })
@@ -2027,7 +2078,6 @@ export default function PortalShell() {
     isManager,
     qc,
     selectedWO,
-    staffNotificationReadsData,
     woData,
   ]);
   const getUser = (id: string) => USERS.find(u => u.id === id);
@@ -2085,37 +2135,22 @@ export default function PortalShell() {
     [myWOs, search, filterC, filterP, filterStatus]
   );
   const statusCounts = useMemo(() => {
-    const openWOs = workOrders.filter(w => activeStatuses.includes(w.status));
-    const openIds = new Set(openWOs.map(w => w.id));
-    const openValue = invoices.reduce(
-      (sum, invoice) =>
-        openIds.has(invoice.wot) && !["draft", "rejected"].includes(invoice.state)
-          ? sum + Number(invoice.total || 0)
-          : sum,
-      0,
-    );
+    const localOpenCount = workOrders.filter(w => activeStatuses.includes(w.status)).length;
+    const localClosed = workOrders.filter(w => w.status === "closed");
     return {
-      openWOs,
-      openCount: openWOs.length,
-      openValue,
-      p1Count: workOrders.filter(w => w.priority === "p1" && activeStatuses.includes(w.status)).length,
-      p1Unassigned: workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length,
-      capitalCount: workOrders.filter(w =>
-        (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
-        && w.status !== "closed",
-      ).length,
-      completedCount: workOrders.filter(w => w.status === "completed").length,
-      pendAppr: workOrders.filter(w => w.status === "pending_approval").length,
-      closedWOs: workOrders.filter(w => w.status === "closed"),
-      slaAtRisk: workOrders.filter(w => {
-        if (!activeStatuses.includes(w.status)) return false;
-        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt, w.startTimeRaw);
-        if (s2) return !s2.responseBreached && !s2.resolutionBreached
-          && ((!s2.responseMet && s2.responseRemainingHours < 2) || s2.resolutionRemainingHours < 2);
-        const s = slaRemaining(w);
-        return s && s.remainingHours < 2 && s.remainingHours > 0;
-      }).length,
-      slaBreached: workOrders.filter(w => {
+      openCount: navigationSummary?.openCount ?? localOpenCount,
+      p1Unassigned: navigationSummary?.p1UnassignedCount
+        ?? workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length,
+      capitalCount: navigationSummary?.capitalCount
+        ?? workOrders.filter(w =>
+          (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
+          && w.status !== "closed",
+        ).length,
+      pendAppr: navigationSummary?.pendingApprovalCount
+        ?? workOrders.filter(w => w.status === "pending_approval").length,
+      closedWOs: localClosed,
+      historyCount: navigationSummary?.historyCount ?? localClosed.length,
+      slaBreached: navigationSummary?.slaBreachedCount ?? workOrders.filter(w => {
         if (!activeStatuses.includes(w.status)) return false;
         const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt, w.startTimeRaw);
         if (s2) return s2.responseBreached || s2.resolutionBreached;
@@ -2123,11 +2158,10 @@ export default function PortalShell() {
         return s && s.remainingHours <= 0;
       }).length,
     };
-  }, [invoices, workOrders]);
+  }, [navigationSummary, workOrders]);
   const {
-    openWOs, openCount, openValue, p1Count, p1Unassigned, capitalCount,
-    completedCount, pendAppr,
-    closedWOs, slaAtRisk, slaBreached
+    openCount, p1Unassigned, capitalCount, pendAppr,
+    closedWOs, historyCount, slaBreached,
   } = statusCounts;
   // Realtime subscription propagates the same change to other clients within ~200ms.
 
@@ -2215,6 +2249,12 @@ export default function PortalShell() {
       fire(contractor
         ? `Work order ${wot} created. Assigned to ${contractorName}.`
         : `Work order ${wot} created. Added to Unassigned.`);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
+        qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
+        qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
+        qc.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY }),
+      ]);
       return true;
     } catch (e: any) {
       // Roll back the optimistic card so no phantom WO lingers, and surface
@@ -2254,22 +2294,25 @@ export default function PortalShell() {
   };
 
   const contractorActiveBadge = useMemo(
-    () => myWOs.filter(w => activeStatuses.includes(w.status)).length,
-    [myWOs]
+    () => navigationSummary?.contractorActiveCount
+      ?? myWOs.filter(w => activeStatuses.includes(w.status)).length,
+    [myWOs, navigationSummary?.contractorActiveCount],
   );
   const contractorInvoiceBadge = useMemo(
-    () => invoices.filter(i =>
-      i.contractor === (currentUser?.contractorAccountId || currentUser?.id)
-      && (i.state === "submitted" || i.state === "revised" || i.state === "rejected"),
-    ).length || null,
-    [invoices, currentUser?.contractorAccountId, currentUser?.id]
+    () => (navigationSummary?.contractorInvoiceCount
+      ?? invoices.filter(i =>
+        i.contractor === (currentUser?.contractorAccountId || currentUser?.id)
+        && (i.state === "submitted" || i.state === "revised" || i.state === "rejected"),
+      ).length) || null,
+    [invoices, currentUser?.contractorAccountId, currentUser?.id, navigationSummary?.contractorInvoiceCount],
   );
   const contractorAttentionBadge = useMemo(
-    () => myWOs.reduce(
-      (count: number, wo: any) => count + Number(wo.pendingContractorAttentionCount || 0),
-      0,
-    ) || null,
-    [myWOs],
+    () => (navigationSummary?.contractorAttentionCount
+      ?? myWOs.reduce(
+        (count: number, wo: any) => count + Number(wo.pendingContractorAttentionCount || 0),
+        0,
+      )) || null,
+    [myWOs, navigationSummary?.contractorAttentionCount],
   );
   const submittedInvoice = useMemo(
     () => invoices.find(i => i.num === submittedInvoiceNum),
@@ -2283,13 +2326,13 @@ export default function PortalShell() {
     : isManager
     ? [
       { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
-      { id: "staff_work", label: "My Work", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", badge: staffWorkRows.length || null },
+      { id: "staff_work", label: "My Work", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", badge: navigationSummary?.staffWorkCount || null },
       { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
       { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
       { id: "billing", label: "Billing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6M9 9h1" },
       { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
-      { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: closedWOs.length || null },
+      { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
     ]
     : [
       { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge, attentionBadge: contractorAttentionBadge },
@@ -2300,7 +2343,7 @@ export default function PortalShell() {
         { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
       ] : []),
     ],
-    [invoiceController, isManager, openCount, capitalCount, pendAppr, closedWOs.length, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canManageTeam, currentUser?.contractorTier, staffWorkRows.length]
+    [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canManageTeam, currentUser?.contractorTier, navigationSummary?.staffWorkCount]
   );
   const bottomNavItems = useMemo(() => {
     const preferred = ["dashboard", "staff_work", "work_orders", "invoices"];
@@ -2831,6 +2874,13 @@ export default function PortalShell() {
               filter={staffWorkFilter}
               setFilter={setStaffWorkFilter}
               staffProfiles={staffProfiles}
+              currentUserId={currentUser?.id || ""}
+              summaryCounts={navigationSummary ? {
+                all: navigationSummary.staffWorkCount,
+                unread: navigationSummary.staffUnreadCount,
+                todo: navigationSummary.myTodoCount,
+                ready: navigationSummary.readyToBillCount,
+              } : undefined}
               busyWorkOrderId={staffWorkBusyId}
               onOpenWorkOrder={openStaffWorkOrder}
               onAddTodo={(workOrderId: string) => void runStaffWorkAction(
@@ -2875,7 +2925,7 @@ export default function PortalShell() {
 
           <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
 
-          <MyJobs page={page} isManager={isManager} myWOs={myWOs} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
+          <MyJobs page={page} isManager={isManager} myWOs={myWOs} currentUser={currentUser} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
 
           <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} technicians={technicians} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} doAssignPortalTechnician={doAssignPortalTechnician} getUser={getUser} loadingStates={loadingStates} />
 
@@ -2884,9 +2934,9 @@ export default function PortalShell() {
           <InvoiceDetail
             page={page}
             selectedInvoice={selectedInvoice}
-            invoices={invoices}
+            invoices={invoiceDetailRows}
             billingInvoices={billingInvoices}
-            workOrders={maskedWorkOrders}
+            workOrders={invoiceDetailWorkOrders}
             isManager={isManager}
             currentUser={currentUser}
             getUser={getUser}
@@ -2946,7 +2996,7 @@ export default function PortalShell() {
             <BillingInvoiceDetail
               invoice={selectedBillingInvoiceData}
               workOrder={selectedBillingInvoiceData?.wot
-                ? maskedWorkOrders.find((workOrder: any) => workOrder.id === selectedBillingInvoiceData.wot)
+                ? selectedBillingWorkOrder
                 : null}
               invoiceLines={selectedBillingInvoiceData?.lines || []}
               onBack={() => {
@@ -3108,6 +3158,12 @@ export default function PortalShell() {
               () => transferStaffWorkTodo(workOrderId, ownerId),
               "To-do owner updated",
             )}
+            onLoadMoreActivities={workOrderDetailsQuery.loadMoreActivities}
+            onLoadMorePhotos={workOrderDetailsQuery.loadMorePhotos}
+            onLoadMoreVisits={workOrderDetailsQuery.loadMoreVisits}
+            loadingMoreActivities={workOrderDetailsQuery.loadingActivities}
+            loadingMorePhotos={workOrderDetailsQuery.loadingPhotos}
+            loadingMoreVisits={workOrderDetailsQuery.loadingVisits}
           />
 
           <div className="mobile-footer-spacer" style={{ display: "none" }} />
@@ -3751,8 +3807,12 @@ export default function PortalShell() {
                 : [invoice, ...(items || [])];
             });
             qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
+            qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
+            qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
             qc.invalidateQueries({ queryKey: INVOICES_KEY });
+            qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY });
             qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+            qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
             if (invoice?.id) setSelectedBillingInvoice(invoice.id);
             setBillingSourceToStart(null);
             setBillingWorkOrderToStart(null);

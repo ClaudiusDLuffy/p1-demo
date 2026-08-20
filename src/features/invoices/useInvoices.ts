@@ -18,11 +18,23 @@ import {
   insertActivity,
   nextInvoiceNumFromDb,
   correctContractorInvoiceTotal,
+  loadInvoicesPage,
 } from "../../lib/db";
 import { P1_BUSINESS } from "../../lib/constants";
 import { normalizeInvoiceLineNumbers } from "../../lib/invoiceMath";
-import { WORK_ORDERS_KEY } from "../work-orders/queries";
-import { INVOICES_KEY } from "./queries";
+import {
+  CONTRACTOR_WORKLOAD_SUMMARY_KEY,
+  PORTAL_NAVIGATION_SUMMARY_KEY,
+  WORK_ORDER_BY_ID_KEY,
+  WORK_ORDER_DETAILS_KEY,
+  WORK_ORDER_PAGES_KEY,
+  WORK_ORDERS_KEY,
+} from "../work-orders/queries";
+import {
+  INVOICE_BY_ID_KEY,
+  INVOICE_PAGES_KEY,
+  INVOICES_KEY,
+} from "./queries";
 import { supabase } from "../../lib/supabase/client";
 
 const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
@@ -57,6 +69,42 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
   const [submittedInvoiceNum, setSubmittedInvoiceNum] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const invalidateWorkOrderData = () => Promise.all([
+    qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+    qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
+    qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
+    qc.invalidateQueries({ queryKey: WORK_ORDER_DETAILS_KEY }),
+    qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
+    qc.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY }),
+  ]);
+  const invalidateInvoiceData = () => Promise.all([
+    qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+    qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY }),
+    qc.invalidateQueries({ queryKey: INVOICE_BY_ID_KEY }),
+  ]);
+  const invalidateWorkflowData = () => Promise.all([
+    invalidateWorkOrderData(),
+    invalidateInvoiceData(),
+  ]);
+  const hasLiveSiblingInvoice = async (invoice: any) => {
+    if (!invoice?.wot) return true;
+    let cursor: string | null = null;
+    do {
+      const page = await loadInvoicesPage({
+        state: "all",
+        workOrderId: invoice.wot,
+        sort: "recent",
+        direction: "desc",
+        limit: 100,
+        cursor,
+      });
+      if (page.items.some((candidate: any) =>
+        candidate.id !== invoice.id && candidate.state !== "draft"
+      )) return true;
+      cursor = page.hasMore ? page.nextCursor : null;
+    } while (cursor);
+    return false;
+  };
 
   const contractorProfileFor = (invoice: any) => {
     const contractorId = invoice?.contractor || invoice?.contractorId;
@@ -216,14 +264,14 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
           fire(`Draft saved, but PDF upload failed: ${e.message || e}`);
         }
       }
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      invalidateWorkOrderData();
+      invalidateInvoiceData();
       announceSavedNum("draft saved", result, draft.num || null);
       resetNewInv();
       return true;
     } catch (e: any) {
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      invalidateWorkOrderData();
+      invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
         fire(e.message || "That invoice number already exists for this contractor.");
       } else {
@@ -341,8 +389,8 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       } else if (!pdfHandled && !draft.hasExistingPdf) {
         await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, subtotal, tax, total, fullStoreAddr);
       }
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      invalidateWorkOrderData();
+      invalidateInvoiceData();
       setSubmittedInvoiceNum(finalNum);
       if (collidedFrom && collidedFrom !== finalNum) {
         fire(`Invoice #${collidedFrom} already exists — saved as #${finalNum} instead.`);
@@ -350,8 +398,8 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       resetNewInv();
       return true;
     } catch (e: any) {
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
+      invalidateWorkOrderData();
+      invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
         fire(e.message || "That invoice number already exists for this contractor.");
       } else {
@@ -393,7 +441,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
         try {
           if (!inv.pdfStoragePath) {
             await uploadInvoicePdf(inv.id, inv.num, blob);
-            qc.invalidateQueries({ queryKey: INVOICES_KEY });
+            void invalidateInvoiceData();
           }
         } catch (e: any) {
           fire(`PDF cache failed: ${e.message || e}`);
@@ -441,13 +489,18 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const doDeleteInvoice = async (inv: any) => {
     try {
       await deleteInvoice(inv.id);
-      // After delete: check whether the WO has any non-draft siblings left at
-      // all. Rejections are live unresolved review work.
-      const all = ((qc.getQueryData(INVOICES_KEY) as any[]) ?? []);
-      const remaining = all.filter((i: any) => i.id !== inv.id && i.wot === inv.wot && i.state !== "draft");
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-      if (remaining.length === 0 && inv.wot) {
+      // The shell no longer owns a global invoice cache. Check only this work
+      // order's cursor pages before claiming that its final live invoice was
+      // removed; a scoped read preserves the old warning without a full-table
+      // bootstrap query.
+      let hasLiveSibling: boolean | null = null;
+      try {
+        hasLiveSibling = await hasLiveSiblingInvoice(inv);
+      } catch (loadError) {
+        console.error("Could not verify invoice siblings after deletion", loadError);
+      }
+      await invalidateWorkflowData();
+      if (hasLiveSibling === false && inv.wot) {
         fire(`Invoice #${inv.num} deleted — no live invoices left on ${inv.wot}; move the WO manually if needed.`);
       } else {
         fire(`Invoice #${inv.num} deleted`);
@@ -467,8 +520,8 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     if (!trimmed) { fire("Enter a rejection reason"); return false; }
     try {
       await reviewContractorInvoice(inv.id, "reject", trimmed);
-      qc.invalidateQueries({ queryKey: INVOICES_KEY });
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
+      invalidateInvoiceData();
+      invalidateWorkOrderData();
       try {
         await notifyInvoiceReview(inv.id, "rejected");
         fire(`Invoice #${inv.num} rejected — contractor notified`);
@@ -509,10 +562,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
         action,
         reasonText,
       );
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-      ]);
+      await invalidateWorkflowData();
 
       const reviewedCount = Number(result?.count || normalizedIds.length);
       if (action === "approve") {
@@ -549,10 +599,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const doRetractInvoiceRejection = async (inv: any) => {
     try {
       await retractContractorInvoiceRejection(inv.id);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-      ]);
+      await invalidateWorkflowData();
       try {
         await notifyInvoiceReview(inv.id, "retraction");
         fire(`Invoice #${inv.num} rejection retracted and approved — contractor notified`);
@@ -579,10 +626,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
 
     try {
       await correctContractorInvoiceTotal(inv.id, correctedTotal, reason);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-      ]);
+      await invalidateWorkflowData();
       fire(`Invoice #${inv.num} total corrected to $${correctedTotal.toFixed(2)}`);
       return true;
     } catch (e: any) {

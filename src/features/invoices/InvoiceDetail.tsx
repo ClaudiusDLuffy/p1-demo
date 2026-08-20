@@ -10,6 +10,7 @@ import { T, INV_STATE, P1_BUSINESS } from "../../lib/constants";
 import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { useMemo, useState } from "react";
+import { useBillingInvoicePageQuery } from "../billing/queries";
 
 export default function InvoiceDetail(props: any) {
   const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
@@ -34,6 +35,13 @@ export default function InvoiceDetail(props: any) {
     () => invoices.find(i => i.id === selectedInvoice),
     [invoices, selectedInvoice]
   );
+  const linkedStaffInvoiceQuery = useBillingInvoicePageQuery({
+    queue: "work_order",
+    workOrderId: inv?.wot || null,
+    sort: "recent",
+    direction: "desc",
+    limit: 100,
+  }, isManager && Boolean(inv?.wot));
   const contractorProfile = inv
     ? getUser?.(inv.contractor)
       || (currentUser?.role === "contractor" ? currentUser : null)
@@ -56,10 +64,10 @@ export default function InvoiceDetail(props: any) {
   const linkedStaffInvoices = useMemo(
     () => !isManager || !inv
       ? []
-      : billingInvoices.filter((billingInvoice: any) =>
+      : (linkedStaffInvoiceQuery.data?.items || billingInvoices).filter((billingInvoice: any) =>
           (billingInvoice.sourceInvoiceIds || []).includes(inv.id),
         ),
-    [billingInvoices, inv, isManager],
+    [billingInvoices, inv, isManager, linkedStaffInvoiceQuery.data?.items],
   );
   return (
     <>

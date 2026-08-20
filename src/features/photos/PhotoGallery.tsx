@@ -7,7 +7,7 @@ import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
 import { getPhotoUrl } from "../../lib/db";
 
-export default function PhotoGallery({ woId, photos = [], imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, loadingStates = {} }: any) {
+export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, loadingStates = {} }: any) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -90,7 +90,7 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
                     {/* Photos */}
                     <div className="card" style={{ padding: 22, marginBottom: 16 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos{(photos?.length || 0) > 0 ? ` (${photos.length})` : ""}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos{Number(totalCount ?? photos?.length ?? 0) > 0 ? ` (${Number(totalCount ?? photos.length)})` : ""}</div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
                             <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
@@ -107,7 +107,7 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
                       {(photos || []).length === 0
                         ? <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: T.subtle, background: T.surfaceSoft, borderRadius: 10, border: `1px dashed ${T.border}` }}>No photos yet. Add site pics, asset tags, part numbers, completed work.</div>
                         : !expanded
-                          ? <button onClick={() => setExpanded(true)} className="btn-soft" style={{ width: "100%", justifyContent: "center" }}>View {photos.length} photo{photos.length !== 1 ? "s" : ""}</button>
+                          ? <button onClick={() => setExpanded(true)} className="btn-soft" style={{ width: "100%", justifyContent: "center" }}>View photos ({photos.length} loaded{Number(totalCount || 0) > photos.length ? ` of ${totalCount}` : ""})</button>
                           : (
                             <>
                               {resolving && <div style={{ textAlign: "center", padding: "12px 0", fontSize: 12, color: T.subtle }}>Loading photos...</div>}
@@ -156,6 +156,15 @@ export default function PhotoGallery({ woId, photos = [], imageErrors, setImageE
                                   );
                                 })}
                               </div>
+                              {hasMore && (
+                                <button
+                                  type="button"
+                                  className="btn-soft"
+                                  disabled={loadingMore}
+                                  onClick={() => onLoadMore?.()}
+                                  style={{ width: "100%", justifyContent: "center", marginTop: 12 }}
+                                >{loadingMore ? <><BtnSpinnerDark />Loading photos...</> : `Load more photos (${photos.length} of ${totalCount || "many"})`}</button>
+                              )}
                             </>
                           )}
                     </div>

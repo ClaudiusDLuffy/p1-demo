@@ -5,32 +5,31 @@ import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
+import { useCursorPagination } from "../../lib/useCursorPagination";
+import { useWorkOrdersPageQuery } from "./queries";
 
 export default function MyJobs(props: any) {
-  const { page, isManager, myWOs, activeStatuses, slaLabel, setSelectedWO, setPage, setAiNote, woParts = [] } = props;
+  const { page, isManager, myWOs, currentUser, slaLabel, setSelectedWO, setPage, setAiNote, woParts = [] } = props;
   const [search, setSearch] = useState("");
-  const jobCounts = useMemo(() => ({
-    active: myWOs.filter(w => activeStatuses.includes(w.status)).length,
-    pendingInvoice: myWOs.filter(w => w.status === "pending_invoice").length,
-    capital: myWOs.filter(w =>
-      (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
-      && w.status !== "closed",
-    ).length,
-  }), [myWOs, activeStatuses]);
-  const visibleJobs = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return myWOs;
-    return myWOs.filter(wo => [
-      wo.id,
-      wo.incidentId,
-      wo.store,
-      wo.addr,
-      wo.city,
-      wo.summary,
-      wo.description,
-    ].some(value => String(value ?? "").toLowerCase().includes(needle)));
-  }, [myWOs, search]);
+  const deferredSearch = useDeferredValue(search.trim());
+  const {
+    position,
+    previous: previousPage,
+    next: nextPage,
+  } = useCursorPagination(deferredSearch);
+  const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
+  const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
+  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: "priority", limit: 25, cursor: position.cursor }, enabled);
+  const activeCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, sort: "newest", limit: 1 }, enabled);
+  const pendingCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, status: "pending_invoice", sort: "newest", limit: 1 }, enabled);
+  const capitalCountQuery = useWorkOrdersPageQuery({ scope: "capital", contractorId, sort: "newest", limit: 1 }, enabled);
+  const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
+  const jobCounts = {
+    active: activeCountQuery.data?.totalCount || 0,
+    pendingInvoice: pendingCountQuery.data?.totalCount || 0,
+    capital: capitalCountQuery.data?.totalCount || 0,
+  };
   // Per-WO parts summary for the parts-status badge. Only counted when there
   // are structured wo_parts rows for the WO — legacy part_needed scalars get
   // their own card on detail view, not a badge here.
@@ -76,7 +75,12 @@ export default function MyJobs(props: any) {
               {visibleJobs.map((wo, i) => {
                 const sla = slaLabel(wo);
                 const hasNewSla = !!(wo.responseBreachAt || wo.resolutionBreachAt);
-                const partsSummary = partsByWO[wo.id];
+                const partsSummary = Number(wo.partsTotal || 0) > 0
+                  ? {
+                      total: Number(wo.partsTotal || 0),
+                      received: Number(wo.partsReceived || 0),
+                    }
+                  : partsByWO[wo.id];
                 const location = (wo.addr || wo.city || "").trim();
                 const storeLocation = [wo.store ? `Store #${wo.store}` : null, location || null]
                   .filter(Boolean)
@@ -115,6 +119,13 @@ export default function MyJobs(props: any) {
                   </div>
                 );
               })}
+              <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, color: T.muted }}>{jobsQuery.isFetching ? "Loading jobs..." : `${jobsQuery.data?.totalCount || 0} jobs · page ${position.page}`}</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className="btn-soft" disabled={position.page <= 1 || jobsQuery.isFetching} onClick={previousPage}>Previous</button>
+                  <button type="button" className="btn-soft" disabled={!jobsQuery.data?.hasMore || jobsQuery.isFetching} onClick={() => nextPage(jobsQuery.data?.nextCursor || null)}>Next</button>
+                </div>
+              </div>
             </div>
           )}
 

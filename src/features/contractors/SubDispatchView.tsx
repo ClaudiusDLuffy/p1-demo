@@ -1,12 +1,14 @@
 "use client";
 // @ts-nocheck
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { T, STATUS } from "../../lib/constants";
+import { useCursorPagination } from "../../lib/useCursorPagination";
+import { useWorkOrdersPageQuery } from "../work-orders/queries";
 
 export default function SubDispatchView(props: any) {
   const {
@@ -27,6 +29,7 @@ export default function SubDispatchView(props: any) {
   } = props;
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [savingWo, setSavingWo] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const companyMode = !!currentUser?.canManageTeam;
   const contractorAccountId = currentUser?.contractorAccountId || currentUser?.id;
 
@@ -52,14 +55,39 @@ export default function SubDispatchView(props: any) {
     ),
     [contractorAccountId, technicians],
   );
+  const teamContractorIds = useMemo(
+    () => companyMode
+      ? [contractorAccountId].filter(Boolean)
+      : [currentUser?.id, ...legacyTeamIds].filter(Boolean),
+    [companyMode, contractorAccountId, currentUser?.id, legacyTeamIds],
+  );
+  const deferredSearch = useDeferredValue(search.trim());
+  const paginationSignature = JSON.stringify({
+    search: deferredSearch,
+    contractorIds: teamContractorIds,
+  });
+  const {
+    position,
+    previous: previousPage,
+    next: nextPage,
+  } = useCursorPagination(paginationSignature);
+  const teamWorkOrdersQuery = useWorkOrdersPageQuery({
+    scope: "active",
+    search: deferredSearch,
+    contractorIds: teamContractorIds,
+    sort: "priority",
+    limit: 25,
+    cursor: position.cursor,
+  }, page === "team_dispatch" && currentUser?.role === "contractor");
+  const visibleWorkOrders = teamWorkOrdersQuery.data?.items || workOrders;
   const myTeamWOs = useMemo(
     () => companyMode
-      ? workOrders.filter((workOrder: any) => workOrder.contractor === contractorAccountId)
-      : workOrders.filter((workOrder: any) =>
+      ? visibleWorkOrders.filter((workOrder: any) => workOrder.contractor === contractorAccountId)
+      : visibleWorkOrders.filter((workOrder: any) =>
           workOrder.contractor === currentUser?.id
           || legacyTeamIds.includes(workOrder.contractor),
         ),
-    [companyMode, contractorAccountId, currentUser?.id, legacyTeamIds, workOrders],
+    [companyMode, contractorAccountId, currentUser?.id, legacyTeamIds, visibleWorkOrders],
   );
 
   const hasTeamAccess = companyMode || currentUser?.contractorTier === "mr_freeze";
@@ -76,6 +104,14 @@ export default function SubDispatchView(props: any) {
           {companyTechnicians.length > 0 ? ` · ${companyTechnicians.length} technicians on file` : ""}
         </div>
       )}
+      <input
+        type="search"
+        value={search}
+        onChange={event => setSearch(event.target.value)}
+        placeholder="Search team work orders"
+        aria-label="Search team work orders"
+        style={{ width: "100%", maxWidth: 420, marginBottom: 14, minHeight: 40, padding: "9px 11px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+      />
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="table-scroll" style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -207,6 +243,17 @@ export default function SubDispatchView(props: any) {
             </tbody>
           </table>
         </div>
+      </div>
+      <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 11, color: T.muted }}>
+          {teamWorkOrdersQuery.isFetching
+            ? "Loading team work…"
+            : `${teamWorkOrdersQuery.data?.totalCount || 0} work orders · page ${position.page}`}
+        </span>
+        <span style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn-soft" disabled={position.page <= 1 || teamWorkOrdersQuery.isFetching} onClick={previousPage}>Previous</button>
+          <button type="button" className="btn-soft" disabled={!teamWorkOrdersQuery.data?.hasMore || teamWorkOrdersQuery.isFetching} onClick={() => nextPage(teamWorkOrdersQuery.data?.nextCursor || null)}>Next</button>
+        </span>
       </div>
     </div>
   );

@@ -8,14 +8,15 @@ import { Ico } from "../../components/ui/Ico";
 import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE } from "../../lib/constants";
 import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
-import { InvoiceSortKey, SortDirection, sortInvoices } from "../../lib/invoiceSort";
+import { InvoiceSortKey, SortDirection } from "../../lib/invoiceSort";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import ControllerExportPanel from "./ControllerExportPanel";
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCursorPagination } from "../../lib/useCursorPagination";
+import { useInvoicesPageQuery } from "./queries";
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices, onEditRejected } = props;
-  const currentContractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const controller = isInvoiceController(currentUser);
   const canBatchReview = isManager && !controller && !!doBatchReviewInvoices;
   const [search, setSearch] = useState("");
@@ -63,47 +64,31 @@ export default function InvoiceList(props: any) {
     setSortKey(key);
     setSortDirection(key === "recent" || key === "date" ? "desc" : "asc");
   };
-  const visibleInvoices = useMemo(
-    () => {
-      const filtered = (isManager ? invoices : invoices.filter(i => i.contractor === currentContractorId))
-        .filter(i => (i.invoiceType || "contractor") === "contractor")
-        .filter(i => !controller || ["approved", "paid"].includes(i.state))
-        .filter(i => invTab === "all" ? true : i.state === invTab)
-        .filter(i => {
-        const query = search.trim().toLowerCase();
-        if (!query) return true;
-        const contractor = getUser(i.contractor);
-        return [
-          i.num,
-          i.wot,
-          i.store,
-          i.storeAddr,
-          i.state,
-          contractor?.name,
-          contractor?.company,
-          ...(i.lines || []).flatMap((line: any) => [
-            line.type,
-            line.desc,
-            line.description,
-          ]),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(query);
-        });
-      return sortInvoices(
-        filtered,
-        sortKey,
-        sortDirection,
-        contractorId => {
-          const contractor = getUser(contractorId);
-          return contractor?.company || contractor?.name || "";
-        },
-      );
-    },
-    [controller, currentContractorId, getUser, invTab, invoices, isManager, search, sortDirection, sortKey]
+  const deferredSearch = useDeferredValue(search.trim());
+  const pagingSignature = JSON.stringify({
+    search: deferredSearch,
+    state: invTab || "all",
+    sort: sortKey,
+    direction: sortDirection,
+  });
+  const {
+    position: pagePosition,
+    previous: previousPage,
+    next: nextPage,
+  } = useCursorPagination(pagingSignature);
+  const invoicePageQuery = useInvoicesPageQuery({
+    state: invTab || "all",
+    search: deferredSearch,
+    sort: sortKey,
+    direction: sortDirection,
+    limit: 25,
+    cursor: pagePosition.cursor,
+  }, page === "invoices" && !selectedInvoice);
+  const visibleInvoices: any[] = useMemo(
+    () => (invoicePageQuery.data?.items || []) as any[],
+    [invoicePageQuery.data?.items],
   );
+
   const reviewableInvoices = useMemo(
     () => canBatchReview
       ? visibleInvoices.filter((invoice: any) =>
@@ -429,6 +414,37 @@ export default function InvoiceList(props: any) {
                   </div>
                 )}
               </div>
+
+              <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: T.muted }}>
+                  {invoicePageQuery.isFetching
+                    ? "Loading invoices..."
+                    : `${invoicePageQuery.data?.totalCount || 0} invoice${invoicePageQuery.data?.totalCount === 1 ? "" : "s"} · page ${pagePosition.page}`}
+                </span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn-soft"
+                    disabled={pagePosition.page <= 1 || invoicePageQuery.isFetching}
+                    onClick={previousPage}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-soft"
+                    disabled={!invoicePageQuery.data?.hasMore || invoicePageQuery.isFetching}
+                    onClick={() => nextPage(invoicePageQuery.data?.nextCursor || null)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+              {invoicePageQuery.isError && (
+                <div role="alert" style={{ marginTop: 10, padding: 10, borderRadius: 8, background: T.dangerSoft, color: T.danger, fontSize: 11 }}>
+                  Invoices could not be loaded. Refresh and try again.
+                </div>
+              )}
 
               {batchDialog === "approve" && (
                 <Modal onClose={closeBatchDialog} title={`Approve ${selectedReviewInvoices.length} invoices`} width={480}>

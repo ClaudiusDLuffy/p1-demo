@@ -4,8 +4,16 @@ import { useMemo } from "react";
 
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
-import type { StaffWorkFilter, StaffWorkProfile, StaffWorkRow } from "./workQueue";
-import { filterStaffWorkRows } from "./workQueue";
+import { useCursorPagination } from "../../lib/useCursorPagination";
+import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import type {
+  StaffNotificationRead,
+  StaffWorkFilter,
+  StaffWorkProfile,
+  StaffWorkRow,
+  StaffWorkTodo,
+} from "./workQueue";
+import { buildStaffWorkRows, filterStaffWorkRows } from "./workQueue";
 
 const FILTERS: { value: StaffWorkFilter; label: string }[] = [
   { value: "all", label: "All work" },
@@ -39,6 +47,10 @@ export default function StaffWorkHub({
   onCompleteTodo,
   onTransferTodo,
   onOpenBilling,
+  todos = [],
+  reads = [],
+  currentUserId = "",
+  summaryCounts,
 }: {
   page: string;
   rows: StaffWorkRow[];
@@ -51,16 +63,74 @@ export default function StaffWorkHub({
   onCompleteTodo: (workOrderId: string) => void;
   onTransferTodo: (workOrderId: string, ownerId: string) => void;
   onOpenBilling: (workOrderId: string) => void;
+  todos?: StaffWorkTodo[];
+  reads?: StaffNotificationRead[];
+  currentUserId?: string;
+  summaryCounts?: {
+    all: number;
+    unread: number;
+    todo: number;
+    ready: number;
+  };
 }) {
-  const visibleRows = useMemo(
-    () => filterStaffWorkRows(rows, filter),
-    [filter, rows],
+  const scope = filter === "unread"
+    ? "staff_work_unread"
+    : filter === "todo"
+      ? "staff_work_todo"
+      : filter === "ready"
+        ? "staff_work_ready"
+        : "staff_work";
+  const {
+    position,
+    previous: previousPage,
+    next: nextPage,
+  } = useCursorPagination(scope);
+  const workPageQuery = useWorkOrdersPageQuery({
+    scope,
+    sort: "newest",
+    limit: 25,
+    cursor: position.cursor,
+  }, page === "staff_work");
+  const pageRows = useMemo(
+    () => {
+      const pageWorkOrders = workPageQuery.data?.items || [];
+      const pageTodos = pageWorkOrders
+        .map(workOrder => (workOrder as typeof workOrder & { staffTodo?: StaffWorkTodo | null }).staffTodo)
+        .filter((todo): todo is StaffWorkTodo => Boolean(todo));
+      const pageReads = pageWorkOrders
+        .map(workOrder => ({
+          userId: currentUserId,
+          workOrderId: workOrder.id,
+          readThroughAt: String((workOrder as typeof workOrder & { staffReadThroughAt?: string | null }).staffReadThroughAt || ""),
+        }))
+        .filter(read => Boolean(read.readThroughAt));
+
+      return buildStaffWorkRows({
+        workOrders: pageWorkOrders,
+        todos: pageTodos.length ? pageTodos : todos,
+        reads: pageReads.length ? pageReads : reads,
+        profiles: staffProfiles,
+        readyWorkOrderIds: new Set(
+          pageWorkOrders
+            .filter(workOrder => ["pending_invoice", "pending_payment"].includes(workOrder.status))
+            .map(workOrder => workOrder.id),
+        ),
+        currentUserId,
+      });
+    },
+    [currentUserId, reads, staffProfiles, todos, workPageQuery.data?.items],
   );
-  const myTodoCount = rows.filter(row => row.isMyTodo).length;
-  const unreadCount = rows.filter(row => row.isUnread).length;
-  const readyCount = rows.filter(row => row.isReadyToBill).length;
+  const visibleRows = useMemo(
+    () => workPageQuery.data
+      ? filterStaffWorkRows(pageRows, filter)
+      : filterStaffWorkRows(rows, filter),
+    [filter, pageRows, rows, workPageQuery.data],
+  );
+  const myTodoCount = summaryCounts?.todo ?? rows.filter(row => row.isMyTodo).length;
+  const unreadCount = summaryCounts?.unread ?? rows.filter(row => row.isUnread).length;
+  const readyCount = summaryCounts?.ready ?? rows.filter(row => row.isReadyToBill).length;
   const filterCounts: Record<StaffWorkFilter, number> = {
-    all: rows.length,
+    all: summaryCounts?.all ?? rows.length,
     unread: unreadCount,
     todo: myTodoCount,
     ready: readyCount,
@@ -238,6 +308,17 @@ export default function StaffWorkHub({
             Nothing is waiting in this view.
           </div>
         )}
+      </div>
+      <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <span style={{ color: T.muted, fontSize: 11 }}>
+          {workPageQuery.isFetching
+            ? "Loading work…"
+            : `${workPageQuery.data?.totalCount || 0} items · page ${position.page}`}
+        </span>
+        <span style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn-soft" disabled={position.page <= 1 || workPageQuery.isFetching} onClick={previousPage}>Previous</button>
+          <button type="button" className="btn-soft" disabled={!workPageQuery.data?.hasMore || workPageQuery.isFetching} onClick={() => nextPage(workPageQuery.data?.nextCursor || null)}>Next</button>
+        </span>
       </div>
     </div>
   );

@@ -27,6 +27,13 @@ import {
   isInternalWorkOrderActivity,
 } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
+import { useBillingInvoicePageQuery } from "../billing/queries";
+import { useInvoicesPageQuery } from "../invoices/queries";
+import {
+  useWorkOrderPartsQuery,
+  useWorkOrdersPageQuery,
+} from "./queries";
+import VisitTimeline from "./VisitTimeline";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -56,7 +63,36 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders, invoices, billingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const detailEnabled = Boolean(
+    selectedWO
+    && woData
+    && ["work_orders", "wo_detail", "history"].includes(page),
+  );
+  const contractorInvoiceQuery = useInvoicesPageQuery({
+    state: "all",
+    workOrderId: selectedWO,
+    sort: "recent",
+    limit: 100,
+  }, detailEnabled);
+  const billingInvoiceQuery = useBillingInvoicePageQuery({
+    queue: "work_order",
+    workOrderId: selectedWO,
+    sort: "recent",
+    direction: "desc",
+    limit: 100,
+  }, detailEnabled && isManager);
+  const storeHistoryQuery = useWorkOrdersPageQuery({
+    scope: "all",
+    storeNumber: woData?.store || null,
+    sort: "newest",
+    limit: 25,
+  }, detailEnabled && Boolean(woData?.store));
+  const partsQuery = useWorkOrderPartsQuery(selectedWO, detailEnabled);
+  const invoices = contractorInvoiceQuery.data?.items || suppliedInvoices;
+  const billingInvoices = billingInvoiceQuery.data?.items || suppliedBillingInvoices;
+  const workOrders = storeHistoryQuery.data?.items || suppliedWorkOrders;
+  const woParts = partsQuery.data || suppliedWoParts;
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
@@ -1040,12 +1076,36 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    <PhotoGallery woId={woData.id} photos={woData.photos || []} imageErrors={imageErrors} setImageErrors={setImageErrors} setLightbox={setLightbox} doAddPhotos={doAddPhotos} doRemovePhoto={doRemovePhoto} loadingStates={loadingStates} />
+                    <VisitTimeline
+                      workOrder={woData}
+                      visits={woData.visits || []}
+                      totalCount={woData.visitPage?.totalCount}
+                      hasMore={woData.visitPage?.hasMore}
+                      onLoadMore={onLoadMoreVisits}
+                      loadingMore={loadingMoreVisits}
+                      currentUser={currentUser}
+                      fire={fire}
+                    />
+
+                    <PhotoGallery
+                      woId={woData.id}
+                      photos={woData.photos || []}
+                      totalCount={woData.photoPage?.totalCount}
+                      hasMore={woData.photoPage?.hasMore}
+                      onLoadMore={onLoadMorePhotos}
+                      loadingMore={loadingMorePhotos}
+                      imageErrors={imageErrors}
+                      setImageErrors={setImageErrors}
+                      setLightbox={setLightbox}
+                      doAddPhotos={doAddPhotos}
+                      doRemovePhoto={doRemovePhoto}
+                      loadingStates={loadingStates}
+                    />
 
                     {/* Activity */}
                     <div className="card" style={{ padding: 22 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {visibleActivities.length}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activityPage?.totalCount ?? visibleActivities.length}</div>
                         {isManager && (
                           <div className="desktop-only-activity-action" style={{ alignItems: "center", gap: 8 }}>
                             <button type="button" className="btn-soft" onClick={copyWorkOrderNumber} style={{ padding: "7px 12px", fontSize: 11 }}>
@@ -1198,6 +1258,15 @@ export default function WorkOrderDetail(props: any) {
                           </div>
                         );
                       })}
+                      {woData.activityPage?.hasMore && (
+                        <button
+                          type="button"
+                          className="btn-soft"
+                          disabled={loadingMoreActivities}
+                          onClick={() => onLoadMoreActivities?.()}
+                          style={{ width: "100%", justifyContent: "center" }}
+                        >{loadingMoreActivities ? <><BtnSpinnerDark />Loading activity...</> : `Load older activity (${visibleActivities.length} of ${woData.activityPage.totalCount})`}</button>
+                      )}
                     </div>
                   </div>
 

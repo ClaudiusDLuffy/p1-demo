@@ -8,44 +8,65 @@ const db = read("src/lib/db.ts");
 const portal = read("src/components/PortalShell.tsx");
 const workOrderHook = read("src/features/work-orders/useWorkOrders.ts");
 const billingModal = read("src/features/billing/BillingInvoiceCreateModal.tsx");
-const migration = read("supabase/migrations/0070_work_order_activity_summaries.sql");
+const migration = read("supabase/migrations/0076_cursor_pagination_and_portal_indexes.sql");
 
-test("work-order list uses an RLS-aware aggregate instead of global detail rows", () => {
+test("work-order lists use RLS-aware cursor pages instead of global detail rows", () => {
   const listLoader = db.slice(
     db.indexOf("export async function loadWorkOrders"),
     db.indexOf("const formatWorkOrderDateTime"),
   );
-  assert.match(db, /rpc\("get_work_order_activity_summaries"\)/);
+  assert.match(db, /rpc\("list_work_orders_page"/);
   assert.doesNotMatch(listLoader, /\.from\("photos"\)/);
   assert.doesNotMatch(listLoader, /\.from\("work_order_visits"\)/);
   assert.match(migration, /security invoker/i);
+  assert.match(migration, /candidate_work_orders as materialized/i);
   assert.match(migration, /where activity\.deleted_at is null/i);
   assert.match(migration, /grant execute[\s\S]*authenticated, service_role/i);
 });
 
-test("opened work-order details are filtered and completely paged", () => {
+test("opened work-order details request only their first scoped cursor pages", () => {
   const detailLoader = db.slice(
     db.indexOf("export async function loadWorkOrderDetails"),
     db.indexOf('// "5h", "2d", "1w"'),
   );
-  for (const table of ["activities", "photos", "work_order_visits"]) {
-    assert.match(detailLoader, new RegExp(`\\.from\\("${table}"\\)`));
-  }
-  assert.equal(
-    (detailLoader.match(/\.eq\("work_order_id", workOrder\.id\)/g) || []).length,
-    3,
-  );
-  assert.equal(
-    (detailLoader.match(/collectSupabasePages<any>/g) || []).length,
-    3,
-  );
+  assert.match(detailLoader, /loadWorkOrderActivitiesPage\(workOrder\)/);
+  assert.match(detailLoader, /loadWorkOrderPhotosPage\(workOrder\.id\)/);
+  assert.match(detailLoader, /loadWorkOrderVisitsPage\(workOrder\.id\)/);
+  assert.doesNotMatch(detailLoader, /collectSupabasePages<any>/);
+  for (const rpc of [
+    "list_work_order_activities_page",
+    "list_work_order_photos_page",
+    "list_work_order_visits_page",
+  ]) assert.match(db, new RegExp(`rpc\\("${rpc}"`));
 });
 
 test("portal and billing merge scoped detail queries without a second initial reset", () => {
   assert.match(portal, /useWorkOrderDetailsQuery\(/);
   assert.match(billingModal, /useWorkOrderDetailsQuery\(/);
   assert.match(workOrderHook, /existing\?\.detailsLoaded/);
-  assert.match(workOrderHook, /qc\.getQueryData\(workOrderDetailsKey\(workOrder\.id\)\)/);
+  assert.match(portal, /useWorkOrderByIdQuery\(/);
   assert.doesNotMatch(portal, /qc\.resetQueries/);
   assert.match(portal, /const isAuthenticated = !!currentUser\?\.id/);
+});
+
+test("the portal shell does not restore hidden global preload queries", () => {
+  for (const hook of [
+    "useWorkOrdersQuery",
+    "useInvoicesQuery",
+    "useWoPartsQuery",
+    "useStaffWorkTodosQuery",
+    "useStaffNotificationReadsQuery",
+  ]) {
+    assert.doesNotMatch(portal, new RegExp(`${hook}\\(`));
+  }
+  assert.match(portal, /usePortalNavigationSummaryQuery\(/);
+  assert.match(portal, /useWorkOrderByIdQuery\(/);
+  assert.match(portal, /useWorkOrderDetailsQuery\(/);
+});
+
+test("invoice workflow mutations use exact or work-order-scoped reads", () => {
+  assert.match(workOrderHook, /loadInvoiceById\(invoiceId\)/);
+  assert.match(workOrderHook, /loadWorkOrderInvoicesForMutation/);
+  assert.match(workOrderHook, /workOrderId,/);
+  assert.match(workOrderHook, /loadInvoicesPage\(/);
 });

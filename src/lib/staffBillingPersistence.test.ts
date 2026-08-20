@@ -70,14 +70,15 @@ test("the API delegates both creates and edits to the atomic save function", () 
   );
 });
 
-test("all global billing joins are explicitly paged past the PostgREST cap", () => {
-  assert.match(route, /collectSupabasePages<any>[\s\S]+?\.from\("invoices"\)/);
-  assert.match(route, /collectSupabasePages<any>[\s\S]+?\.from\("invoice_lines"\)/);
-  assert.match(route, /collectSupabasePages<any>[\s\S]+?\.from\("staff_invoice_sources"\)/);
+test("billing list pages headers and enriches only bounded page IDs", () => {
+  assert.match(route, /rpc\("list_staff_invoices_page"/);
+  assert.match(route, /loadChunkedRows\(staffIds/);
+  assert.match(route, /chunkArray\(Array\.from\(new Set\(ids\)\), 100\)/);
+  assert.match(route, /mapChunksWithConcurrency/);
+  assert.doesNotMatch(route, /async function loadStaffInvoices\(/);
   assert.match(route, /\.order\("invoice_id", \{ ascending: true \}\)/);
   assert.match(route, /\.order\("position", \{ ascending: true \}\)/);
   assert.match(route, /\.order\("id", \{ ascending: true \}\)/);
-  assert.match(route, /\.range\(from, to\)/);
 });
 
 test("PDF and CSV exports reload and reconcile the exact invoice first", () => {
