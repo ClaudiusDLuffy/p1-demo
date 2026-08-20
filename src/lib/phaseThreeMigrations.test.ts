@@ -15,6 +15,9 @@ const visitCorrections = read(
 const cursorPermissionHotfix = read(
   "supabase/migrations/0078_pagination_cursor_permissions.sql",
 );
+const cursorCodecFix = read(
+  "supabase/migrations/0080_fix_pagination_cursor_codec.sql",
+);
 
 test("interactive datasets use bounded RLS-aware keyset pages", () => {
   for (const functionName of [
@@ -107,6 +110,31 @@ test("authenticated page RPCs can encode and decode their opaque cursors", () =>
       new RegExp(`grant execute on function public\\.${signature}\\s+to authenticated, service_role`, "i"),
     );
   }
+});
+
+test("long pagination cursors strip base64 wrapping before padding and round trip", () => {
+  const encodeStart = cursorCodecFix.indexOf(
+    "function public.portal_encode_cursor",
+  );
+  const decodeStart = cursorCodecFix.indexOf(
+    "function public.portal_decode_cursor",
+  );
+  assert.ok(encodeStart >= 0, "cursor encoder replacement should exist");
+  assert.ok(decodeStart > encodeStart, "cursor decoder replacement should exist");
+
+  const encodeBody = cursorCodecFix.slice(encodeStart, decodeStart);
+  const decodeBody = cursorCodecFix.slice(
+    decodeStart,
+    cursorCodecFix.indexOf("revoke all", decodeStart),
+  );
+  assert.match(encodeBody, /regexp_replace[\s\S]*?encode\([\s\S]*?'base64'\)[\s\S]*?'\[\[:space:\]\]'[\s\S]*?'g'/i);
+  assert.match(decodeBody, /normalized\s*:=\s*regexp_replace[\s\S]*?translate\(p_cursor[\s\S]*?'\[\[:space:\]\]'[\s\S]*?'g'/i);
+  assert.ok(
+    decodeBody.indexOf("regexp_replace") < decodeBody.indexOf("length(normalized)"),
+    "decoder must remove wrapped whitespace before calculating base64 padding",
+  );
+  assert.match(cursorCodecFix, /Legacy wrapped pagination cursor could not be decoded/);
+  assert.match(cursorCodecFix, /grant execute[\s\S]*?to authenticated, service_role/i);
 });
 
 test("visit corrections are validated, audited, and cannot be written directly", () => {

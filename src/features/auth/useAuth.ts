@@ -25,7 +25,6 @@ export default function useAuth({
   setPage,
   setSelectedWO,
   setAiNote,
-  setWorkOrders,
   setInvoices,
 }: any) {
   const qc = useQueryClient();
@@ -37,12 +36,15 @@ export default function useAuth({
   const [loginError, setLoginError] = useState<string | null>(null);
   const [fadeIn, setFadeIn] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  const expectedUserIdRef = useRef<string | null>(null);
   const lastLoadedUserIdRef = useRef<string | null>(null);
   const loginAttemptRef = useRef(false);
+  const authTransitionRef = useRef<"login" | "logout" | null>(null);
 
   useEffect(() => { const t = setTimeout(() => setFadeIn(true), 50); return () => clearTimeout(t); }, []);
 
   const hydrateProfile = useCallback(async (userId: string) => {
+    if (expectedUserIdRef.current !== userId) return;
     try {
       const sb = supabase();
       const [profileResult, scopeResult, permissionsResult] = await Promise.all([
@@ -58,6 +60,9 @@ export default function useAuth({
       if (scopeResult.error) throw scopeResult.error;
       if (permissionsResult.error) throw permissionsResult.error;
       if (!prof) throw new Error("Profile not found for this account");
+      // An older profile request can finish after a new account signs in.
+      // Never let that stale response restore the previous identity.
+      if (expectedUserIdRef.current !== prof.id) return;
       if (lastLoadedUserIdRef.current === prof.id) return;
       lastLoadedUserIdRef.current = prof.id;
       const profAny = prof as any;
@@ -88,12 +93,16 @@ export default function useAuth({
       });
       setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
     } catch (err: any) {
+      if (expectedUserIdRef.current !== userId) return;
       setLoginError(err?.message || "Could not load your profile");
       if (fire) fire(err?.message || "Could not load your profile");
       throw err;
     } finally {
-      loginAttemptRef.current = false;
-      setLoginLoading(false);
+      if (expectedUserIdRef.current === userId) {
+        loginAttemptRef.current = false;
+        authTransitionRef.current = null;
+        setLoginLoading(false);
+      }
     }
   }, [fire, setPage]);
 
@@ -105,35 +114,57 @@ export default function useAuth({
     setLoginError(null);
     setLoginLoading(true);
     loginAttemptRef.current = true;
+    authTransitionRef.current = "login";
     try {
       setRememberMePreference(remember, v);
-      // Clear any stale session before signing in fresh - guards against
-      // wedged refresh tokens left over from a previous demo run.
-      await signOut().catch(() => {});
+      // Gate every profile-scoped query while Supabase changes identity. A
+      // successful password sign-in replaces the local session itself, so a
+      // pre-login sign-out would only create a 401 window (and its default
+      // global scope would revoke the user's sessions on other devices).
+      expectedUserIdRef.current = null;
+      lastLoadedUserIdRef.current = null;
+      qc.clear();
+      setHasSession(false);
+      setCurrentUser(null);
+      setSelectedWO(null);
+      setAiNote(null);
+      setInvoices?.([]);
       const data = await signIn(v, password);
       if (data?.user?.id) {
+        expectedUserIdRef.current = data.user.id;
         setHasSession(true);
         await hydrateProfile(data.user.id);
       } else {
         loginAttemptRef.current = false;
+        authTransitionRef.current = null;
         setLoginLoading(false);
       }
     } catch (err: any) {
       setLoginError(err.message || "Sign in failed");
       loginAttemptRef.current = false;
+      authTransitionRef.current = null;
       setLoginLoading(false);
     }
   };
   const logout = async () => {
     loginAttemptRef.current = false;
-    await signOut();
+    authTransitionRef.current = "logout";
+    expectedUserIdRef.current = null;
+    lastLoadedUserIdRef.current = null;
     qc.clear();
     setHasSession(false);
     setCurrentUser(null);
+    setLoginLoading(false);
     setPage("dashboard");
     setSelectedWO(null);
     setLoginEmail("");
     setAiNote(null);
+    setInvoices?.([]);
+    try {
+      await signOut("local");
+    } finally {
+      authTransitionRef.current = null;
+    }
   };
 
   // -- DATA LOADERS - fire when auth session is available ---------------
@@ -152,8 +183,6 @@ export default function useAuth({
         } catch (err: any) {
           if (!mounted) return;
           // hydrateProfile already surfaced the error.
-        } finally {
-          if (mounted) setLoginLoading(false);
         }
       }, 0);
     };
@@ -161,15 +190,32 @@ export default function useAuth({
     const sb = supabase();
     const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
+      // A token refresh from the previous identity can arrive while a
+      // password request is in flight. The direct sign-in result is the
+      // authority until its new user id is known.
+      if (authTransitionRef.current === "login" && expectedUserIdRef.current === null) return;
+      if (authTransitionRef.current === "logout" && event !== "SIGNED_OUT") return;
       if ((event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session?.user) {
+        const nextUserId = session.user.id;
+        if (expectedUserIdRef.current !== nextUserId) {
+          // INITIAL_SESSION and cross-tab sign-ins can change identity without
+          // going through doLogin in this component.
+          qc.clear();
+          lastLoadedUserIdRef.current = null;
+          setCurrentUser(null);
+        }
+        expectedUserIdRef.current = nextUserId;
         setHasSession(true);
-        hydrate(session.user.id);
+        hydrate(nextUserId);
       } else if (event === "INITIAL_SESSION" && !session) {
         // No session on mount - make sure the spinner isn't left on.
+        expectedUserIdRef.current = null;
+        lastLoadedUserIdRef.current = null;
         setHasSession(false);
         setLoginLoading(false);
       } else if (event === "SIGNED_OUT") {
         qc.clear();
+        expectedUserIdRef.current = null;
         lastLoadedUserIdRef.current = null;
         setHasSession(false);
         setCurrentUser(null);
