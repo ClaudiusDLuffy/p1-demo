@@ -12,6 +12,9 @@ const pagination = read(
 const visitCorrections = read(
   "supabase/migrations/0077_audited_work_order_visit_corrections.sql",
 );
+const cursorPermissionHotfix = read(
+  "supabase/migrations/0078_pagination_cursor_permissions.sql",
+);
 
 test("interactive datasets use bounded RLS-aware keyset pages", () => {
   for (const functionName of [
@@ -92,6 +95,18 @@ test("Phase 3 adds indexes for page cursors and database-side search", () => {
   ]) assert.match(pagination, new RegExp(`index if not exists ${indexName}`));
   assert.match(pagination, /create extension if not exists pg_trgm/);
   assert.match(pagination, /grant execute[\s\S]*?to authenticated, service_role/);
+});
+
+test("authenticated page RPCs can encode and decode their opaque cursors", () => {
+  for (const signature of [
+    "portal_encode_cursor\\(jsonb\\)",
+    "portal_decode_cursor\\(text\\)",
+  ]) {
+    assert.match(
+      cursorPermissionHotfix,
+      new RegExp(`grant execute on function public\\.${signature}\\s+to authenticated, service_role`, "i"),
+    );
+  }
 });
 
 test("visit corrections are validated, audited, and cannot be written directly", () => {
