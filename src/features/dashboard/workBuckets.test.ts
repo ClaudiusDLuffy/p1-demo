@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -7,6 +9,21 @@ import {
 } from "./workBuckets";
 
 const ids = (rows: Array<{ id: string }>) => rows.map(row => row.id);
+const dashboardWorkBucketsSource = readFileSync(
+  resolve(process.cwd(), "src/features/dashboard/DashboardWorkBuckets.tsx"),
+  "utf8",
+);
+
+test("dashboard operational queues start collapsed and expand only by user action", () => {
+  assert.match(
+    dashboardWorkBucketsSource,
+    /useState<Partial<Record<DashboardBucketId, boolean>>>\(\{\}\)/,
+  );
+  assert.match(
+    dashboardWorkBucketsSource,
+    /const isExpanded = expanded\[bucket\.id\] === true/,
+  );
+});
 
 test("dashboard buckets expose each operational queue without merging their meanings", () => {
   const buckets = buildDashboardWorkBuckets({
