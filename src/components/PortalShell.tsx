@@ -1,6 +1,6 @@
 ﻿"use client";
 // @ts-nocheck
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useQueryClient } from "@tanstack/react-query";
@@ -100,6 +100,14 @@ import {
 import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
 import { isInvoiceController } from "../lib/staffPermissions";
 import {
+  WORK_ORDER_REOPEN_REASON_MAX_LENGTH,
+  normalizeWorkOrderReopenReason,
+  validateWorkOrderReopenReason,
+  workOrderReopenOptions,
+  type ReopenableWorkOrder,
+  type WorkOrderReopenMode,
+} from "../lib/workOrderReopen";
+import {
   REALTIME_INVALIDATION_BATCH_MS,
   datasetsForRealtimeTables,
   type PortalRealtimeTable,
@@ -157,6 +165,11 @@ async function notificationFetch(path: string, body: Record<string, unknown>) {
     console.error("Notification request failed", payload.error || res.statusText);
   }
 }
+
+type ReopenTarget = ReopenableWorkOrder & {
+  id: string;
+  status: string;
+};
 
 // ===============================================================
 //  THEME - Claude-inspired warm palette. Tokens are the source of truth.
@@ -1128,6 +1141,10 @@ export default function PortalShell() {
   const [aiNote, setAiNote] = useState(null);
   const [modal, setModal] = useState(null);
   const [modalLoading, setModalLoading] = useState(false);
+  const [reopenTarget, setReopenTarget] = useState<ReopenTarget | null>(null);
+  const [reopenMode, setReopenMode] = useState<WorkOrderReopenMode | "">("");
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenError, setReopenError] = useState("");
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const [reassignSearch, setReassignSearch] = useState("");
@@ -1619,6 +1636,31 @@ export default function PortalShell() {
       : null,
     [maskedWorkOrders, selectedWO, selectedWorkOrderForView]
   );
+  const resetReopenForm = useCallback(() => {
+    setReopenTarget(null);
+    setReopenMode("");
+    setReopenReason("");
+    setReopenError("");
+  }, []);
+  const closeReopenModal = useCallback(() => {
+    setModal(null);
+    resetReopenForm();
+  }, [resetReopenForm]);
+  const requestReopen = useCallback((workOrder: ReopenTarget) => {
+    if (!isManager || invoiceController) {
+      fire("Operational staff access is required to reopen work orders");
+      return;
+    }
+    if (!workOrder?.id || workOrder.status !== "closed") {
+      fire("Only a closed work order can be reopened");
+      return;
+    }
+    setReopenTarget(workOrder);
+    setReopenMode("");
+    setReopenReason("");
+    setReopenError("");
+    setModal("reopen");
+  }, [fire, invoiceController, isManager]);
   const invoiceFormWorkOrder = useMemo(
     () => resumeDraft?.wot
       ? maskedWorkOrders.find((workOrder: any) => workOrder.id === resumeDraft.wot)
@@ -3112,7 +3154,30 @@ export default function PortalShell() {
             fire={fire}
           />
 
-          <HistoryView page={page} isManager={isManager} selectedWO={selectedWO} histFrom={histFrom} setHistFrom={setHistFrom} histTo={histTo} setHistTo={setHistTo} histSearch={histSearch} setHistSearch={setHistSearch} histContractor={histContractor} setHistContractor={setHistContractor} histReso={histReso} setHistReso={setHistReso} invoices={invoices} closedWOs={closedWOs} contractorsOnly={contractorsOnly} setSelectedWO={setSelectedWO} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
+          <HistoryView
+            page={page}
+            isManager={isManager}
+            canReopen={isManager && !invoiceController}
+            onRequestReopen={requestReopen}
+            selectedWO={selectedWO}
+            histFrom={histFrom}
+            setHistFrom={setHistFrom}
+            histTo={histTo}
+            setHistTo={setHistTo}
+            histSearch={histSearch}
+            setHistSearch={setHistSearch}
+            histContractor={histContractor}
+            setHistContractor={setHistContractor}
+            histReso={histReso}
+            setHistReso={setHistReso}
+            invoices={invoices}
+            closedWOs={closedWOs}
+            contractorsOnly={contractorsOnly}
+            setSelectedWO={setSelectedWO}
+            setAiNote={setAiNote}
+            getUser={getUser}
+            fmt={fmt}
+          />
 
           {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderQuery.isLoading && (
             <div className="card" role="status" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
@@ -3182,6 +3247,7 @@ export default function PortalShell() {
             doMarkPaid={doMarkPaid}
             doCloseWO={doCloseWO}
             doCloseWithoutInvoice={doCloseWithoutInvoice}
+            onRequestReopen={requestReopen}
             doDownloadInvoice={doDownloadInvoice}
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}
@@ -3565,31 +3631,128 @@ export default function PortalShell() {
         );
       })()}
 
-      {modal === "reopen" && woData && (
-        <Modal onClose={() => setModal(null)} title="Reopen work order" width={420}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Reopen <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
-            <CopyWorkOrderButton value={woData.id} />? It returns to the active board and leaves History. Invoice states are untouched, so staff can continue billing or add more invoices.
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button
-              onClick={async () => {
-                setModalLoading(true);
-                try {
-                  await doReopen(woData.id);
-                  setModal(null);
-                } finally {
-                  setModalLoading(false);
-                }
-              }}
-              disabled={modalLoading}
-              className="btn-primary"
-              style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />Reopening...</> : "Reopen"}</button>
-          </div>
-        </Modal>
-      )}
+      {modal === "reopen" && reopenTarget && (() => {
+        const reopenOptions = workOrderReopenOptions(reopenTarget);
+        return (
+          <Modal
+            onClose={() => { if (!modalLoading) closeReopenModal(); }}
+            closeOnBackdrop={!modalLoading}
+            title="Reopen work order"
+            width={540}
+          >
+            <div style={{ fontSize: 13, color: T.muted, marginBottom: 18, lineHeight: 1.55 }}>
+              Choose why <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{reopenTarget.id}</span>{" "}
+              <CopyWorkOrderButton value={reopenTarget.id} /> is being reopened. The selected purpose determines which operational queue receives it.
+            </div>
+
+            <div role="radiogroup" aria-label="Reopen purpose" style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+              {reopenOptions.map(option => {
+                const selected = reopenMode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={option.disabled || modalLoading}
+                    onClick={() => {
+                      setReopenMode(option.value);
+                      setReopenError("");
+                    }}
+                    style={{
+                      padding: "13px 14px",
+                      borderRadius: 12,
+                      border: `1px solid ${selected ? T.accent : T.border}`,
+                      background: selected ? T.accentSoft : T.surface,
+                      color: T.ink,
+                      textAlign: "left",
+                      fontFamily: "inherit",
+                      cursor: option.disabled || modalLoading ? "not-allowed" : "pointer",
+                      opacity: option.disabled ? 0.55 : 1,
+                    }}
+                  >
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 800 }}>{option.label}</span>
+                    <span style={{ display: "block", marginTop: 4, fontSize: 11, color: T.muted, lineHeight: 1.45 }}>
+                      {option.disabledReason || option.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <Field label="Reason for reopening *">
+              <TA
+                rows={3}
+                maxLength={WORK_ORDER_REOPEN_REASON_MAX_LENGTH}
+                value={reopenReason}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                  setReopenReason(event.target.value);
+                  setReopenError("");
+                }}
+                disabled={modalLoading}
+                placeholder="Explain what needs to continue or be corrected..."
+                aria-invalid={Boolean(reopenError)}
+              />
+            </Field>
+            <div style={{ marginTop: -8, marginBottom: 14, textAlign: "right", fontSize: 10, color: T.subtle }}>
+              {reopenReason.length}/{WORK_ORDER_REOPEN_REASON_MAX_LENGTH}
+            </div>
+
+            <div role="note" style={{ padding: "11px 12px", borderRadius: 10, background: T.warnSoft, color: "#73560C", fontSize: 11, lineHeight: 1.5, marginBottom: 14 }}>
+              Existing invoices, contractor and technician assignments, historical activities, and prior visits will not be changed. Reopening sends no dispatch notification.
+            </div>
+
+            {reopenError && (
+              <div role="alert" style={{ color: T.danger, background: T.dangerSoft, borderRadius: 9, padding: "9px 11px", fontSize: 11, marginBottom: 14 }}>
+                {reopenError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={closeReopenModal}
+                disabled={modalLoading}
+                className="btn-soft"
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!reopenMode) {
+                    setReopenError("Choose whether this is for field work or billing follow-up.");
+                    return;
+                  }
+                  const reasonError = validateWorkOrderReopenReason(reopenReason);
+                  if (reasonError) {
+                    setReopenError(reasonError);
+                    return;
+                  }
+
+                  setModalLoading(true);
+                  setReopenError("");
+                  try {
+                    const reopened = await doReopen(
+                      reopenTarget.id,
+                      reopenMode,
+                      normalizeWorkOrderReopenReason(reopenReason),
+                    );
+                    if (reopened) {
+                      closeReopenModal();
+                    } else {
+                      setReopenError("The work order was not reopened. Review the error message, then retry.");
+                    }
+                  } finally {
+                    setModalLoading(false);
+                  }
+                }}
+                disabled={modalLoading}
+                className="btn-primary"
+                style={modalActionStyle}
+              >{modalLoading ? <><BtnSpinner />Reopening...</> : "Reopen work order"}</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {modal === "deleteActivity" && pendingDelete && (
         <Modal onClose={() => { setModal(null); setPendingDelete(null); }} title="Delete comment" width={420}>

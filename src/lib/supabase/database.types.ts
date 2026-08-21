@@ -36,6 +36,7 @@ export type Database = {
           text: string
           type: string | null
           work_order_id: string
+          workflow_cycle: number
         }
         Insert: {
           author_id?: string | null
@@ -58,6 +59,7 @@ export type Database = {
           text: string
           type?: string | null
           work_order_id: string
+          workflow_cycle?: number
         }
         Update: {
           author_id?: string | null
@@ -80,6 +82,7 @@ export type Database = {
           text?: string
           type?: string | null
           work_order_id?: string
+          workflow_cycle?: number
         }
         Relationships: [
           {
@@ -1699,6 +1702,7 @@ export type Database = {
           technician_assigned_at: string | null
           technician_assigned_by: string | null
           updated_at: string | null
+          workflow_cycle: number
         }
         Insert: {
           address?: string | null
@@ -1768,6 +1772,7 @@ export type Database = {
           technician_assigned_at?: string | null
           technician_assigned_by?: string | null
           updated_at?: string | null
+          workflow_cycle?: number
         }
         Update: {
           address?: string | null
@@ -1837,6 +1842,7 @@ export type Database = {
           technician_assigned_at?: string | null
           technician_assigned_by?: string | null
           updated_at?: string | null
+          workflow_cycle?: number
         }
         Relationships: [
           {
@@ -2116,6 +2122,14 @@ export type Database = {
       request_p1_part_order: {
         Args: { p_part_id: string }
         Returns: Database["public"]["Tables"]["wo_parts"]["Row"]
+      }
+      reopen_work_order: {
+        Args: {
+          p_mode: string
+          p_reason: string
+          p_work_order_id: string
+        }
+        Returns: Json
       }
       resubmit_rejected_contractor_invoice: {
         Args: {

@@ -15,6 +15,7 @@ import {
   moveWorkOrderStraightToBilling,
   completeCapitalWork,
   closeWorkOrderWithoutInvoice,
+  reopenWorkOrder,
   assignContractorTechnician,
   reviewContractorInvoice,
   loadInvoiceById,
@@ -46,6 +47,7 @@ import {
   INVOICES_KEY,
 } from "../invoices/queries";
 import { contractorInvoiceWorkOrderStatus } from "../../lib/contractorInvoiceReview";
+import type { WorkOrderReopenMode } from "../../lib/workOrderReopen";
 
 const PART_STATUS_LABEL: Record<string, string> = {
   ordered: "Ordered",
@@ -932,28 +934,53 @@ export default function useWorkOrders({
     }
   };
 
-  // Staff-only fail-safe: pull a closed WO back onto the active board by
-  // pulling it back onto the active board. Now that closing is a manual
-  // staff decision (not "all invoices paid"), reopening does NOT touch
-  // invoice states — a closed WO can have any mix (paid, approved,
-  // submitted, none). We just clear closed_at and recompute WO status from
-  // whatever invoices currently exist; defaults to pending_invoice when
-  // there are none.
-  const doReopen = async (woId: string) => {
+  // Reopening is one locked server-side lifecycle transition. The RPC owns
+  // authorization, mode-specific status selection, repeat-completion
+  // boundaries, and the audit record. Apply local state only after commit;
+  // invoices, assignments, technicians, and prior visits remain untouched.
+  const doReopen = async (
+    woId: string,
+    mode: WorkOrderReopenMode,
+    reason: string,
+  ) => {
     setLoading("reopen_" + woId, true);
     try {
-    const workOrderInvoices = await loadWorkOrderInvoicesForMutation(woId);
-    const nextWoStatus = computeWoStatusFromInvoices(woId, workOrderInvoices) || "pending_invoice";
-    const text = `Work order reopened by ${currentUser.name}.`;
-    const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: nextWoStatus, closedAt: null }, localActivity(text, "system"));
-    const saved = await dbCall(async () => {
-      await updateWorkOrder(woId, { status: nextWoStatus, closedAt: null });
-      await insertActivity(woId, currentUser.name, text, "system");
-    }, "Reopen failed", () => restoreWorkOrders(woSnapshot));
-    if (saved) fire("Work order reopened — back on the active board");
-    return Boolean(saved);
+      const result = await reopenWorkOrder(woId, mode, reason);
+      if (!result.applied && result.reason === "already_open") {
+        invalidateWorkOrders();
+        fire("Work order is already open");
+        return true;
+      }
+
+      const purpose = mode === "resume_work" ? "field work" : "billing follow-up";
+      const text = `Work order reopened by ${currentUser.name} for ${purpose}. Reason: ${reason.trim()}`;
+      patchLocalWO(
+        woId,
+        {
+          status: result.workOrderStatus,
+          functionalStatus: result.functionalStatus,
+          closedAt: result.closedAt,
+          billingReadyAt: result.billingReadyAt ?? null,
+          workflowCycle: result.workflowCycle,
+        },
+        localActivity(
+          text,
+          "system",
+          false,
+          "work_order_reopened",
+          false,
+          true,
+        ),
+      );
+      invalidateWorkOrders();
+      fire(mode === "resume_work"
+        ? "Work order reopened for field work"
+        : "Work order reopened for billing follow-up");
+      return true;
     } catch (error: any) {
+      // A network interruption can hide a committed response. Refetch the
+      // authoritative server state before the user retries.
+      invalidateWorkOrders();
       fire(`Reopen failed: ${error.message || error}`);
       return false;
     } finally {

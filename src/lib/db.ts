@@ -17,6 +17,7 @@ import type {
   PortalRealtimeChange,
   PortalRealtimeTable,
 } from "./realtimeInvalidation";
+import type { WorkOrderReopenMode } from "./workOrderReopen";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -455,6 +456,7 @@ const mapWO = (w: any) => ({
   billingReadyBy: w.billing_ready_by || null,
   contractorAssignmentStartedAt: w.contractor_assignment_started_at || null,
   contractorAssignmentVersion: Number(w.contractor_assignment_version || 0),
+  workflowCycle: Number(w.workflow_cycle || 0),
   staffNotesSeenAt: w.staff_notes_seen_at || null,
   technicianOnJob: w.technician_on_job,
   assignedTechnicianProfileId: w.assigned_technician_profile_id || null,
@@ -495,6 +497,7 @@ const mapActivity = (a: any, timeZone?: string) => ({
   requiresContractorAttention: !!a.requires_contractor_attention,
   contractorAcknowledgedAt: a.contractor_attention_acknowledged_at || null,
   contractorAcknowledgedBy: a.contractor_attention_acknowledged_by || null,
+  workflowCycle: Number(a.workflow_cycle || 0),
 });
 
 const mapVisit = (visit: any) => ({
@@ -1011,6 +1014,33 @@ export async function closeWorkOrderWithoutInvoice(id: string): Promise<Json> {
   );
   if (error) throw error;
   return data;
+}
+
+export type ReopenWorkOrderResult = {
+  applied: boolean;
+  reason: "reopened" | "already_open" | string;
+  mode?: WorkOrderReopenMode;
+  workOrderId: string;
+  workOrderStatus: string;
+  functionalStatus: string | null;
+  closedAt: string | null;
+  billingReadyAt?: string | null;
+  workflowCycle: number;
+};
+
+export async function reopenWorkOrder(
+  id: string,
+  mode: WorkOrderReopenMode,
+  reason: string,
+): Promise<ReopenWorkOrderResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("reopen_work_order", {
+    p_work_order_id: id,
+    p_mode: mode,
+    p_reason: reason,
+  });
+  if (error) throw error;
+  return data as unknown as ReopenWorkOrderResult;
 }
 
 export async function markWorkOrderNotesSeen(

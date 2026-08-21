@@ -10,7 +10,7 @@ import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
 
 export default function HistoryView(props: any) {
-  const { page, isManager, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
+  const { page, isManager, canReopen, onRequestReopen, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
   const deferredSearch = useDeferredValue(histSearch || "");
   const pageSize = 24;
   const cursorSignature = JSON.stringify({
@@ -157,6 +157,20 @@ export default function HistoryView(props: any) {
                       <div>Closed <strong style={{ color: T.ink }}>{w.closedAt ? new Date(w.closedAt).toLocaleDateString() : "-"}</strong></div>
                       <div>Total <strong style={{ color: T.ink }}>{fmt(woTotal)}</strong>{woInvCount > 1 ? <span style={{ color: T.subtle, fontWeight: 400 }}> · {woInvCount} invoices</span> : null}</div>
                     </div>
+                    {canReopen && (
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>
+                        <button
+                          type="button"
+                          className="btn-soft"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onRequestReopen?.(w);
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >Reopen</button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -210,6 +224,18 @@ export default function HistoryView(props: any) {
                 <div style={{ marginTop: 6, fontSize: 11, color: T.muted }}>
                   {w.resolutionCode}
                 </div>
+              )}
+              {canReopen && (
+                <button
+                  type="button"
+                  className="btn-soft"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onRequestReopen?.(w);
+                  }}
+                  style={{ width: "100%", marginTop: 10 }}
+                >Reopen work order</button>
               )}
             </div>
           ))}
