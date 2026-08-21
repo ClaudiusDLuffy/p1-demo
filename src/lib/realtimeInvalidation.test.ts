@@ -20,6 +20,10 @@ test("realtime invalidation maps each table only to affected datasets", () => {
     datasetsForRealtimeTables(["photos"]),
     ["workOrderDetails"],
   );
+  assert.deepEqual(
+    datasetsForRealtimeTables(["contractor_estimates"]),
+    ["contractorEstimates"],
+  );
 });
 
 test("batched tables produce a distinct targeted dataset union", () => {
@@ -49,4 +53,10 @@ test("work-order IDs are extracted from new and delete payloads", () => {
     new: {},
     old: {},
   }), null);
+  assert.equal(workOrderIdFromRealtimeChange({
+    table: "contractor_estimates",
+    eventType: "UPDATE",
+    new: { work_order_id: "WOT3" },
+    old: {},
+  }), "WOT3");
 });

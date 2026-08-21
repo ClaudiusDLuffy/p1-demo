@@ -43,6 +43,10 @@ const QuoteCalculator = dynamic(
   () => import("./QuoteCalculatorWorkspace"),
   { ssr: false }
 );
+const ContractorEstimatePanel = dynamic(
+  () => import("../estimates/ContractorEstimatePanel"),
+  { ssr: false }
+);
 
 // ETA is stored as an ISO timestamp (timestamptz). Render it in the user's
 // locale. Falls through to the raw string for any legacy non-ISO value so
@@ -63,7 +67,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -249,6 +253,28 @@ export default function WorkOrderDetail(props: any) {
                     <div style={{ color: "#A16207", fontSize: 10, marginTop: 3 }}>
                       This work order was sent directly to Ready to Bill. Contractor assignment and dispatch notifications are disabled.
                     </div>
+                  </div>
+                )}
+
+                {woData.status === "closed" && isManager && !invoiceController && (
+                  <div className="card" style={{ padding: "14px 16px", marginBottom: 12, background: T.surface, border: `1px solid ${T.accentRing}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 280px" }}>
+                      <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>This work order is closed</div>
+                      <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                        Reopen it only when field work must resume or billing needs correction. A purpose and audit reason are required.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRequestReopen?.(woData)}
+                      disabled={isLoading("reopen_" + woData.id)}
+                      className="btn-primary"
+                      style={loadingStyle("reopen_" + woData.id)}
+                    >
+                      {isLoading("reopen_" + woData.id)
+                        ? <><BtnSpinner />Reopening...</>
+                        : "Reopen work order"}
+                    </button>
                   </div>
                 )}
 
@@ -579,15 +605,22 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("closeWithoutInvoice_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close — no invoice"}
                         </button>
                       ))}
-                      {/* Closed job: always-available invoice download + staff-only reopen. */}
+                      {/* Closed job: invoice download remains available. Reopen is
+                          deliberately prominent in the closed-state banner. */}
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
-                      {woData.status === "closed" && isManager && (
-                        <button onClick={() => setModal("reopen")} disabled={isLoading("reopen_" + woData.id)} className="btn-soft" style={loadingStyle("reopen_" + woData.id)}>
-                          {isLoading("reopen_" + woData.id) ? <><BtnSpinnerDark />Reopening...</> : "Reopen"}
-                        </button>
-                      )}
 
                     </div>
+
+                    {!invoiceController && (isManager || canInvoice) && (
+                      <ContractorEstimatePanel
+                        workOrder={woData}
+                        currentUser={currentUser}
+                        isManager={isManager}
+                        fire={fire}
+                        fmt={fmt}
+                        onOpenInvoiceDraft={draft => openCreate(draft)}
+                      />
+                    )}
 
                     {/* ─────────────── INVOICES ON THIS WORK ORDER ────────────────
                         Multi-invoice support: each visit is its own complete

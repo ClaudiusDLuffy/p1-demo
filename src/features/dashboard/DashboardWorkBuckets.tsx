@@ -49,15 +49,9 @@ export default function DashboardWorkBuckets({
   onOpenWorkOrder: (workOrderId: string) => void;
   onViewAll: () => void;
 }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    pending_submission: true,
-    pending_approval: true,
-    awaiting_parts: false,
-    seven_eleven_updates: true,
-    unassigned: true,
-    p1_parts_to_order: true,
-    pending_capital_completion: true,
-  });
+  // Buckets open only after an explicit user action, so newly added queues also
+  // inherit the requested collapsed-by-default behavior.
+  const [expanded, setExpanded] = useState<Partial<Record<DashboardBucketId, boolean>>>({});
   const deferredSearch = useDeferredValue(search.trim());
   const {
     positions,
@@ -106,7 +100,7 @@ export default function DashboardWorkBuckets({
       <div className="dashboard-bucket-grid" style={{ display: "grid", gap: 12 }}>
         {buckets.map(bucket => {
           const visibleRows = (bucket.query.data?.items || []) as DashboardWorkOrder[];
-          const isExpanded = expanded[bucket.id] !== false;
+          const isExpanded = expanded[bucket.id] === true;
           const color = BUCKET_COLORS[bucket.id];
           const position = positions[bucket.id];
           return (

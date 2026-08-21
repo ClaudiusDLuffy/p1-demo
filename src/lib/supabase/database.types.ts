@@ -36,6 +36,7 @@ export type Database = {
           text: string
           type: string | null
           work_order_id: string
+          workflow_cycle: number
         }
         Insert: {
           author_id?: string | null
@@ -58,6 +59,7 @@ export type Database = {
           text: string
           type?: string | null
           work_order_id: string
+          workflow_cycle?: number
         }
         Update: {
           author_id?: string | null
@@ -80,6 +82,7 @@ export type Database = {
           text?: string
           type?: string | null
           work_order_id?: string
+          workflow_cycle?: number
         }
         Relationships: [
           {
@@ -148,6 +151,172 @@ export type Database = {
           region?: string | null
         }
         Relationships: []
+      }
+      contractor_estimate_lines: {
+        Row: {
+          amount: number | null
+          description: string | null
+          estimate_id: string
+          id: string
+          position: number
+          qty: number
+          rate: number
+          type: string
+        }
+        Insert: {
+          amount?: number | null
+          description?: string | null
+          estimate_id: string
+          id?: string
+          position: number
+          qty?: number
+          rate?: number
+          type: string
+        }
+        Update: {
+          amount?: number | null
+          description?: string | null
+          estimate_id?: string
+          id?: string
+          position?: number
+          qty?: number
+          rate?: number
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_estimate_lines_estimate_id_fkey"
+            columns: ["estimate_id"]
+            isOneToOne: false
+            referencedRelation: "contractor_estimates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contractor_estimates: {
+        Row: {
+          contractor_assignment_version: number
+          contractor_id: string
+          converted_at: string | null
+          converted_by: string | null
+          converted_invoice_id: string | null
+          created_at: string
+          created_by: string
+          id: string
+          notes: string | null
+          quote_date: string
+          quote_num: string
+          sales_tax: number
+          state: string
+          submitted_at: string | null
+          submitted_by: string | null
+          subtotal: number
+          terms: string
+          total: number | null
+          updated_at: string
+          updated_by: string
+          valid_until: string | null
+          work_order_id: string
+        }
+        Insert: {
+          contractor_assignment_version: number
+          contractor_id: string
+          converted_at?: string | null
+          converted_by?: string | null
+          converted_invoice_id?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          notes?: string | null
+          quote_date?: string
+          quote_num?: string
+          sales_tax?: number
+          state?: string
+          submitted_at?: string | null
+          submitted_by?: string | null
+          subtotal?: number
+          terms?: string
+          total?: number | null
+          updated_at?: string
+          updated_by: string
+          valid_until?: string | null
+          work_order_id: string
+        }
+        Update: {
+          contractor_assignment_version?: number
+          contractor_id?: string
+          converted_at?: string | null
+          converted_by?: string | null
+          converted_invoice_id?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          notes?: string | null
+          quote_date?: string
+          quote_num?: string
+          sales_tax?: number
+          state?: string
+          submitted_at?: string | null
+          submitted_by?: string | null
+          subtotal?: number
+          terms?: string
+          total?: number | null
+          updated_at?: string
+          updated_by?: string
+          valid_until?: string | null
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_estimates_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimates_converted_by_fkey"
+            columns: ["converted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimates_converted_invoice_id_fkey"
+            columns: ["converted_invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimates_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimates_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimates_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contractor_technicians: {
         Row: {
@@ -1699,6 +1868,7 @@ export type Database = {
           technician_assigned_at: string | null
           technician_assigned_by: string | null
           updated_at: string | null
+          workflow_cycle: number
         }
         Insert: {
           address?: string | null
@@ -1768,6 +1938,7 @@ export type Database = {
           technician_assigned_at?: string | null
           technician_assigned_by?: string | null
           updated_at?: string | null
+          workflow_cycle?: number
         }
         Update: {
           address?: string | null
@@ -1837,6 +2008,7 @@ export type Database = {
           technician_assigned_at?: string | null
           technician_assigned_by?: string | null
           updated_at?: string | null
+          workflow_cycle?: number
         }
         Relationships: [
           {
@@ -1995,6 +2167,10 @@ export type Database = {
         }
         Returns: Database["public"]["Tables"]["invoices"]["Row"]
       }
+      convert_contractor_estimate_to_invoice: {
+        Args: { p_estimate_id: string }
+        Returns: Json
+      }
       submit_contractor_invoice_once: {
         Args: {
           p_cme: string | null
@@ -2090,6 +2266,21 @@ export type Database = {
         }
         Returns: string
       }
+      save_contractor_estimate: {
+        Args: {
+          p_estimate_id: string | null
+          p_expected_updated_at?: string | null
+          p_lines: Json
+          p_notes: string | null
+          p_quote_date: string
+          p_sales_tax: number
+          p_submit?: boolean
+          p_terms: string
+          p_valid_until: string | null
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
       move_work_order_straight_to_billing: {
         Args: { p_work_order_id: string }
         Returns: Database["public"]["Tables"]["work_orders"]["Row"]
@@ -2116,6 +2307,14 @@ export type Database = {
       request_p1_part_order: {
         Args: { p_part_id: string }
         Returns: Database["public"]["Tables"]["wo_parts"]["Row"]
+      }
+      reopen_work_order: {
+        Args: {
+          p_mode: string
+          p_reason: string
+          p_work_order_id: string
+        }
+        Returns: Json
       }
       resubmit_rejected_contractor_invoice: {
         Args: {
