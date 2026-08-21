@@ -12,12 +12,18 @@ import {
 import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
 import type { Invoice, WorkOrder } from "./schemas";
-import type { Json } from "./supabase/database.types";
+import type { Database, Json } from "./supabase/database.types";
 import type {
   PortalRealtimeChange,
   PortalRealtimeTable,
 } from "./realtimeInvalidation";
 import type { WorkOrderReopenMode } from "./workOrderReopen";
+import type {
+  ContractorEstimate,
+  ContractorEstimateLine,
+  ContractorEstimateLineType,
+  EditableContractorEstimateLine,
+} from "./contractorEstimate";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -661,6 +667,181 @@ function ageString(createdAt: string, dispatchedAt?: string): string {
   const days = Math.floor(hrs / 24);
   if (days < 14) return `${days}d`;
   return `${Math.floor(days / 7)}w`;
+}
+
+// ── CONTRACTOR ESTIMATES ──────────────────────────────────────────────────
+// Estimates deliberately stay outside the invoice tables. The two RPCs are
+// the only authenticated write boundary; direct table access is read-only.
+
+type ContractorEstimateRow =
+  Database["public"]["Tables"]["contractor_estimates"]["Row"];
+type ContractorEstimateLineRow =
+  Database["public"]["Tables"]["contractor_estimate_lines"]["Row"];
+
+const mapContractorEstimateLine = (
+  line: ContractorEstimateLineRow,
+): ContractorEstimateLine => ({
+  id: line.id,
+  position: Number(line.position),
+  type: line.type as ContractorEstimateLineType,
+  description: line.description || "",
+  qty: Number(line.qty || 0),
+  rate: Number(line.rate || 0),
+  amount: Number(line.amount || 0),
+});
+
+const mapContractorEstimate = (
+  estimate: ContractorEstimateRow,
+  lines: ContractorEstimateLine[],
+): ContractorEstimate => ({
+  id: estimate.id,
+  quoteNum: estimate.quote_num,
+  workOrderId: estimate.work_order_id,
+  contractorId: estimate.contractor_id,
+  contractorAssignmentVersion: Number(estimate.contractor_assignment_version),
+  quoteDate: estimate.quote_date,
+  validUntil: estimate.valid_until || null,
+  terms: estimate.terms,
+  notes: estimate.notes || null,
+  state: estimate.state as ContractorEstimate["state"],
+  subtotal: Number(estimate.subtotal || 0),
+  salesTax: Number(estimate.sales_tax || 0),
+  total: Number(estimate.total || 0),
+  submittedAt: estimate.submitted_at || null,
+  submittedBy: estimate.submitted_by || null,
+  convertedAt: estimate.converted_at || null,
+  convertedBy: estimate.converted_by || null,
+  convertedInvoiceId: estimate.converted_invoice_id || null,
+  createdAt: estimate.created_at,
+  updatedAt: estimate.updated_at,
+  lines,
+});
+
+export async function loadContractorEstimatesForWorkOrder(
+  workOrderId: string,
+): Promise<ContractorEstimate[]> {
+  if (!workOrderId) return [];
+  const sb = supabase();
+  const { data: estimates, error: estimateError } = await sb
+    .from("contractor_estimates")
+    .select("*")
+    .eq("work_order_id", workOrderId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (estimateError) throw estimateError;
+  if (!estimates?.length) return [];
+
+  const estimateIds = estimates.map(estimate => estimate.id);
+  const { data: rawLines, error: lineError } = await sb
+    .from("contractor_estimate_lines")
+    .select("*")
+    .in("estimate_id", estimateIds)
+    .order("position", { ascending: true })
+    .order("id", { ascending: true });
+  if (lineError) throw lineError;
+
+  const linesByEstimate = new Map<string, ContractorEstimateLine[]>();
+  for (const rawLine of rawLines || []) {
+    const lines = linesByEstimate.get(rawLine.estimate_id) || [];
+    lines.push(mapContractorEstimateLine(rawLine));
+    linesByEstimate.set(rawLine.estimate_id, lines);
+  }
+
+  return estimates.map(estimate => mapContractorEstimate(
+    estimate,
+    linesByEstimate.get(estimate.id) || [],
+  ));
+}
+
+export type SaveContractorEstimateInput = {
+  estimateId?: string | null;
+  workOrderId: string;
+  quoteDate: string;
+  validUntil?: string | null;
+  terms: string;
+  notes?: string | null;
+  salesTax: number;
+  lines: EditableContractorEstimateLine[];
+  submit?: boolean;
+  expectedUpdatedAt?: string | null;
+};
+
+export type SaveContractorEstimateResult = {
+  estimateId: string;
+  quoteNum: string;
+  state: "draft" | "submitted";
+  workOrderId: string;
+  subtotal: number;
+  salesTax: number;
+  total: number;
+  updatedAt: string;
+};
+
+export async function saveContractorEstimate(
+  input: SaveContractorEstimateInput,
+): Promise<SaveContractorEstimateResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("save_contractor_estimate", {
+    p_estimate_id: input.estimateId || null,
+    p_work_order_id: input.workOrderId,
+    p_quote_date: input.quoteDate,
+    p_valid_until: input.validUntil || null,
+    p_terms: input.terms,
+    p_notes: input.notes || null,
+    p_sales_tax: input.salesTax,
+    p_lines: input.lines as Json,
+    p_submit: Boolean(input.submit),
+    p_expected_updated_at: input.expectedUpdatedAt || null,
+  });
+  if (error) throw error;
+  const result = data as Record<string, Json> | null;
+  if (!result || typeof result.estimateId !== "string") {
+    throw new Error("The server returned an invalid estimate result");
+  }
+  return {
+    estimateId: result.estimateId,
+    quoteNum: String(result.quoteNum || ""),
+    state: result.state === "submitted" ? "submitted" : "draft",
+    workOrderId: String(result.workOrderId || input.workOrderId),
+    subtotal: Number(result.subtotal || 0),
+    salesTax: Number(result.salesTax || 0),
+    total: Number(result.total || 0),
+    updatedAt: String(result.updatedAt || ""),
+  };
+}
+
+export type ConvertContractorEstimateResult = {
+  estimateId: string;
+  quoteNum: string;
+  invoiceId: string;
+  invoiceNum: string;
+  invoiceState: "draft";
+  workOrderId: string;
+  alreadyConverted: boolean;
+};
+
+export async function convertContractorEstimateToInvoice(
+  estimateId: string,
+): Promise<ConvertContractorEstimateResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "convert_contractor_estimate_to_invoice",
+    { p_estimate_id: estimateId },
+  );
+  if (error) throw error;
+  const result = data as Record<string, Json> | null;
+  if (!result || typeof result.invoiceId !== "string") {
+    throw new Error("The server returned an invalid estimate conversion result");
+  }
+  return {
+    estimateId: String(result.estimateId || estimateId),
+    quoteNum: String(result.quoteNum || ""),
+    invoiceId: result.invoiceId,
+    invoiceNum: String(result.invoiceNum || ""),
+    invoiceState: "draft",
+    workOrderId: String(result.workOrderId || ""),
+    alreadyConverted: Boolean(result.alreadyConverted),
+  };
 }
 
 // ── INVOICES ────────────────────────────────────────────────────────────────
@@ -2130,6 +2311,7 @@ export function subscribeToChanges(
     .on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, handleChange("work_orders"))
     .on("postgres_changes", { event: "*", schema: "public", table: "activities" }, handleChange("activities"))
     .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, handleChange("invoices"))
+    .on("postgres_changes", { event: "*", schema: "public", table: "contractor_estimates" }, handleChange("contractor_estimates"))
     .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, handleChange("photos"))
     .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, handleChange("wo_parts"))
     .on("postgres_changes", { event: "*", schema: "public", table: "work_order_visits" }, handleChange("work_order_visits"))

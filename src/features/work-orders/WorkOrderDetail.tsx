@@ -43,6 +43,10 @@ const QuoteCalculator = dynamic(
   () => import("./QuoteCalculatorWorkspace"),
   { ssr: false }
 );
+const ContractorEstimatePanel = dynamic(
+  () => import("../estimates/ContractorEstimatePanel"),
+  { ssr: false }
+);
 
 // ETA is stored as an ISO timestamp (timestamptz). Render it in the user's
 // locale. Falls through to the raw string for any legacy non-ISO value so
@@ -606,6 +610,17 @@ export default function WorkOrderDetail(props: any) {
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
 
                     </div>
+
+                    {!invoiceController && (isManager || canInvoice) && (
+                      <ContractorEstimatePanel
+                        workOrder={woData}
+                        currentUser={currentUser}
+                        isManager={isManager}
+                        fire={fire}
+                        fmt={fmt}
+                        onOpenInvoiceDraft={draft => openCreate(draft)}
+                      />
+                    )}
 
                     {/* ─────────────── INVOICES ON THIS WORK ORDER ────────────────
                         Multi-invoice support: each visit is its own complete

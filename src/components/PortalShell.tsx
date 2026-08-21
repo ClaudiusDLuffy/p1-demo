@@ -55,6 +55,7 @@ import {
   INVOICES_KEY,
   useInvoiceByIdQuery,
 } from "../features/invoices/queries";
+import { CONTRACTOR_ESTIMATES_KEY } from "../features/estimates/queries";
 import ContractorList from "../features/contractors/ContractorList";
 import SubDispatchView from "../features/contractors/SubDispatchView";
 import StaffWorkHub from "../features/staff-work/StaffWorkHub";
@@ -1807,6 +1808,9 @@ export default function PortalShell() {
           void qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
           void qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
           void qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
+        }
+        if (dataset === "contractorEstimates") {
+          void qc.invalidateQueries({ queryKey: CONTRACTOR_ESTIMATES_KEY });
         }
         if (dataset === "woParts") void qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
         if (dataset === "staffWorkTodos") void qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY });

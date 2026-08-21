@@ -4,6 +4,7 @@ export const PORTAL_REALTIME_TABLES = [
   "work_orders",
   "activities",
   "invoices",
+  "contractor_estimates",
   "photos",
   "wo_parts",
   "work_order_visits",
@@ -26,6 +27,7 @@ export type PortalRealtimeDataset =
   | "workOrderDetails"
   | "invoices"
   | "billingInvoices"
+  | "contractorEstimates"
   | "woParts"
   | "staffWorkTodos"
   | "staffNotificationReads";
@@ -34,6 +36,7 @@ const DATASETS_BY_TABLE: Record<PortalRealtimeTable, readonly PortalRealtimeData
   work_orders: ["workOrders", "workOrderDetails"],
   activities: ["workOrders", "workOrderDetails"],
   invoices: ["invoices", "billingInvoices"],
+  contractor_estimates: ["contractorEstimates"],
   photos: ["workOrderDetails"],
   wo_parts: ["woParts"],
   work_order_visits: ["workOrderDetails"],
