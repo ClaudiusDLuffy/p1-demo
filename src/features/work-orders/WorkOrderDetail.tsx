@@ -1132,6 +1132,7 @@ export default function WorkOrderDetail(props: any) {
                       setLightbox={setLightbox}
                       doAddPhotos={doAddPhotos}
                       doRemovePhoto={doRemovePhoto}
+                      fire={fire}
                       loadingStates={loadingStates}
                     />
 

@@ -560,6 +560,36 @@ export async function loadWorkOrderPhotosPage(
   };
 }
 
+export async function loadAllWorkOrderPhotoPaths(
+  workOrderId: string,
+): Promise<string[]> {
+  if (!workOrderId) throw new Error("A work order ID is required");
+
+  const paths: string[] = [];
+  const seenPaths = new Set<string>();
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+
+  do {
+    const page = await loadWorkOrderPhotosPage(workOrderId, cursor, 100);
+    for (const path of page.items) {
+      if (!seenPaths.has(path)) {
+        seenPaths.add(path);
+        paths.push(path);
+      }
+    }
+
+    if (!page.hasMore) break;
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
+      throw new Error("Photo pagination returned an invalid cursor");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  } while (cursor);
+
+  return paths;
+}
+
 export async function loadWorkOrderVisitsPage(
   workOrderId: string,
   cursor: string | null = null,
@@ -1055,14 +1085,28 @@ function shortMonthDay(d: string | null): string {
 // ── PHOTO STORAGE URLs ──────────────────────────────────────────────────────
 // Photos in DB are storage paths. Authenticated downloads enforce storage
 // RLS on every load; blob URLs are revoked when the gallery unmounts.
+export async function loadPhotoBlob(path: string): Promise<Blob> {
+  if (!path) throw new Error("A photo path is required");
+  if (path.startsWith("data:") || path.startsWith("http")) {
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error(`Photo download failed (${response.status})`);
+    }
+    return response.blob();
+  }
+
+  const sb = supabase();
+  const { data, error } = await sb.storage.from("photos").download(path);
+  if (error) throw error;
+  if (!data) throw new Error("Empty photo response from storage");
+  return data;
+}
+
 export async function getPhotoUrl(path: string): Promise<string | null> {
   if (!path) return null;
   // If it's already a data: URL (legacy in-memory photo), return as-is
   if (path.startsWith("data:") || path.startsWith("http")) return path;
-  const sb = supabase();
-  const { data, error } = await sb.storage.from("photos").download(path);
-  if (error) throw error;
-  return data ? URL.createObjectURL(data) : null;
+  return URL.createObjectURL(await loadPhotoBlob(path));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
