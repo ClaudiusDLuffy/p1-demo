@@ -42,23 +42,34 @@ export default function WorkOrderList(props: any) {
     setAiNote,
     setPage,
     getUser,
+    storeView,
+    onClearStoreView,
   } = props;
 
-  const [sortBy, setSortBy] = useState<WorkOrderSortKey>(isManager ? "sla_due" : "newest");
+  const [sortBy, setSortBy] = useState<WorkOrderSortKey>(storeView ? "newest" : isManager ? "sla_due" : "newest");
   const [viewMode, setViewMode] = useState<"recent" | "needs_action">("recent");
   const [filterState, setFilterState] = useState("all");
-  const [hideClosed, setHideClosed] = useState(true);
+  const [hideClosed, setHideClosed] = useState(!storeView);
   const [pagingDirection, setPagingDirection] = useState<"prev" | "next" | null>(null);
   const pageSize = 10;
   const deferredSearch = useDeferredValue(search);
 
+  const exactStoreFilteredWOs = useMemo(
+    () => storeView?.storeNumber
+      ? filteredWOs.filter((workOrder: Record<string, unknown>) =>
+          String(workOrder.store || "") === storeView.storeNumber
+        )
+      : filteredWOs,
+    [filteredWOs, storeView],
+  );
+
   const fallbackStateFilteredWOs = useMemo(
     () => filterState === "all"
-      ? filteredWOs
-      : filteredWOs.filter((workOrder: Record<string, unknown>) =>
+      ? exactStoreFilteredWOs
+      : exactStoreFilteredWOs.filter((workOrder: Record<string, unknown>) =>
           stateCodeFromWorkOrder(workOrder) === filterState
         ),
-    [filteredWOs, filterState],
+    [exactStoreFilteredWOs, filterState],
   );
 
   const fallbackTableWOs = useMemo(() => {
@@ -86,6 +97,8 @@ export default function WorkOrderList(props: any) {
     hideClosed,
     viewMode,
     isManager,
+    storeNumber: storeView?.storeNumber || null,
+    storeRequestId: storeView?.requestId || null,
   });
   const {
     position: effectiveCursor,
@@ -104,6 +117,7 @@ export default function WorkOrderList(props: any) {
     pendingFirst: isManager,
     limit: pageSize,
     cursor: effectiveCursor.cursor,
+    storeNumber: storeView?.storeNumber || null,
   }, page === "work_orders" && !selectedWO);
 
   const serverPage = workOrderPageQuery.data;
@@ -215,7 +229,13 @@ export default function WorkOrderList(props: any) {
             </div>
             <input
               value={search}
-              onChange={(e: any) => setSearch(e.target.value)}
+              onChange={(e: any) => {
+                const nextSearch = e.target.value;
+                setSearch(nextSearch);
+                if (storeView && nextSearch.trim() !== storeView.storeNumber) {
+                  onClearStoreView?.();
+                }
+              }}
               placeholder="Search WO#, INC#, store, keyword..."
               style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, width: 300, fontFamily: "inherit", background: T.surface }}
             />
@@ -266,8 +286,8 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls
               </label>
             )}
-            {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent") && (
-              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent" || storeView) && (
+              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); setHideClosed(true); onClearStoreView?.(); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}

@@ -1118,6 +1118,11 @@ export default function PortalShell() {
   const [filterC, setFilterC] = useState("all");
   const [filterP, setFilterP] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [workOrderStoreView, setWorkOrderStoreView] = useState<{
+    requestId: number;
+    storeNumber: string;
+  } | null>(null);
+  const workOrderStoreViewSequenceRef = useRef(0);
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
   const [workflowReturn, setWorkflowReturn] = useState<{
@@ -1860,6 +1865,7 @@ export default function PortalShell() {
     setBillingWorkOrderToStart(null);
     setAiNote(null);
     setWorkOrderReturnPage(null);
+    setWorkOrderStoreView(null);
   }, []);
   const openUnassignedWorkOrders = useCallback(() => {
     setSearch("");
@@ -1867,6 +1873,21 @@ export default function PortalShell() {
     setFilterP("all");
     setFilterStatus("unassigned");
     nav("work_orders");
+  }, [nav]);
+  const openStoreWorkOrders = useCallback((storeNumber: string) => {
+    const exactStoreNumber = String(storeNumber || "").trim();
+    if (!exactStoreNumber) return;
+
+    setSearch(exactStoreNumber);
+    setFilterC("all");
+    setFilterP("all");
+    setFilterStatus("all");
+    nav("work_orders");
+    workOrderStoreViewSequenceRef.current += 1;
+    setWorkOrderStoreView({
+      requestId: workOrderStoreViewSequenceRef.current,
+      storeNumber: exactStoreNumber,
+    });
   }, [nav]);
 
   // Lists own their cursor pages; the shell retains only exact records needed
@@ -3021,6 +3042,9 @@ export default function PortalShell() {
           )}
 
           <WorkOrderList
+            key={workOrderStoreView
+              ? `store-${workOrderStoreView.requestId}`
+              : "work-orders"}
             page={page}
             selectedWO={selectedWO}
             search={search}
@@ -3039,6 +3063,8 @@ export default function PortalShell() {
             setAiNote={setAiNote}
             setPage={setPage}
             getUser={getUser}
+            storeView={workOrderStoreView}
+            onClearStoreView={() => setWorkOrderStoreView(null)}
           />
 
           <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
@@ -3228,6 +3254,7 @@ export default function PortalShell() {
                 setPage("my_jobs");
               }
             }}
+            onViewStoreWorkOrders={openStoreWorkOrders}
             setSelectedInvoice={setSelectedInvoice}
             onOpenContractorInvoice={openContractorInvoiceFromWorkOrder}
             setAiNote={setAiNote}

@@ -118,9 +118,9 @@ export default function VisitTimeline({
     <div className="card" style={{ padding: 18, marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 750, color: T.ink }}>Visit history · {displayedTotal}</div>
+          <div style={{ fontSize: 13, fontWeight: 750, color: T.ink }}>Field visit timeline · {displayedTotal}</div>
           <div style={{ fontSize: 10, color: T.subtle, marginTop: 3 }}>
-            Times are shown in the store time zone ({timeZone}). Corrections require a reason and are audited.
+            Technician check-in and check-out times for this work order are shown in the store time zone ({timeZone}). Corrections require a reason and are audited.
           </div>
         </div>
       </div>
