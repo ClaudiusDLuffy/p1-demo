@@ -21,7 +21,9 @@ import {
   loadInvoicesPage,
 } from "../../lib/db";
 import { P1_BUSINESS } from "../../lib/constants";
+import { acquireInvoiceMutationLocks } from "../../lib/invoiceMutationGuard";
 import { normalizeInvoiceLineNumbers } from "../../lib/invoiceMath";
+import { isRpcConflict, rpcConflictMessage } from "../../lib/rpcConflict";
 import {
   CONTRACTOR_WORKLOAD_SUMMARY_KEY,
   PORTAL_NAVIGATION_SUMMARY_KEY,
@@ -287,6 +289,14 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     if (!payload) return false;
     const { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly } = payload;
     const userTypedNum = !!draft.userTypedNum;
+    let releaseInvoiceLock: (() => void) | null = null;
+    if (existingInvoiceId && draft.resubmittingRejected) {
+      releaseInvoiceLock = acquireInvoiceMutationLocks([existingInvoiceId]);
+      if (!releaseInvoiceLock) {
+        fire("This invoice already has an update in progress");
+        return false;
+      }
+    }
     try {
       let header: any;
       let finalNum: string = draft.num || "";
@@ -402,10 +412,14 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
         fire(e.message || "That invoice number already exists for this contractor.");
+      } else if (isRpcConflict(e)) {
+        fire(rpcConflictMessage("Invoice"));
       } else {
         fire(`Invoice save failed: ${e.message || e}`);
       }
       return false;
+    } finally {
+      releaseInvoiceLock?.();
     }
   };
 
@@ -518,6 +532,11 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
   const doRejectInvoice = async (inv: any, reason: string) => {
     const trimmed = (reason || "").trim();
     if (!trimmed) { fire("Enter a rejection reason"); return false; }
+    const releaseInvoiceLock = acquireInvoiceMutationLocks([inv.id]);
+    if (!releaseInvoiceLock) {
+      fire("This invoice already has a review in progress");
+      return false;
+    }
     try {
       await reviewContractorInvoice(inv.id, "reject", trimmed);
       invalidateInvoiceData();
@@ -531,8 +550,15 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       }
       return true;
     } catch (e: any) {
-      fire(`Reject failed: ${e.message || e}`);
+      if (isRpcConflict(e)) {
+        await invalidateWorkflowData();
+        fire(rpcConflictMessage("Invoice"));
+      } else {
+        fire(`Reject failed: ${e.message || e}`);
+      }
       return false;
+    } finally {
+      releaseInvoiceLock();
     }
   };
 
@@ -556,6 +582,11 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       return false;
     }
 
+    const releaseInvoiceLocks = acquireInvoiceMutationLocks(normalizedIds);
+    if (!releaseInvoiceLocks) {
+      fire("One or more selected invoices already have a review in progress");
+      return false;
+    }
     try {
       const result = await reviewContractorInvoices(
         normalizedIds,
@@ -591,12 +622,24 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       }
       return true;
     } catch (error: any) {
-      fire(`Batch ${action === "approve" ? "approval" : "rejection"} failed: ${error.message || error}`);
+      if (isRpcConflict(error)) {
+        await invalidateWorkflowData();
+        fire(rpcConflictMessage("One or more invoices"));
+      } else {
+        fire(`Batch ${action === "approve" ? "approval" : "rejection"} failed: ${error.message || error}`);
+      }
       return false;
+    } finally {
+      releaseInvoiceLocks();
     }
   };
 
   const doRetractInvoiceRejection = async (inv: any) => {
+    const releaseInvoiceLock = acquireInvoiceMutationLocks([inv.id]);
+    if (!releaseInvoiceLock) {
+      fire("This invoice already has an update in progress");
+      return false;
+    }
     try {
       await retractContractorInvoiceRejection(inv.id);
       await invalidateWorkflowData();
@@ -609,8 +652,15 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
       }
       return true;
     } catch (error: any) {
-      fire(`Could not retract rejection: ${error.message || error}`);
+      if (isRpcConflict(error)) {
+        await invalidateWorkflowData();
+        fire(rpcConflictMessage("Invoice"));
+      } else {
+        fire(`Could not retract rejection: ${error.message || error}`);
+      }
       return false;
+    } finally {
+      releaseInvoiceLock();
     }
   };
 
