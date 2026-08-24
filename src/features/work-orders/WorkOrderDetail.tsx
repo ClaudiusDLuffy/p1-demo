@@ -33,6 +33,11 @@ import {
   useWorkOrderPartsQuery,
   useWorkOrdersPageQuery,
 } from "./queries";
+import {
+  buildStoreWorkOrderHistory,
+  storeWorkOrderHistoryTotal,
+} from "../../lib/storeWorkOrderHistory";
+import StoreWorkOrderHistory from "./StoreWorkOrderHistory";
 import VisitTimeline from "./VisitTimeline";
 
 const WorkReportForm = dynamic(
@@ -67,7 +72,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -140,6 +145,16 @@ export default function WorkOrderDetail(props: any) {
   const storeHistory = useMemo(
     () => woData ? workOrders.filter(w => w.store === woData.store && w.id !== woData.id) : [],
     [workOrders, woData]
+  );
+  const storeHistoryRows = useMemo(
+    () => buildStoreWorkOrderHistory(woData, workOrders, 5),
+    [workOrders, woData],
+  );
+  const storeHistoryTotal = storeWorkOrderHistoryTotal(
+    storeHistoryRows,
+    storeHistoryQuery.isPlaceholderData
+      ? null
+      : storeHistoryQuery.data?.totalCount,
   );
   const visibleActivities = useMemo(
     () => (woData?.activities || []).filter(
@@ -488,6 +503,25 @@ export default function WorkOrderDetail(props: any) {
                         ))}
                       </div>
                     </div>
+
+                    {isManager && woData.store && (
+                      <StoreWorkOrderHistory
+                        currentWorkOrderId={woData.id}
+                        storeNumber={String(woData.store)}
+                        rows={storeHistoryRows}
+                        totalCount={storeHistoryTotal}
+                        loading={storeHistoryQuery.isFetching}
+                        failed={storeHistoryQuery.isError}
+                        getUser={getUser}
+                        onOpenWorkOrder={(workOrderId: string) => {
+                          setAiNote(null);
+                          setSelectedWO(workOrderId);
+                        }}
+                        onViewAll={onViewStoreWorkOrders
+                          ? () => onViewStoreWorkOrders(String(woData.store))
+                          : undefined}
+                      />
+                    )}
 
                     {/* Actions */}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
