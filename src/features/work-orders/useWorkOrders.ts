@@ -47,6 +47,12 @@ import {
   INVOICES_KEY,
 } from "../invoices/queries";
 import { contractorInvoiceWorkOrderStatus } from "../../lib/contractorInvoiceReview";
+import { acquireInvoiceMutationLocks } from "../../lib/invoiceMutationGuard";
+import {
+  isRpcConflict,
+  rpcConflictMessage,
+  rpcErrorMessage,
+} from "../../lib/rpcConflict";
 import type { WorkOrderReopenMode } from "../../lib/workOrderReopen";
 
 const PART_STATUS_LABEL: Record<string, string> = {
@@ -184,9 +190,21 @@ export default function useWorkOrders({
   });
 
   // Wrap a DB call in a try/catch that fires a toast on failure
-  const dbCall = async (fn: () => Promise<any>, errorMsg: string = "Save failed", onError?: () => void, onSettled?: () => void) => {
+  const dbCall = async (
+    fn: () => Promise<any>,
+    errorMsg: string = "Save failed",
+    onError?: (error: unknown) => void,
+    onSettled?: () => void,
+    messageForError?: (error: unknown) => string,
+  ) => {
     try { await fn(); return true; }
-    catch (e: any) { if (onError) onError(); fire(`${errorMsg}: ${e.message || e}`); return false; }
+    catch (e: unknown) {
+      if (onError) onError(e);
+      fire(messageForError
+        ? messageForError(e)
+        : `${errorMsg}: ${rpcErrorMessage(e)}`);
+      return false;
+    }
     finally { if (onSettled) onSettled(); else invalidateBoth(); }
   };
 
@@ -784,6 +802,11 @@ export default function useWorkOrders({
   // current state, approve, recompute the parent WO, and write one structured
   // activity entry. Rejected siblings keep the WO in pending_approval.
   const doApproveInvoice = async (invoiceId: string) => {
+    const releaseInvoiceLock = acquireInvoiceMutationLocks([invoiceId]);
+    if (!releaseInvoiceLock) {
+      fire("This invoice already has a review in progress");
+      return false;
+    }
     setLoading("approveInvoice_" + invoiceId, true);
     try {
     const inv = invoices.find((i: any) => i.id === invoiceId)
@@ -816,7 +839,9 @@ export default function useWorkOrders({
     }, "Approval failed", () => {
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
-    });
+    }, undefined, error => isRpcConflict(error)
+      ? rpcConflictMessage("Invoice")
+      : `Approval failed: ${rpcErrorMessage(error)}`);
     if (ok) {
       fire(approvedWorkOrderStatus === "pending_invoice"
         ? `Invoice #${inv.num} approved — ready for P1 billing`
@@ -828,6 +853,7 @@ export default function useWorkOrders({
       return false;
     } finally {
       setLoading("approveInvoice_" + invoiceId, false);
+      releaseInvoiceLock();
     }
   };
 

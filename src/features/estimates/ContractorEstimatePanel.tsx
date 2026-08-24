@@ -32,6 +32,7 @@ import {
   type EditableContractorEstimateLine,
 } from "../../lib/contractorEstimate";
 import { P1_BUSINESS, T } from "../../lib/constants";
+import { isRpcConflict, rpcConflictMessage } from "../../lib/rpcConflict";
 import {
   INVOICE_BY_ID_KEY,
   INVOICE_PAGES_KEY,
@@ -239,8 +240,13 @@ export default function ContractorEstimatePanel({
         ? `Estimate #${result.quoteNum} submitted — no invoice or billing status changed`
         : `Estimate #${result.quoteNum} saved as a draft`);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      setError(message);
+      if (isRpcConflict(caught)) {
+        await invalidateEstimateWorkflow();
+        setError(`${rpcConflictMessage("Estimate")} Close and reopen this estimate to continue.`);
+      } else {
+        const message = caught instanceof Error ? caught.message : String(caught);
+        setError(message);
+      }
     } finally {
       operationLock.current = false;
       setBusy(null);
@@ -284,7 +290,12 @@ export default function ContractorEstimatePanel({
         : `Estimate #${result.quoteNum} converted to invoice #${result.invoiceNum} draft`);
       if (invoice) onOpenInvoiceDraft?.(invoice);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      if (isRpcConflict(caught)) {
+        await invalidateConvertedInvoice();
+        setError(rpcConflictMessage("Estimate"));
+      } else {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
       setConfirmAction(null);
     } finally {
       operationLock.current = false;
