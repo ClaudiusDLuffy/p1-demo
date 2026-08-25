@@ -7,6 +7,7 @@ import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { T, STATUS } from "../../lib/constants";
+import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
 
@@ -75,7 +76,7 @@ export default function SubDispatchView(props: any) {
     scope: "active",
     search: deferredSearch,
     contractorIds: teamContractorIds,
-    sort: "priority",
+    sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT,
     limit: 25,
     cursor: position.cursor,
   }, page === "team_dispatch" && currentUser?.role === "contractor");
