@@ -10,6 +10,7 @@ import {
   reportClientDiagnostic,
   reportClientFailure,
 } from "../../lib/clientDiagnostics";
+import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
 
@@ -24,7 +25,7 @@ export default function MyJobs(props: any) {
   } = useCursorPagination(deferredSearch);
   const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
-  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: "priority", limit: 25, cursor: position.cursor }, enabled);
+  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, limit: 25, cursor: position.cursor }, enabled);
   const activeCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, sort: "newest", limit: 1 }, enabled);
   const pendingCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, status: "pending_invoice", sort: "newest", limit: 1 }, enabled);
   const capitalCountQuery = useWorkOrdersPageQuery({ scope: "capital", contractorId, sort: "newest", limit: 1 }, enabled);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CONTRACTOR_ACTIVE_WORK_ORDER_SORT,
   canFlagWorkOrderCapital,
   getWorkOrderActionReasons,
   getWorkOrderProgressSteps,
@@ -10,6 +11,10 @@ import {
   workOrderHasPendingSevenElevenSync,
   workOrderNeedsAction,
 } from "./workOrderView";
+
+test("contractor active queues default to newest received calls", () => {
+  assert.equal(CONTRACTOR_ACTIVE_WORK_ORDER_SORT, "newest");
+});
 
 test("capital review can start from every open non-capital status", () => {
   for (const status of [

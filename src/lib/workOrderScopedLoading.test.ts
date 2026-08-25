@@ -9,6 +9,7 @@ const portal = read("src/components/PortalShell.tsx");
 const workOrderHook = read("src/features/work-orders/useWorkOrders.ts");
 const billingModal = read("src/features/billing/BillingInvoiceCreateModal.tsx");
 const myJobs = read("src/features/work-orders/MyJobs.tsx");
+const subDispatch = read("src/features/contractors/SubDispatchView.tsx");
 const migration = read("supabase/migrations/0076_cursor_pagination_and_portal_indexes.sql");
 
 test("work-order lists use RLS-aware cursor pages instead of global detail rows", () => {
@@ -86,6 +87,13 @@ test("contractor work-order page failures are reported and remain retryable", ()
     myJobs,
     /!jobsQuery\.isLoading && !jobsQuery\.isError && visibleJobs\.length === 0/,
   );
+});
+
+test("contractor active lists request receipt-ordered cursor pages", () => {
+  assert.match(myJobs, /sort:\s*CONTRACTOR_ACTIVE_WORK_ORDER_SORT/);
+  assert.match(subDispatch, /sort:\s*CONTRACTOR_ACTIVE_WORK_ORDER_SORT/);
+  assert.doesNotMatch(myJobs, /sort:\s*"priority"/);
+  assert.doesNotMatch(subDispatch, /sort:\s*"priority"/);
 });
 
 test("My Jobs reports a safe first-page result summary without row contents", () => {

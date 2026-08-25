@@ -3,6 +3,11 @@ import { computeSlaState } from "./slaConfig";
 
 export type WorkOrderSortKey = "sla_due" | "newest" | "oldest" | "priority";
 
+// Contractor-facing active queues follow receipt order. Priority and SLA stay
+// visible on each row, while staff operational queues keep their urgency-based
+// ordering policies.
+export const CONTRACTOR_ACTIVE_WORK_ORDER_SORT: WorkOrderSortKey = "newest";
+
 export type WorkOrderViewRow = {
   createdAt?: string | null;
   created_at?: string | null;
