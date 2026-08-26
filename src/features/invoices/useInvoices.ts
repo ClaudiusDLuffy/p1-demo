@@ -11,6 +11,7 @@ import {
   uploadInvoicePdfObject,
   downloadInvoicePdfBlob,
   deleteInvoice,
+  deleteOwnContractorInvoice,
   reviewContractorInvoice,
   reviewContractorInvoices,
   resubmitRejectedContractorInvoice,
@@ -495,14 +496,20 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     }
   };
 
-  // Staff-only soft delete (the UI gates visibility; RLS backs it up).
+  // Staff cleanup retains its service endpoint. Contractors use a narrower,
+  // atomic RPC that permits only their own current draft/rejected invoice and
+  // writes the audit entry in the same transaction.
   // Deleted invoices vanish from every list/stat because loadInvoices
   // filters deleted_at at the source. Per Gustavo's call, we do NOT
   // auto-revert WO status — if deleting the last non-draft invoice leaves
   // the WO stuck, surface a toast prompting staff to move it manually.
   const doDeleteInvoice = async (inv: any) => {
     try {
-      await deleteInvoice(inv.id);
+      if (currentUser?.role === "contractor") {
+        await deleteOwnContractorInvoice(inv.id);
+      } else {
+        await deleteInvoice(inv.id);
+      }
       // The shell no longer owns a global invoice cache. Check only this work
       // order's cursor pages before claiming that its final live invoice was
       // removed; a scoped read preserves the old warning without a full-table

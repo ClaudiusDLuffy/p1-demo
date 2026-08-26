@@ -14,6 +14,7 @@ import { isInvoiceController } from "../../lib/staffPermissions";
 import { useCursorBuckets } from "../../lib/useCursorPagination";
 import { useInvoicesPageQuery } from "../invoices/queries";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import BillingTaxRulePanel from "./BillingTaxRulePanel";
 import { useBillingInvoicePageQuery } from "./queries";
 
 const BILLING_PAGE_KEYS = [
@@ -184,6 +185,7 @@ export default function BillingInvoiceList(props: any) {
     onCreateFromWorkOrder,
     onOpenReadyInvoice,
     fmt,
+    fire,
   } = props;
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<InvoiceSortKey>("invoice");
@@ -314,6 +316,8 @@ export default function BillingInvoiceList(props: any) {
           {!controller && <button onClick={onCreate} className="btn-primary billing-create-button">+ Create Invoice</button>}
         </div>
       </div>
+
+      <BillingTaxRulePanel enabled={!controller} fire={fire} />
 
       <div style={{ display: "grid", gap: 12 }}>
         {!controller && (readyQuery.isPending || (readyQuery.data?.totalCount || 0) > 0 || Boolean(deferredSearch)) && (

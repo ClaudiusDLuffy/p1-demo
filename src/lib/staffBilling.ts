@@ -32,6 +32,29 @@ export function normalizeImportedStaffBillingLineType(
   ) {
     return "OT Labor";
   }
+
+  // Contractor PDFs and manually entered invoices sometimes label every row
+  // as "Other". Only infer from the description when the supplied category
+  // carries no useful meaning, and give travel/shipping/labor wording
+  // precedence so a phrase such as "labor to replace compressor" is not
+  // accidentally marked up as a part.
+  if (normalizedType === "Other") {
+    if (/\b(?:travel|trip|truck\s*charge|mileage)\b/i.test(detail)) {
+      return "Travel";
+    }
+    if (/\b(?:shipping|freight|delivery)\b/i.test(detail)) {
+      return "Shipping";
+    }
+    if (/\b(?:labou?r|technician\s+(?:time|hours?)|diagnostic\s+(?:time|hours?))\b/i.test(detail)) {
+      return "Labor";
+    }
+    if (
+      /\b(?:parts?|materials?|hardware|component|replacement\s+(?:unit|assembly))\b/i.test(detail)
+      || /\b(?:compressor|condenser|evaporator|motor|blower|gasket|filter|belt|bearing|valve|relay|contactor|thermostat|refrigerant|freon|fuse|pump|control\s+board|circuit\s+board|sensor|switch|solenoid|capacitor|coil|hose|fitting|connector|seal|assembly|module)\b/i.test(detail)
+    ) {
+      return "Parts/Hardware";
+    }
+  }
   return normalizedType;
 }
 

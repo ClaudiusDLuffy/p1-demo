@@ -8,6 +8,7 @@ const shell = read("src/components/PortalShell.tsx");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const list = read("src/features/work-orders/WorkOrderList.tsx");
 const timeline = read("src/features/work-orders/VisitTimeline.tsx");
+const storeHistory = read("src/features/work-orders/StoreWorkOrderHistory.tsx");
 
 test("dispatch detail uses the existing exact-store authorized work-order query", () => {
   assert.match(detail, /scope: "all",[\s\S]*storeNumber: woData\?\.store \|\| null/);
@@ -36,4 +37,18 @@ test("field visits and store work-order history have distinct labels", () => {
   assert.match(timeline, /Field visit timeline/);
   assert.doesNotMatch(timeline, />Visit history/);
   assert.match(detail, /StoreWorkOrderHistory/);
+});
+
+test("store history starts collapsed and remains independently expandable", () => {
+  assert.match(storeHistory, /useState\(false\)/);
+  assert.match(storeHistory, /aria-expanded=\{expanded\}/);
+  assert.match(storeHistory, /expanded \? "Collapse history" : "Expand history"/);
+  assert.match(storeHistory, /\{expanded && \(/);
+});
+
+test("the in-app work-order back action restores the prior history entry", () => {
+  assert.match(shell, /const backFromWorkOrder = useCallback/);
+  assert.match(shell, /portalHistoryDepthRef\.current > 0/);
+  assert.match(shell, /window\.history\.back\(\)/);
+  assert.match(shell, /onBackFromWorkOrder=\{backFromWorkOrder\}/);
 });

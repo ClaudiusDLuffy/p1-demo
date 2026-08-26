@@ -16,6 +16,7 @@ import {
   completeCapitalWork,
   closeWorkOrderWithoutInvoice,
   reopenWorkOrder,
+  finishContractorInvoicing,
   assignContractorTechnician,
   reviewContractorInvoice,
   loadInvoiceById,
@@ -769,6 +770,45 @@ export default function useWorkOrders({
     }
   };
 
+  const doFinishContractorInvoicing = async (woId: string) => {
+    setLoading("finishInvoicing_" + woId, true);
+    try {
+      const result = await finishContractorInvoicing(woId);
+      patchLocalWO(
+        woId,
+        {
+          status: result.workOrderStatus,
+          contractorInvoicingCompletedAt: result.completedAt,
+          contractorInvoicingCompletedBy: result.completedBy || currentUser?.id || null,
+          contractorInvoicingAssignmentVersion:
+            workOrders.find(workOrder => workOrder.id === woId)?.contractorAssignmentVersion ?? null,
+          contractorInvoicingWorkflowCycle:
+            workOrders.find(workOrder => workOrder.id === woId)?.workflowCycle ?? null,
+          contractorInvoicingCompletionSource: result.source || "contractor",
+        },
+        result.applied
+          ? localActivity(
+              `Invoicing marked complete by ${currentUser?.name || "contractor"}.`,
+              "system",
+              false,
+              "contractor_invoicing_completed",
+            )
+          : undefined,
+      );
+      invalidateBoth();
+      fire(result.applied
+        ? "Invoicing marked complete — staff can continue billing"
+        : "Invoicing was already marked complete");
+      return true;
+    } catch (error: any) {
+      invalidateBoth();
+      fire(`Could not finish invoicing: ${rpcErrorMessage(error)}`);
+      return false;
+    } finally {
+      setLoading("finishInvoicing_" + woId, false);
+    }
+  };
+
   // Multi-invoice rule:
   // - WO returns to pending_invoice only when every non-draft invoice is
   //   approved or sent to QuickBooks. A rejection is unresolved review work.
@@ -1466,7 +1506,8 @@ export default function useWorkOrders({
     patchLocalWO, localActivity, dbCall,
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
+    doMoveToInvoice, doFinishContractorInvoicing,
+    doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,

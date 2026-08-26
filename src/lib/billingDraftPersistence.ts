@@ -38,6 +38,7 @@ const normalizeLine = (line: unknown) => {
     qty: optionalNumber(value.qty),
     rate: optionalNumber(value.rate),
     isTaxable: !!value.isTaxable,
+    taxTreatmentManual: !!value.taxTreatmentManual,
     sourceInvoiceLineId: text(value.sourceInvoiceLineId) || null,
     sourceUnitCost: value.sourceUnitCost == null
       ? null
@@ -152,4 +153,3 @@ export function writeBillingDraft(
 export function removeBillingDraft(storage: StorageLike, key: string) {
   storage.removeItem(key);
 }
-

@@ -7,7 +7,10 @@ import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE, P1_BUSINESS } from "../../lib/constants";
-import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
+import {
+  canDeleteOwnContractorInvoice,
+  canEditRejectedContractorInvoice,
+} from "../../lib/invoicePermissions";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { useMemo, useState } from "react";
 import { useBillingInvoicePageQuery } from "../billing/queries";
@@ -53,6 +56,11 @@ export default function InvoiceDetail(props: any) {
     && inv?.state !== "paid"
     && (!controller || inv?.state === "approved");
   const canEditRejected = canEditRejectedContractorInvoice(
+    inv,
+    currentUser,
+    isManager,
+  );
+  const canDeleteInvoice = canReview || canDeleteOwnContractorInvoice(
     inv,
     currentUser,
     isManager,
@@ -143,8 +151,9 @@ export default function InvoiceDetail(props: any) {
                         {retracting ? <><BtnSpinner />Approving...</> : "Undo rejection and approve"}
                       </button>
                     )}
-                    {/* Staff-only soft delete (testing-phase cleanup) — contractors never see this. */}
-                    {canReview && (
+                    {/* The server allows contractor deletion only for an owned
+                        draft or rejected invoice; staff retain their existing path. */}
+                    {canDeleteInvoice && (
                       <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
                     )}
                   </div>

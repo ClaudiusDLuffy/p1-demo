@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canEditRejectedContractorInvoice } from "./invoicePermissions";
+import {
+  canDeleteOwnContractorInvoice,
+  canEditRejectedContractorInvoice,
+} from "./invoicePermissions";
 
 test("allows an invoice-capable company member to correct its rejected invoice", () => {
   assert.equal(canEditRejectedContractorInvoice(
@@ -43,3 +46,38 @@ test("keeps other states, other companies, report-only users, and staff out", ()
   ), false);
 });
 
+test("contractors may delete only their own draft or rejected invoices", () => {
+  const viewer = {
+    id: "member",
+    contractorAccountId: "canonical-company",
+    canInvoice: true,
+  };
+
+  assert.equal(canDeleteOwnContractorInvoice(
+    { contractor: "canonical-company", state: "draft" },
+    viewer,
+    false,
+  ), true);
+  assert.equal(canDeleteOwnContractorInvoice(
+    { contractor: "canonical-company", state: "rejected" },
+    viewer,
+    false,
+  ), true);
+  for (const state of ["submitted", "revised", "approved", "paid"]) {
+    assert.equal(canDeleteOwnContractorInvoice(
+      { contractor: "canonical-company", state },
+      viewer,
+      false,
+    ), false);
+  }
+  assert.equal(canDeleteOwnContractorInvoice(
+    { contractor: "other-company", state: "draft" },
+    viewer,
+    false,
+  ), false);
+  assert.equal(canDeleteOwnContractorInvoice(
+    { contractor: "canonical-company", state: "draft" },
+    viewer,
+    true,
+  ), false);
+});

@@ -18,6 +18,10 @@ import {
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
 import {
+  billingTaxEquipmentText,
+  resolveBillingLineTaxability,
+} from "../../lib/billingTaxRules";
+import {
   applyStaffBillingPartsMarkup,
   importedStaffBillingRate,
   isStaffBillingPartsLine,
@@ -30,6 +34,7 @@ import {
 import { billingWorkOrderOptions } from "../../lib/billingWorkOrderOptions";
 import { supabase } from "../../lib/supabase/client";
 import BillingWorkOrderActivityPanel from "./BillingWorkOrderActivityPanel";
+import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
 import {
   billingDraftStorageKey,
   createBillingDraftPayload,
@@ -41,12 +46,16 @@ import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
 import {
+  mapVerifiedLocationTaxRate,
+  postalCodeFromAddress,
+} from "../../lib/locationTax";
+import {
   useWorkOrderByIdQuery,
   useWorkOrderDetailsQuery,
   useWorkOrdersPageQuery,
 } from "../work-orders/queries";
 import { useInvoiceByIdQuery, useInvoicesPageQuery } from "../invoices/queries";
-import { useBillingInvoicePageQuery } from "./queries";
+import { useBillingInvoicePageQuery, useBillingTaxRulesQuery } from "./queries";
 import { loadAllWorkOrderVisits } from "../../lib/db";
 
 const BillingLineSchema = z.object({
@@ -55,6 +64,9 @@ const BillingLineSchema = z.object({
   qty: z.number().positive("Qty must be greater than 0"),
   rate: z.number().positive("Rate must be greater than 0"),
   isTaxable: z.boolean().default(false),
+  // UI-only. The persistence boundary ignores this flag; it prevents a later
+  // rule refresh from overwriting an explicit staff checkbox choice.
+  taxTreatmentManual: z.boolean().default(false),
   sourceInvoiceLineId: z.string().optional().nullable(),
   sourceUnitCost: z.number().nonnegative().optional().nullable(),
   markupPercent: z.number().min(0).max(999).optional().nullable(),
@@ -188,6 +200,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [customTerritory, setCustomTerritory] = useState(false);
   const [draggingLine, setDraggingLine] = useState<number | null>(null);
   const [sourceSnapshots, setSourceSnapshots] = useState<Record<string, any>>({});
+  const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
   const [taxRates, setTaxRates] = useState<any[]>([]);
   const [taxRateLoadError, setTaxRateLoadError] = useState("");
   const [numberEdited, setNumberEdited] = useState(false);
@@ -255,10 +268,12 @@ export default function BillingInvoiceCreateModal(props: any) {
   const invoiceDate = watch("invoiceDate");
   const serviceDate = watch("serviceDate");
   const taxState = String(watch("taxState") || "").toUpperCase();
+  const storeAddress = String(watch("storeAddress") || "");
   const taxRateOverride = watch("taxRateOverride");
   const salesTaxOverride = watch("salesTaxOverride");
 
   const deferredWoSearch = useDeferredValue(woSearch.trim());
+  const deferredStoreAddress = useDeferredValue(storeAddress.trim());
   const requestedWorkOrderId = selectedWorkOrderId
     || editingInvoice?.wot
     || initialWorkOrderId
@@ -299,6 +314,9 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, modal === "createBillingInvoice" && Boolean(
     selectedWorkOrderId || editingInvoice?.wot || initialWorkOrderId,
   ));
+  const billingTaxRulesQuery = useBillingTaxRulesQuery(
+    modal === "createBillingInvoice",
+  );
   const workOrders = useMemo(() => {
     const rows = [
       ...(workOrderOptionsQuery.data?.items || []),
@@ -355,6 +373,52 @@ export default function BillingInvoiceCreateModal(props: any) {
     },
     [completeVisitsQuery.data, selectedWorkOrderBase, selectedWorkOrderDetails],
   );
+  const billingTaxRules = billingTaxRulesQuery.data || [];
+  const taxabilityForLine = useCallback((type: unknown, description: unknown) =>
+    resolveBillingLineTaxability(
+      billingTaxRules,
+      {
+        equipmentText: billingTaxEquipmentText(selectedWorkOrder),
+        lineType: type,
+        description,
+      },
+      defaultLineTaxable(type, description),
+    ), [billingTaxRules, selectedWorkOrder]);
+  const texasLocationTaxQuery = useQuery({
+    queryKey: [
+      "verified-location-tax-rate",
+      deferredStoreAddress,
+      selectedWorkOrder?.city || "",
+      selectedWorkOrder?.storeCounty || selectedWorkOrder?.store_county || "",
+      selectedWorkOrder?.storePostalCode || selectedWorkOrder?.store_postal_code || "",
+      serviceDate || invoiceDate || "",
+    ],
+    queryFn: async () => {
+      const { data, error } = await (supabase() as any).rpc(
+        "resolve_location_sales_tax_rate",
+        {
+          p_address: deferredStoreAddress,
+          p_city: selectedWorkOrder?.city || null,
+          p_county: selectedWorkOrder?.storeCounty
+            || selectedWorkOrder?.store_county
+            || null,
+          p_state: "TX",
+          p_postal_code: selectedWorkOrder?.storePostalCode
+            || selectedWorkOrder?.store_postal_code
+            || postalCodeFromAddress(deferredStoreAddress)
+            || null,
+          p_on_date: serviceDate || invoiceDate || todayIso(),
+        },
+      );
+      if (error) throw error;
+      return mapVerifiedLocationTaxRate(data);
+    },
+    enabled: modal === "createBillingInvoice"
+      && taxState === "TX"
+      && deferredStoreAddress.length >= 6,
+    staleTime: 5 * 60_000,
+  });
+  const verifiedLocationTaxRate = texasLocationTaxQuery.data || null;
   const isCapitalQuote = editingInvoice?.documentKind === "capital_quote"
     || (!editingInvoice && selectedWorkOrder?.isCapital && selectedWorkOrder?.status === "capital");
   const isCapitalFinalInvoice = Boolean(
@@ -395,6 +459,16 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   const activeTaxRate = useMemo(() => {
     if (!taxState) return null;
+    if (taxState === "TX") {
+      return verifiedLocationTaxRate
+        ? {
+            rate: verifiedLocationTaxRate.rate,
+            effective_from: verifiedLocationTaxRate.effectiveFrom,
+            effective_to: verifiedLocationTaxRate.effectiveTo,
+            source: "verified_location",
+          }
+        : null;
+    }
     const onDate = serviceDate || invoiceDate || todayIso();
     return taxRates
       .filter((rate: any) =>
@@ -405,8 +479,11 @@ export default function BillingInvoiceCreateModal(props: any) {
       .sort((a: any, b: any) =>
         String(b.effective_from || "").localeCompare(String(a.effective_from || "")),
       )[0] || null;
-  }, [invoiceDate, serviceDate, taxRates, taxState]);
+  }, [invoiceDate, serviceDate, taxRates, taxState, verifiedLocationTaxRate]);
   const configuredTaxRate = activeTaxRate ? Number(activeTaxRate.rate || 0) : null;
+  const texasLocationTaxError = taxState === "TX" && texasLocationTaxQuery.isError
+    ? "The verified Texas location-rate lookup is unavailable."
+    : "";
   const taxableSubtotal = lines.reduce(
     (sum: number, line: any) => sum + (line?.isTaxable ? amount(line) : 0),
     0,
@@ -649,6 +726,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             qty: Number(line.qty || 1),
             rate: Number(line.rate || 0),
             isTaxable: !!line.isTaxable,
+            taxTreatmentManual: true,
             sourceInvoiceLineId: line.sourceInvoiceLineId || null,
             sourceUnitCost: line.sourceUnitCost == null
               ? null
@@ -784,9 +862,28 @@ export default function BillingInvoiceCreateModal(props: any) {
     previousWorkOrderId.current = selectedWorkOrderId || "";
     setSelectedSourceIds([]);
     setSourceSnapshots({});
+    setSourcePreviewId(null);
     setValue("taxRateOverride", "", { shouldDirty: true });
     setValue("salesTaxOverride", "", { shouldDirty: true });
   }, [selectedWorkOrderId, setValue]);
+
+  useEffect(() => {
+    if (modal !== "createBillingInvoice" || !billingTaxRulesQuery.isSuccess) return;
+    lines.forEach((line: any, lineIndex: number) => {
+      if (line?.taxTreatmentManual) return;
+      const decision = taxabilityForLine(line?.type, line?.desc);
+      if (Boolean(line?.isTaxable) === decision.taxable) return;
+      setValue(`lines.${lineIndex}.isTaxable` as const, decision.taxable, {
+        shouldDirty: false,
+      });
+    });
+  }, [
+    billingTaxRulesQuery.isSuccess,
+    lines,
+    modal,
+    setValue,
+    taxabilityForLine,
+  ]);
 
   const closeKeepingDraft = () => {
     persistBillingDraft();
@@ -919,7 +1016,8 @@ export default function BillingInvoiceCreateModal(props: any) {
             partMarkupPercent,
           ),
           markupPercent: parts ? partMarkupPercent : null,
-          isTaxable: defaultLineTaxable(line.type, line.desc),
+          isTaxable: taxabilityForLine(line.type, line.desc).taxable,
+          taxTreatmentManual: false,
         };
       });
       replace(imported);
@@ -972,6 +1070,14 @@ export default function BillingInvoiceCreateModal(props: any) {
           ...data,
           state,
           taxState: String(data.taxState || "").toUpperCase(),
+          // The API independently validates and persists tax. Pass an exact,
+          // verified location rate through its existing override boundary so
+          // Texas never silently falls back to the state-only 6.25% rate.
+          taxRateOverride: !hasManualTax
+            && !hasManualTaxRate
+            && verifiedLocationTaxRate
+            ? verifiedLocationTaxRate.rate * 100
+            : data.taxRateOverride,
           sourceInvoiceIds: selectedSourceIds,
           userTypedNum: numberEdited,
         }),
@@ -991,16 +1097,17 @@ export default function BillingInvoiceCreateModal(props: any) {
   };
 
   return (
-    <Modal
-      onClose={closeKeepingDraft}
-      title={isEditing
-        ? `Edit ${isCapitalQuote ? "capital quote" : "invoice"} #${editingInvoice.num}`
-        : isCapitalQuote
-          ? "Create capital quote for 7-Eleven"
-          : "Create P1 to 7-Eleven invoice"}
-      width={1240}
-      closeOnBackdrop={false}
-    >
+    <>
+      <Modal
+        onClose={closeKeepingDraft}
+        title={isEditing
+          ? `Edit ${isCapitalQuote ? "capital quote" : "invoice"} #${editingInvoice.num}`
+          : isCapitalQuote
+            ? "Create capital quote for 7-Eleven"
+            : "Create P1 to 7-Eleven invoice"}
+        width={1240}
+        closeOnBackdrop={false}
+      >
       <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
           {isCapitalQuote
@@ -1198,13 +1305,23 @@ export default function BillingInvoiceCreateModal(props: any) {
                   const linkedElsewhere = !!linkedTo && linkedTo.id !== editingInvoice?.id;
                   const checked = selectedSourceIds.includes(invoice.id);
                   return (
-                    <label key={invoice.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: `1px solid ${checked ? T.accent : T.borderSoft}`, background: T.surface, opacity: linkedElsewhere ? 0.6 : 1, cursor: linkedElsewhere ? "not-allowed" : "pointer" }}>
-                      <input type="checkbox" checked={checked} disabled={linkedElsewhere} onChange={() => toggleSourceInvoice(invoice.id)} />
-                      <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
-                      <span style={{ fontSize: 11, color: T.muted, textTransform: "capitalize" }}>{invoice.state}</span>
-                      <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.ink }}>{fmt(Number(invoice.total || 0))}</span>
-                      {linkedElsewhere && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo?.num}</span>}
-                    </label>
+                    <div key={invoice.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: `1px solid ${checked ? T.accent : T.borderSoft}`, background: T.surface, opacity: linkedElsewhere ? 0.6 : 1 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1, cursor: linkedElsewhere ? "not-allowed" : "pointer" }}>
+                        <input type="checkbox" checked={checked} disabled={linkedElsewhere} onChange={() => toggleSourceInvoice(invoice.id)} />
+                        <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
+                        <span style={{ fontSize: 11, color: T.muted, textTransform: "capitalize" }}>{invoice.state}</span>
+                        <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.ink }}>{fmt(Number(invoice.total || 0))}</span>
+                        {linkedElsewhere && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo?.num}</span>}
+                      </label>
+                      <button
+                        type="button"
+                        className="btn-soft"
+                        onClick={() => setSourcePreviewId(invoice.id)}
+                        style={{ padding: "6px 9px", fontSize: 10, flexShrink: 0 }}
+                      >
+                        Open source
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1240,6 +1357,11 @@ export default function BillingInvoiceCreateModal(props: any) {
                     event.target.checked,
                     { shouldDirty: true },
                   );
+                  setValue(
+                    `lines.${lineIndex}.taxTreatmentManual` as const,
+                    true,
+                    { shouldDirty: true },
+                  );
                 });
               }}
               aria-label="Set all line items taxable"
@@ -1259,6 +1381,8 @@ export default function BillingInvoiceCreateModal(props: any) {
               : Number(line.sourceUnitCost);
             const quantityConstraints = invoiceQuantityInputConstraints(line.type);
             const typeRegistration = register(`lines.${i}.type` as const);
+            const descriptionRegistration = register(`lines.${i}.desc` as const);
+            const taxableRegistration = register(`lines.${i}.isTaxable` as const);
             const rateRegistration = register(`lines.${i}.rate` as const, {
               valueAsNumber: true,
             });
@@ -1275,6 +1399,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 style={{ position: "relative", display: "grid", gridTemplateColumns: "28px minmax(86px, 110px) minmax(120px, 1fr) minmax(48px, 58px) minmax(64px, 82px) minmax(58px, 74px) minmax(54px, 66px) minmax(72px, 92px)", gap: 8, padding: "10px 48px 10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start", background: draggingLine === i ? T.accentSoft : T.surface }}
               >
                 <input type="hidden" {...register(`lines.${i}.sourceInvoiceLineId` as const)} />
+                <input type="hidden" {...register(`lines.${i}.taxTreatmentManual` as const)} />
                 <input
                   type="hidden"
                   {...register(`lines.${i}.sourceUnitCost` as const, {
@@ -1305,9 +1430,12 @@ export default function BillingInvoiceCreateModal(props: any) {
                     const nextType = normalizeStaffBillingLineType(event.target.value);
                     setValue(
                       `lines.${i}.isTaxable` as const,
-                      defaultLineTaxable(nextType, line.desc),
+                      taxabilityForLine(nextType, line.desc).taxable,
                       { shouldDirty: true },
                     );
+                    setValue(`lines.${i}.taxTreatmentManual` as const, false, {
+                      shouldDirty: true,
+                    });
                     if (!isStaffBillingPartsLine(nextType)) {
                       setValue(`lines.${i}.markupPercent` as const, null, {
                         shouldDirty: true,
@@ -1344,7 +1472,20 @@ export default function BillingInvoiceCreateModal(props: any) {
                 >
                   {STAFF_BILLING_LINE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </Sel>
-                <textarea {...register(`lines.${i}.desc` as const)} placeholder={staffBillingDescriptionPlaceholder(line.type)} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }} />
+                <textarea
+                  {...descriptionRegistration}
+                  onBlur={(event: any) => {
+                    void descriptionRegistration.onBlur(event);
+                    if (getValues(`lines.${i}.taxTreatmentManual` as const)) return;
+                    setValue(
+                      `lines.${i}.isTaxable` as const,
+                      taxabilityForLine(line.type, event.target.value).taxable,
+                      { shouldDirty: true },
+                    );
+                  }}
+                  placeholder={staffBillingDescriptionPlaceholder(line.type)}
+                  style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }}
+                />
                 <input
                   type="number"
                   min={quantityConstraints.min}
@@ -1411,7 +1552,17 @@ export default function BillingInvoiceCreateModal(props: any) {
                   </label>
                 )}
                 <label style={{ display: "flex", justifyContent: "center", paddingTop: 9 }} title="Include this line in store-state sales tax">
-                  <input type="checkbox" {...register(`lines.${i}.isTaxable` as const)} aria-label={`Line ${i + 1} taxable`} />
+                  <input
+                    type="checkbox"
+                    {...taxableRegistration}
+                    onChange={(event: any) => {
+                      void taxableRegistration.onChange(event);
+                      setValue(`lines.${i}.taxTreatmentManual` as const, true, {
+                        shouldDirty: true,
+                      });
+                    }}
+                    aria-label={`Line ${i + 1} taxable`}
+                  />
                 </label>
                 <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
                 <button
@@ -1439,7 +1590,8 @@ export default function BillingInvoiceCreateModal(props: any) {
                 desc: item.desc,
                 qty: 1,
                 rate: item.rate,
-                isTaxable: defaultLineTaxable(item.type, item.desc),
+                isTaxable: taxabilityForLine(item.type, item.desc).taxable,
+                taxTreatmentManual: false,
                 sourceInvoiceLineId: null,
                 sourceUnitCost: null,
                 markupPercent: null,
@@ -1461,7 +1613,8 @@ export default function BillingInvoiceCreateModal(props: any) {
                 desc: preset.label,
                 qty: 1,
                 rate: preset.rate,
-                isTaxable: true,
+                isTaxable: taxabilityForLine(preset.type, preset.label).taxable,
+                taxTreatmentManual: false,
                 sourceInvoiceLineId: null,
                 sourceUnitCost: null,
                 markupPercent: null,
@@ -1520,11 +1673,17 @@ export default function BillingInvoiceCreateModal(props: any) {
                 {String(errors.taxRateOverride.message || "Enter a valid tax rate")}
               </div>
             )}
-            <div style={{ fontSize: 11, color: !hasSalesTaxOverride && !hasTaxRateOverride && (taxRateLoadError || (taxableSubtotal > 0 && !activeTaxRate)) ? T.danger : T.subtle, marginTop: 6, maxWidth: 460 }}>
+            <div style={{ fontSize: 11, color: !hasSalesTaxOverride && !hasTaxRateOverride && (taxRateLoadError || texasLocationTaxError || (taxableSubtotal > 0 && !activeTaxRate)) ? T.danger : T.subtle, marginTop: 6, maxWidth: 460 }}>
               {hasSalesTaxOverride
                 ? "Manual tax amount is applied. Clear it to calculate tax from the percentage."
                 : hasTaxRateOverride
                   ? `${Number(taxRateOverride).toFixed(3)}% manual rate. Tax applies only to checked lines.`
+                  : texasLocationTaxError
+                    ? `${texasLocationTaxError} Enter the official total rate manually to continue.`
+                  : taxState === "TX" && verifiedLocationTaxRate
+                    ? `${(verifiedLocationTaxRate.rate * 100).toFixed(3)}% verified for this exact address from ${verifiedLocationTaxRate.sourceName}${verifiedLocationTaxRate.sourceVersion ? ` (${verifiedLocationTaxRate.sourceVersion})` : ""}.`
+                  : taxState === "TX" && taxableSubtotal > 0
+                    ? "No verified exact-address Texas rate is loaded. ZIP alone is not sufficient; enter the official total rate manually."
                   : taxRateLoadError
                     ? `${taxRateLoadError} Enter a tax rate or amount manually to continue.`
                     : activeTaxRate
@@ -1582,7 +1741,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 : hasTaxRateOverride
                   ? `${Number(taxRateOverride).toFixed(3)}% rate override`
                   : activeTaxRate
-                    ? `Configured ${taxState} rate`
+                    ? taxState === "TX" ? "Verified exact-address rate" : `Configured ${taxState} rate`
                     : "Enter a rate or amount"}
             </div>
             {errors.salesTaxOverride && (
@@ -1625,7 +1784,13 @@ export default function BillingInvoiceCreateModal(props: any) {
                 : isCapitalQuote ? "Prepare Quote" : "Submit Invoice"}
           </button>
         </div>
-      </form>
-    </Modal>
+        </form>
+      </Modal>
+      <SourceContractorInvoiceDrawer
+        invoiceId={sourcePreviewId}
+        onClose={() => setSourcePreviewId(null)}
+        fmt={fmt}
+      />
+    </>
   );
 }

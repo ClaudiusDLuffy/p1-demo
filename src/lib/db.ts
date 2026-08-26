@@ -24,6 +24,7 @@ import type {
   ContractorEstimateLineType,
   EditableContractorEstimateLine,
 } from "./contractorEstimate";
+import { workOrderCanEnterSevenElevenQueue } from "./workOrderView";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -179,6 +180,17 @@ export type WorkOrderPageParams = {
   limit?: number;
   cursor?: string | null;
   storeNumber?: string | null;
+  tableSortColumn?: "work_order" | "status" | "priority" | "incident" | "store"
+    | "summary" | "contractor" | "created" | "updated" | "sla";
+  tableSortDirection?: "asc" | "desc";
+  workOrderFilter?: string;
+  incidentFilter?: string;
+  storeFilter?: string;
+  summaryFilter?: string;
+  contractorFilter?: string;
+  createdDateFilter?: string;
+  updatedDateFilter?: string;
+  slaFilter?: "all" | "overdue";
 };
 
 export type PortalNavigationSummary = {
@@ -261,7 +273,13 @@ const mapEmbeddedStaffTodo = (todo: any) => todo ? ({
 const mapWorkOrderListRow = (wo: any): WorkOrder => {
   const latestNoteAt = wo.latest_note_at || null;
   const seenAt = wo.staff_notes_seen_at || null;
-  const pendingSevenElevenSyncCount = Number(wo.pending_7eleven_sync_count || 0);
+  const sevenElevenEligible = workOrderCanEnterSevenElevenQueue({
+    status: wo.status,
+    functional_status: wo.functional_status,
+  });
+  const pendingSevenElevenSyncCount = sevenElevenEligible
+    ? Number(wo.pending_7eleven_sync_count || 0)
+    : 0;
   const pendingContractorAttentionCount = Number(wo.pending_contractor_attention_count || 0);
   const assignmentRows = Array.isArray(wo.assignment_history)
     ? wo.assignment_history
@@ -312,7 +330,16 @@ export async function loadWorkOrdersPage(
   params: WorkOrderPageParams = {},
 ): Promise<CursorPage<WorkOrder>> {
   const sb = supabase();
-  const { data, error } = await (sb as any).rpc("list_work_orders_page", {
+  const tableMode = Boolean(params.tableSortColumn)
+    || params.scope === "dashboard_seven_eleven_updates"
+    || params.scope === "dashboard_pending_submission"
+    || params.scope === "ready_to_bill"
+    || params.scope === "staff_work"
+    || params.scope === "staff_work_ready";
+  const rpcName = tableMode
+    ? "list_work_orders_table_page"
+    : "list_work_orders_page";
+  const sharedArgs = {
     p_scope: params.scope || "active",
     p_search: params.search?.trim() || null,
     p_contractor_id: params.contractorId || null,
@@ -329,7 +356,25 @@ export async function loadWorkOrdersPage(
     p_cursor: params.cursor || null,
     p_store_number: params.storeNumber || null,
     p_contractor_ids: params.contractorIds?.length ? params.contractorIds : null,
-  });
+  };
+  const tableArgs = tableMode ? {
+    ...sharedArgs,
+    p_sort_column: params.tableSortColumn
+      || (params.sort === "priority" ? "priority" : params.sort === "sla_due" ? "sla" : "created"),
+    p_sort_direction: params.tableSortDirection
+      || (params.sort === "oldest" ? "asc" : params.sort === "priority" || params.sort === "sla_due" ? "asc" : "desc"),
+    p_work_order_filter: params.workOrderFilter?.trim() || null,
+    p_incident_filter: params.incidentFilter?.trim() || null,
+    p_store_filter: params.storeFilter?.trim() || null,
+    p_summary_filter: params.summaryFilter?.trim() || null,
+    p_contractor_filter: params.contractorFilter?.trim() || null,
+    p_created_date_filter: params.createdDateFilter || null,
+    p_updated_date_filter: params.updatedDateFilter || null,
+    p_sla_filter: params.slaFilter && params.slaFilter !== "all"
+      ? params.slaFilter
+      : null,
+  } : sharedArgs;
+  const { data, error } = await (sb as any).rpc(rpcName, tableArgs);
   if (error) throw error;
   const page = cursorPageFromRpc<any>(data);
   return { ...page, items: page.items.map(mapWorkOrderListRow) };
@@ -420,6 +465,8 @@ const mapWO = (w: any) => ({
   addr: w.address,
   storeState: w.store_state || null,
   storeTimezone: w.store_timezone || null,
+  storeCounty: w.store_county || null,
+  storePostalCode: w.store_postal_code || null,
   lineOfService: w.line_of_service,
   businessService: w.business_service,
   category: w.category,
@@ -463,6 +510,18 @@ const mapWO = (w: any) => ({
   contractorAssignmentStartedAt: w.contractor_assignment_started_at || null,
   contractorAssignmentVersion: Number(w.contractor_assignment_version || 0),
   workflowCycle: Number(w.workflow_cycle || 0),
+  contractorInvoicingCompletedAt: w.contractor_invoicing_completed_at || null,
+  contractorInvoicingCompletedBy: w.contractor_invoicing_completed_by || null,
+  contractorInvoicingAssignmentVersion:
+    w.contractor_invoicing_assignment_version == null
+      ? null
+      : Number(w.contractor_invoicing_assignment_version),
+  contractorInvoicingWorkflowCycle:
+    w.contractor_invoicing_workflow_cycle == null
+      ? null
+      : Number(w.contractor_invoicing_workflow_cycle),
+  contractorInvoicingCompletionSource:
+    w.contractor_invoicing_completion_source || null,
   staffNotesSeenAt: w.staff_notes_seen_at || null,
   technicianOnJob: w.technician_on_job,
   assignedTechnicianProfileId: w.assigned_technician_profile_id || null,
@@ -638,9 +697,14 @@ export async function loadWorkOrderDetails(workOrder: {
   const latestNoteAt = (currentWorkOrder as any)?.latestNoteAt
     || activities.find(activity => activity.type === "note")?.createdAt
     || null;
-  const pendingSevenElevenActivities = activities.filter(activity =>
-    activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
+  const sevenElevenEligible = workOrderCanEnterSevenElevenQueue(
+    currentWorkOrder as any,
   );
+  const pendingSevenElevenActivities = sevenElevenEligible
+    ? activities.filter(activity =>
+        activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt
+      )
+    : [];
   const pendingContractorActivities = activities.filter(activity =>
     activity.requiresContractorAttention && !activity.contractorAcknowledgedAt
   );
@@ -660,11 +724,11 @@ export async function loadWorkOrderDetails(workOrder: {
       !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
     ),
     pendingSevenElevenActivities,
-    pendingSevenElevenSyncCount: Number(
+    pendingSevenElevenSyncCount: sevenElevenEligible ? Number(
       (currentWorkOrder as any)?.pendingSevenElevenSyncCount
       ?? pendingSevenElevenActivities.length,
-    ),
-    hasPendingSevenElevenSync: Boolean(
+    ) : 0,
+    hasPendingSevenElevenSync: sevenElevenEligible && Boolean(
       (currentWorkOrder as any)?.hasPendingSevenElevenSync
       ?? pendingSevenElevenActivities.length > 0,
     ),
@@ -996,6 +1060,12 @@ const mapInvoice = (i: any) => ({
   salesTax: parseFloat(i.sales_tax || 0),
   taxState: i.tax_state || null,
   taxRate: i.tax_rate == null ? null : parseFloat(i.tax_rate),
+  taxRateSource: i.tax_rate_source || null,
+  taxRateReferenceId: i.tax_rate_reference_id || null,
+  taxJurisdictionSnapshot: Array.isArray(i.tax_jurisdiction_snapshot)
+    ? i.tax_jurisdiction_snapshot
+    : [],
+  taxRateVerifiedAt: i.tax_rate_verified_at || null,
   total: parseFloat(i.total || 0),
   territory: i.territory || null,
   pdfStoragePath: i.pdf_storage_path || null,
@@ -1488,6 +1558,41 @@ export async function deleteInvoice(invoiceId: string): Promise<void> {
   if (!response.ok) {
     throw new Error(payload.error || "Invoice delete failed");
   }
+}
+
+export async function deleteOwnContractorInvoice(
+  invoiceId: string,
+): Promise<Record<string, unknown>> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "delete_own_contractor_invoice",
+    { p_invoice_id: invoiceId },
+  );
+  if (error) throw error;
+  return (data || {}) as Record<string, unknown>;
+}
+
+export type FinishContractorInvoicingResult = {
+  applied: boolean;
+  reason: "completed" | "already_complete" | string;
+  workOrderId: string;
+  workOrderStatus: string;
+  completedAt: string;
+  completedBy?: string | null;
+  source?: "contractor" | "staff_override" | "legacy" | string;
+  invoiceCount?: number;
+};
+
+export async function finishContractorInvoicing(
+  workOrderId: string,
+): Promise<FinishContractorInvoicingResult> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "finish_contractor_invoicing",
+    { p_work_order_id: workOrderId },
+  );
+  if (error) throw error;
+  return data as FinishContractorInvoicingResult;
 }
 
 // Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,

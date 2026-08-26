@@ -1,5 +1,6 @@
 "use client";
 
+import { useId, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import type { StoreHistoryWorkOrder } from "../../lib/storeWorkOrderHistory";
@@ -36,9 +37,12 @@ export default function StoreWorkOrderHistory({
   onOpenWorkOrder?: (workOrderId: string) => void;
   onViewAll?: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+
   return (
     <section className="card" aria-label={`Store ${storeNumber} work-order history`} style={{ padding: 18, marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: expanded ? 12 : 0 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>
             Store work-order history · {totalCount}
@@ -47,25 +51,38 @@ export default function StoreWorkOrderHistory({
             Current and previous calls for Store #{storeNumber}. Review prior equipment and contractor details before assigning.
           </div>
         </div>
-        <button type="button" className="btn-soft" onClick={onViewAll} disabled={!onViewAll}>
-          View all store calls
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn-soft"
+            aria-expanded={expanded}
+            aria-controls={contentId}
+            onClick={() => setExpanded(value => !value)}
+          >
+            {expanded ? "Collapse history" : "Expand history"}
+          </button>
+          <button type="button" className="btn-soft" onClick={onViewAll} disabled={!onViewAll}>
+            View all store calls
+          </button>
+        </div>
       </div>
 
-      {loading && rows.length <= 1 && (
-        <div role="status" style={{ padding: "12px 0", fontSize: 11, color: T.muted }}>
-          Loading previous store calls…
-        </div>
-      )}
+      {expanded && (
+        <div id={contentId}>
+          {loading && rows.length <= 1 && (
+            <div role="status" style={{ padding: "12px 0", fontSize: 11, color: T.muted }}>
+              Loading previous store calls…
+            </div>
+          )}
 
-      {failed && rows.length <= 1 && (
-        <div role="alert" style={{ padding: "10px 12px", borderRadius: 9, background: T.dangerSoft, color: T.danger, fontSize: 11 }}>
-          Previous store calls could not be loaded. Use “View all store calls” to retry in Work Orders.
-        </div>
-      )}
+          {failed && rows.length <= 1 && (
+            <div role="alert" style={{ padding: "10px 12px", borderRadius: 9, background: T.dangerSoft, color: T.danger, fontSize: 11 }}>
+              Previous store calls could not be loaded. Use “View all store calls” to retry in Work Orders.
+            </div>
+          )}
 
-      <div style={{ display: "grid", gap: 8 }}>
-        {rows.map(workOrder => {
+          <div style={{ display: "grid", gap: 8 }}>
+            {rows.map(workOrder => {
           const current = workOrder.id === currentWorkOrderId;
           const status = STATUS[workOrder.status as keyof typeof STATUS]
             || { label: workOrder.status || "Unknown", color: T.muted, bg: T.borderSoft, ring: T.border };
@@ -82,7 +99,7 @@ export default function StoreWorkOrderHistory({
             workOrder.assetSerial ? `Serial ${workOrder.assetSerial}` : null,
           ].filter(Boolean).join(" · ");
 
-          return (
+              return (
             <button
               key={workOrder.id}
               type="button"
@@ -125,9 +142,11 @@ export default function StoreWorkOrderHistory({
                 <span>Created {dateLabel(workOrder.createdAt)}</span>
               </div>
             </button>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -38,6 +38,33 @@ test("recognizes overtime wording in imported descriptions", () => {
   );
 });
 
+test("recognizes parts mislabeled as Other without overriding labor or travel", () => {
+  assert.equal(
+    normalizeImportedStaffBillingLineType("Other", "Replacement compressor"),
+    "Parts/Hardware",
+  );
+  assert.equal(
+    normalizeImportedStaffBillingLineType("Other", "Contactor and capacitor"),
+    "Parts/Hardware",
+  );
+  assert.equal(
+    normalizeImportedStaffBillingLineType("Other", "Labor to replace compressor"),
+    "Labor",
+  );
+  assert.equal(
+    normalizeImportedStaffBillingLineType("Other", "Travel to pick up replacement motor"),
+    "Travel",
+  );
+  assert.equal(
+    normalizeImportedStaffBillingLineType("Other", "Freight for control board"),
+    "Shipping",
+  );
+  assert.equal(
+    normalizeImportedStaffBillingLineType("Other", "General contracted service"),
+    "Other",
+  );
+});
+
 test("imports fixed labor and travel rates without markup", () => {
   assert.equal(importedStaffBillingRate("Labor", 80), 110);
   assert.equal(importedStaffBillingRate("Travel", 45), 110);

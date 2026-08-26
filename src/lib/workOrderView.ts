@@ -28,6 +28,8 @@ export type WorkOrderViewRow = {
   closedAt?: string | null;
   priority?: string | null;
   status?: string | null;
+  functionalStatus?: string | null;
+  functional_status?: string | null;
   hasUnreadNotes?: boolean | null;
   hasPendingSevenElevenSync?: boolean | null;
   pendingSevenElevenSyncCount?: number | string | null;
@@ -230,8 +232,18 @@ export const workOrderNeedsAction = (
 export const workOrderHasPendingSevenElevenSync = (
   wo: WorkOrderViewRow | null | undefined,
 ) => Boolean(
-  wo?.hasPendingSevenElevenSync
-  || Number(wo?.pendingSevenElevenSyncCount || 0) > 0
+  workOrderCanEnterSevenElevenQueue(wo)
+  && (
+    wo?.hasPendingSevenElevenSync
+    || Number(wo?.pendingSevenElevenSyncCount || 0) > 0
+  )
+);
+
+export const workOrderCanEnterSevenElevenQueue = (
+  wo: WorkOrderViewRow | null | undefined,
+) => Boolean(
+  wo?.status === "closed"
+  || (wo?.functionalStatus || wo?.functional_status) === "Completed"
 );
 
 export const canFlagWorkOrderCapital = (

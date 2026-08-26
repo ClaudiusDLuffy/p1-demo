@@ -29,3 +29,17 @@ export function canEditRejectedContractorInvoice(
     && invoice.contractor === contractorAccountId;
 }
 
+export function canDeleteOwnContractorInvoice(
+  invoice: ContractorInvoiceIdentity | null | undefined,
+  viewer: ContractorViewer | null | undefined,
+  isStaff: boolean,
+): boolean {
+  const contractorAccountId = viewer?.contractorAccountId || viewer?.id;
+
+  return !isStaff
+    && viewer?.canInvoice === true
+    && ["draft", "rejected"].includes(String(invoice?.state || ""))
+    && !!invoice?.contractor
+    && !!contractorAccountId
+    && invoice.contractor === contractorAccountId;
+}

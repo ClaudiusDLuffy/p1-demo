@@ -14,6 +14,11 @@ test("work-order rows reserve their visible flag for pending 7-Eleven updates", 
 });
 
 test("desktop work orders keep status near the work-order number", () => {
-  assert.match(list, /\["WO#", "Status", "Priority", "INC#", "Store"/);
-  assert.match(list, /minWidth: 980/);
+  assert.match(
+    list,
+    /\{ column: "work_order", label: "WO#" \},\s*\{ column: "status", label: "Status" \},\s*\{ column: "priority", label: "Priority" \},\s*\{ column: "incident", label: "INC#" \},\s*\{ column: "store", label: "Store" \}/,
+  );
+  assert.match(list, /onClick=\{\(\) => selectTableSort\(column\)\}/);
+  assert.match(list, /renderColumnFilter\(column\)/);
+  assert.match(list, /minWidth: 1180/);
 });

@@ -39,7 +39,7 @@ test("staff action reasons cover operational and billing follow-up", () => {
       hasUnreadNotes: true,
       pendingSevenElevenSyncCount: 1,
     }, true),
-    ["Assignment needed", "Unread activity", "7-Eleven update pending"],
+    ["Assignment needed", "Unread activity"],
   );
   assert.deepEqual(
     getWorkOrderActionReasons({ status: "pending_invoice" }, true),
@@ -80,16 +80,17 @@ test("an overdue SLA does not make an otherwise active work order action-require
 });
 
 test("pending 7-Eleven updates are detected from either count or summary flag", () => {
-  assert.equal(workOrderHasPendingSevenElevenSync({ pendingSevenElevenSyncCount: 2 }), true);
-  assert.equal(workOrderHasPendingSevenElevenSync({ hasPendingSevenElevenSync: true }), true);
-  assert.equal(workOrderHasPendingSevenElevenSync({ pendingSevenElevenSyncCount: 0 }), false);
+  assert.equal(workOrderHasPendingSevenElevenSync({ functionalStatus: "Completed", pendingSevenElevenSyncCount: 2 }), true);
+  assert.equal(workOrderHasPendingSevenElevenSync({ status: "closed", hasPendingSevenElevenSync: true }), true);
+  assert.equal(workOrderHasPendingSevenElevenSync({ functionalStatus: "Awaiting Parts", pendingSevenElevenSyncCount: 2 }), false);
+  assert.equal(workOrderHasPendingSevenElevenSync({ functionalStatus: "Completed", pendingSevenElevenSyncCount: 0 }), false);
 });
 
 test("pending 7-Eleven updates rise first without changing the selected order within groups", () => {
   const sorted = sortWorkOrders([
     { id: "ordinary-newest", createdAt: "2026-08-06T15:00:00Z" },
-    { id: "sync-oldest", createdAt: "2026-08-06T13:00:00Z", pendingSevenElevenSyncCount: 1 },
-    { id: "sync-newest", createdAt: "2026-08-06T14:00:00Z", pendingSevenElevenSyncCount: 1 },
+    { id: "sync-oldest", createdAt: "2026-08-06T13:00:00Z", functionalStatus: "Completed", pendingSevenElevenSyncCount: 1 },
+    { id: "sync-newest", createdAt: "2026-08-06T14:00:00Z", functionalStatus: "Completed", pendingSevenElevenSyncCount: 1 },
   ], "newest");
 
   assert.deepEqual(

@@ -1,9 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { billingApiFetch } from "../../lib/billingApi";
+import {
+  mapBillingTaxRule,
+  type BillingTaxRule,
+  type BillingTaxRuleRow,
+} from "../../lib/billingTaxRules";
+import { supabase } from "../../lib/supabase/client";
 
 export const BILLING_INVOICES_KEY = ["billing-invoices"] as const;
 export const BILLING_INVOICE_PAGES_KEY = ["billing-invoice-pages"] as const;
 export const BILLING_INVOICE_BY_ID_KEY = ["billing-invoice-by-id"] as const;
+export const BILLING_TAX_RULES_KEY = ["billing-tax-rules"] as const;
 
 export type BillingInvoicePageParams = {
   queue: "active" | "all" | "draft" | "submitted" | "sent" | "work_order";
@@ -64,5 +71,22 @@ export function useBillingInvoiceByIdQuery(
     },
     staleTime: 30_000,
     enabled: enabled && Boolean(id),
+  });
+}
+
+export function useBillingTaxRulesQuery(enabled = true) {
+  return useQuery<BillingTaxRule[]>({
+    queryKey: BILLING_TAX_RULES_KEY,
+    queryFn: async () => {
+      const { data, error } = await (supabase() as any)
+        .from("billing_tax_rules")
+        .select("id, rule_key, name, priority, equipment_keywords, line_types, description_keywords, taxable, is_active, created_at, updated_at")
+        .order("priority", { ascending: true })
+        .order("rule_key", { ascending: true });
+      if (error) throw error;
+      return ((data || []) as BillingTaxRuleRow[]).map(mapBillingTaxRule);
+    },
+    staleTime: 60_000,
+    enabled,
   });
 }
