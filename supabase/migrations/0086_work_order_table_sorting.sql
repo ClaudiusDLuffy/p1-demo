@@ -219,6 +219,7 @@ as $$
     from public.work_orders work_order
     join candidate on candidate.id = work_order.id
     left join activity_summary summary on summary.work_order_id = work_order.id
+    cross join args
     where (
       case args.scope_name
         when 'dashboard_seven_eleven_updates' then (
