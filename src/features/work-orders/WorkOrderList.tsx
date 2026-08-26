@@ -14,11 +14,18 @@ import { stateCodeFromWorkOrder } from "../../lib/billingRules";
 import {
   getSlaAgingStyle,
   getWorkOrderDateMeta,
-  prioritizePendingSevenElevenUpdates,
   sortWorkOrders,
   workOrderNeedsAction,
   type WorkOrderSortKey,
 } from "../../lib/workOrderView";
+import {
+  filterAndSortWorkOrderTable,
+  hasWorkOrderColumnFilters,
+  nextWorkOrderTableSort,
+  type WorkOrderColumnFilters,
+  type WorkOrderTableColumn,
+  type WorkOrderTableSort,
+} from "../../lib/workOrderTable";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
 
@@ -47,12 +54,19 @@ export default function WorkOrderList(props: any) {
   } = props;
 
   const [sortBy, setSortBy] = useState<WorkOrderSortKey>(storeView ? "newest" : isManager ? "sla_due" : "newest");
+  const [tableSort, setTableSort] = useState<WorkOrderTableSort>(() => (
+    storeView || !isManager
+      ? { column: "created", direction: "desc" }
+      : { column: "sla", direction: "asc" }
+  ));
+  const [columnFilters, setColumnFilters] = useState<WorkOrderColumnFilters>({});
   const [viewMode, setViewMode] = useState<"recent" | "needs_action">("recent");
   const [filterState, setFilterState] = useState("all");
   const [hideClosed, setHideClosed] = useState(!storeView);
   const [pagingDirection, setPagingDirection] = useState<"prev" | "next" | null>(null);
   const pageSize = 10;
   const deferredSearch = useDeferredValue(search);
+  const deferredColumnFilters = useDeferredValue(columnFilters);
 
   const exactStoreFilteredWOs = useMemo(
     () => storeView?.storeNumber
@@ -82,10 +96,13 @@ export default function WorkOrderList(props: any) {
       sortBy,
     );
 
-    return isManager
-      ? prioritizePendingSevenElevenUpdates(sorted)
-      : sorted;
-  }, [fallbackStateFilteredWOs, hideClosed, isManager, sortBy, viewMode]);
+    return filterAndSortWorkOrderTable(
+      sorted,
+      deferredColumnFilters,
+      tableSort,
+      contractorId => contractorId ? getUser(contractorId)?.name || "" : "",
+    );
+  }, [deferredColumnFilters, fallbackStateFilteredWOs, getUser, hideClosed, isManager, sortBy, tableSort, viewMode]);
 
   const cursorSignature = JSON.stringify({
     search: deferredSearch.trim(),
@@ -94,6 +111,8 @@ export default function WorkOrderList(props: any) {
     filterStatus,
     filterState,
     sortBy,
+    tableSort,
+    columnFilters: deferredColumnFilters,
     hideClosed,
     viewMode,
     isManager,
@@ -109,15 +128,29 @@ export default function WorkOrderList(props: any) {
     scope: hideClosed ? "operations" : "operations_all",
     search: deferredSearch,
     contractorId: filterC !== "all" ? filterC : null,
-    priority: filterP,
-    status: filterStatus,
+    priority: deferredColumnFilters.priority && deferredColumnFilters.priority !== "all"
+      ? deferredColumnFilters.priority
+      : filterP,
+    status: deferredColumnFilters.status && deferredColumnFilters.status !== "all"
+      ? deferredColumnFilters.status
+      : filterStatus,
     state: filterState,
     needsAction: viewMode === "needs_action",
     sort: sortBy,
-    pendingFirst: isManager,
+    pendingFirst: false,
     limit: pageSize,
     cursor: effectiveCursor.cursor,
     storeNumber: storeView?.storeNumber || null,
+    tableSortColumn: tableSort.column,
+    tableSortDirection: tableSort.direction,
+    workOrderFilter: deferredColumnFilters.workOrder,
+    incidentFilter: deferredColumnFilters.incident,
+    storeFilter: deferredColumnFilters.store,
+    summaryFilter: deferredColumnFilters.summary,
+    contractorFilter: deferredColumnFilters.contractor,
+    createdDateFilter: deferredColumnFilters.createdDate,
+    updatedDateFilter: deferredColumnFilters.updatedDate,
+    slaFilter: deferredColumnFilters.sla === "overdue" ? "overdue" : "all",
   }, page === "work_orders" && !selectedWO);
 
   const serverPage = workOrderPageQuery.data;
@@ -138,6 +171,104 @@ export default function WorkOrderList(props: any) {
     setPagingDirection(direction);
     if (direction === "prev") previousPage();
     else nextPage(serverPage?.nextCursor || null);
+  };
+
+  const setColumnFilter = (key: keyof WorkOrderColumnFilters, value: string) => {
+    setColumnFilters(current => ({ ...current, [key]: value }));
+  };
+
+  const selectTableSort = (column: WorkOrderTableColumn) => {
+    setTableSort(current => nextWorkOrderTableSort(current, column));
+  };
+
+  const applySortPreset = (value: WorkOrderSortKey) => {
+    setSortBy(value);
+    if (value === "oldest") setTableSort({ column: "created", direction: "asc" });
+    else if (value === "priority") setTableSort({ column: "priority", direction: "asc" });
+    else if (value === "sla_due") setTableSort({ column: "sla", direction: "asc" });
+    else setTableSort({ column: "created", direction: "desc" });
+  };
+
+  const sortIndicator = (column: WorkOrderTableColumn) =>
+    tableSort.column === column ? (tableSort.direction === "asc" ? " ↑" : " ↓") : "";
+  const sortPresetValue: WorkOrderSortKey | "custom" =
+    tableSort.column === "created"
+      ? tableSort.direction === "asc" ? "oldest" : "newest"
+      : tableSort.column === "priority" && tableSort.direction === "asc"
+        ? "priority"
+        : tableSort.column === "sla" && tableSort.direction === "asc"
+          ? "sla_due"
+          : "custom";
+
+  const tableColumns: Array<{ column: WorkOrderTableColumn; label: string }> = [
+    { column: "work_order", label: "WO#" },
+    { column: "status", label: "Status" },
+    { column: "priority", label: "Priority" },
+    { column: "incident", label: "INC#" },
+    { column: "store", label: "Store" },
+    { column: "summary", label: "Summary" },
+    { column: "contractor", label: "Contractor" },
+    { column: "created", label: "Created" },
+    { column: "updated", label: "Updated" },
+    { column: "sla", label: "SLA due" },
+  ];
+  const columnFilterStyle = {
+    width: "100%",
+    minWidth: 74,
+    padding: "6px 7px",
+    borderRadius: 7,
+    border: `1px solid ${T.border}`,
+    background: T.surface,
+    color: T.ink,
+    fontFamily: "inherit",
+    fontSize: 10,
+    boxSizing: "border-box" as const,
+  };
+  const renderColumnFilter = (column: WorkOrderTableColumn) => {
+    if (column === "status") {
+      return (
+        <select aria-label="Filter status column" value={columnFilters.status || "all"} onChange={event => setColumnFilter("status", event.target.value)} style={columnFilterStyle}>
+          <option value="all">All</option>
+          {Object.entries(STATUS).map(([value, config]: any) => <option key={value} value={value}>{config.label}</option>)}
+        </select>
+      );
+    }
+    if (column === "priority") {
+      return (
+        <select aria-label="Filter priority column" value={columnFilters.priority || "all"} onChange={event => setColumnFilter("priority", event.target.value)} style={columnFilterStyle}>
+          <option value="all">All</option>
+          {Object.entries(PRIORITY).map(([value, config]: any) => <option key={value} value={value}>{config.label}</option>)}
+        </select>
+      );
+    }
+    if (column === "created" || column === "updated") {
+      const key = column === "created" ? "createdDate" : "updatedDate";
+      return <input aria-label={`Filter ${column} date column`} type="date" value={columnFilters[key] || ""} onChange={event => setColumnFilter(key, event.target.value)} style={columnFilterStyle} />;
+    }
+    if (column === "sla") {
+      return (
+        <select aria-label="Filter SLA column" value={columnFilters.sla || "all"} onChange={event => setColumnFilter("sla", event.target.value)} style={columnFilterStyle}>
+          <option value="all">All</option>
+          <option value="overdue">Overdue</option>
+        </select>
+      );
+    }
+    const filterKey = ({
+      work_order: "workOrder",
+      incident: "incident",
+      store: "store",
+      summary: "summary",
+      contractor: "contractor",
+    } as const)[column as "work_order" | "incident" | "store" | "summary" | "contractor"];
+    return (
+      <input
+        aria-label={`Filter ${column} column`}
+        value={columnFilters[filterKey] || ""}
+        onChange={event => setColumnFilter(filterKey, event.target.value)}
+        placeholder="Filter"
+        style={columnFilterStyle}
+      />
+    );
   };
 
   const renderPaginationControls = () => totalRows > 0 && (
@@ -269,7 +400,8 @@ export default function WorkOrderList(props: any) {
               <option value="all">All priorities</option>
               {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
             </Sel>
-            <Sel value={sortBy} onChange={(e: any) => setSortBy(e.target.value as WorkOrderSortKey)} style={{ width: 190, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+            <Sel value={sortPresetValue} onChange={(e: any) => { if (e.target.value !== "custom") applySortPreset(e.target.value as WorkOrderSortKey); }} style={{ width: 190, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+              {sortPresetValue === "custom" && <option value="custom">Custom column sort</option>}
               <option value="sla_due">SLA due soonest</option>
               <option value="newest">Newest to oldest</option>
               <option value="oldest">Oldest to newest</option>
@@ -286,8 +418,8 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls
               </label>
             )}
-            {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent" || storeView) && (
-              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); setHideClosed(true); onClearStoreView?.(); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent" || storeView || hasWorkOrderColumnFilters(columnFilters)) && (
+              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); setHideClosed(true); setColumnFilters({}); onClearStoreView?.(); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}
@@ -295,11 +427,26 @@ export default function WorkOrderList(props: any) {
 
           <div className="desktop-only-table">
             <div className="card table-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>
-              <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", fontSize: 12 }}>
+              <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.surfaceSoft }}>
-                    {["WO#", "Status", "Priority", "INC#", "Store", "Summary", "Contractor", "Dates", "SLA due"].map(h => (
-                      <th key={h} style={{ textAlign: "left", padding: "10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>{h}</th>
+                    {tableColumns.map(({ column, label }) => (
+                      <th key={column} aria-sort={tableSort.column === column ? (tableSort.direction === "asc" ? "ascending" : "descending") : "none"} style={{ textAlign: "left", padding: "10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => selectTableSort(column)}
+                          style={{ padding: 0, border: 0, background: "none", color: "inherit", font: "inherit", textTransform: "inherit", letterSpacing: "inherit", cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          {label}{sortIndicator(column)}
+                        </button>
+                      </th>
+                    ))}
+                  </tr>
+                  <tr style={{ background: T.surfaceSoft }}>
+                    {tableColumns.map(({ column }) => (
+                      <th key={column} style={{ padding: "0 7px 8px", borderBottom: `1px solid ${T.borderSoft}` }}>
+                        {renderColumnFilter(column)}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -339,10 +486,8 @@ export default function WorkOrderList(props: any) {
                         <td style={{ padding: "10px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "-"}</td>
                         <td style={{ padding: "10px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "-"}</td>
                         <td style={{ padding: "10px", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "-"}</td>
-                        <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 140 }}>
-                          <div>Created: {dates.created}</div>
-                          <div style={{ marginTop: 3 }}>Updated: {dates.updated}</div>
-                        </td>
+                        <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 115 }}>{dates.created}</td>
+                        <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 115 }}>{dates.updated}</td>
                         <td style={{ padding: "10px" }}>
                           <div style={{ display: "grid", gap: 4, minWidth: 130 }}>
                             <span style={{ fontSize: 11, color: T.muted }}>{dates.slaDue}</span>

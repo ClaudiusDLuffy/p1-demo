@@ -15,7 +15,10 @@ import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
-import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
+import {
+  canDeleteOwnContractorInvoice,
+  canEditRejectedContractorInvoice,
+} from "../../lib/invoicePermissions";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
@@ -72,7 +75,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -231,6 +234,17 @@ export default function WorkOrderDetail(props: any) {
   }, [woBillingInvoices, woData?.status]);
   const hasAnyLiveInvoice = woAllInvoices.length > 0 || woBillingInvoices.length > 0;
   const canInvoice = !isManager && currentUser?.canInvoice === true;
+  const invoicingComplete = Boolean(
+    woData?.contractorInvoicingCompletedAt
+      && woData.contractorInvoicingAssignmentVersion === woData.contractorAssignmentVersion
+      && woData.contractorInvoicingWorkflowCycle === woData.workflowCycle,
+  );
+  const contractorInvoiceStates = woAllInvoices.map((invoice: any) => invoice.state);
+  const canFinishInvoicing = canInvoice
+    && woData?.status !== "closed"
+    && (woData?.billingOnly || woData?.functionalStatus === "Completed")
+    && contractorInvoiceStates.some(state => ["submitted", "revised", "approved", "paid"].includes(state))
+    && !contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state));
   // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
   // his work actions (pause / close complete / submit report / resume) as long
   // as the job itself is alive — driven by whether the WO is closed, NOT by the
@@ -656,6 +670,50 @@ export default function WorkOrderDetail(props: any) {
                       />
                     )}
 
+                    {woAllInvoices.length > 0 && (isManager || canInvoice) && (
+                      <div
+                        role="status"
+                        className="card"
+                        style={{
+                          padding: "14px 16px",
+                          marginBottom: 16,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 14,
+                          flexWrap: "wrap",
+                          background: invoicingComplete ? T.successSoft : T.surface,
+                          borderColor: invoicingComplete ? `${T.success}55` : T.border,
+                        }}
+                      >
+                        <div style={{ flex: "1 1 280px" }}>
+                          <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>
+                            {invoicingComplete ? "Contractor invoicing complete" : "Contractor may still be invoicing"}
+                          </div>
+                          <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                            {invoicingComplete
+                              ? "Staff can safely continue the billing handoff. A new or corrected contractor invoice automatically reopens this step."
+                              : canFinishInvoicing
+                                ? "Confirm that no more invoices are coming for this work order."
+                                : "This becomes ready after field work is complete and every draft or rejected invoice is resolved."}
+                          </div>
+                        </div>
+                        {!isManager && canFinishInvoicing && !invoicingComplete && (
+                          <button
+                            type="button"
+                            onClick={() => void doFinishContractorInvoicing?.(woData.id)}
+                            disabled={isLoading("finishInvoicing_" + woData.id)}
+                            className="btn-primary"
+                            style={loadingStyle("finishInvoicing_" + woData.id)}
+                          >
+                            {isLoading("finishInvoicing_" + woData.id)
+                              ? <><BtnSpinner />Saving...</>
+                              : "Done invoicing"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* ─────────────── INVOICES ON THIS WORK ORDER ────────────────
                         Multi-invoice support: each visit is its own complete
                         invoice. Staff see per-invoice approve / reject / mark
@@ -681,6 +739,11 @@ export default function WorkOrderDetail(props: any) {
                               || isManager
                             );
                             const isMyRejectedInvoice = canEditRejectedContractorInvoice(
+                              inv,
+                              currentUser,
+                              isManager,
+                            );
+                            const canDeleteInvoice = isManager || canDeleteOwnContractorInvoice(
                               inv,
                               currentUser,
                               isManager,
@@ -755,7 +818,7 @@ export default function WorkOrderDetail(props: any) {
                                   {canReviewInvoices && inv.state === "rejected" && doRetractInvoiceRejection && (
                                     <button onClick={() => setRetractingInvId(inv.id)} className="btn-accent wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Undo rejection</button>
                                   )}
-                                  {isManager && (
+                                  {canDeleteInvoice && (
                                     <button onClick={() => setDeletingInvId(inv.id)} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>
                                   )}
                                 </div>
@@ -794,7 +857,7 @@ export default function WorkOrderDetail(props: any) {
                                         {canReviewInvoices && inv.state === "rejected" && doRetractInvoiceRejection && (
                                           <button onClick={() => { setInvoiceMenuId(null); setRetractingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.accent, fontFamily: "inherit" }}>Undo rejection and approve</button>
                                         )}
-                                        {isManager && (
+                                        {canDeleteInvoice && (
                                           <button onClick={() => { setInvoiceMenuId(null); setDeletingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Delete</button>
                                         )}
                                       </div>
@@ -860,7 +923,8 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    {/* Per-row delete-invoice confirmation — staff only. */}
+                    {/* Per-row soft delete. Contractors reach this only for
+                        their own draft/rejected invoice; the RPC rechecks it. */}
                     {markingPaidInvId && (() => {
                       const inv = woAllInvoices.find((i: any) => i.id === markingPaidInvId);
                       if (!inv) return null;

@@ -152,6 +152,107 @@ export type Database = {
         }
         Relationships: []
       }
+      billing_tax_rule_audit: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          id: number
+          new_value: Json | null
+          operation: string
+          previous_value: Json | null
+          rule_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          id?: never
+          new_value?: Json | null
+          operation: string
+          previous_value?: Json | null
+          rule_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          id?: never
+          new_value?: Json | null
+          operation?: string
+          previous_value?: Json | null
+          rule_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_tax_rule_audit_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      billing_tax_rules: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description_keywords: string[]
+          equipment_keywords: string[]
+          id: string
+          is_active: boolean
+          line_types: string[]
+          name: string
+          priority: number
+          rule_key: string
+          taxable: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description_keywords?: string[]
+          equipment_keywords?: string[]
+          id?: string
+          is_active?: boolean
+          line_types?: string[]
+          name: string
+          priority?: number
+          rule_key: string
+          taxable: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description_keywords?: string[]
+          equipment_keywords?: string[]
+          id?: string
+          is_active?: boolean
+          line_types?: string[]
+          name?: string
+          priority?: number
+          rule_key?: string
+          taxable?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_tax_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_tax_rules_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractor_estimate_lines: {
         Row: {
           amount: number | null
@@ -607,7 +708,11 @@ export type Database = {
           store_number: string | null
           submission_key: string | null
           subtotal: number | null
+          tax_jurisdiction_snapshot: Json
           tax_rate: number | null
+          tax_rate_reference_id: string | null
+          tax_rate_source: string | null
+          tax_rate_verified_at: string | null
           tax_state: string | null
           territory: string | null
           terms: string | null
@@ -646,7 +751,11 @@ export type Database = {
           store_number?: string | null
           submission_key?: string | null
           subtotal?: number | null
+          tax_jurisdiction_snapshot?: Json
           tax_rate?: number | null
+          tax_rate_reference_id?: string | null
+          tax_rate_source?: string | null
+          tax_rate_verified_at?: string | null
           tax_state?: string | null
           territory?: string | null
           terms?: string | null
@@ -685,7 +794,11 @@ export type Database = {
           store_number?: string | null
           submission_key?: string | null
           subtotal?: number | null
+          tax_jurisdiction_snapshot?: Json
           tax_rate?: number | null
+          tax_rate_reference_id?: string | null
+          tax_rate_source?: string | null
+          tax_rate_verified_at?: string | null
           tax_state?: string | null
           territory?: string | null
           terms?: string | null
@@ -720,6 +833,13 @@ export type Database = {
             columns: ["resubmitted_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_tax_rate_reference_fkey"
+            columns: ["tax_rate_reference_id"]
+            isOneToOne: false
+            referencedRelation: "sales_tax_location_rates"
             referencedColumns: ["id"]
           },
           {
@@ -1078,6 +1198,77 @@ export type Database = {
           },
         ]
       }
+      sales_tax_location_rates: {
+        Row: {
+          address: string
+          city: string | null
+          combined_rate: number
+          county: string | null
+          created_at: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          import_batch_id: string
+          jurisdictions: Json
+          normalized_address: string
+          normalized_city: string
+          normalized_county: string
+          postal_code: string | null
+          source_reference: string | null
+          state_code: string
+          updated_at: string
+          verification_status: string
+        }
+        Insert: {
+          address: string
+          city?: string | null
+          combined_rate: number
+          county?: string | null
+          created_at?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          import_batch_id: string
+          jurisdictions?: Json
+          normalized_address?: string
+          normalized_city?: string
+          normalized_county?: string
+          postal_code?: string | null
+          source_reference?: string | null
+          state_code: string
+          updated_at?: string
+          verification_status?: string
+        }
+        Update: {
+          address?: string
+          city?: string | null
+          combined_rate?: number
+          county?: string | null
+          created_at?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          import_batch_id?: string
+          jurisdictions?: Json
+          normalized_address?: string
+          normalized_city?: string
+          normalized_county?: string
+          postal_code?: string | null
+          source_reference?: string | null
+          state_code?: string
+          updated_at?: string
+          verification_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_tax_location_rates_import_batch_id_fkey"
+            columns: ["import_batch_id"]
+            isOneToOne: false
+            referencedRelation: "tax_rate_import_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       state_sales_tax_rates: {
         Row: {
           created_at: string
@@ -1142,6 +1333,53 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      tax_rate_import_batches: {
+        Row: {
+          effective_from: string
+          id: string
+          imported_at: string
+          imported_by: string | null
+          notes: string | null
+          source_file_sha256: string | null
+          source_name: string
+          source_url: string
+          source_version: string
+          state_code: string
+        }
+        Insert: {
+          effective_from: string
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          notes?: string | null
+          source_file_sha256?: string | null
+          source_name: string
+          source_url: string
+          source_version: string
+          state_code: string
+        }
+        Update: {
+          effective_from?: string
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          notes?: string | null
+          source_file_sha256?: string | null
+          source_name?: string
+          source_url?: string
+          source_version?: string
+          state_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tax_rate_import_batches_imported_by_fkey"
+            columns: ["imported_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       staff_permission_grants: {
         Row: {
@@ -1821,6 +2059,11 @@ export type Database = {
           closed_at: string | null
           contractor_assignment_started_at: string | null
           contractor_assignment_version: number
+          contractor_invoicing_assignment_version: number | null
+          contractor_invoicing_completed_at: string | null
+          contractor_invoicing_completed_by: string | null
+          contractor_invoicing_completion_source: string | null
+          contractor_invoicing_workflow_cycle: number | null
           contractor_id: string | null
           created_at: string | null
           created_by: string | null
@@ -1860,6 +2103,8 @@ export type Database = {
           start_time: string | null
           status: Database["public"]["Enums"]["wo_status"]
           store_number: string | null
+          store_county: string | null
+          store_postal_code: string | null
           store_state: string | null
           store_timezone: string | null
           sub_category: string | null
@@ -1891,6 +2136,11 @@ export type Database = {
           closed_at?: string | null
           contractor_assignment_started_at?: string | null
           contractor_assignment_version?: number
+          contractor_invoicing_assignment_version?: number | null
+          contractor_invoicing_completed_at?: string | null
+          contractor_invoicing_completed_by?: string | null
+          contractor_invoicing_completion_source?: string | null
+          contractor_invoicing_workflow_cycle?: number | null
           contractor_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -1930,6 +2180,8 @@ export type Database = {
           start_time?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
           store_number?: string | null
+          store_county?: string | null
+          store_postal_code?: string | null
           store_state?: string | null
           store_timezone?: string | null
           sub_category?: string | null
@@ -1961,6 +2213,11 @@ export type Database = {
           closed_at?: string | null
           contractor_assignment_started_at?: string | null
           contractor_assignment_version?: number
+          contractor_invoicing_assignment_version?: number | null
+          contractor_invoicing_completed_at?: string | null
+          contractor_invoicing_completed_by?: string | null
+          contractor_invoicing_completion_source?: string | null
+          contractor_invoicing_workflow_cycle?: number | null
           contractor_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -2000,6 +2257,8 @@ export type Database = {
           start_time?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
           store_number?: string | null
+          store_county?: string | null
+          store_postal_code?: string | null
           store_state?: string | null
           store_timezone?: string | null
           sub_category?: string | null
@@ -2159,6 +2418,10 @@ export type Database = {
         Args: { p_work_order_id: string }
         Returns: Database["public"]["Enums"]["wo_status"] | null
       }
+      contractor_invoicing_is_complete: {
+        Args: { p_work_order_id: string }
+        Returns: boolean
+      }
       correct_contractor_invoice_total: {
         Args: {
           p_invoice_id: string
@@ -2169,6 +2432,14 @@ export type Database = {
       }
       convert_contractor_estimate_to_invoice: {
         Args: { p_estimate_id: string }
+        Returns: Json
+      }
+      delete_own_contractor_invoice: {
+        Args: { p_invoice_id: string }
+        Returns: Json
+      }
+      finish_contractor_invoicing: {
+        Args: { p_work_order_id: string }
         Returns: Json
       }
       submit_contractor_invoice_once: {
@@ -2227,6 +2498,59 @@ export type Database = {
       mark_staff_work_order_read: {
         Args: { p_read_through_at: string; p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_notification_reads"]["Row"]
+      }
+      list_work_orders_table_page: {
+        Args: {
+          p_contractor_filter?: string | null
+          p_contractor_id?: string | null
+          p_contractor_ids?: string[] | null
+          p_created_date_filter?: string | null
+          p_cursor?: string | null
+          p_from?: string | null
+          p_incident_filter?: string | null
+          p_limit?: number
+          p_needs_action?: boolean
+          p_pending_first?: boolean
+          p_priority?: string | null
+          p_resolution?: string | null
+          p_scope?: string
+          p_search?: string | null
+          p_sla_filter?: string | null
+          p_sort?: string
+          p_sort_column?: string
+          p_sort_direction?: string
+          p_state?: string | null
+          p_status?: string | null
+          p_store_filter?: string | null
+          p_store_number?: string | null
+          p_summary_filter?: string | null
+          p_to?: string | null
+          p_updated_date_filter?: string | null
+          p_work_order_filter?: string | null
+        }
+        Returns: Json
+      }
+      list_staff_contractor_preview_invoices: {
+        Args: {
+          p_contractor_id: string
+          p_cursor_created_at?: string | null
+          p_cursor_id?: string | null
+          p_limit?: number
+          p_search?: string | null
+          p_state?: string
+        }
+        Returns: Json
+      }
+      list_staff_contractor_preview_work_orders: {
+        Args: {
+          p_contractor_id: string
+          p_cursor_created_at?: string | null
+          p_cursor_id?: string | null
+          p_limit?: number
+          p_scope?: string
+          p_search?: string | null
+        }
+        Returns: Json
       }
       mark_staff_invoice_billed: {
         Args: {
@@ -2313,6 +2637,17 @@ export type Database = {
           p_mode: string
           p_reason: string
           p_work_order_id: string
+        }
+        Returns: Json
+      }
+      resolve_location_sales_tax_rate: {
+        Args: {
+          p_address: string
+          p_city: string | null
+          p_county: string | null
+          p_on_date: string
+          p_postal_code: string | null
+          p_state: string
         }
         Returns: Json
       }

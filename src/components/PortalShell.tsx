@@ -101,6 +101,10 @@ import {
 import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
 import { isInvoiceController } from "../lib/staffPermissions";
 import {
+  PORTAL_AUTO_REFRESH_MS,
+  shouldRefreshPortal,
+} from "../lib/portalRefresh";
+import {
   WORK_ORDER_REOPEN_REASON_MAX_LENGTH,
   normalizeWorkOrderReopenReason,
   validateWorkOrderReopenReason,
@@ -133,6 +137,11 @@ const BillingInvoiceCreateModal = dynamic(
 
 const BillingInvoiceDetail = dynamic(
   () => import("../features/billing/BillingInvoiceDetail"),
+  { ssr: false }
+);
+
+const StaffContractorPreview = dynamic(
+  () => import("../features/contractor-preview/StaffContractorPreview"),
   { ssr: false }
 );
 
@@ -1160,6 +1169,7 @@ export default function PortalShell() {
   const pullDistanceRef = useRef(0);
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshInFlightRef = useRef(false);
   const portalHistoryInitializedRef = useRef(false);
   const applyingPortalHistoryRef = useRef(false);
   const portalHistoryDepthRef = useRef(0);
@@ -1176,11 +1186,6 @@ export default function PortalShell() {
     pullDistanceRef.current = distance;
     setPullDistance(distance);
   }, []);
-  const refreshPortal = useCallback(() => {
-    if (typeof window === "undefined" || isRefreshing) return;
-    setIsRefreshing(true);
-    window.requestAnimationFrame(() => window.location.reload());
-  }, [isRefreshing]);
   const handlePullStart = useCallback((event: any) => {
     if (event.touches?.length !== 1) return;
     const contentAtTop = (contentScrollRef.current?.scrollTop || 0) <= 0;
@@ -1199,13 +1204,6 @@ export default function PortalShell() {
     }
     updatePullDistance(Math.min(88, delta * 0.45));
   }, [updatePullDistance]);
-  const handlePullEnd = useCallback(() => {
-    const shouldRefresh = pullDistanceRef.current >= 64;
-    pullEligibleRef.current = false;
-    pullStartYRef.current = null;
-    updatePullDistance(0);
-    if (shouldRefresh) refreshPortal();
-  }, [refreshPortal, updatePullDistance]);
   const persistPortalScrollState = useCallback((scrollTop: number) => {
     if (typeof window === "undefined") return;
     const state = window.history.state;
@@ -1281,6 +1279,54 @@ export default function PortalShell() {
   const notesSeenInFlight = useRef(new Set<string>());
   const staffReadInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
+  const refreshPortal = useCallback(async () => {
+    if (typeof window === "undefined" || !shouldRefreshPortal({
+      authenticated: Boolean(currentUser?.id),
+      visible: document.visibilityState === "visible",
+      online: navigator.onLine,
+      busy: refreshInFlightRef.current,
+    })) return;
+
+    // Visibility, online, interval, manual, and pull-to-refresh events can
+    // arrive in the same browser tick. A ref closes that gap before React has
+    // time to publish the loading state, keeping refresh strictly single-flight.
+    refreshInFlightRef.current = true;
+    setIsRefreshing(true);
+    try {
+      // Refetch mounted read models in place. Local form state, pagination,
+      // navigation history, and scroll position are intentionally untouched.
+      await qc.invalidateQueries({ refetchType: "active" });
+    } finally {
+      refreshInFlightRef.current = false;
+      setIsRefreshing(false);
+    }
+  }, [currentUser?.id, qc]);
+  const handlePullEnd = useCallback(() => {
+    const shouldRefresh = pullDistanceRef.current >= 64;
+    pullEligibleRef.current = false;
+    pullStartYRef.current = null;
+    updatePullDistance(0);
+    if (shouldRefresh) void refreshPortal();
+  }, [refreshPortal, updatePullDistance]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentUser?.id) return;
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshPortal();
+    };
+    const intervalId = window.setInterval(() => {
+      void refreshPortal();
+    }, PORTAL_AUTO_REFRESH_MS);
+
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
+    };
+  }, [currentUser?.id, refreshPortal]);
   const { data: navigationSummary } = usePortalNavigationSummaryQuery(isAuthenticated);
   const selectedWorkOrderQuery = useWorkOrderByIdQuery(
     selectedWO,
@@ -1322,7 +1368,8 @@ export default function PortalShell() {
     patchLocalWO, localActivity, dbCall,
     doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
-    doMoveToInvoice, doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
+    doMoveToInvoice, doFinishContractorInvoicing,
+    doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
@@ -1515,6 +1562,30 @@ export default function PortalShell() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [currentUser?.id, setSelectedInvoice, setSelectedWO]);
+
+  const backFromWorkOrder = useCallback(() => {
+    setAiNote(null);
+
+    if (
+      typeof window !== "undefined"
+      && portalHistoryDepthRef.current > 0
+      && portalViewFromHistoryState(window.history.state)?.selectedWorkOrderId
+    ) {
+      setWorkOrderReturnPage(null);
+      window.history.back();
+      return;
+    }
+
+    // Direct links do not have a portal list entry to restore, so retain the
+    // existing deterministic fallback for those sessions.
+    setSelectedWO(null);
+    if (workOrderReturnPage) {
+      setPage(workOrderReturnPage);
+      setWorkOrderReturnPage(null);
+    } else if (!isManager) {
+      setPage("my_jobs");
+    }
+  }, [isManager, setSelectedWO, workOrderReturnPage]);
 
   const rememberWorkOrderReturn = useCallback((workOrderId: string) => {
     if (!workOrderId) return;
@@ -2476,6 +2547,7 @@ export default function PortalShell() {
       { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
       { id: "billing", label: "Billing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6M9 9h1" },
       { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
+      { id: "contractor_preview", label: "Contractor view", icon: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" },
       { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
     ]
     : [
@@ -2514,7 +2586,7 @@ export default function PortalShell() {
   // ===============================================================
   //  APP SHELL
   // ===============================================================
-  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
+  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
 
   // =====  // ===============================================================
   //  LAYOUT
@@ -3133,6 +3205,7 @@ export default function PortalShell() {
               onCreateFromWorkOrder={(workOrder: any) => openBillingForWorkOrder(workOrder.id)}
               onOpenReadyInvoice={(invoice: any) => setSelectedBillingInvoice(invoice.id)}
               fmt={fmt}
+              fire={fire}
             />
           )}
 
@@ -3183,6 +3256,13 @@ export default function PortalShell() {
             setFilterC={setFilterC}
             fire={fire}
           />
+
+          {isManager && !invoiceController && (
+            <StaffContractorPreview
+              page={page}
+              contractors={assignableContractors}
+            />
+          )}
 
           <HistoryView
             page={page}
@@ -3244,16 +3324,7 @@ export default function PortalShell() {
             modal={modal}
             isManager={isManager}
             setSelectedWO={setSelectedWO}
-            onBackFromWorkOrder={() => {
-              setSelectedWO(null);
-              setAiNote(null);
-              if (workOrderReturnPage) {
-                setPage(workOrderReturnPage);
-                setWorkOrderReturnPage(null);
-              } else if (!isManager) {
-                setPage("my_jobs");
-              }
-            }}
+            onBackFromWorkOrder={backFromWorkOrder}
             onViewStoreWorkOrders={openStoreWorkOrders}
             setSelectedInvoice={setSelectedInvoice}
             onOpenContractorInvoice={openContractorInvoiceFromWorkOrder}
@@ -3273,6 +3344,7 @@ export default function PortalShell() {
             doCapitalComplete={handleCapitalCompleted}
             onOpenBillingForWorkOrder={openBillingFromWorkOrder}
             doMoveToInvoice={doMoveToInvoice}
+            doFinishContractorInvoicing={doFinishContractorInvoicing}
             doApproveInvoice={doApproveInvoice}
             onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
             doMarkPaid={doMarkPaid}

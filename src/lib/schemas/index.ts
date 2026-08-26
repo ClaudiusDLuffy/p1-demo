@@ -26,6 +26,13 @@ export const WorkOrderSchema = z.object({
   is_capital: z.boolean().optional().nullable(),
   technician_on_job: z.string().optional().nullable(),
   source: z.string().optional().nullable(),
+  store_county: z.string().optional().nullable(),
+  store_postal_code: z.string().optional().nullable(),
+  contractor_invoicing_completed_at: z.string().optional().nullable(),
+  contractor_invoicing_completed_by: z.string().uuid().optional().nullable(),
+  contractor_invoicing_assignment_version: z.number().int().optional().nullable(),
+  contractor_invoicing_workflow_cycle: z.number().int().optional().nullable(),
+  contractor_invoicing_completion_source: z.string().optional().nullable(),
 })
 
 export type WorkOrder = z.infer<typeof WorkOrderSchema>
@@ -47,6 +54,10 @@ export const InvoiceSchema = z.object({
   state: z.enum(["draft", "submitted", "approved", "rejected", "revised", "paid"]),
   subtotal: z.number(),
   sales_tax: z.number().optional().nullable(),
+  tax_rate_source: z.string().optional().nullable(),
+  tax_rate_reference_id: z.string().uuid().optional().nullable(),
+  tax_jurisdiction_snapshot: z.array(z.record(z.string(), z.unknown())).optional(),
+  tax_rate_verified_at: z.string().optional().nullable(),
   total: z.number(),
   pdf_storage_path: z.string().optional().nullable(),
   rejection_reason: z.string().optional().nullable(),

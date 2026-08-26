@@ -11,19 +11,23 @@ const billingModal = read("src/features/billing/BillingInvoiceCreateModal.tsx");
 const myJobs = read("src/features/work-orders/MyJobs.tsx");
 const subDispatch = read("src/features/contractors/SubDispatchView.tsx");
 const migration = read("supabase/migrations/0076_cursor_pagination_and_portal_indexes.sql");
+const tableMigration = read("supabase/migrations/0086_work_order_table_sorting.sql");
 
 test("work-order lists use RLS-aware cursor pages instead of global detail rows", () => {
   const listLoader = db.slice(
     db.indexOf("export async function loadWorkOrders"),
     db.indexOf("const formatWorkOrderDateTime"),
   );
-  assert.match(db, /rpc\("list_work_orders_page"/);
+  assert.match(db, /\? "list_work_orders_table_page"\s*:\s*"list_work_orders_page"/);
+  assert.match(db, /rpc\(rpcName, tableArgs\)/);
   assert.doesNotMatch(listLoader, /\.from\("photos"\)/);
   assert.doesNotMatch(listLoader, /\.from\("work_order_visits"\)/);
   assert.match(migration, /security invoker/i);
   assert.match(migration, /candidate_work_orders as materialized/i);
   assert.match(migration, /where activity\.deleted_at is null/i);
   assert.match(migration, /grant execute[\s\S]*authenticated, service_role/i);
+  assert.match(tableMigration, /security invoker/i);
+  assert.match(tableMigration, /grant execute[\s\S]*authenticated, service_role/i);
 });
 
 test("opened work-order details request only their first scoped cursor pages", () => {
