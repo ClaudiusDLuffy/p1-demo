@@ -21,6 +21,16 @@ test("work-order table sorting and filtering operate on the full RLS result set"
   assert.match(migration, /portal_encode_cursor/);
 });
 
+test("every CTE that reads normalized arguments joins the args row", () => {
+  const filteredStart = migration.indexOf("filtered as (");
+  const sortableStart = migration.indexOf("sortable as (", filteredStart);
+  const filtered = migration.slice(filteredStart, sortableStart);
+
+  assert.ok(filteredStart >= 0);
+  assert.ok(sortableStart > filteredStart);
+  assert.match(filtered, /left join activity_summary[\s\S]*cross join args[\s\S]*case args\.scope_name/);
+});
+
 test("the dedicated table RPC remains authenticated and RLS scoped", () => {
   assert.doesNotMatch(migration, /security definer/i);
   assert.match(
