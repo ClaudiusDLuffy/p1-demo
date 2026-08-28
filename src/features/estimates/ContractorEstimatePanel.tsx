@@ -11,6 +11,7 @@ import { TA } from "../../components/ui/TA";
 import {
   convertContractorEstimateToInvoice,
   downloadContractorEstimateAttachment,
+  downloadContractorEstimateTemplate,
   loadInvoiceById,
   removeContractorEstimateAttachment,
   saveContractorEstimate,
@@ -31,6 +32,7 @@ import {
   validateContractorEstimate,
   type ContractorEstimate,
   type ContractorEstimateAttachment,
+  type ContractorEstimateTemplate,
   type ContractorEstimateLineType,
   type ContractorEstimateState,
   type EditableContractorEstimateLine,
@@ -45,6 +47,7 @@ import {
 import { WORK_ORDER_DETAILS_KEY } from "../work-orders/queries";
 import {
   CONTRACTOR_ESTIMATES_KEY,
+  useContractorEstimateTemplatesQuery,
   useContractorEstimatesQuery,
 } from "./queries";
 
@@ -149,6 +152,8 @@ export default function ContractorEstimatePanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"save" | "submit" | "convert" | "open" | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState<string | null>(null);
+  const [templateBusy, setTemplateBusy] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState("");
   const [confirmAction, setConfirmAction] = useState<"submit" | "convert" | null>(null);
   const operationLock = useRef(false);
   const access = useMemo(() => ({
@@ -161,7 +166,11 @@ export default function ContractorEstimatePanel({
     workOrder.id,
     isManager || currentUser?.canInvoice === true,
   );
+  const templatesQuery = useContractorEstimateTemplatesQuery(
+    isManager || currentUser?.canInvoice === true,
+  );
   const estimates = estimatesQuery.data || [];
+  const templates = templatesQuery.data || [];
   const totals = useMemo(
     () => editor ? contractorEstimateTotals(editor.lines, editor.salesTax) : null,
     [editor],
@@ -255,6 +264,21 @@ export default function ContractorEstimatePanel({
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setAttachmentBusy(null);
+    }
+  };
+
+  const downloadTemplate = async (template: ContractorEstimateTemplate) => {
+    if (templateBusy) return;
+    setTemplateBusy(template.id);
+    setTemplateError("");
+    try {
+      await downloadContractorEstimateTemplate(template);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setTemplateError(message);
+      fire(`Could not download ${template.displayName}: ${message}`);
+    } finally {
+      setTemplateBusy(null);
     }
   };
 
@@ -399,6 +423,42 @@ export default function ContractorEstimatePanel({
             >+ New estimate</button>
           )}
         </div>
+
+        <section aria-label="Approved equipment form templates" style={{ padding: "13px 18px", borderBottom: `1px solid ${T.borderSoft}` }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: T.ink }}>Approved equipment form templates</div>
+          <div style={{ fontSize: 10, color: T.muted, marginTop: 3, lineHeight: 1.45 }}>
+            Download a blank form, complete it in Excel, then save an estimate draft and attach the completed workbook under Equipment forms.
+          </div>
+          {templatesQuery.isLoading ? (
+            <div style={{ marginTop: 9, fontSize: 11, color: T.subtle }}>Loading approved templates…</div>
+          ) : templatesQuery.isError ? (
+            <div role="alert" style={{ marginTop: 9, fontSize: 11, color: T.danger }}>Approved templates could not be loaded.</div>
+          ) : templates.length === 0 ? (
+            <div style={{ marginTop: 9, fontSize: 11, color: T.subtle }}>No approved templates are published yet.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {templates.map(template => (
+                <button
+                  key={template.id}
+                  type="button"
+                  className="btn-soft"
+                  disabled={Boolean(templateBusy)}
+                  onClick={() => void downloadTemplate(template)}
+                  title={template.description}
+                  style={{ padding: "7px 11px", fontSize: 11, opacity: templateBusy ? 0.65 : 1 }}
+                >
+                  {templateBusy === template.id ? "Downloading…" : `Download ${template.displayName}`}
+                  <span style={{ display: "block", marginTop: 2, fontSize: 9, color: T.subtle, fontWeight: 500 }}>
+                    {template.versionLabel} · {(template.sizeBytes / 1024).toFixed(0)} KB · .xlsx
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {templateError && (
+            <div role="alert" style={{ marginTop: 9, fontSize: 11, color: T.danger }}>{templateError}</div>
+          )}
+        </section>
 
         {estimatesQuery.isLoading ? (
           <div style={{ padding: 18, fontSize: 12, color: T.muted }}>Loading estimates…</div>

@@ -25,3 +25,9 @@ test("the export panel does not turn an accountant into a restricted controller"
   assert.match(dashboard, /const controller = isInvoiceController\(currentUser\)/);
   assert.match(dashboard, /<ControllerExportPanel/);
 });
+
+test("the QuickBooks audit log stays closed until accounting opens it", () => {
+  assert.match(exportPanel, /const \[showHistory, setShowHistory\] = useState\(false\)/);
+  assert.match(exportPanel, /showHistory \? "Hide audit log" : "View audit log"/);
+  assert.match(exportPanel, /setShowHistory\(true\)/);
+});

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "bootstrap": "tsx scripts/bootstrap.ts"
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "publish:contractor-templates": "tsx scripts/publish-contractor-estimate-templates.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

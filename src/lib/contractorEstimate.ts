@@ -31,6 +31,20 @@ export type ContractorEstimateAttachment = {
   createdAt: string;
 };
 
+export type ContractorEstimateTemplate = {
+  id: string;
+  templateKey: "heatcraft" | "carrier";
+  displayName: string;
+  description: string;
+  versionLabel: string;
+  originalName: string;
+  storagePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  publishedAt: string;
+};
+
 export type ContractorEstimate = {
   id: string;
   quoteNum: string;
