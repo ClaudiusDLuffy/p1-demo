@@ -6,6 +6,7 @@ import test from "node:test";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const shell = read("src/components/PortalShell.tsx");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
+const billingEditor = read("src/features/billing/BillingInvoiceCreateModal.tsx");
 const sourceDrawer = read("src/features/billing/SourceContractorInvoiceDrawer.tsx");
 const nextConfig = read("next.config.ts");
 const queueMigration = read("supabase/migrations/0093_work_order_queue_pinning.sql");
@@ -13,11 +14,28 @@ const billingMigration = read("supabase/migrations/0094_staff_billing_sorting.sq
 
 test("invoice and billing detours return to the originating work order", () => {
   assert.match(shell, /const rememberWorkOrderReturn = useCallback/);
+  assert.match(shell, /page === "wo_detail"\s*\? "wo_detail"/);
   assert.match(shell, /const returnToWorkflowWorkOrder = useCallback/);
   assert.match(shell, /const openContractorInvoiceFromWorkOrder = useCallback/);
   assert.match(shell, /onClose=\{closeBillingInvoiceEditor\}/);
   assert.match(detail, /Back to previous view/);
   assert.match(detail, /Back to all work orders/);
+});
+
+test("saving a P1 invoice opens its exact billing detail instead of restoring the work order", () => {
+  const createdStart = shell.indexOf("onCreated={(invoice: any) => {");
+  const createdEnd = shell.indexOf("fire={fire}", createdStart);
+  const createdFlow = shell.slice(createdStart, createdEnd);
+  const saveStart = billingEditor.indexOf("const submit = async");
+  const saveEnd = billingEditor.indexOf("if (modal !==", saveStart);
+  const saveFlow = billingEditor.slice(saveStart, saveEnd);
+
+  assert.match(createdFlow, /setSelectedBillingInvoice\(invoice\.id\)/);
+  assert.match(createdFlow, /setModal\(null\)/);
+  assert.match(createdFlow, /setPage\("billing"\)/);
+  assert.match(saveFlow, /onCreated\?\.\(payload\.invoice\)/);
+  assert.match(saveFlow, /resetAfterSaveOrDiscard\(\)/);
+  assert.doesNotMatch(saveFlow, /discardAndClose\(\)/);
 });
 
 test("source invoice drawer renders the authenticated original PDF and keeps structured data as fallback", () => {

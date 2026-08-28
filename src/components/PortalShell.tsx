@@ -1593,9 +1593,11 @@ export default function PortalShell() {
       workOrderId,
       page: page === "history"
         ? "history"
-        : page === "my_jobs"
-          ? "my_jobs"
-          : "work_orders",
+        : page === "wo_detail"
+          ? "wo_detail"
+          : page === "my_jobs"
+            ? "my_jobs"
+            : "work_orders",
     });
   }, [page]);
 
@@ -4220,7 +4222,13 @@ export default function PortalShell() {
             qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY });
             qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
             qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
-            if (invoice?.id) setSelectedBillingInvoice(invoice.id);
+            if (invoice?.id) {
+              setSelectedWO(null);
+              setSelectedBillingInvoice(invoice.id);
+              setPage("billing");
+            }
+            setModal(null);
+            setBillingDraftToEdit(null);
             setBillingSourceToStart(null);
             setBillingWorkOrderToStart(null);
           }}
