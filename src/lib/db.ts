@@ -1759,6 +1759,55 @@ export type FinishContractorInvoicingResult = {
   invoiceCount?: number;
 };
 
+export type CompleteContractorWorkAndInvoicingResult =
+  FinishContractorInvoicingResult & {
+    workCompletionApplied: boolean;
+    workCompletionReason?: string | null;
+    completionActivityId?: string | null;
+    invoicingCompletionApplied: boolean;
+  };
+
+export async function completeContractorWorkAndInvoicing(
+  workOrderId: string,
+  {
+    completedAt,
+    assetMake,
+    assetModel,
+    assetSerial,
+    assetYear,
+    resolutionCode,
+    resolutionNotes,
+    activityText,
+  }: {
+    completedAt: string;
+    assetMake: string;
+    assetModel: string;
+    assetSerial: string;
+    assetYear?: number | null;
+    resolutionCode?: string | null;
+    resolutionNotes?: string | null;
+    activityText: string;
+  },
+): Promise<CompleteContractorWorkAndInvoicingResult> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "complete_contractor_work_and_invoicing",
+    {
+      p_work_order_id: workOrderId,
+      p_completed_at: completedAt,
+      p_asset_make: assetMake,
+      p_asset_model: assetModel,
+      p_asset_serial: assetSerial,
+      p_asset_year: assetYear || null,
+      p_resolution_code: resolutionCode || null,
+      p_resolution_notes: resolutionNotes || null,
+      p_activity_text: activityText,
+    },
+  );
+  if (error) throw error;
+  return data as CompleteContractorWorkAndInvoicingResult;
+}
+
 export async function finishContractorInvoicing(
   workOrderId: string,
 ): Promise<FinishContractorInvoicingResult> {

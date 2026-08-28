@@ -35,12 +35,12 @@ test("closed work orders reject unsafe new invoice headers at the database bound
   assert.match(migration, /auth\.role\(\)[\s\S]*= 'service_role'/);
 });
 
-test("the UI separates no-invoice close from the existing invoiced close path", () => {
+test("staff only get the no-invoice exception on work orders", () => {
   assert.match(detail, /const hasAnyLiveInvoice = woAllInvoices\.length > 0 \|\| woBillingInvoices\.length > 0/);
-  assert.match(detail, /hasAnyLiveInvoice \? \(/);
+  assert.match(detail, /isManager && woData\.status !== "closed" && !hasAnyLiveInvoice/);
   assert.match(detail, /setModal\("closeWithoutInvoice"\)/);
   assert.match(detail, /Close — no invoice/);
-  assert.match(detail, /setModal\("closeWO"\)/);
+  assert.doesNotMatch(detail, /setModal\("closeWO"\)/);
   assert.match(shell, /modal === "closeWithoutInvoice"/);
   assert.match(shell, /await doCloseWithoutInvoice\(woData\.id\)/);
   assert.match(hook, /closeWorkOrderWithoutInvoice\(woId\)/);

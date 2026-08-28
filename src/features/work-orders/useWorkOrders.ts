@@ -12,6 +12,7 @@ import {
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
+  completeContractorWorkAndInvoicing,
   moveWorkOrderStraightToBilling,
   completeCapitalWork,
   closeWorkOrderWithoutInvoice,
@@ -711,42 +712,93 @@ export default function useWorkOrders({
   const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null, completedAt?: string, resolutionNotes?: string) => {
     setLoading("closeComplete_" + woId, true);
     try {
-    const endIso = completedAt || new Date().toISOString();
-    const existing = workOrders.find(w => w.id === woId);
-    const timeZone = timezoneForWorkOrder(existing);
-    const formattedEnd = new Date(endIso).toLocaleString("en-US", {
-      timeZone,
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    const cleanNotes = (resolutionNotes || "").trim();
-    const text = `Job completed and clocked out at ${formattedEnd}. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.${cleanNotes ? ` Closing notes: ${cleanNotes}` : ""}`;
-    const patch: any = { status: "completed", functionalStatus: "Completed", assetMake: make, assetModel: model, assetSerial: serial, endTime: formattedEnd, endTimeRaw: endIso, resolutionCode: resolution || null, resolutionNotes: cleanNotes || null };
-    if (assetYear) patch.assetYear = assetYear;
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, patch, localActivity(text, "note", isManager, "job_completed", true));
-    let completionResult: { applied: boolean; reason?: string } | null = null;
-    const saved = await dbCall(async () => {
-      completionResult = await completeWorkOrderOnce(woId, {
-        completedAt: endIso,
+      const endIso = completedAt || new Date().toISOString();
+      const existing = workOrders.find(w => w.id === woId);
+      const timeZone = timezoneForWorkOrder(existing);
+      const formattedEnd = new Date(endIso).toLocaleString("en-US", {
+        timeZone,
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      const cleanNotes = (resolutionNotes || "").trim();
+      const text = `Job completed and clocked out at ${formattedEnd}. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.${cleanNotes ? ` Closing notes: ${cleanNotes}` : ""}`;
+      const patch: any = {
+        status: "completed",
+        functionalStatus: "Completed",
         assetMake: make,
         assetModel: model,
         assetSerial: serial,
-        assetYear: assetYear || null,
+        endTime: formattedEnd,
+        endTimeRaw: endIso,
         resolutionCode: resolution || null,
         resolutionNotes: cleanNotes || null,
-        activityText: text,
-      });
-    }, "Close failed", () => restoreWorkOrders(snapshot), invalidateWorkOrders);
-    if (saved && completionResult?.applied === false) {
-      restoreWorkOrders(snapshot);
-      invalidateWorkOrders();
-      fire("Work order was already completed");
-    } else if (saved) {
-      fire("Completed");
-    }
+      };
+      if (assetYear) patch.assetYear = assetYear;
+
+      // Invoice-capable contractors use one atomic RPC. If invoice validation
+      // fails, PostgreSQL rolls the field completion back with it.
+      if (!isManager && currentUser?.canInvoice === true && !existing?.billingOnly) {
+        try {
+          const result = await completeContractorWorkAndInvoicing(woId, {
+            completedAt: endIso,
+            assetMake: make,
+            assetModel: model,
+            assetSerial: serial,
+            assetYear: assetYear || null,
+            resolutionCode: resolution || null,
+            resolutionNotes: cleanNotes || null,
+            activityText: text,
+          });
+          const fieldPatch = existing?.functionalStatus === "Completed" ? {} : patch;
+          patchLocalWO(woId, {
+            ...fieldPatch,
+            status: result.workOrderStatus,
+            contractorInvoicingCompletedAt: result.completedAt,
+            contractorInvoicingCompletedBy:
+              result.completedBy || currentUser?.id || null,
+            contractorInvoicingAssignmentVersion:
+              existing?.contractorAssignmentVersion ?? null,
+            contractorInvoicingWorkflowCycle:
+              existing?.workflowCycle ?? null,
+            contractorInvoicingCompletionSource: result.source || "contractor",
+          });
+          invalidateBoth();
+          fire(result.applied
+            ? "Work and invoicing completed — staff can continue approval and billing"
+            : "Work and invoicing were already completed");
+          return true;
+        } catch (error: any) {
+          invalidateBoth();
+          fire(`Could not complete work and invoicing: ${rpcErrorMessage(error)}`);
+          return false;
+        }
+      }
+
+      const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+      patchLocalWO(woId, patch, localActivity(text, "note", isManager, "job_completed", true));
+      let completionResult: { applied: boolean; reason?: string } | null = null;
+      const saved = await dbCall(async () => {
+        completionResult = await completeWorkOrderOnce(woId, {
+          completedAt: endIso,
+          assetMake: make,
+          assetModel: model,
+          assetSerial: serial,
+          assetYear: assetYear || null,
+          resolutionCode: resolution || null,
+          resolutionNotes: cleanNotes || null,
+          activityText: text,
+        });
+      }, "Close failed", () => restoreWorkOrders(snapshot), invalidateWorkOrders);
+      if (saved && completionResult?.applied === false) {
+        restoreWorkOrders(snapshot);
+        invalidateWorkOrders();
+        fire("Work order was already completed");
+      } else if (saved) {
+        fire("Completed");
+      }
+      return saved;
     } finally {
       setLoading("closeComplete_" + woId, false);
     }

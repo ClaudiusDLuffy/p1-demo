@@ -1741,6 +1741,10 @@ export default function PortalShell() {
       : null,
     [maskedWorkOrders, selectedWO, selectedWorkOrderForView]
   );
+  const combinesContractorCompletion = !isManager
+    && currentUser?.canInvoice === true
+    && !woData?.billingOnly;
+  const contractorFieldAlreadyComplete = woData?.functionalStatus === "Completed";
   const resetReopenForm = useCallback(() => {
     setReopenTarget(null);
     setReopenMode("");
@@ -4132,9 +4136,24 @@ export default function PortalShell() {
       )}
 
       {modal === "closeComplete" && woData && !isManager && (
-        <Modal onClose={() => setModal(null)} title="Mark work complete" width={540}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Complete the job for Store #{woData.store}. Asset info is required.</div>
-          <div style={{ display: "grid", gap: 14 }}>
+        <Modal
+          onClose={() => setModal(null)}
+          title={combinesContractorCompletion ? "Complete work & invoicing" : "Mark work complete"}
+          width={540}
+        >
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+            {combinesContractorCompletion
+              ? contractorFieldAlreadyComplete
+                ? `Field work for Store #${woData.store} is already complete. Confirm the current contractor invoice set to finish this job.`
+                : `Complete field work for Store #${woData.store} and confirm the current contractor invoice set in one action.`
+              : `Complete the job for Store #${woData.store}. Asset info is required.`}
+          </div>
+          {combinesContractorCompletion && (
+            <div style={{ padding: "12px 14px", marginBottom: 16, background: T.successSoft, borderRadius: 10, border: `1px solid ${T.success}33`, color: T.ink, fontSize: 12, lineHeight: 1.5 }}>
+              This confirms that every contractor invoice for this work order has been submitted. P1 review and billing remain separate.
+            </div>
+          )}
+          {(!combinesContractorCompletion || !contractorFieldAlreadyComplete) && <div style={{ display: "grid", gap: 14 }}>
             <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Asset information (required)</div>
               <Field label="Equipment make"><Input value={assetMakeInput} onChange={(e: any) => setAssetMakeInput(e.target.value)} placeholder="e.g. Taylor" /></Field>
@@ -4162,7 +4181,7 @@ export default function PortalShell() {
               <Field label="End date"><DatePickerField value={closeDateInput} onChange={setCloseDateInput} /></Field>
               <Field label="End time"><TimePickerField value={closeTimeInput} onChange={setCloseTimeInput} /></Field>
             </div>
-          </div>
+          </div>}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
@@ -4173,7 +4192,7 @@ export default function PortalShell() {
               const m = assetModelInput.trim();
               const s = assetSerialInput.trim();
               const y = parseInt(assetYearInput, 10);
-              if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
+              if ((!mk || !m || !s) && !contractorFieldAlreadyComplete) { fire("Equipment make, model, and serial number are required"); return; }
               const completedAt = closeDateInput && closeTimeInput
                 ? storeLocalDateTimeToIso(
                     closeDateInput,
@@ -4181,7 +4200,8 @@ export default function PortalShell() {
                     timezoneForWorkOrder(woData),
                   )
                 : new Date().toISOString();
-              await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt, resolutionNotesInput); setModal(null);
+              const completed = await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt, resolutionNotesInput);
+              if (completed !== false) setModal(null);
               } finally {
                 setModalLoading(false);
               }
@@ -4189,7 +4209,11 @@ export default function PortalShell() {
               disabled={modalLoading}
               className="btn-primary"
               style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />Completing...</> : "Mark work complete"}</button>
+            >{modalLoading
+              ? <><BtnSpinner />Completing...</>
+              : combinesContractorCompletion
+                ? "Complete work & invoicing"
+                : "Mark work complete"}</button>
           </div>
         </Modal>
       )}

@@ -310,11 +310,18 @@ export default function WorkOrderDetail(props: any) {
       && woData.contractorInvoicingWorkflowCycle === woData.workflowCycle,
   );
   const contractorInvoiceStates = woAllInvoices.map((invoice: any) => invoice.state);
+  const contractorInvoiceSetReady = contractorInvoiceStates.some(state =>
+    ["submitted", "revised", "approved", "paid"].includes(state),
+  ) && !contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state));
   const canFinishInvoicing = canInvoice
     && woData?.status !== "closed"
     && (woData?.billingOnly || woData?.functionalStatus === "Completed")
-    && contractorInvoiceStates.some(state => ["submitted", "revised", "approved", "paid"].includes(state))
-    && !contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state));
+    && contractorInvoiceSetReady;
+  const canCompleteWorkAndInvoicing = canInvoice
+    && !woData?.billingOnly
+    && !invoicingComplete
+    && contractorInvoiceSetReady
+    && !["assigned", "parts", "closed", "capital", "pending_capital_completion"].includes(woData?.status);
   // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
   // his work actions (pause / close complete / submit report / resume) as long
   // as the job itself is alive — driven by whether the WO is closed, NOT by the
@@ -670,26 +677,32 @@ export default function WorkOrderDetail(props: any) {
                           </button>
                         </>
                       )}
-                      {/* Job-progress actions are parallel to invoicing.
-                           Shown at WIP for everyone (staff preserved),
-                          and for a contractor any time the job is still open and not
-                          already paused, so submitting an invoice (which flips the WO
-                          to pending_approval) no longer hides them. Resume covers the
-                          paused (parts) state below. */}
-                      {(
-                        (!isManager && jobOpen && !["assigned", "parts", "completed"].includes(woData.status))
-                        || (isManager && ["wip", "pending_invoice", "pending_approval"].includes(woData.status))
-                      ) && (
+                      {/* Invoice-capable contractors finish field work and the
+                          current invoice set with one atomic action. Report-only
+                          technicians retain field completion without invoice access. */}
+                      {!isManager && jobOpen && !["assigned", "parts"].includes(woData.status) && (
                         <>
-                          <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
-                            {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
-                          </button>
-                          {!isManager && (
+                          {woData.status !== "completed" && (
+                            <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
+                              {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
+                            </button>
+                          )}
+                          {!canInvoice && woData.status !== "completed" && (
                             <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
                               {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Mark work complete"}
                             </button>
                           )}
+                          {canCompleteWorkAndInvoicing && (
+                            <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
+                              {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Complete work & invoicing"}
+                            </button>
+                          )}
                         </>
+                      )}
+                      {isManager && ["wip", "pending_invoice", "pending_approval"].includes(woData.status) && (
+                        <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
+                          {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
+                        </button>
                       )}
                       {isManager && canFlagWorkOrderCapital(woData) && (
                         <button onClick={() => void doCapitalFlag(woData.id)} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>
@@ -719,17 +732,14 @@ export default function WorkOrderDetail(props: any) {
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
                       {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
-                      {/* Manual close — staff judgement decides when the job is done.
-                          QuickBooks handoff does not auto-close capital jobs. */}
-                      {isManager && woData.status !== "closed" && (hasAnyLiveInvoice ? (
-                        <button onClick={() => setModal("closeWO")} disabled={isLoading("closeWO_" + woData.id)} className="btn-primary" style={loadingStyle("closeWO_" + woData.id)}>
-                          {isLoading("closeWO_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close work order"}
-                        </button>
-                      ) : (
+                      {/* Staff retain only the explicit no-invoice exception.
+                          Invoice-backed work orders close from Billing when staff
+                          records Billed to 7-Eleven. */}
+                      {isManager && woData.status !== "closed" && !hasAnyLiveInvoice && (
                         <button onClick={() => setModal("closeWithoutInvoice")} disabled={isLoading("closeWithoutInvoice_" + woData.id)} className="btn-primary" style={loadingStyle("closeWithoutInvoice_" + woData.id)}>
                           {isLoading("closeWithoutInvoice_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close — no invoice"}
                         </button>
-                      ))}
+                      )}
                       {/* Closed job: invoice download remains available. Reopen is
                           deliberately prominent in the closed-state banner. */}
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
@@ -770,12 +780,18 @@ export default function WorkOrderDetail(props: any) {
                           <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
                             {invoicingComplete
                               ? "Staff can safely continue the billing handoff. A new or corrected contractor invoice automatically reopens this step."
-                              : canFinishInvoicing
-                                ? "Use the final action only after every trip invoice has been submitted. P1 will still review and bill separately."
-                                : "This becomes ready after field work is complete and every draft or rejected invoice is resolved."}
+                              : woData?.billingOnly && canFinishInvoicing
+                                ? "Use the final action after every contractor invoice has been submitted. P1 will still review and bill separately."
+                                : canCompleteWorkAndInvoicing
+                                  ? "Use Complete work & invoicing to finish field work and confirm the current invoice set together."
+                                  : contractorInvoiceSetReady
+                                    ? "The contractor can complete field work and invoicing together when ready."
+                                  : contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state))
+                                    ? "Submit or delete drafts and resolve rejected invoices before completing work and invoicing."
+                                    : "Submit at least one contractor invoice before completing work and invoicing."}
                           </div>
                         </div>
-                        {!isManager && canFinishInvoicing && !invoicingComplete && (
+                        {!isManager && woData?.billingOnly && canFinishInvoicing && !invoicingComplete && (
                           <button
                             type="button"
                             onClick={() => {

@@ -2740,6 +2740,20 @@ export type Database = {
         Args: { p_invoice_id: string }
         Returns: Json
       }
+      complete_contractor_work_and_invoicing: {
+        Args: {
+          p_activity_text: string
+          p_asset_make: string
+          p_asset_model: string
+          p_asset_serial: string
+          p_asset_year: number | null
+          p_completed_at: string
+          p_resolution_code: string | null
+          p_resolution_notes: string | null
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
       finish_contractor_invoicing: {
         Args: { p_work_order_id: string }
         Returns: Json
