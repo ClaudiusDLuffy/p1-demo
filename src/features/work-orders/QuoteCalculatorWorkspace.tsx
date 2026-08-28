@@ -23,6 +23,7 @@ import {
   type QuoteCalculatorLine,
 } from "../../lib/quoteCalculator";
 import { STAFF_BILLING_LINE_TYPES } from "../../lib/staffBilling";
+import { resolveQuickBooksEquipmentTag } from "../../lib/quickBooksEquipmentTags";
 import {
   clampBulkQuoteLineCount,
   createQuoteCalculatorDraft,
@@ -105,6 +106,12 @@ type QuoteWorkOrder = {
   store?: string | number | null;
   addr?: string | null;
   storeState?: string | null;
+  lineOfService?: string | null;
+  businessService?: string | null;
+  category?: string | null;
+  subCategory?: string | null;
+  summary?: string | null;
+  description?: string | null;
 };
 
 type QuoteCalculatorProps = {
@@ -521,6 +528,7 @@ export default function QuoteCalculatorWorkspace({
         cme: "",
         state: "draft",
         territory,
+        equipmentTag: resolveQuickBooksEquipmentTag(workOrder),
         taxState: storeState,
         salesTaxOverride: 0,
         lines: validLines,

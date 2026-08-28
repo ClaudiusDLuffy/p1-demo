@@ -20,6 +20,7 @@ import type {
 import type { WorkOrderReopenMode } from "./workOrderReopen";
 import type {
   ContractorEstimate,
+  ContractorEstimateAttachment,
   ContractorEstimateLine,
   ContractorEstimateLineType,
   EditableContractorEstimateLine,
@@ -158,6 +159,10 @@ export type WorkOrderDetails = {
   detailsLoaded: true;
 };
 
+export type WorkOrderTableSortColumn = "work_order" | "status" | "priority"
+  | "incident" | "store" | "summary" | "contractor" | "technician"
+  | "created" | "updated" | "closed" | "sla";
+
 export type WorkOrderPageParams = {
   scope?: "active" | "operations" | "operations_all" | "history" | "capital" | "ready_to_bill" | "all"
     | "staff_work" | "staff_work_unread" | "staff_work_todo" | "staff_work_ready"
@@ -180,8 +185,7 @@ export type WorkOrderPageParams = {
   limit?: number;
   cursor?: string | null;
   storeNumber?: string | null;
-  tableSortColumn?: "work_order" | "status" | "priority" | "incident" | "store"
-    | "summary" | "contractor" | "created" | "updated" | "sla";
+  tableSortColumn?: WorkOrderTableSortColumn;
   tableSortDirection?: "asc" | "desc";
   workOrderFilter?: string;
   incidentFilter?: string;
@@ -333,6 +337,7 @@ export async function loadWorkOrdersPage(
   const tableMode = Boolean(params.tableSortColumn)
     || params.scope === "dashboard_seven_eleven_updates"
     || params.scope === "dashboard_pending_submission"
+    || params.scope === "dashboard_p1_parts_to_order"
     || params.scope === "ready_to_bill"
     || params.scope === "staff_work"
     || params.scope === "staff_work_ready";
@@ -550,6 +555,14 @@ const mapActivity = (a: any, timeZone?: string) => ({
   }),
   text: a.text,
   type: a.type,
+  activityChannel: a.activity_channel
+    || (a.requires_7eleven_sync
+      ? "field_note"
+      : a.is_staff_only
+        ? "internal_note"
+        : a.type === "system"
+          ? "system_event"
+          : "legacy"),
   enteredByRole: a.entered_by_role || "system",
   isStaffOverride: !!a.is_staff_override,
   isStaffOnly: !!a.is_staff_only,
@@ -787,6 +800,7 @@ const mapContractorEstimateLine = (
 const mapContractorEstimate = (
   estimate: ContractorEstimateRow,
   lines: ContractorEstimateLine[],
+  attachments: ContractorEstimateAttachment[],
 ): ContractorEstimate => ({
   id: estimate.id,
   quoteNum: estimate.quote_num,
@@ -809,6 +823,7 @@ const mapContractorEstimate = (
   createdAt: estimate.created_at,
   updatedAt: estimate.updated_at,
   lines,
+  attachments,
 });
 
 export async function loadContractorEstimatesForWorkOrder(
@@ -826,13 +841,23 @@ export async function loadContractorEstimatesForWorkOrder(
   if (!estimates?.length) return [];
 
   const estimateIds = estimates.map(estimate => estimate.id);
-  const { data: rawLines, error: lineError } = await sb
-    .from("contractor_estimate_lines")
-    .select("*")
-    .in("estimate_id", estimateIds)
-    .order("position", { ascending: true })
-    .order("id", { ascending: true });
+  const [{ data: rawLines, error: lineError }, { data: rawAttachments, error: attachmentError }] = await Promise.all([
+    sb
+      .from("contractor_estimate_lines")
+      .select("*")
+      .in("estimate_id", estimateIds)
+      .order("position", { ascending: true })
+      .order("id", { ascending: true }),
+    sb
+      .from("contractor_estimate_attachments")
+      .select("*")
+      .in("estimate_id", estimateIds)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true }),
+  ]);
   if (lineError) throw lineError;
+  if (attachmentError) throw attachmentError;
 
   const linesByEstimate = new Map<string, ContractorEstimateLine[]>();
   for (const rawLine of rawLines || []) {
@@ -840,11 +865,95 @@ export async function loadContractorEstimatesForWorkOrder(
     lines.push(mapContractorEstimateLine(rawLine));
     linesByEstimate.set(rawLine.estimate_id, lines);
   }
+  const attachmentsByEstimate = new Map<string, ContractorEstimateAttachment[]>();
+  for (const attachment of rawAttachments || []) {
+    const items = attachmentsByEstimate.get(attachment.estimate_id) || [];
+    items.push({
+      id: attachment.id,
+      estimateId: attachment.estimate_id,
+      originalName: attachment.original_name,
+      storagePath: attachment.storage_path,
+      mimeType: attachment.mime_type,
+      sizeBytes: Number(attachment.size_bytes),
+      uploadedBy: attachment.uploaded_by,
+      createdAt: attachment.created_at,
+    });
+    attachmentsByEstimate.set(attachment.estimate_id, items);
+  }
 
   return estimates.map(estimate => mapContractorEstimate(
     estimate,
     linesByEstimate.get(estimate.id) || [],
+    attachmentsByEstimate.get(estimate.id) || [],
   ));
+}
+
+const ESTIMATE_ATTACHMENT_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const ESTIMATE_ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
+
+export async function uploadContractorEstimateAttachment(
+  estimateId: string,
+  file: File,
+): Promise<ContractorEstimateAttachment> {
+  if (!estimateId) throw new Error("Save the estimate draft before attaching a form.");
+  if (!/\.xlsx$/i.test(file.name)) throw new Error("Only .xlsx equipment forms can be attached.");
+  if (file.size <= 0 || file.size > ESTIMATE_ATTACHMENT_MAX_BYTES) {
+    throw new Error("Equipment forms must be between 1 byte and 15 MB.");
+  }
+  const sb = supabase();
+  const storagePath = `${estimateId}/${crypto.randomUUID()}.xlsx`;
+  const { error: uploadError } = await sb.storage
+    .from("contractor-estimate-attachments")
+    .upload(storagePath, file, { contentType: ESTIMATE_ATTACHMENT_MIME, upsert: false });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await (sb as any).rpc("attach_contractor_estimate_file", {
+    p_estimate_id: estimateId,
+    p_storage_path: storagePath,
+    p_original_name: file.name,
+    p_mime_type: ESTIMATE_ATTACHMENT_MIME,
+    p_size_bytes: file.size,
+  });
+  if (error) {
+    await sb.storage.from("contractor-estimate-attachments").remove([storagePath]);
+    throw error;
+  }
+  return data as ContractorEstimateAttachment;
+}
+
+export async function removeContractorEstimateAttachment(
+  attachmentId: string,
+): Promise<void> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("remove_contractor_estimate_file", {
+    p_attachment_id: attachmentId,
+  });
+  if (error) throw error;
+  const storagePath = String(data?.storagePath || "");
+  if (!storagePath) throw new Error("The removed equipment form had no storage path.");
+  const { error: storageError } = await sb.storage
+    .from("contractor-estimate-attachments")
+    .remove([storagePath]);
+  if (storageError) throw storageError;
+}
+
+export async function downloadContractorEstimateAttachment(
+  attachment: ContractorEstimateAttachment,
+): Promise<void> {
+  const sb = supabase();
+  const { data, error } = await sb.storage
+    .from("contractor-estimate-attachments")
+    .download(attachment.storagePath);
+  if (error) throw error;
+  const url = URL.createObjectURL(data);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = attachment.originalName;
+    link.click();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
 }
 
 export type SaveContractorEstimateInput = {
@@ -980,7 +1089,7 @@ export async function loadInvoicesPage(
 export async function loadInvoiceById(invoiceId: string): Promise<Invoice | null> {
   if (!invoiceId) return null;
   const sb = supabase();
-  const [invoiceResult, lineResult, uploadResult] = await Promise.all([
+  const [invoiceResult, lineResult, uploadResult, holdResult] = await Promise.all([
     sb.from("invoices")
       .select("*")
       .eq("id", invoiceId)
@@ -1001,10 +1110,15 @@ export async function loadInvoiceById(invoiceId: string): Promise<Invoice | null
       .order("id", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    sb.from("contractor_invoice_payment_holds")
+      .select("placed_at,placed_by,reason")
+      .eq("invoice_id", invoiceId)
+      .maybeSingle(),
   ]);
   if (invoiceResult.error) throw invoiceResult.error;
   if (lineResult.error) throw lineResult.error;
   if (uploadResult.error) throw uploadResult.error;
+  if (holdResult.error) throw holdResult.error;
   if (!invoiceResult.data) return null;
   const eventData = uploadResult.data?.event_data;
   return mapInvoicePageRow({
@@ -1014,6 +1128,9 @@ export async function loadInvoiceById(invoiceId: string): Promise<Invoice | null
     original_pdf_name: eventData && typeof eventData === "object" && !Array.isArray(eventData)
       ? eventData.fileName || null
       : null,
+    payment_hold_at: holdResult.data?.placed_at || null,
+    payment_hold_by: holdResult.data?.placed_by || null,
+    payment_hold_reason: holdResult.data?.reason || null,
   });
 }
 
@@ -1069,6 +1186,12 @@ const mapInvoice = (i: any) => ({
   total: parseFloat(i.total || 0),
   territory: i.territory || null,
   pdfStoragePath: i.pdf_storage_path || null,
+  qboInvoiceId: i.qbo_invoice_id || null,
+  qboSyncedAt: i.qbo_synced_at || null,
+  paidAt: i.paid_at || null,
+  paymentHoldAt: i.payment_hold_at || null,
+  paymentHoldBy: i.payment_hold_by || null,
+  paymentHoldReason: i.payment_hold_reason || null,
   date: shortMonthDay(i.invoice_date),
   rejectionReason: i.rejection_reason,
   // Keep the legacy UI alias while newer callers use the explicit field.
@@ -1133,6 +1256,7 @@ const mapInvoiceLine = (l: any) => ({
   amount: parseFloat(l.amount),
   isTaxable: !!l.is_taxable,
   sourceInvoiceLineId: l.source_invoice_line_id || null,
+  sourceWorkOrderPartId: l.source_work_order_part_id || null,
   sourceUnitCost: l.source_unit_cost == null
     ? null
     : parseFloat(l.source_unit_cost),
@@ -1423,6 +1547,7 @@ export type ActivityAuditOptions = {
   eventKey?: string;
   eventData?: Json;
   requiresSevenElevenSync?: boolean;
+  activityChannel?: "field_note" | "internal_note" | "contractor_message" | "system_event" | "legacy";
 };
 
 function inferActivityEventKey(text: string, type: "note" | "system" | "ai"): string {
@@ -1473,6 +1598,7 @@ export async function insertActivity(
     event_key: eventKey,
     event_data: audit.eventData || {},
     requires_7eleven_sync: !!audit.requiresSevenElevenSync,
+    activity_channel: audit.activityChannel || "legacy",
   });
   if (error) throw error;
 }
@@ -2373,6 +2499,69 @@ export async function setP1PartOrderStatus(
     });
   if (error) throw error;
   return mapWoPart(data);
+}
+
+export async function loadP1PartCostsForWorkOrder(
+  workOrderId: string,
+): Promise<any[]> {
+  if (!workOrderId) return [];
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "list_p1_part_costs_for_work_order",
+    { p_work_order_id: workOrderId },
+  );
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    partId: row.part_id,
+    unitCost: Number(row.unit_cost),
+    updatedAt: row.updated_at || null,
+    updatedBy: row.updated_by || null,
+  }));
+}
+
+export async function loadBillableP1Parts(
+  workOrderId: string,
+  excludeInvoiceId?: string | null,
+): Promise<any[]> {
+  if (!workOrderId) return [];
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc("list_billable_p1_parts", {
+    p_work_order_id: workOrderId,
+    p_exclude_invoice_id: excludeInvoiceId || null,
+  });
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    partId: row.part_id,
+    workOrderId: row.work_order_id,
+    description: row.description,
+    partNumber: row.part_number || "",
+    qty: Number(row.qty || 1),
+    p1OrderStatus: row.p1_order_status,
+    unitCost: Number(row.unit_cost),
+    markedUpUnitRate: Number(row.marked_up_unit_rate),
+  }));
+}
+
+export async function setP1PartOrderStatusWithCost(
+  id: string,
+  status: "requested" | "ordered" | "received" | "cancelled",
+  unitCost?: number | null,
+): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await (sb as any).rpc(
+    "set_p1_part_order_status_with_cost",
+    {
+      p_part_id: id,
+      p_status: status,
+      p_unit_cost: unitCost == null ? null : unitCost,
+    },
+  );
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+  return {
+    ...mapWoPart(result?.part || result),
+    p1UnitCost: result?.unitCost == null ? null : Number(result.unitCost),
+  };
 }
 
 export async function loadWorkReports(

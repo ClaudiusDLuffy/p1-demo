@@ -30,6 +30,19 @@ type InvoiceReviewNotificationInput = {
   };
 };
 
+type InvoicePaymentHoldNotificationInput = {
+  event: "placed" | "released";
+  recipients: string[];
+  invoice: {
+    num: string;
+    workOrderId?: string | null;
+    contractorName?: string | null;
+    total?: number | null;
+  };
+  actorName: string;
+  reason: string;
+};
+
 const SERVICE_INBOX = "service@p1pros.com";
 
 const PRIORITY_LABELS: Record<string, string> = {
@@ -227,6 +240,60 @@ export async function sendInvoiceReviewNotification(
   const plan = createInvoiceReviewNotificationPlan(input);
   if (plan.recipients.length === 0) {
     throw new Error("No contractor invoice recipients were found");
+  }
+
+  const accessToken = await getAccessToken();
+  await sendEmail(
+    accessToken,
+    plan.recipients,
+    plan.subject,
+    plan.body,
+  );
+}
+
+export function createInvoicePaymentHoldNotificationPlan(
+  input: InvoicePaymentHoldNotificationInput,
+) {
+  const recipients = [...new Set(
+    (input.recipients || [])
+      .map(email => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const { invoice } = input;
+  const amount = Number.isFinite(Number(invoice.total))
+    ? `$${Number(invoice.total || 0).toFixed(2)}`
+    : "Not captured";
+  const placed = input.event === "placed";
+
+  return {
+    recipients,
+    subject: placed
+      ? `Payment hold placed — invoice #${invoice.num}`
+      : `Payment hold released — invoice #${invoice.num}`,
+    body: `${placed ? "A contractor invoice was placed on payment hold." : "A contractor invoice payment hold was released."}
+
+Invoice: #${invoice.num}
+Work Order: ${invoice.workOrderId || "Not captured"}
+Contractor: ${invoice.contractorName || "Not captured"}
+Amount: ${amount}
+${placed ? "Placed" : "Released"} by: ${input.actorName}
+Reason: ${input.reason}
+
+${placed
+  ? "This invoice is excluded from the QuickBooks handoff queue until an authorized controller releases it."
+  : "This invoice is eligible for the QuickBooks handoff queue again."}
+
+Review it in the P1 Pros Portal:
+${portalUrl()}`,
+  };
+}
+
+export async function sendInvoicePaymentHoldNotification(
+  input: InvoicePaymentHoldNotificationInput,
+) {
+  const plan = createInvoicePaymentHoldNotificationPlan(input);
+  if (plan.recipients.length === 0) {
+    throw new Error("No QuickBooks handoff recipients were found");
   }
 
   const accessToken = await getAccessToken();

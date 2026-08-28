@@ -1,5 +1,6 @@
 export const STAFF_PERMISSION = {
   quickBooksExport: "quickbooks_export",
+  quickBooksHandoff: "quickbooks_handoff",
   // Legacy restricted role. Keep this separate from the additive export
   // capability so an accountant can retain ordinary staff access.
   invoiceController: "invoice_controller",
@@ -29,4 +30,10 @@ export function canExportQuickBooks(
   profile: StaffPermissionProfile | null | undefined,
 ): boolean {
   return hasStaffPermission(profile, STAFF_PERMISSION.quickBooksExport);
+}
+
+export function canHandoffQuickBooks(
+  profile: StaffPermissionProfile | null | undefined,
+): boolean {
+  return hasStaffPermission(profile, STAFF_PERMISSION.quickBooksHandoff);
 }

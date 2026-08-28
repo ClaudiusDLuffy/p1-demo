@@ -9,6 +9,7 @@ import {
 export const INVOICES_KEY = ["invoices"] as const;
 export const INVOICE_PAGES_KEY = ["invoice-pages"] as const;
 export const INVOICE_BY_ID_KEY = ["invoice-by-id"] as const;
+export const CONTROLLER_INVOICE_HOLDS_KEY = ["controller-invoice-payment-holds"] as const;
 
 export function useInvoicesQuery(enabled = true) {
   return useQuery({

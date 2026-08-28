@@ -121,6 +121,8 @@ async function run(request: NextRequest) {
       .eq("p1_order_status", "requested")
       .is("work_orders.deleted_at", null)
       .neq("work_orders.status", "closed")
+      .neq("work_orders.status", "capital")
+      .neq("work_orders.status", "pending_capital_completion")
       .order("p1_requested_at", { ascending: true }),
     sb
       .from("p1_parts_alert_recipients")

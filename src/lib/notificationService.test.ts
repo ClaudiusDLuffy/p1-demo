@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createDispatchNotificationPlan,
+  createInvoicePaymentHoldNotificationPlan,
   createInvoiceReviewNotificationPlan,
 } from "./notificationService";
 
@@ -109,4 +110,26 @@ test("retraction email tells the contractor no resubmission is needed", () => {
   assert.match(plan.subject, /rejection withdrawn/);
   assert.match(plan.body, /now approved/);
   assert.match(plan.body, /no correction or resubmission is needed/i);
+});
+
+test("payment hold email tells accounting why an invoice is excluded", () => {
+  const plan = createInvoicePaymentHoldNotificationPlan({
+    event: "placed",
+    recipients: ["EmilyB@PHospitality.com", "emilyb@phospitality.com"],
+    invoice: {
+      num: "6879",
+      workOrderId: "WOT1143877",
+      contractorName: "Anderson Mechanical",
+      total: 155,
+    },
+    actorName: "Lynnette Price",
+    reason: "Possible duplicate — controller review required",
+  });
+
+  assert.deepEqual(plan.recipients, ["emilyb@phospitality.com"]);
+  assert.match(plan.subject, /Payment hold placed/);
+  assert.match(plan.body, /WOT1143877/);
+  assert.match(plan.body, /Anderson Mechanical/);
+  assert.match(plan.body, /\$155\.00/);
+  assert.match(plan.body, /excluded from the QuickBooks handoff queue/);
 });

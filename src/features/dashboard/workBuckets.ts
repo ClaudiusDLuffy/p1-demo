@@ -11,6 +11,7 @@ export type DashboardWorkOrder = {
   hasPendingSevenElevenSync?: boolean | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  isCapital?: boolean | null;
 };
 
 export type DashboardInvoice = {
@@ -142,7 +143,9 @@ export function buildDashboardWorkBuckets({
       "p1_parts_to_order",
       "Parts P1 needs to order",
       "Contractor requests waiting for P1 purchasing action.",
-      workOrder => p1OrderWorkOrderIds.has(workOrder.id),
+      workOrder => p1OrderWorkOrderIds.has(workOrder.id)
+        && !workOrder.isCapital
+        && !["capital", "pending_capital_completion"].includes(workOrder.status || ""),
     ),
     bucket(
       "pending_capital_completion",

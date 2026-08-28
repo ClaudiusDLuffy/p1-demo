@@ -11,20 +11,21 @@ import {
   canDeleteOwnContractorInvoice,
   canEditRejectedContractorInvoice,
 } from "../../lib/invoicePermissions";
-import { isInvoiceController } from "../../lib/staffPermissions";
+import {
+  canHandoffQuickBooks,
+  isInvoiceController,
+} from "../../lib/staffPermissions";
 import { useMemo, useState } from "react";
 import { useBillingInvoicePageQuery } from "../billing/queries";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doMarkPaid, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold, pdfBusy, fmt, loadingStates = {} } = props;
   const controller = isInvoiceController(currentUser);
   const canReview = isManager && !controller;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
-  const [confirmMarkPaid, setConfirmMarkPaid] = useState(false);
   const [confirmRetract, setConfirmRetract] = useState(false);
   const [approving, setApproving] = useState(false);
-  const [markingPaid, setMarkingPaid] = useState(false);
   const [retracting, setRetracting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -34,6 +35,9 @@ export default function InvoiceDetail(props: any) {
   const [correctedTotal, setCorrectedTotal] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
+  const [paymentHoldAction, setPaymentHoldAction] = useState<"hold" | "release" | null>(null);
+  const [paymentHoldReason, setPaymentHoldReason] = useState("");
+  const [paymentHoldBusy, setPaymentHoldBusy] = useState(false);
   const inv = useMemo(
     () => invoices.find(i => i.id === selectedInvoice),
     [invoices, selectedInvoice]
@@ -65,6 +69,16 @@ export default function InvoiceDetail(props: any) {
     currentUser,
     isManager,
   );
+  const canPlacePaymentHold = isManager
+    && inv?.state === "approved"
+    && !inv?.qboSyncedAt
+    && !inv?.qboInvoiceId
+    && !inv?.paymentHoldAt
+    && Boolean(doPlaceInvoicePaymentHold);
+  const canReleasePaymentHold = isManager
+    && Boolean(inv?.paymentHoldAt)
+    && canHandoffQuickBooks(currentUser)
+    && Boolean(doReleaseInvoicePaymentHold);
   const wo = useMemo(
     () => inv ? workOrders.find(w => w.id === inv.wot) : null,
     [workOrders, inv]
@@ -107,6 +121,31 @@ export default function InvoiceDetail(props: any) {
                         Correct total
                       </button>
                     )}
+                    {canPlacePaymentHold && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentHoldReason("");
+                          setPaymentHoldAction("hold");
+                        }}
+                        className="btn-soft"
+                        style={{ color: T.danger, borderColor: `${T.danger}44` }}
+                      >
+                        Hold / Do not pay
+                      </button>
+                    )}
+                    {canReleasePaymentHold && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentHoldReason("");
+                          setPaymentHoldAction("release");
+                        }}
+                        className="btn-primary"
+                      >
+                        Release payment hold
+                      </button>
+                    )}
                     {canEditRejected && onEditRejected && (
                       <button
                         type="button"
@@ -132,14 +171,6 @@ export default function InvoiceDetail(props: any) {
                         <button onClick={() => setRejecting(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
                       </>
                     )}
-                    {isManager && inv.state === "approved" && doMarkPaid && (
-                      <button
-                        onClick={() => setConfirmMarkPaid(true)}
-                        disabled={loadingStates["markPaid_" + inv.id] || markingPaid}
-                        className="btn-primary"
-                        style={{ display: "flex", alignItems: "center", gap: 6, opacity: loadingStates["markPaid_" + inv.id] || markingPaid ? 0.7 : 1, cursor: loadingStates["markPaid_" + inv.id] || markingPaid ? "default" : "pointer" }}
-                      >{loadingStates["markPaid_" + inv.id] || markingPaid ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
-                    )}
                     {canReview && inv.state === "rejected" && doRetractInvoiceRejection && (
                       <button
                         type="button"
@@ -158,6 +189,80 @@ export default function InvoiceDetail(props: any) {
                     )}
                   </div>
                 </div>
+                {paymentHoldAction && (
+                  <Modal
+                    onClose={() => {
+                      if (paymentHoldBusy) return;
+                      setPaymentHoldAction(null);
+                      setPaymentHoldReason("");
+                    }}
+                    title={paymentHoldAction === "hold"
+                      ? `Hold invoice #${inv.num}`
+                      : `Release hold for #${inv.num}`}
+                    width={480}
+                  >
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
+                      {paymentHoldAction === "hold"
+                        ? "This removes the invoice from the QuickBooks handoff queue. Any pending batch containing it will be cancelled automatically."
+                        : "This returns the invoice to the QuickBooks handoff queue. Only an authorized accounting handoff owner can release it."}
+                    </div>
+                    <label style={{ display: "block" }}>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>
+                        Required reason
+                      </span>
+                      <textarea
+                        rows={3}
+                        value={paymentHoldReason}
+                        onChange={(event) => setPaymentHoldReason(event.target.value)}
+                        placeholder={paymentHoldAction === "hold"
+                          ? "Duplicate invoice, incorrect document, or needs review…"
+                          : "Verified corrected invoice and cleared for payment…"}
+                        autoFocus
+                        maxLength={500}
+                        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+                      />
+                    </label>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+                      <button
+                        type="button"
+                        className="btn-soft"
+                        disabled={paymentHoldBusy}
+                        onClick={() => {
+                          setPaymentHoldAction(null);
+                          setPaymentHoldReason("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className={paymentHoldAction === "hold" ? "btn-soft" : "btn-primary"}
+                        disabled={paymentHoldBusy || !paymentHoldReason.trim()}
+                        onClick={async () => {
+                          setPaymentHoldBusy(true);
+                          try {
+                            const ok = paymentHoldAction === "hold"
+                              ? await doPlaceInvoicePaymentHold(inv, paymentHoldReason)
+                              : await doReleaseInvoicePaymentHold(inv, paymentHoldReason);
+                            if (ok) {
+                              setPaymentHoldAction(null);
+                              setPaymentHoldReason("");
+                            }
+                          } finally {
+                            setPaymentHoldBusy(false);
+                          }
+                        }}
+                        style={paymentHoldAction === "hold"
+                          ? { color: T.danger, borderColor: `${T.danger}44`, display: "flex", alignItems: "center", gap: 6 }
+                          : { display: "flex", alignItems: "center", gap: 6 }}
+                      >
+                        {paymentHoldBusy
+                          ? <><BtnSpinner />Saving…</>
+                          : paymentHoldAction === "hold" ? "Place hold" : "Release hold"}
+                      </button>
+                    </div>
+                  </Modal>
+                )}
                 {confirmApprove && (
                   <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} title={`Approve invoice #${inv.num}`} width={440}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
@@ -179,30 +284,6 @@ export default function InvoiceDetail(props: any) {
                         className="btn-primary"
                         style={{ padding: "10px 18px", opacity: approving || loadingStates["approveInvoice_" + inv.id] ? 0.7 : 1, cursor: approving || loadingStates["approveInvoice_" + inv.id] ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
                       >{approving || loadingStates["approveInvoice_" + inv.id] ? <><BtnSpinner />Approving...</> : "Approve"}</button>
-                    </div>
-                  </Modal>
-                )}
-                {confirmMarkPaid && (
-                  <Modal onClose={() => { if (!markingPaid) setConfirmMarkPaid(false); }} title={`Send invoice #${inv.num} to QuickBooks`} width={440}>
-                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                      Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as sent to QuickBooks? This records the handoff for this invoice only.
-                    </div>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button onClick={() => setConfirmMarkPaid(false)} disabled={markingPaid} className="btn-soft">Cancel</button>
-                      <button
-                        onClick={async () => {
-                          setMarkingPaid(true);
-                          try {
-                            await doMarkPaid(inv.id);
-                            setConfirmMarkPaid(false);
-                          } finally {
-                            setMarkingPaid(false);
-                          }
-                        }}
-                        disabled={markingPaid || loadingStates["markPaid_" + inv.id]}
-                        className="btn-primary"
-                        style={{ padding: "10px 18px", opacity: markingPaid || loadingStates["markPaid_" + inv.id] ? 0.7 : 1, cursor: markingPaid || loadingStates["markPaid_" + inv.id] ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
-                      >{markingPaid || loadingStates["markPaid_" + inv.id] ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
                     </div>
                   </Modal>
                 )}
@@ -340,6 +421,15 @@ export default function InvoiceDetail(props: any) {
                       >{deleting ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
                     </div>
                   </Modal>
+                )}
+                {inv.paymentHoldAt && (
+                  <div role="alert" style={{ maxWidth: 860, marginBottom: 14, padding: "13px 15px", borderRadius: 10, border: `1px solid ${T.danger}55`, background: T.dangerSoft, color: T.danger }}>
+                    <div style={{ fontSize: 12, fontWeight: 800 }}>Payment hold — do not export or pay</div>
+                    <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+                      {inv.paymentHoldReason || "A staff member placed this invoice on hold."}
+                      {inv.paymentHoldAt ? ` · ${new Date(inv.paymentHoldAt).toLocaleString("en-US")}` : ""}
+                    </div>
+                  </div>
                 )}
                 <div className="card invoice-detail-container" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
                   {/* Invoice header */}

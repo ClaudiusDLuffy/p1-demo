@@ -12,14 +12,15 @@ const exportRoute = source("src/app/api/controller-exports/route.ts");
 const exportPanel = source("src/features/invoices/ControllerExportPanel.tsx");
 const dashboard = source("src/features/dashboard/Dashboard.tsx");
 
-test("the export route requires active staff with the additive capability", () => {
+test("all active staff can read the queue while the handoff remains capability-gated", () => {
   assert.match(exportRoute, /STAFF_ROLES\.has\(profile\.role/);
-  assert.match(exportRoute, /canExportQuickBooksProfile/);
+  assert.match(exportRoute, /canHandoffQuickBooksProfile/);
+  assert.match(exportRoute, /if \(!auth\.canHandoff\)/);
   assert.doesNotMatch(exportRoute, /isInvoiceControllerProfile/);
 });
 
 test("the export panel does not turn an accountant into a restricted controller", () => {
-  assert.match(exportPanel, /canExportQuickBooks\(currentUser\)/);
+  assert.match(exportPanel, /canHandoffQuickBooks\(currentUser\)/);
   assert.doesNotMatch(exportPanel, /isInvoiceController\(currentUser\)/);
   assert.match(dashboard, /const controller = isInvoiceController\(currentUser\)/);
   assert.match(dashboard, /<ControllerExportPanel/);

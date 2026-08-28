@@ -43,6 +43,7 @@ export type WorkOrderProgressActivity = {
 };
 
 export type WorkOrderActivityVisibility = {
+  activityChannel?: string | null;
   isStaffOnly?: boolean | null;
   eventKey?: string | null;
   text?: string | null;
@@ -53,6 +54,7 @@ export const isInternalWorkOrderActivity = (
 ) => {
   const text = String(activity?.text || "");
   return Boolean(activity?.isStaffOnly)
+    || activity?.activityChannel === "internal_note"
     || activity?.eventKey === "staff_billing"
     || activity?.eventKey === "work_order_reassigned"
     || activity?.eventKey === "work_order_assignment"

@@ -7,7 +7,7 @@ import {
   staffInvoiceCsvRows,
 } from "./invoiceCsv";
 
-const HEADER = "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Class";
+const HEADER = "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Equipment Tag,Class";
 
 test("matches the supplied SaasAnt layout with one row per line item", () => {
   const csv = generateStaffInvoiceCsv({
@@ -18,6 +18,7 @@ test("matches the supplied SaasAnt layout with one row per line item", () => {
     invoiceDateRaw: "2026-07-28",
     serviceDateRaw: "2026-07-27",
     territory: "Texas",
+    equipmentTag: "7-ELEVEN: HVAC",
     lines: [
       {
         type: "Truck Charge",
@@ -38,8 +39,8 @@ test("matches the supplied SaasAnt layout with one row per line item", () => {
     csv,
     [
       HEADER,
-      "P1-00013,7-Eleven Inc,7-ELEVEN STORE - 33662,Net 30,7/28/2026,7/27/2026,,Texas,7-ELEVEN STORE - 33662,33662,,,WOT0898256,Travel,,1,110,110,,",
-      "P1-00013,,,,,,,,,,,,,Labor,\"Arrived onsite,\nreplaced transformer.\",3,110,330,,",
+      "P1-00013,7-Eleven Inc,7-ELEVEN STORE - 33662,Net 30,07/28/2026,07/27/2026,,Texas,,33662,,,WOT0898256,Travel,,1,110,110,,7-ELEVEN: HVAC,",
+      "P1-00013,,,,,,,,,,,,,Labor,\"Arrived onsite,\nreplaced transformer.\",3,110,330,,,",
     ].join("\r\n"),
   );
 });
@@ -68,7 +69,7 @@ test("uses the same SaasAnt format for contractor invoice downloads", () => {
     csv,
     [
       HEADER,
-      "4347,7-Eleven Inc,7-ELEVEN STORE - 23995,Net 30,7/30/2026,7/29/2026,,Virginia,7-ELEVEN STORE - 23995,23995,,,WOT0909771,Parts/Hardware,Replacement board,2,50,100,6%,",
+      "4347,7-Eleven Inc,7-ELEVEN STORE - 23995,Net 30,07/30/2026,07/29/2026,,Virginia,,23995,,,WOT0909771,Parts/Hardware,Replacement board,2,50,100,6%,,",
     ].join("\r\n"),
   );
 });
@@ -99,6 +100,7 @@ test("exposes first-row metadata and normalized product names", () => {
   assert.equal(rows[1].customer, "");
   assert.equal(rows[1].productService, "OT Labor");
   assert.equal(rows[1].quantity, 0.5);
+  assert.equal(rows[0].shippingTo, "");
 });
 
 test("builds a stable CSV filename", () => {

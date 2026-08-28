@@ -13,19 +13,23 @@ import {
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
+import WorkOrderSortControls from "./WorkOrderSortControls";
+import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function MyJobs(props: any) {
   const { page, isManager, myWOs, currentUser, slaLabel, setSelectedWO, setPage, setAiNote, woParts = [] } = props;
   const [search, setSearch] = useState("");
+  const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const deferredSearch = useDeferredValue(search.trim());
   const {
     position,
     previous: previousPage,
     next: nextPage,
-  } = useCursorPagination(deferredSearch);
+  } = useCursorPagination(JSON.stringify({ search: deferredSearch, sortColumn, sortDirection }));
   const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
-  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, limit: 25, cursor: position.cursor }, enabled);
+  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled);
   const activeCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, sort: "newest", limit: 1 }, enabled);
   const pendingCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, status: "pending_invoice", sort: "newest", limit: 1 }, enabled);
   const capitalCountQuery = useWorkOrdersPageQuery({ scope: "capital", contractorId, sort: "newest", limit: 1 }, enabled);
@@ -127,14 +131,35 @@ export default function MyJobs(props: any) {
                   </div>
                 ))}
               </div>
-              <input
-                type="search"
-                value={search}
-                onChange={event => setSearch(event.target.value)}
-                aria-label="Search my jobs"
-                placeholder="Search WO#, store, address, keyword..."
-                style={{ width: "100%", marginBottom: 18, padding: "11px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
-              />
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+                <input
+                  type="search"
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                  aria-label="Search my jobs"
+                  placeholder="Search WO#, store, address, keyword..."
+                  style={{ flex: "1 1 300px", minWidth: 220, padding: "11px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+                />
+                <WorkOrderSortControls
+                  column={sortColumn}
+                  direction={sortDirection}
+                  options={[
+                    { value: "created", label: "Date received" },
+                    { value: "work_order", label: "Work order" },
+                    { value: "status", label: "Status" },
+                    { value: "priority", label: "Priority" },
+                    { value: "store", label: "Store" },
+                    { value: "summary", label: "Summary" },
+                    { value: "updated", label: "Last updated" },
+                    { value: "sla", label: "SLA due" },
+                  ]}
+                  onColumnChange={value => {
+                    setSortColumn(value);
+                    setSortDirection(["created", "updated", "sla"].includes(value) ? "desc" : "asc");
+                  }}
+                  onDirectionChange={setSortDirection}
+                />
+              </div>
               {jobsQuery.isLoading && (
                 <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
                   Loading work orders...

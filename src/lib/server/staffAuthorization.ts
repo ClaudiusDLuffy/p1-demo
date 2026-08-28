@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  canHandoffQuickBooks,
   canExportQuickBooks,
   isInvoiceController,
 } from "../staffPermissions";
@@ -34,6 +35,12 @@ export function canExportQuickBooksProfile(profile: {
   staffPermissions?: string[] | null;
 } | null | undefined): boolean {
   return canExportQuickBooks(profile);
+}
+
+export function canHandoffQuickBooksProfile(profile: {
+  staffPermissions?: string[] | null;
+} | null | undefined): boolean {
+  return canHandoffQuickBooks(profile);
 }
 
 export async function requireStaffRequest(

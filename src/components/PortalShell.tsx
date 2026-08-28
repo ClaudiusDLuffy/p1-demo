@@ -1411,7 +1411,7 @@ export default function PortalShell() {
     nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
-    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal,
+    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, profiles: USERS, fire });
   const selectedInvoiceInBootstrap = selectedInvoice
@@ -1591,7 +1591,11 @@ export default function PortalShell() {
     if (!workOrderId) return;
     setWorkflowReturn({
       workOrderId,
-      page: page === "history" ? "history" : "work_orders",
+      page: page === "history"
+        ? "history"
+        : page === "my_jobs"
+          ? "my_jobs"
+          : "work_orders",
     });
   }, [page]);
 
@@ -1609,6 +1613,28 @@ export default function PortalShell() {
     setWorkflowReturn(null);
     return true;
   }, [setSelectedInvoice, setSelectedWO, workflowReturn]);
+
+  const backToAllWorkOrders = useCallback(() => {
+    setSelectedInvoice(null);
+    setSelectedBillingInvoice(null);
+    setBillingDraftToEdit(null);
+    setBillingSourceToStart(null);
+    setBillingWorkOrderToStart(null);
+    setModal(null);
+    setAiNote(null);
+    setWorkflowReturn(null);
+    setWorkOrderReturnPage(null);
+    setSelectedWO(null);
+    setPage(isManager ? "work_orders" : "my_jobs");
+  }, [isManager, setSelectedInvoice, setSelectedWO]);
+
+  const closeBillingInvoiceEditor = useCallback(() => {
+    if (returnToWorkflowWorkOrder()) return;
+    setModal(null);
+    setBillingDraftToEdit(null);
+    setBillingSourceToStart(null);
+    setBillingWorkOrderToStart(null);
+  }, [returnToWorkflowWorkOrder]);
 
   const openContractorInvoiceFromWorkOrder = useCallback((invoice: any, workOrderId: string) => {
     if (!invoice?.id || !workOrderId) return;
@@ -2152,6 +2178,27 @@ export default function PortalShell() {
         : `Invoice #${invoice.num} sent to 7-Eleven; work order closed`);
     } catch (e: any) {
       fire(`Billing update failed: ${e.message || e}`);
+      throw e;
+    }
+  };
+  const doMarkBillingInvoiceReady = async (invoice: any) => {
+    try {
+      const payload = await billingFetch(
+        `/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ action: "mark_ready" }),
+        },
+      );
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY }),
+        qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY }),
+        qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY }),
+      ]);
+      fire(`${invoice.documentKind === "capital_quote" ? "Capital quote" : "Invoice"} #${invoice.num} is ready for 7-Eleven`);
+      return payload.invoice;
+    } catch (e: any) {
+      fire(`Ready-for-7-Eleven update failed: ${e.message || e}`);
       throw e;
     }
   };
@@ -3177,6 +3224,8 @@ export default function PortalShell() {
             doRejectInvoice={doRejectInvoice}
             doRetractInvoiceRejection={doRetractInvoiceRejection}
             doCorrectInvoiceTotal={doCorrectInvoiceTotal}
+            doPlaceInvoicePaymentHold={doPlaceInvoicePaymentHold}
+            doReleaseInvoicePaymentHold={doReleaseInvoicePaymentHold}
             pdfBusy={pdfBusy}
             fmt={fmt}
             loadingStates={loadingStates}
@@ -3237,6 +3286,7 @@ export default function PortalShell() {
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onDownloadCsv={() => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv(selectedBillingInvoiceData)}
               onMarkBilled={() => selectedBillingInvoiceData && doMarkBillingInvoiceBilled(selectedBillingInvoiceData)}
+              onMarkReady={() => selectedBillingInvoiceData && doMarkBillingInvoiceReady(selectedBillingInvoiceData)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
               onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.id); setPage("invoices"); }}
               currentUser={currentUser}
@@ -3325,6 +3375,7 @@ export default function PortalShell() {
             isManager={isManager}
             setSelectedWO={setSelectedWO}
             onBackFromWorkOrder={backFromWorkOrder}
+            onBackToAllWorkOrders={backToAllWorkOrders}
             onViewStoreWorkOrders={openStoreWorkOrders}
             setSelectedInvoice={setSelectedInvoice}
             onOpenContractorInvoice={openContractorInvoiceFromWorkOrder}
@@ -4153,12 +4204,7 @@ export default function PortalShell() {
           editingInvoice={billingDraftToEdit}
           initialSourceInvoiceId={billingSourceToStart}
           initialWorkOrderId={billingWorkOrderToStart}
-          onClose={() => {
-            setModal(null);
-            setBillingDraftToEdit(null);
-            setBillingSourceToStart(null);
-            setBillingWorkOrderToStart(null);
-          }}
+          onClose={closeBillingInvoiceEditor}
           onCreated={(invoice: any) => {
             qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
               if (!invoice?.id) return items || [];

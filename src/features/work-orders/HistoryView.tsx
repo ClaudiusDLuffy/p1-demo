@@ -5,13 +5,17 @@ import { T } from "../../lib/constants";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { DatePickerField } from "../../components/ui/DateTimePicker";
-import { useDeferredValue } from "react";
+import { useDeferredValue, useState } from "react";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
+import WorkOrderSortControls from "./WorkOrderSortControls";
+import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function HistoryView(props: any) {
   const { page, isManager, canReopen, onRequestReopen, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
   const deferredSearch = useDeferredValue(histSearch || "");
+  const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("closed");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const pageSize = 24;
   const cursorSignature = JSON.stringify({
     search: deferredSearch.trim(),
@@ -19,6 +23,8 @@ export default function HistoryView(props: any) {
     histReso,
     histFrom,
     histTo,
+    sortColumn,
+    sortDirection,
   });
   const {
     position: effectiveCursor,
@@ -33,6 +39,8 @@ export default function HistoryView(props: any) {
     from: histFrom || undefined,
     to: histTo || undefined,
     sort: "newest",
+    tableSortColumn: sortColumn,
+    tableSortDirection: sortDirection,
     limit: pageSize,
     cursor: effectiveCursor.cursor,
   }, page === "history" && !selectedWO);
@@ -112,6 +120,23 @@ export default function HistoryView(props: any) {
             <div className="filter-date-field" style={{ width: 150, minWidth: 150 }}>
               <DatePickerField value={histTo} onChange={setHistTo} placeholder="To date" />
             </div>
+            <WorkOrderSortControls
+              column={sortColumn}
+              direction={sortDirection}
+              options={[
+                { value: "closed", label: "Date closed" },
+                { value: "work_order", label: "Work order" },
+                { value: "priority", label: "Priority" },
+                { value: "store", label: "Store" },
+                { value: "summary", label: "Summary" },
+                { value: "contractor", label: "Contractor" },
+              ]}
+              onColumnChange={value => {
+                setSortColumn(value);
+                setSortDirection(value === "closed" ? "desc" : "asc");
+              }}
+              onDirectionChange={setSortDirection}
+            />
           </div>
         </div>
 

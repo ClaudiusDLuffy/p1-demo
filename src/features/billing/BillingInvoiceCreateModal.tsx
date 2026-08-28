@@ -51,12 +51,17 @@ import {
 } from "../../lib/locationTax";
 import {
   useWorkOrderByIdQuery,
+  useBillableP1PartsQuery,
   useWorkOrderDetailsQuery,
   useWorkOrdersPageQuery,
 } from "../work-orders/queries";
 import { useInvoiceByIdQuery, useInvoicesPageQuery } from "../invoices/queries";
 import { useBillingInvoicePageQuery, useBillingTaxRulesQuery } from "./queries";
 import { loadAllWorkOrderVisits } from "../../lib/db";
+import {
+  QUICKBOOKS_EQUIPMENT_TAGS,
+  resolveQuickBooksEquipmentTag,
+} from "../../lib/quickBooksEquipmentTags";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -68,6 +73,7 @@ const BillingLineSchema = z.object({
   // rule refresh from overwriting an explicit staff checkbox choice.
   taxTreatmentManual: z.boolean().default(false),
   sourceInvoiceLineId: z.string().optional().nullable(),
+  sourceWorkOrderPartId: z.string().optional().nullable(),
   sourceUnitCost: z.number().nonnegative().optional().nullable(),
   markupPercent: z.number().min(0).max(999).optional().nullable(),
 }).superRefine((line, context) => {
@@ -110,6 +116,7 @@ const BillingInvoiceSchema = z.object({
   dueDate: z.string().optional(),
   workOrderId: z.string().optional(),
   territory: z.string().trim().min(1, "Territory is required"),
+  equipmentTag: z.enum(QUICKBOOKS_EQUIPMENT_TAGS),
   storeNumber: z.string().min(1, "Store number is required"),
   storeAddress: z.string().optional(),
   terms: z.string().min(1),
@@ -215,6 +222,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const numberEditedRef = useRef(false);
   const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
+  const p1PartsHydratedFor = useRef<string | null>(null);
   const isEditing = !!editingInvoice?.id;
   const controller = isInvoiceController(currentUser);
   const draftStorageKey = useMemo(
@@ -245,6 +253,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       dueDate: addDays(todayIso(), 30),
       workOrderId: "",
       territory: "",
+      equipmentTag: "7-ELEVEN: Miscellaneous",
       storeNumber: "",
       storeAddress: "",
       terms: "Net 30",
@@ -314,6 +323,11 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, modal === "createBillingInvoice" && Boolean(
     selectedWorkOrderId || editingInvoice?.wot || initialWorkOrderId,
   ));
+  const billableP1PartsQuery = useBillableP1PartsQuery(
+    selectedWorkOrderId,
+    editingInvoice?.id || null,
+    modal === "createBillingInvoice" && Boolean(selectedWorkOrderId),
+  );
   const billingTaxRulesQuery = useBillingTaxRulesQuery(
     modal === "createBillingInvoice",
   );
@@ -707,6 +721,10 @@ export default function BillingInvoiceCreateModal(props: any) {
           ),
         )
         || "",
+      equipmentTag: editingInvoice?.equipmentTag
+        || resolveQuickBooksEquipmentTag(
+          activeWorkOrders.find((item: any) => item.id === resolvedInitialWorkOrderId),
+        ),
       storeNumber: editingInvoice?.store || "",
       storeAddress: editingInvoice?.storeAddr || "",
       terms: editingInvoice?.terms || "Net 30",
@@ -728,6 +746,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             isTaxable: !!line.isTaxable,
             taxTreatmentManual: true,
             sourceInvoiceLineId: line.sourceInvoiceLineId || null,
+            sourceWorkOrderPartId: line.sourceWorkOrderPartId || null,
             sourceUnitCost: line.sourceUnitCost == null
               ? null
               : Number(line.sourceUnitCost),
@@ -793,6 +812,94 @@ export default function BillingInvoiceCreateModal(props: any) {
   ]);
 
   useEffect(() => {
+    if (
+      modal !== "createBillingInvoice"
+      || !selectedWorkOrderId
+      || !draftHydrated.current
+      || !billableP1PartsQuery.isSuccess
+    ) return;
+    const partFingerprint = (billableP1PartsQuery.data || [])
+      .map((part: any) => `${part.partId}:${part.qty}:${part.unitCost}:${part.markedUpUnitRate}`)
+      .join("|");
+    const hydrationKey = `${editingInvoice?.id || "new"}:${selectedWorkOrderId}:${partFingerprint}`;
+    if (p1PartsHydratedFor.current === hydrationKey) return;
+    p1PartsHydratedFor.current = hydrationKey;
+
+    const currentLines = getValues("lines") || [];
+    const existingPartIds = new Set(
+      currentLines
+        .map((line: any) => String(line?.sourceWorkOrderPartId || ""))
+        .filter(Boolean),
+    );
+    const billablePartById = new Map(
+      (billableP1PartsQuery.data || []).map((part: any) => [part.partId, part]),
+    );
+    let refreshedExisting = false;
+    const normalizedCurrentLines = currentLines.map((line: any) => {
+      const part = billablePartById.get(String(line?.sourceWorkOrderPartId || ""));
+      if (!part) return line;
+      const description = `P1 ordered part: ${part.description}${part.partNumber ? ` (${part.partNumber})` : ""}`;
+      const normalized = {
+        ...line,
+        type: "Parts/Hardware",
+        desc: description,
+        qty: Number(part.qty || 1),
+        rate: Number(part.markedUpUnitRate),
+        sourceInvoiceLineId: null,
+        sourceWorkOrderPartId: part.partId,
+        sourceUnitCost: Number(part.unitCost),
+        markupPercent: 25,
+        isTaxable: line.taxTreatmentManual
+          ? Boolean(line.isTaxable)
+          : taxabilityForLine("Parts/Hardware", description).taxable,
+      };
+      if (
+        normalized.type !== line.type
+        || normalized.desc !== line.desc
+        || normalized.qty !== Number(line.qty)
+        || normalized.rate !== Number(line.rate)
+        || normalized.sourceUnitCost !== Number(line.sourceUnitCost)
+        || normalized.markupPercent !== Number(line.markupPercent)
+      ) refreshedExisting = true;
+      return normalized;
+    });
+    const additions = (billableP1PartsQuery.data || [])
+      .filter((part: any) => !existingPartIds.has(part.partId))
+      .map((part: any) => {
+        const description = `P1 ordered part: ${part.description}${part.partNumber ? ` (${part.partNumber})` : ""}`;
+        return {
+          type: "Parts/Hardware",
+          desc: description,
+          qty: Number(part.qty || 1),
+          rate: Number(part.markedUpUnitRate),
+          isTaxable: taxabilityForLine("Parts/Hardware", description).taxable,
+          taxTreatmentManual: false,
+          sourceInvoiceLineId: null,
+          sourceWorkOrderPartId: part.partId,
+          sourceUnitCost: Number(part.unitCost),
+          markupPercent: 25,
+        };
+      });
+    if (additions.length === 0 && !refreshedExisting) return;
+    replace([...normalizedCurrentLines, ...additions]);
+    clearErrors("lines");
+    if (additions.length > 0) {
+      fire?.(`Added ${additions.length} P1-ordered part${additions.length === 1 ? "" : "s"} with 25% markup`);
+    }
+  }, [
+    billableP1PartsQuery.data,
+    billableP1PartsQuery.isSuccess,
+    clearErrors,
+    editingInvoice?.id,
+    fire,
+    getValues,
+    modal,
+    replace,
+    selectedWorkOrderId,
+    taxabilityForLine,
+  ]);
+
+  useEffect(() => {
     if (modal !== "createBillingInvoice" || !draftHydrated.current) return;
     const scheduleSave = () => {
       if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
@@ -833,6 +940,12 @@ export default function BillingInvoiceCreateModal(props: any) {
       shouldDirty: true,
       shouldValidate: true,
     });
+    if (!isEditing || editingInvoice?.wot !== wo.id || !editingInvoice?.equipmentTag) {
+      setValue("equipmentTag", resolveQuickBooksEquipmentTag(wo), {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
     setCustomTerritory(false);
     const latestVisitClockOut = [...(wo.visits || [])]
       .filter((visit: any) => visit?.checkOutAt)
@@ -850,6 +963,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, [
     clearErrors,
     editingInvoice?.serviceDateRaw,
+    editingInvoice?.equipmentTag,
     editingInvoice?.wot,
     isEditing,
     selectedWorkOrder,
@@ -860,6 +974,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   useEffect(() => {
     if (previousWorkOrderId.current === selectedWorkOrderId) return;
     previousWorkOrderId.current = selectedWorkOrderId || "";
+    p1PartsHydratedFor.current = null;
     setSelectedSourceIds([]);
     setSourceSnapshots({});
     setSourcePreviewId(null);
@@ -904,6 +1019,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     previousInvoiceDate.current = "";
     previousWorkOrderId.current = "";
     skipRestoredWorkOrderHydration.current = null;
+    p1PartsHydratedFor.current = null;
     reset({
       num: "",
       invoiceDate: today,
@@ -911,6 +1027,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       dueDate: addDays(today, 30),
       workOrderId: "",
       territory: "",
+      equipmentTag: "7-ELEVEN: Miscellaneous",
       storeNumber: "",
       storeAddress: "",
       terms: "Net 30",
@@ -1020,7 +1137,10 @@ export default function BillingInvoiceCreateModal(props: any) {
           taxTreatmentManual: false,
         };
       });
-      replace(imported);
+      const p1PartLines = (getValues("lines") || []).filter(
+        (line: any) => Boolean(line?.sourceWorkOrderPartId),
+      );
+      replace([...p1PartLines, ...imported]);
       clearErrors("lines");
       setTimeout(() => void trigger("lines"), 0);
       fire?.(`Pulled ${imported.length} line item${imported.length === 1 ? "" : "s"}`);
@@ -1223,6 +1343,18 @@ export default function BillingInvoiceCreateModal(props: any) {
           </label>
         </div>
 
+        <label style={{ display: "block", marginBottom: 16 }}>
+          <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>QuickBooks equipment tag</span>
+          <Sel
+            {...register("equipmentTag")}
+            aria-label="QuickBooks equipment tag"
+            style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.equipmentTag ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
+          >
+            {QUICKBOOKS_EQUIPMENT_TAGS.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+          </Sel>
+          <span style={{ display: "block", fontSize: 10, color: T.subtle, marginTop: 5 }}>Auto-filled from the work order and editable before export.</span>
+        </label>
+
         {selectedWorkOrder && (
           <div role="status" style={{ padding: "11px 14px", marginBottom: 14, borderRadius: 9, border: `1px solid ${selectedWorkOrder.priority === "p1" ? `${T.warn}55` : T.borderSoft}`, background: selectedWorkOrder.priority === "p1" ? T.warnSoft : T.surfaceSoft, color: T.ink, fontSize: 12, fontWeight: 700 }}>
             Priority: {PRIORITY[selectedWorkOrder.priority]?.label || String(selectedWorkOrder.priority || "Not set")}
@@ -1379,6 +1511,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             const sourceUnitCost = line.sourceUnitCost == null
               ? null
               : Number(line.sourceUnitCost);
+            const isP1PurchasedPart = Boolean(line.sourceWorkOrderPartId);
             const quantityConstraints = invoiceQuantityInputConstraints(line.type);
             const typeRegistration = register(`lines.${i}.type` as const);
             const descriptionRegistration = register(`lines.${i}.desc` as const);
@@ -1399,6 +1532,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 style={{ position: "relative", display: "grid", gridTemplateColumns: "28px minmax(86px, 110px) minmax(120px, 1fr) minmax(48px, 58px) minmax(64px, 82px) minmax(58px, 74px) minmax(54px, 66px) minmax(72px, 92px)", gap: 8, padding: "10px 48px 10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start", background: draggingLine === i ? T.accentSoft : T.surface }}
               >
                 <input type="hidden" {...register(`lines.${i}.sourceInvoiceLineId` as const)} />
+                <input type="hidden" {...register(`lines.${i}.sourceWorkOrderPartId` as const)} />
                 <input type="hidden" {...register(`lines.${i}.taxTreatmentManual` as const)} />
                 <input
                   type="hidden"
@@ -1424,8 +1558,10 @@ export default function BillingInvoiceCreateModal(props: any) {
                 </button>
                 <Sel
                   {...typeRegistration}
-                  defaultValue={field.type}
+                  aria-disabled={isP1PurchasedPart}
+                  value={line.type}
                   onChange={(event: any) => {
+                    if (isP1PurchasedPart) return;
                     void typeRegistration.onChange(event);
                     const nextType = normalizeStaffBillingLineType(event.target.value);
                     setValue(
@@ -1474,6 +1610,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 </Sel>
                 <textarea
                   {...descriptionRegistration}
+                  readOnly={isP1PurchasedPart}
                   onBlur={(event: any) => {
                     void descriptionRegistration.onBlur(event);
                     if (getValues(`lines.${i}.taxTreatmentManual` as const)) return;
@@ -1493,12 +1630,14 @@ export default function BillingInvoiceCreateModal(props: any) {
                   inputMode="decimal"
                   title="Labor may be billed in quarter-hour increments (1.25 = 1 hour 15 minutes)."
                   {...register(`lines.${i}.qty` as const, { valueAsNumber: true })}
+                  readOnly={isP1PurchasedPart}
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
                 />
                 <input
                   type="number"
                   step="any"
                   {...rateRegistration}
+                  readOnly={isP1PurchasedPart}
                   onChange={(event: any) => {
                     void rateRegistration.onChange(event);
                     if (!isStaffBillingPartsLine(line.type) || sourceUnitCost == null) return;
@@ -1520,7 +1659,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                       max="999"
                       step="0.1"
                       value={line.markupPercent ?? ""}
-                      disabled={sourceUnitCost == null && !(Number(line.rate) > 0)}
+                      disabled={isP1PurchasedPart || (sourceUnitCost == null && !(Number(line.rate) > 0))}
                       onChange={(event: any) => {
                         const next = applyStaffBillingPartsMarkup(
                           sourceUnitCost,
@@ -1565,16 +1704,29 @@ export default function BillingInvoiceCreateModal(props: any) {
                   />
                 </label>
                 <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
-                <button
-                  type="button"
-                  className="billing-line-remove"
-                  onClick={() => remove(i)}
-                  title={`Delete line ${i + 1}`}
-                  aria-label={`Delete line ${i + 1}`}
-                  style={{ position: "absolute", top: 10, right: 10, width: 30, height: 34, display: "grid", placeItems: "center", padding: 0, borderRadius: 8, border: `1px solid ${T.danger}33`, background: T.dangerSoft, color: T.danger, cursor: "pointer", fontSize: 18, lineHeight: 1 }}
-                >
-                  ×
-                </button>
+                {isP1PurchasedPart ? (
+                  <button
+                    type="button"
+                    className="billing-line-remove"
+                    disabled
+                    title="P1-purchased parts are required on this invoice"
+                    aria-label={`P1-purchased line ${i + 1} is required`}
+                    style={{ position: "absolute", top: 10, right: 10, width: 30, height: 34, display: "grid", placeItems: "center", padding: 0, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surfaceSoft, color: T.subtle, cursor: "not-allowed", fontSize: 18, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="billing-line-remove"
+                    onClick={() => remove(i)}
+                    title={`Delete line ${i + 1}`}
+                    aria-label={`Delete line ${i + 1}`}
+                    style={{ position: "absolute", top: 10, right: 10, width: 30, height: 34, display: "grid", placeItems: "center", padding: 0, borderRadius: 8, border: `1px solid ${T.danger}33`, background: T.dangerSoft, color: T.danger, cursor: "pointer", fontSize: 18, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1593,6 +1745,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 isTaxable: taxabilityForLine(item.type, item.desc).taxable,
                 taxTreatmentManual: false,
                 sourceInvoiceLineId: null,
+                sourceWorkOrderPartId: null,
                 sourceUnitCost: null,
                 markupPercent: null,
               })}
@@ -1616,6 +1769,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 isTaxable: taxabilityForLine(preset.type, preset.label).taxable,
                 taxTreatmentManual: false,
                 sourceInvoiceLineId: null,
+                sourceWorkOrderPartId: null,
                 sourceUnitCost: null,
                 markupPercent: null,
               })}

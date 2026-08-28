@@ -17,6 +17,8 @@ import { useWorkOrdersPageQuery } from "../work-orders/queries";
 import BillingTaxRulePanel from "./BillingTaxRulePanel";
 import { useBillingInvoicePageQuery } from "./queries";
 
+type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
+
 const BILLING_PAGE_KEYS = [
   "ready",
   "all",
@@ -52,7 +54,19 @@ function BillingInvoiceRows({
   canOpen,
   fmt,
   emptyMessage,
+  sortKey,
+  sortDirection,
+  onSort,
 }: any) {
+  const headers = [
+    { key: "invoice", label: "Invoice #" },
+    { key: "date", label: "Date" },
+    { key: "work_order", label: "Work Order" },
+    { key: "store", label: "Store" },
+    { key: "territory", label: "Territory" },
+    { key: "total", label: "Amount", align: "right" },
+    { key: "status", label: "Status" },
+  ];
   return (
     <>
       <div className="desktop-only-table">
@@ -60,12 +74,13 @@ function BillingInvoiceRows({
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: T.surfaceSoft }}>
-                {["Invoice #", "Date", "Work Order", "Store", "Territory", "Amount", "Status"].map(header => (
+                {headers.map(header => (
                   <th
-                    key={header}
+                    key={header.key}
+                    aria-sort={sortKey === header.key ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                     style={{
-                      textAlign: header === "Amount" ? "right" : "left",
-                      padding: "12px 14px",
+                      textAlign: (header.align || "left") as "left" | "right",
+                      padding: 0,
                       fontSize: 10,
                       fontWeight: 700,
                       textTransform: "uppercase",
@@ -74,7 +89,14 @@ function BillingInvoiceRows({
                       borderBottom: `1px solid ${T.borderSoft}`,
                     }}
                   >
-                    {header}
+                    <button
+                      type="button"
+                      onClick={() => onSort?.(header.key)}
+                      style={{ width: "100%", padding: "12px 14px", display: "flex", justifyContent: header.align === "right" ? "flex-end" : "flex-start", alignItems: "center", gap: 5, border: 0, background: "transparent", color: "inherit", cursor: "pointer", font: "inherit", fontWeight: "inherit", textTransform: "inherit", letterSpacing: "inherit" }}
+                    >
+                      {header.label}
+                      {sortKey === header.key && <span aria-hidden="true">{sortDirection === "asc" ? "↑" : "↓"}</span>}
+                    </button>
                   </th>
                 ))}
               </tr>
@@ -188,7 +210,7 @@ export default function BillingInvoiceList(props: any) {
     fire,
   } = props;
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<InvoiceSortKey>("invoice");
+  const [sortKey, setSortKey] = useState<BillingSortKey>("invoice");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     ready: true,
@@ -200,7 +222,18 @@ export default function BillingInvoiceList(props: any) {
   });
   const controller = isInvoiceController(currentUser);
   const deferredSearch = useDeferredValue(search.trim());
-  const staffSort = sortKey === "status" ? "status" : "invoice";
+  const staffSort = sortKey;
+  const contractorSort: InvoiceSortKey = ["territory"].includes(sortKey)
+    ? "recent"
+    : sortKey as InvoiceSortKey;
+  const chooseSort = (key: BillingSortKey) => {
+    if (sortKey === key) {
+      setSortDirection(direction => direction === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === "date" || key === "recent" ? "desc" : "asc");
+  };
   const pagingSignature = JSON.stringify({
     search: deferredSearch,
     direction: sortDirection,
@@ -216,8 +249,11 @@ export default function BillingInvoiceList(props: any) {
   const draftQuery = useBillingInvoicePageQuery({ queue: "draft", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.draft.cursor }, queryEnabled);
   const submittedQuery = useBillingInvoicePageQuery({ queue: "submitted", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.submitted.cursor }, queryEnabled);
   const sentQuery = useBillingInvoicePageQuery({ queue: "sent", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.sent.cursor }, queryEnabled);
-  const approvedQuery = useInvoicesPageQuery({ state: "approved", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.recently_approved.cursor }, queryEnabled);
-  const readyQuery = useWorkOrdersPageQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", limit: 20, cursor: positions.ready.cursor }, queryEnabled && !controller);
+  const approvedQuery = useInvoicesPageQuery({ state: "approved", search: deferredSearch, sort: contractorSort, direction: sortDirection, limit: 20, cursor: positions.recently_approved.cursor }, queryEnabled);
+  const readySortColumn = sortKey === "work_order" || sortKey === "store" || sortKey === "status"
+    ? sortKey
+    : "created";
+  const readyQuery = useWorkOrdersPageQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn, tableSortDirection: sortDirection, limit: 20, cursor: positions.ready.cursor }, queryEnabled && !controller);
 
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, any>();
@@ -298,11 +334,16 @@ export default function BillingInvoiceList(props: any) {
           </label>
           <select
             value={sortKey}
-            onChange={event => setSortKey(event.target.value as InvoiceSortKey)}
+            onChange={event => chooseSort(event.target.value as BillingSortKey)}
             aria-label="Sort billing invoices"
             style={{ minHeight: 38, padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
           >
             <option value="invoice">Invoice number</option>
+            <option value="date">Invoice date</option>
+            <option value="work_order">Work order</option>
+            <option value="store">Store</option>
+            <option value="territory">Territory</option>
+            <option value="total">Amount</option>
             <option value="status">Status</option>
           </select>
           <button
@@ -434,6 +475,9 @@ export default function BillingInvoiceList(props: any) {
                     canOpen={(invoice: any) => canOpenInvoice(invoice, contractorBucket)}
                     fmt={fmt}
                     emptyMessage={search ? "No billing records in this queue match your search." : "Nothing is waiting in this queue."}
+                    sortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={chooseSort}
                   />
                   <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 10, color: T.subtle }}>
