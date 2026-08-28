@@ -16,6 +16,7 @@ import {
   normalizeStaffBillingLineType,
   roundStaffBillingMarkupPercent,
 } from "../../../lib/staffBilling";
+import { isQuickBooksEquipmentTag } from "../../../lib/quickBooksEquipmentTags";
 import {
   isInvoiceControllerProfile,
   loadStaffPermissions,
@@ -31,6 +32,7 @@ type BillingLineInput = {
   rate: number;
   isTaxable?: boolean;
   sourceInvoiceLineId?: string | null;
+  sourceWorkOrderPartId?: string | null;
   sourceUnitCost?: number | null;
   markupPercent?: number | null;
 };
@@ -67,14 +69,14 @@ async function requireStaff(req: NextRequest) {
   const sb = createServerClient();
   const { data: profile, error: profileError } = await sb
     .from("profiles")
-    .select("id, role, name")
+    .select("id, role, name, active")
     .eq("id", user.id)
     .maybeSingle();
 
   if (profileError) {
     return { error: jsonError(profileError.message, 500) };
   }
-  if (!profile || !STAFF_ROLES.has(profile.role || "")) {
+  if (!profile?.active || !STAFF_ROLES.has(profile.role || "")) {
     return { error: jsonError("Forbidden", 403) };
   }
 
@@ -100,6 +102,7 @@ const mapLine = (line: any) => ({
   amount: Number(line.amount || 0),
   isTaxable: !!line.is_taxable,
   sourceInvoiceLineId: line.source_invoice_line_id || null,
+  sourceWorkOrderPartId: line.source_work_order_part_id || null,
   sourceUnitCost: line.source_unit_cost == null
     ? null
     : Number(line.source_unit_cost),
@@ -148,6 +151,7 @@ const mapInvoice = (invoice: any, lines: any[]) => ({
   taxRate: invoice.tax_rate == null ? null : Number(invoice.tax_rate),
   total: Number(invoice.total || 0),
   territory: invoice.territory || null,
+  equipmentTag: invoice.equipment_tag || "7-ELEVEN: Miscellaneous",
   pdfStoragePath: invoice.pdf_storage_path || null,
   qboInvoiceId: invoice.qbo_invoice_id || null,
   qboSyncedAt: invoice.qbo_synced_at || null,
@@ -179,6 +183,7 @@ type ValidBillingLine = {
   rate: number;
   isTaxable: boolean;
   sourceInvoiceLineId: string | null;
+  sourceWorkOrderPartId: string | null;
   sourceUnitCost: number | null;
   markupPercent: number | null;
 };
@@ -199,6 +204,7 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
         rate: roundInvoiceNumber(line.rate),
         isTaxable: !!line.isTaxable,
         sourceInvoiceLineId: String(line.sourceInvoiceLineId || "").trim() || null,
+        sourceWorkOrderPartId: String(line.sourceWorkOrderPartId || "").trim() || null,
         sourceUnitCost: sourceUnitCost != null && Number.isFinite(sourceUnitCost)
           ? roundInvoiceNumber(sourceUnitCost)
           : null,
@@ -212,6 +218,88 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
       && (line.sourceUnitCost == null || line.sourceUnitCost >= 0)
       && (line.markupPercent == null || line.markupPercent >= 0),
     );
+
+const invalidBillingInput = (message: string) => {
+  const error: Error & { code?: string } = new Error(message);
+  error.code = "23514";
+  return error;
+};
+
+async function canonicalizeP1PartLines(
+  sb: ReturnType<typeof createServerClient>,
+  workOrderId: string | null,
+  lines: BillingLineInput[],
+  invoiceId: string | null = null,
+): Promise<BillingLineInput[]> {
+  const requestedPartIds = lines
+    .map(line => String(line.sourceWorkOrderPartId || "").trim())
+    .filter(Boolean);
+  if (!workOrderId) {
+    if (requestedPartIds.length > 0) {
+      throw invalidBillingInput("P1-purchased parts require a linked work order");
+    }
+    return lines;
+  }
+  if (new Set(requestedPartIds).size !== requestedPartIds.length) {
+    throw invalidBillingInput("A P1-purchased part may appear only once on an invoice");
+  }
+
+  const { data: billableParts, error: billablePartsError } = await (sb as any)
+    .rpc("list_billable_p1_parts", {
+      p_work_order_id: workOrderId,
+      p_exclude_invoice_id: invoiceId,
+    });
+  if (billablePartsError) throw billablePartsError;
+  const partById = new Map<string, any>((billableParts || []).map((part: any) => [
+    String(part.part_id),
+    part,
+  ]));
+  if (requestedPartIds.some(partId => !partById.has(partId))) {
+    throw invalidBillingInput(
+      "Every P1-purchased part must be ordered, priced, unbilled, and belong to this work order",
+    );
+  }
+
+  const canonicalLines = lines.map(line => {
+    const partId = String(line.sourceWorkOrderPartId || "").trim();
+    if (!partId) return line;
+    const part = partById.get(partId);
+    if (!part) throw invalidBillingInput("P1-purchased part is not billable");
+    const unitCost = Number(part.unit_cost);
+    return {
+      ...line,
+      type: "Parts/Hardware",
+      desc: `P1 ordered part: ${part.description}${part.part_number ? ` (${part.part_number})` : ""}`,
+      description: `P1 ordered part: ${part.description}${part.part_number ? ` (${part.part_number})` : ""}`,
+      qty: Number(part.qty || 1),
+      rate: Number(part.marked_up_unit_rate),
+      sourceInvoiceLineId: null,
+      sourceWorkOrderPartId: partId,
+      sourceUnitCost: roundInvoiceNumber(unitCost),
+      markupPercent: 25,
+    };
+  });
+
+  const requested = new Set(requestedPartIds);
+  for (const part of billableParts || []) {
+    const partId = String(part.part_id);
+    if (requested.has(partId)) continue;
+    const description = `P1 ordered part: ${part.description}${part.part_number ? ` (${part.part_number})` : ""}`;
+    canonicalLines.push({
+      type: "Parts/Hardware",
+      desc: description,
+      description,
+      qty: Number(part.qty || 1),
+      rate: Number(part.marked_up_unit_rate),
+      isTaxable: true,
+      sourceInvoiceLineId: null,
+      sourceWorkOrderPartId: partId,
+      sourceUnitCost: Number(part.unit_cost),
+      markupPercent: 25,
+    });
+  }
+  return canonicalLines;
+}
 
 async function resolveTax(
   sb: ReturnType<typeof createServerClient>,
@@ -307,6 +395,7 @@ const rpcLinePayload = (lines: ValidBillingLine[]) => lines.map(line => ({
   rate: line.rate,
   is_taxable: line.isTaxable,
   source_invoice_line_id: line.sourceInvoiceLineId,
+  source_work_order_part_id: line.sourceWorkOrderPartId,
   source_unit_cost: line.sourceUnitCost,
   markup_percent: line.markupPercent,
 }));
@@ -330,6 +419,7 @@ type StaffInvoiceSaveInput = {
     taxRate: number | null;
   };
   territory: string;
+  equipmentTag: string;
   lines: ValidBillingLine[];
   sourceInvoiceIds: string[];
 };
@@ -339,7 +429,7 @@ async function saveStaffBillingInvoice(
   input: StaffInvoiceSaveInput,
 ) {
   const { data, error } = await (sb as any).rpc(
-    "save_staff_billing_invoice",
+    "save_staff_billing_invoice_v3",
     {
       p_actor_id: input.actorId,
       p_invoice_id: input.invoiceId,
@@ -357,6 +447,7 @@ async function saveStaffBillingInvoice(
       p_tax_state: input.tax.taxState,
       p_tax_rate: input.tax.taxRate,
       p_territory: input.territory,
+      p_equipment_tag: input.equipmentTag,
       p_lines: rpcLinePayload(input.lines),
       p_source_invoice_ids: input.sourceInvoiceIds,
     },
@@ -689,7 +780,7 @@ export async function GET(req: NextRequest) {
       ? queueValue
       : "active";
     const sortValue = String(req.nextUrl.searchParams.get("sort") || "invoice").toLowerCase();
-    const sort = ["invoice", "status", "recent"].includes(sortValue)
+    const sort = ["invoice", "date", "work_order", "store", "territory", "total", "status", "recent"].includes(sortValue)
       ? sortValue
       : "invoice";
     const direction = req.nextUrl.searchParams.get("direction") === "asc" ? "asc" : "desc";
@@ -733,7 +824,13 @@ export async function POST(req: NextRequest) {
         .filter(Boolean),
     ));
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
-    const validLines = normalizeBillingLines(lines);
+    const canonicalLines = await canonicalizeP1PartLines(
+      auth.sb,
+      String(body.workOrderId || "").trim() || null,
+      lines,
+      null,
+    );
+    const validLines = normalizeBillingLines(canonicalLines);
 
     if (suppliedNum && (suppliedNum.length > 80 || /[\u0000-\u001f\u007f]/.test(suppliedNum))) {
       return jsonError("Invoice number is invalid", 400);
@@ -741,6 +838,9 @@ export async function POST(req: NextRequest) {
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
     if (!String(body.territory || "").trim()) return jsonError("Territory is required", 400);
+    if (!isQuickBooksEquipmentTag(body.equipmentTag)) {
+      return jsonError("A valid QuickBooks equipment tag is required", 400);
+    }
     if (validLines.length === 0) return jsonError("At least one valid line item is required", 400);
     if (sourceInvoiceIds.length > 0 && !body.workOrderId) {
       return jsonError("A work order is required when contractor invoices are linked", 400);
@@ -825,6 +925,7 @@ export async function POST(req: NextRequest) {
           state: targetState,
           tax,
           territory: String(body.territory || "").trim(),
+          equipmentTag: body.equipmentTag,
           lines: validLines,
           sourceInvoiceIds,
         });
@@ -865,6 +966,18 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json();
+    if (body.action === "mark_ready") {
+      const { data: readiness, error: readinessError } = await (auth.sb as any)
+        .rpc("mark_staff_invoice_ready", {
+          p_invoice_id: id,
+          p_actor_id: auth.user.id,
+        });
+      if (readinessError) throw readinessError;
+
+      const invoice = await loadStaffInvoiceById(auth.sb, id);
+      if (!invoice) throw new Error("Ready invoice could not be reloaded");
+      return NextResponse.json({ invoice, readiness });
+    }
     if (body.action === "mark_billed") {
       const { data: finalization, error: finalizationError } = await (auth.sb as any)
         .rpc("mark_staff_invoice_billed", {
@@ -888,7 +1001,13 @@ export async function PATCH(req: NextRequest) {
         .filter(Boolean),
     ));
     const lines = Array.isArray(body.lines) ? body.lines as BillingLineInput[] : [];
-    const validLines = normalizeBillingLines(lines);
+    const canonicalLines = await canonicalizeP1PartLines(
+      auth.sb,
+      workOrderId,
+      lines,
+      id,
+    );
+    const validLines = normalizeBillingLines(canonicalLines);
 
     if (!desiredNum) return jsonError("Invoice number is required", 400);
     if (desiredNum.length > 80 || /[\u0000-\u001f\u007f]/.test(desiredNum)) {
@@ -897,6 +1016,9 @@ export async function PATCH(req: NextRequest) {
     if (!body.invoiceDate) return jsonError("Invoice date is required", 400);
     if (!body.storeNumber) return jsonError("Store number is required", 400);
     if (!String(body.territory || "").trim()) return jsonError("Territory is required", 400);
+    if (!isQuickBooksEquipmentTag(body.equipmentTag)) {
+      return jsonError("A valid QuickBooks equipment tag is required", 400);
+    }
     if (validLines.length === 0) return jsonError("At least one valid line item is required", 400);
     if (sourceInvoiceIds.length > 0 && !workOrderId) {
       return jsonError("A work order is required when contractor invoices are linked", 400);
@@ -991,6 +1113,7 @@ export async function PATCH(req: NextRequest) {
         state: targetState,
         tax,
         territory: String(body.territory || "").trim(),
+        equipmentTag: body.equipmentTag,
         lines: validLines,
         sourceInvoiceIds,
       });

@@ -12,6 +12,12 @@ const read = (path: string) =>
 const migration = read(
   "supabase/migrations/0063_atomic_staff_billing_invoice_save.sql",
 );
+const p1PartMigration = read(
+  "supabase/migrations/0092_p1_part_costs_and_billing.sql",
+);
+const equipmentTagMigration = read(
+  "supabase/migrations/0097_quickbooks_equipment_tags.sql",
+);
 const route = read("src/app/api/billing-invoices/route.ts");
 const shell = read("src/components/PortalShell.tsx");
 const pdf = read("src/lib/invoicePdf.ts");
@@ -59,7 +65,35 @@ test("the transaction reconciles persisted lines before replacing source links",
 
 test("the API delegates both creates and edits to the atomic save function", () => {
   assert.match(route, /async function saveStaffBillingInvoice/);
-  assert.match(route, /\.rpc\(\s*"save_staff_billing_invoice"/);
+  assert.match(route, /\.rpc\(\s*"save_staff_billing_invoice_v3"/);
+  assert.match(
+    equipmentTagMigration,
+    /create or replace function public\.save_staff_billing_invoice_v3/,
+  );
+  assert.match(
+    equipmentTagMigration,
+    /public\.save_staff_billing_invoice_v2\(/,
+  );
+  assert.match(
+    p1PartMigration,
+    /create or replace function public\.save_staff_billing_invoice_v2/,
+  );
+  assert.match(
+    p1PartMigration,
+    /public\.save_staff_billing_invoice\(/,
+  );
+  assert.match(
+    p1PartMigration,
+    /revoke all on function public\.save_staff_billing_invoice_v2\([\s\S]+?from public, anon, authenticated;/,
+  );
+  assert.match(
+    p1PartMigration,
+    /grant execute on function public\.save_staff_billing_invoice_v2\([\s\S]+?to service_role;/,
+  );
+  assert.match(
+    equipmentTagMigration,
+    /grant execute on function public\.save_staff_billing_invoice_v3\([\s\S]+?to service_role;/,
+  );
   assert.equal(
     route.match(/await saveStaffBillingInvoice\(auth\.sb,/g)?.length,
     2,

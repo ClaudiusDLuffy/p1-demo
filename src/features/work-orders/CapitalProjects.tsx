@@ -5,20 +5,27 @@ import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { T } from "../../lib/constants";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   firstCursorPosition,
   nextCursorPosition,
   previousCursorPosition,
 } from "../../lib/cursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
+import WorkOrderSortControls from "./WorkOrderSortControls";
+import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function CapitalProjects(props: any) {
   const { page, isManager, capitalCount, setSelectedWO, setPage, setAiNote, getUser } = props;
   const [position, setPosition] = useState(firstCursorPosition);
+  const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  useEffect(() => setPosition(firstCursorPosition), [sortColumn, sortDirection]);
   const capitalQuery = useWorkOrdersPageQuery({
     scope: "capital",
     sort: "newest",
+    tableSortColumn: sortColumn,
+    tableSortDirection: sortDirection,
     limit: 24,
     cursor: position.cursor,
   }, page === "capital" && isManager);
@@ -35,6 +42,27 @@ export default function CapitalProjects(props: any) {
                   <div style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
                   <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Equipment orders — separate from regular pipeline, 4-12 week lifecycle</div>
                 </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+                <WorkOrderSortControls
+                  column={sortColumn}
+                  direction={sortDirection}
+                  options={[
+                    { value: "created", label: "Date received" },
+                    { value: "work_order", label: "Work order" },
+                    { value: "status", label: "Status" },
+                    { value: "priority", label: "Priority" },
+                    { value: "store", label: "Store" },
+                    { value: "summary", label: "Summary" },
+                    { value: "contractor", label: "Contractor" },
+                    { value: "updated", label: "Last updated" },
+                  ]}
+                  onColumnChange={value => {
+                    setSortColumn(value);
+                    setSortDirection(["created", "updated"].includes(value) ? "desc" : "asc");
+                  }}
+                  onDirectionChange={setSortDirection}
+                />
               </div>
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 11, color: T.muted }}>{capitalQuery.isFetching ? "Loading capital projects..." : `Page ${position.page}`}</span>
@@ -53,6 +81,11 @@ export default function CapitalProjects(props: any) {
                       </span>
                       {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
                     </div>
+                    {wo.status === "pending_capital_completion" && (
+                      <div style={{ marginBottom: 9 }}>
+                        <Badge conf={{ label: "Pending capital completion", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC" }} />
+                      </div>
+                    )}
                     <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
                     <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>{wo.summary || "—"}</div>
                     <div style={{ paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>

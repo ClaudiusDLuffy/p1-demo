@@ -32,12 +32,12 @@ async function requireStaff(req: NextRequest) {
   const sb = createServerClient();
   const { data: profile, error: profileError } = await sb
     .from("profiles")
-    .select("id,role")
+    .select("id,role,active")
     .eq("id", data.user.id)
     .maybeSingle();
 
   if (profileError) return { error: jsonError(profileError.message, 500) };
-  if (!profile || !STAFF_ROLES.has(profile.role || "")) {
+  if (!profile?.active || !STAFF_ROLES.has(profile.role || "")) {
     return { error: jsonError("Forbidden", 403) };
   }
 

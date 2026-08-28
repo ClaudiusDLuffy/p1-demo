@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       activities: {
         Row: {
+          activity_channel: string
           author_id: string | null
           author_name: string
           contractor_attention_acknowledged_at: string | null
@@ -39,6 +40,7 @@ export type Database = {
           workflow_cycle: number
         }
         Insert: {
+          activity_channel?: string
           author_id?: string | null
           author_name: string
           contractor_attention_acknowledged_at?: string | null
@@ -62,6 +64,7 @@ export type Database = {
           workflow_cycle?: number
         }
         Update: {
+          activity_channel?: string
           author_id?: string | null
           author_name?: string
           contractor_attention_acknowledged_at?: string | null
@@ -247,6 +250,80 @@ export type Database = {
           {
             foreignKeyName: "billing_tax_rules_updated_by_fkey"
             columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contractor_estimate_attachments: {
+        Row: {
+          contractor_assignment_version: number
+          contractor_id: string
+          created_at: string
+          deleted_at: string | null
+          deleted_by: string | null
+          estimate_id: string
+          id: string
+          mime_type: string
+          original_name: string
+          size_bytes: number
+          storage_path: string
+          uploaded_by: string
+        }
+        Insert: {
+          contractor_assignment_version: number
+          contractor_id: string
+          created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
+          estimate_id: string
+          id?: string
+          mime_type: string
+          original_name: string
+          size_bytes: number
+          storage_path: string
+          uploaded_by: string
+        }
+        Update: {
+          contractor_assignment_version?: number
+          contractor_id?: string
+          created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
+          estimate_id?: string
+          id?: string
+          mime_type?: string
+          original_name?: string
+          size_bytes?: number
+          storage_path?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_estimate_attachments_estimate_id_fkey"
+            columns: ["estimate_id"]
+            isOneToOne: false
+            referencedRelation: "contractor_estimates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimate_attachments_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimate_attachments_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_estimate_attachments_deleted_by_fkey"
+            columns: ["deleted_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -522,32 +599,168 @@ export type Database = {
           },
         ]
       }
+      contractor_invoice_payment_holds: {
+        Row: {
+          invoice_id: string
+          placed_at: string
+          placed_by: string
+          reason: string
+        }
+        Insert: {
+          invoice_id: string
+          placed_at?: string
+          placed_by: string
+          reason: string
+        }
+        Update: {
+          invoice_id?: string
+          placed_at?: string
+          placed_by?: string
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_invoice_payment_holds_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_invoice_payment_holds_placed_by_fkey"
+            columns: ["placed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contractor_invoice_payment_hold_events: {
+        Row: {
+          action: string
+          actor_id: string
+          actor_name: string
+          contractor_id: string | null
+          created_at: string
+          id: string
+          invoice_id: string
+          invoice_num: string
+          reason: string
+          work_order_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id: string
+          actor_name: string
+          contractor_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id: string
+          invoice_num: string
+          reason: string
+          work_order_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string
+          actor_name?: string
+          contractor_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          invoice_num?: string
+          reason?: string
+          work_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_invoice_payment_hold_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_invoice_payment_hold_events_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_invoice_payment_hold_events_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_invoice_payment_hold_events_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       controller_invoice_export_batches: {
         Row: {
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
           created_at: string
           created_by: string
           id: string
           invoice_count: number
           object_path: string
+          status: string
           total: number
         }
         Insert: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
           created_at?: string
           created_by: string
           id: string
           invoice_count: number
           object_path: string
+          status?: string
           total: number
         }
         Update: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
           created_at?: string
           created_by?: string
           id?: string
           invoice_count?: number
           object_path?: string
+          status?: string
           total?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "controller_invoice_export_batches_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "controller_invoice_export_batches_confirmed_by_fkey"
+            columns: ["confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "controller_invoice_export_batches_created_by_fkey"
             columns: ["created_by"]
@@ -628,6 +841,7 @@ export type Database = {
           qty: number
           rate: number
           source_invoice_line_id: string | null
+          source_work_order_part_id: string | null
           source_unit_cost: number | null
           type: string
         }
@@ -642,6 +856,7 @@ export type Database = {
           qty?: number
           rate?: number
           source_invoice_line_id?: string | null
+          source_work_order_part_id?: string | null
           source_unit_cost?: number | null
           type: string
         }
@@ -656,6 +871,7 @@ export type Database = {
           qty?: number
           rate?: number
           source_invoice_line_id?: string | null
+          source_work_order_part_id?: string | null
           source_unit_cost?: number | null
           type?: string
         }
@@ -674,6 +890,13 @@ export type Database = {
             referencedRelation: "invoice_lines"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "invoice_lines_source_work_order_part_id_fkey"
+            columns: ["source_work_order_part_id"]
+            isOneToOne: false
+            referencedRelation: "wo_parts"
+            referencedColumns: ["id"]
+          },
         ]
       }
       invoices: {
@@ -686,6 +909,7 @@ export type Database = {
           deleted_by: string | null
           document_kind: string
           due_date: string | null
+          equipment_tag: string | null
           id: string
           invoice_date: string
           invoice_type: string
@@ -729,6 +953,7 @@ export type Database = {
           deleted_by?: string | null
           document_kind?: string
           due_date?: string | null
+          equipment_tag?: string | null
           id?: string
           invoice_date: string
           invoice_type?: string
@@ -772,6 +997,7 @@ export type Database = {
           deleted_by?: string | null
           document_kind?: string
           due_date?: string | null
+          equipment_tag?: string | null
           id?: string
           invoice_date?: string
           invoice_type?: string
@@ -2362,6 +2588,31 @@ export type Database = {
         }
         Returns: Json
       }
+      stage_controller_invoice_export: {
+        Args: {
+          p_actor_id: string
+          p_batch_id: string
+          p_invoice_ids: string[]
+          p_object_path: string
+        }
+        Returns: Json
+      }
+      confirm_controller_invoice_export: {
+        Args: { p_actor_id: string; p_batch_id: string }
+        Returns: Json
+      }
+      cancel_controller_invoice_export: {
+        Args: { p_actor_id: string; p_batch_id: string; p_reason: string }
+        Returns: Json
+      }
+      place_contractor_invoice_payment_hold: {
+        Args: { p_actor_id: string; p_invoice_id: string; p_reason: string }
+        Returns: Json
+      }
+      release_contractor_invoice_payment_hold: {
+        Args: { p_actor_id: string; p_invoice_id: string; p_reason: string }
+        Returns: Json
+      }
       complete_p1_parts_alert_delivery: {
         Args: {
           p_delivery_id: string
@@ -2559,6 +2810,13 @@ export type Database = {
         }
         Returns: Json
       }
+      mark_staff_invoice_ready: {
+        Args: {
+          p_actor_id: string
+          p_invoice_id: string
+        }
+        Returns: Json
+      }
       deactivate_contractor_technician: {
         Args: { p_actor_id: string; p_profile_id: string }
         Returns: Json
@@ -2590,6 +2848,30 @@ export type Database = {
         }
         Returns: string
       }
+      save_staff_billing_invoice_v3: {
+        Args: {
+          p_actor_id: string
+          p_cme: string | null
+          p_due_date: string | null
+          p_equipment_tag: string
+          p_invoice_date: string
+          p_invoice_id: string | null
+          p_lines: Json
+          p_num: string
+          p_sales_tax: number
+          p_service_date: string | null
+          p_source_invoice_ids: string[]
+          p_state: string
+          p_store_address: string | null
+          p_store_number: string
+          p_tax_rate: number | null
+          p_tax_state: string | null
+          p_terms: string
+          p_territory: string
+          p_work_order_id: string | null
+        }
+        Returns: string
+      }
       save_contractor_estimate: {
         Args: {
           p_estimate_id: string | null
@@ -2603,6 +2885,20 @@ export type Database = {
           p_valid_until: string | null
           p_work_order_id: string
         }
+        Returns: Json
+      }
+      attach_contractor_estimate_file: {
+        Args: {
+          p_estimate_id: string
+          p_mime_type: string
+          p_original_name: string
+          p_size_bytes: number
+          p_storage_path: string
+        }
+        Returns: Json
+      }
+      remove_contractor_estimate_file: {
+        Args: { p_attachment_id: string }
         Returns: Json
       }
       move_work_order_straight_to_billing: {

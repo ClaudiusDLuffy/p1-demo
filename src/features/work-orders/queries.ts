@@ -3,10 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   loadAllProfiles,
   loadContractorWorkloadSummary,
+  loadBillableP1Parts,
   loadTechnicians,
   loadWoParts,
   loadWoPartsForWorkOrder,
   loadPortalNavigationSummary,
+  loadP1PartCostsForWorkOrder,
   loadWorkOrderActivitiesPage,
   loadWorkOrderById,
   loadWorkOrderDetails,
@@ -24,6 +26,8 @@ export const WORK_ORDER_BY_ID_KEY = ["work-order-by-id"] as const;
 export const PROFILES_KEY = ["profiles"] as const;
 export const TECHNICIANS_KEY = ["technicians"] as const;
 export const WO_PARTS_KEY = ["wo-parts"] as const;
+export const P1_PART_COSTS_KEY = ["p1-part-costs"] as const;
+export const BILLABLE_P1_PARTS_KEY = ["billable-p1-parts"] as const;
 export const PORTAL_NAVIGATION_SUMMARY_KEY = ["portal-navigation-summary"] as const;
 export const CONTRACTOR_WORKLOAD_SUMMARY_KEY = ["contractor-workload-summary"] as const;
 
@@ -50,6 +54,33 @@ export function useWorkOrderPartsQuery(
   return useQuery({
     queryKey: [...WO_PARTS_KEY, id],
     queryFn: () => loadWoPartsForWorkOrder(id),
+    staleTime: 30_000,
+    enabled: enabled && Boolean(id),
+  });
+}
+
+export function useP1PartCostsQuery(
+  workOrderId: string | null | undefined,
+  enabled = true,
+) {
+  const id = String(workOrderId || "");
+  return useQuery({
+    queryKey: [...P1_PART_COSTS_KEY, id],
+    queryFn: () => loadP1PartCostsForWorkOrder(id),
+    staleTime: 30_000,
+    enabled: enabled && Boolean(id),
+  });
+}
+
+export function useBillableP1PartsQuery(
+  workOrderId: string | null | undefined,
+  excludeInvoiceId?: string | null,
+  enabled = true,
+) {
+  const id = String(workOrderId || "");
+  return useQuery({
+    queryKey: [...BILLABLE_P1_PARTS_KEY, id, excludeInvoiceId || null],
+    queryFn: () => loadBillableP1Parts(id, excludeInvoiceId),
     staleTime: 30_000,
     enabled: enabled && Boolean(id),
   });

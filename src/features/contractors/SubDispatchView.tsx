@@ -10,6 +10,7 @@ import { T, STATUS } from "../../lib/constants";
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function SubDispatchView(props: any) {
   const {
@@ -31,6 +32,8 @@ export default function SubDispatchView(props: any) {
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [savingWo, setSavingWo] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const companyMode = !!currentUser?.canManageTeam;
   const contractorAccountId = currentUser?.contractorAccountId || currentUser?.id;
 
@@ -66,6 +69,8 @@ export default function SubDispatchView(props: any) {
   const paginationSignature = JSON.stringify({
     search: deferredSearch,
     contractorIds: teamContractorIds,
+    sortColumn,
+    sortDirection,
   });
   const {
     position,
@@ -77,6 +82,8 @@ export default function SubDispatchView(props: any) {
     search: deferredSearch,
     contractorIds: teamContractorIds,
     sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT,
+    tableSortColumn: sortColumn,
+    tableSortDirection: sortDirection,
     limit: 25,
     cursor: position.cursor,
   }, page === "team_dispatch" && currentUser?.role === "contractor");
@@ -95,6 +102,31 @@ export default function SubDispatchView(props: any) {
   if (page !== "team_dispatch" || currentUser?.role !== "contractor" || !hasTeamAccess) {
     return null;
   }
+
+  const headers = companyMode
+    ? [
+        { key: "work_order", label: "WO" },
+        { key: "store", label: "Store" },
+        { key: "status", label: "Status" },
+        { key: "technician", label: "Technician on job" },
+        { key: null, label: "Update technician" },
+      ]
+    : [
+        { key: "work_order", label: "WO" },
+        { key: "store", label: "Store" },
+        { key: "status", label: "Status" },
+        { key: "contractor", label: "Assigned technician" },
+        { key: null, label: "Assign / Reassign" },
+      ];
+
+  const chooseSort = (column: WorkOrderTableSortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(direction => direction === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortColumn(column);
+    setSortDirection("asc");
+  };
 
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
@@ -118,11 +150,22 @@ export default function SubDispatchView(props: any) {
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
             <thead>
               <tr style={{ background: T.surfaceSoft }}>
-                {(companyMode
-                  ? ["WO", "Store", "Status", "Technician on job", "Update technician"]
-                  : ["WO", "Store", "Status", "Assigned technician", "Assign / Reassign"]
-                ).map(header => (
-                  <th key={header} style={{ textAlign: "left", padding: "12px 16px", fontSize: 10, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.8 }}>{header}</th>
+                {headers.map(header => (
+                  <th
+                    key={header.label}
+                    aria-sort={header.key && sortColumn === header.key ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
+                    style={{ textAlign: "left", padding: header.key ? 0 : "12px 16px", fontSize: 10, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.8 }}
+                  >
+                    {header.key ? (
+                      <button
+                        type="button"
+                        onClick={() => chooseSort(header.key as WorkOrderTableSortColumn)}
+                        style={{ width: "100%", padding: "12px 16px", border: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer", font: "inherit", textTransform: "inherit", letterSpacing: "inherit" }}
+                      >
+                        {header.label}{sortColumn === header.key ? (sortDirection === "asc" ? " ↑" : " ↓") : ""}
+                      </button>
+                    ) : header.label}
+                  </th>
                 ))}
               </tr>
             </thead>

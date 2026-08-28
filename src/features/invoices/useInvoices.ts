@@ -34,6 +34,7 @@ import {
   WORK_ORDERS_KEY,
 } from "../work-orders/queries";
 import {
+  CONTROLLER_INVOICE_HOLDS_KEY,
   INVOICE_BY_ID_KEY,
   INVOICE_PAGES_KEY,
   INVOICES_KEY,
@@ -65,6 +66,31 @@ async function notifyInvoiceReview(
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || "Invoice notification failed");
   }
+}
+
+async function updateInvoicePaymentHold(
+  invoiceId: string,
+  action: "hold" | "release",
+  reason: string,
+) {
+  const sb = supabase();
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Your session expired. Sign in again.");
+
+  const response = await fetch("/api/contractor-invoice-holds", {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ invoiceId, action, reason }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Payment hold update failed");
+  }
+  return payload as { notificationWarning?: string | null };
 }
 
 export default function useInvoices({ currentUser, profiles = [], fire }: any) {
@@ -692,13 +718,55 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     }
   };
 
+  const doPlaceInvoicePaymentHold = async (inv: any, reason: string) => {
+    const cleanReason = String(reason || "").trim();
+    if (!cleanReason) {
+      fire("Enter a reason for the payment hold");
+      return false;
+    }
+    try {
+      const result = await updateInvoicePaymentHold(inv.id, "hold", cleanReason);
+      await invalidateWorkflowData();
+      await qc.invalidateQueries({ queryKey: CONTROLLER_INVOICE_HOLDS_KEY });
+      fire(result.notificationWarning
+        ? `Invoice #${inv.num} placed on hold. ${result.notificationWarning}`
+        : `Invoice #${inv.num} placed on hold — accounting notified`);
+      return true;
+    } catch (error: any) {
+      await invalidateWorkflowData();
+      fire(`Payment hold failed: ${error.message || error}`);
+      return false;
+    }
+  };
+
+  const doReleaseInvoicePaymentHold = async (inv: any, reason: string) => {
+    const cleanReason = String(reason || "").trim();
+    if (!cleanReason) {
+      fire("Enter a reason for releasing the payment hold");
+      return false;
+    }
+    try {
+      const result = await updateInvoicePaymentHold(inv.id, "release", cleanReason);
+      await invalidateWorkflowData();
+      await qc.invalidateQueries({ queryKey: CONTROLLER_INVOICE_HOLDS_KEY });
+      fire(result.notificationWarning
+        ? `Payment hold released for invoice #${inv.num}. ${result.notificationWarning}`
+        : `Payment hold released for invoice #${inv.num} — accounting notified`);
+      return true;
+    } catch (error: any) {
+      await invalidateWorkflowData();
+      fire(`Could not release payment hold: ${error.message || error}`);
+      return false;
+    }
+  };
+
   return {
     newInv, setNewInv,
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal,
+    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
     lineAmount, invSubtotal, invTotal,
   };
 }

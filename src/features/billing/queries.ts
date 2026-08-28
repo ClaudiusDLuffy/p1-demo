@@ -15,7 +15,7 @@ export const BILLING_TAX_RULES_KEY = ["billing-tax-rules"] as const;
 export type BillingInvoicePageParams = {
   queue: "active" | "all" | "draft" | "submitted" | "sent" | "work_order";
   search?: string;
-  sort?: "invoice" | "status" | "recent";
+  sort?: "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
   direction?: "asc" | "desc";
   limit?: number;
   cursor?: string | null;

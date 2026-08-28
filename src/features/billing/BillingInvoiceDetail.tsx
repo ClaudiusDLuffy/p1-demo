@@ -11,6 +11,7 @@ import { T, STAFF_INV_STATE, P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "../../lib/
 import { normalizeStaffBillingLineType } from "../../lib/staffBilling";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import InvoiceLineTypeSubtotals from "./InvoiceLineTypeSubtotals";
+import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -22,13 +23,15 @@ export default function BillingInvoiceDetail(props: any) {
     onDownloadPdf,
     onDownloadCsv,
     onMarkBilled,
+    onMarkReady,
     onDelete,
-    onOpenContractorInvoice,
     currentUser,
     fmt,
   } = props;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmBilled, setConfirmBilled] = useState(false);
+  const [markingReady, setMarkingReady] = useState(false);
+  const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
   const [billing, setBilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -44,6 +47,7 @@ export default function BillingInvoiceDetail(props: any) {
     && !invoice.qboInvoiceId
     && !invoice.qboSyncedAt;
   const canMarkBilled = canDelete && invoice.state === "submitted";
+  const canMarkReady = canDelete && invoice.state === "draft";
   const capitalHandoff = invoice.documentKind === "capital_quote";
   const capitalFinalInvoice = Boolean(
     invoice.documentKind === "invoice" && invoice.sourceCapitalQuoteId,
@@ -61,6 +65,23 @@ export default function BillingInvoiceDetail(props: any) {
           {canMarkBilled && (
             <button onClick={() => setConfirmBilled(true)} className="btn-accent">
               {capitalHandoff ? "Submit Quote to 7-Eleven" : "Billed to 7-Eleven"}
+            </button>
+          )}
+          {canMarkReady && (
+            <button
+              onClick={async () => {
+                setMarkingReady(true);
+                try {
+                  await onMarkReady?.();
+                } finally {
+                  setMarkingReady(false);
+                }
+              }}
+              disabled={markingReady}
+              className="btn-accent"
+              style={{ display: "flex", alignItems: "center", gap: 6, opacity: markingReady ? 0.7 : 1 }}
+            >
+              {markingReady ? <><BtnSpinner />Updating...</> : "Ready for 7-Eleven"}
             </button>
           )}
           {canEdit && (
@@ -178,6 +199,7 @@ export default function BillingInvoiceDetail(props: any) {
                 {invoice.wot && <CopyWorkOrderButton value={invoice.wot} />}
               </span>
               <span style={{ color: T.muted }}>Territory</span><span style={{ color: invoice.territory ? T.ink : T.subtle }}>{invoice.territory || "-"}</span>
+              <span style={{ color: T.muted }}>Equipment tag</span><span style={{ color: invoice.equipmentTag ? T.ink : T.subtle }}>{invoice.equipmentTag || "-"}</span>
               <span style={{ color: T.muted }}>Status</span><span><Badge conf={STAFF_INV_STATE[invoice.state]} small /></span>
               <span style={{ color: T.muted }}>Tax jurisdiction</span>
               <span className="mono" style={{ color: invoice.taxState ? T.ink : T.subtle }}>
@@ -205,7 +227,7 @@ export default function BillingInvoiceDetail(props: any) {
                 <button
                   key={source.id}
                   type="button"
-                  onClick={() => onOpenContractorInvoice?.(source)}
+                  onClick={() => setSourcePreviewId(source.id)}
                   className="btn-soft"
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, width: "100%", textAlign: "left", padding: "9px 12px" }}
                 >
@@ -267,6 +289,11 @@ export default function BillingInvoiceDetail(props: any) {
           Ways to pay - ACH / check. Questions? {P1_BUSINESS.email}
         </div>
       </div>
+      <SourceContractorInvoiceDrawer
+        invoiceId={sourcePreviewId}
+        onClose={() => setSourcePreviewId(null)}
+        fmt={fmt}
+      />
     </div>
   );
 }

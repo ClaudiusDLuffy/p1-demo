@@ -8,7 +8,7 @@ import {
   unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
   uploadPhotos, removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
-  requestP1PartOrder, setP1PartOrderStatus,
+  requestP1PartOrder, setP1PartOrderStatusWithCost,
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
@@ -40,6 +40,8 @@ import {
   WORK_ORDER_PAGES_KEY,
   WORK_ORDERS_KEY,
   WO_PARTS_KEY,
+  P1_PART_COSTS_KEY,
+  BILLABLE_P1_PARTS_KEY,
   workOrderDetailsKey,
 } from "./queries";
 import {
@@ -686,12 +688,15 @@ export default function useWorkOrders({
   const doSetP1PartOrderStatus = async (
     partId: string,
     status: "requested" | "ordered" | "received" | "cancelled",
+    unitCost?: number | null,
   ) => {
     setLoading("p1Part_" + partId, true);
     try {
-      const updated = await setP1PartOrderStatus(partId, status);
+      const updated = await setP1PartOrderStatusWithCost(partId, status, unitCost);
       patchPartsCache(rows => rows.map(row => row.id === partId ? updated : row));
       await qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
+      await qc.invalidateQueries({ queryKey: P1_PART_COSTS_KEY });
+      await qc.invalidateQueries({ queryKey: BILLABLE_P1_PARTS_KEY });
       invalidateWorkOrders();
       fire(`P1 purchasing marked ${status}`);
       return true;
@@ -797,8 +802,8 @@ export default function useWorkOrders({
       );
       invalidateBoth();
       fire(result.applied
-        ? "Invoicing marked complete — staff can continue billing"
-        : "Invoicing was already marked complete");
+        ? "Contractor job closed for invoicing — staff can continue approval and billing"
+        : "This contractor job was already closed for invoicing");
       return true;
     } catch (error: any) {
       invalidateBoth();
@@ -1239,17 +1244,31 @@ export default function useWorkOrders({
     fire(skipped > 0 ? `Auto-dispatched ${count} · ${skipped} need manual assignment` : `Auto-dispatched ${count} call${count !== 1 ? "s" : ""}`);
   };
 
-  const doPostNote = async (woId: string) => {
+  const doPostNote = async (
+    woId: string,
+    requestedChannel: "field_note" | "internal_note" | "contractor_message" = currentUser?.role === "contractor"
+      ? "field_note"
+      : "internal_note",
+  ) => {
     const text = noteText.trim();
     if (!text) return;
+    const channel = currentUser?.role === "contractor" && requestedChannel === "internal_note"
+      ? "contractor_message"
+      : requestedChannel;
+    const isStaffOnly = channel === "internal_note";
     setLoading("postNote_" + woId, true);
     try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     setNoteText("");
-    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: false }, ...(w.activities || [])] } : w));
-    fire("Note posted");
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", activityChannel: channel, enteredByRole: currentUser?.role || "system", isStaffOverride: false, isStaffOnly, requiresSevenElevenSync: channel === "field_note", syncedToSevenElevenAt: null }, ...(w.activities || [])] } : w));
+    fire(channel === "internal_note" ? "Internal note posted" : channel === "contractor_message" ? "Message posted" : "Field note posted");
     await dbCall(async () => {
-      await insertActivity(woId, currentUser.name, text, "note", { eventKey: "note" });
+      await insertActivity(woId, currentUser.name, text, "note", {
+        eventKey: "note",
+        activityChannel: channel,
+        staffOnly: isStaffOnly,
+        requiresSevenElevenSync: channel === "field_note",
+      });
     }, "Note save failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("postNote_" + woId, false);

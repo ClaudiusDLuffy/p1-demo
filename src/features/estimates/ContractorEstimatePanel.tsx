@@ -10,8 +10,11 @@ import { Sel } from "../../components/ui/Sel";
 import { TA } from "../../components/ui/TA";
 import {
   convertContractorEstimateToInvoice,
+  downloadContractorEstimateAttachment,
   loadInvoiceById,
+  removeContractorEstimateAttachment,
   saveContractorEstimate,
+  uploadContractorEstimateAttachment,
 } from "../../lib/db";
 import {
   canConvertContractorEstimate,
@@ -27,6 +30,7 @@ import {
   normalizeContractorEstimateLines,
   validateContractorEstimate,
   type ContractorEstimate,
+  type ContractorEstimateAttachment,
   type ContractorEstimateLineType,
   type ContractorEstimateState,
   type EditableContractorEstimateLine,
@@ -56,6 +60,7 @@ type EditorState = {
   notes: string;
   salesTax: number | string;
   lines: EditableContractorEstimateLine[];
+  attachments: ContractorEstimateAttachment[];
 };
 
 type ContractorEstimatePanelProps = {
@@ -91,6 +96,7 @@ const emptyEditor = (): EditorState => ({
   notes: "",
   salesTax: "",
   lines: [],
+  attachments: [],
 });
 
 const editorFromEstimate = (estimate: ContractorEstimate): EditorState => ({
@@ -110,6 +116,7 @@ const editorFromEstimate = (estimate: ContractorEstimate): EditorState => ({
     qty: line.qty,
     rate: line.rate,
   })),
+  attachments: estimate.attachments || [],
 });
 
 const statusStyle = (state: ContractorEstimateState) => {
@@ -141,6 +148,7 @@ export default function ContractorEstimatePanel({
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"save" | "submit" | "convert" | "open" | null>(null);
+  const [attachmentBusy, setAttachmentBusy] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<"submit" | "convert" | null>(null);
   const operationLock = useRef(false);
   const access = useMemo(() => ({
@@ -206,6 +214,68 @@ export default function ContractorEstimatePanel({
         rate: "",
       }],
     } : current);
+  };
+
+  const uploadEquipmentForms = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!editor?.id || files.length === 0 || attachmentBusy) return;
+    if (editor.attachments.length + files.length > 10) {
+      setError("An estimate can have at most 10 equipment forms.");
+      return;
+    }
+    setAttachmentBusy("upload");
+    setError("");
+    try {
+      const uploaded: ContractorEstimateAttachment[] = [];
+      for (const file of files) {
+        uploaded.push(await uploadContractorEstimateAttachment(editor.id, file));
+      }
+      setEditor(current => current ? {
+        ...current,
+        attachments: [...current.attachments, ...uploaded],
+      } : current);
+      await invalidateEstimateWorkflow();
+      fire(`${uploaded.length} equipment form${uploaded.length === 1 ? "" : "s"} attached to estimate #${editor.quoteNum}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      await invalidateEstimateWorkflow();
+    } finally {
+      setAttachmentBusy(null);
+    }
+  };
+
+  const downloadEquipmentForm = async (attachment: ContractorEstimateAttachment) => {
+    if (attachmentBusy) return;
+    setAttachmentBusy(`download:${attachment.id}`);
+    setError("");
+    try {
+      await downloadContractorEstimateAttachment(attachment);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setAttachmentBusy(null);
+    }
+  };
+
+  const removeEquipmentForm = async (attachment: ContractorEstimateAttachment) => {
+    if (!editor || attachmentBusy) return;
+    if (!window.confirm(`Remove ${attachment.originalName} from this estimate?`)) return;
+    setAttachmentBusy(`remove:${attachment.id}`);
+    setError("");
+    try {
+      await removeContractorEstimateAttachment(attachment.id);
+      setEditor(current => current ? {
+        ...current,
+        attachments: current.attachments.filter(item => item.id !== attachment.id),
+      } : current);
+      await invalidateEstimateWorkflow();
+      fire(`${attachment.originalName} removed from estimate #${editor.quoteNum}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setAttachmentBusy(null);
+    }
   };
 
   const save = async (submit: boolean) => {
@@ -355,6 +425,7 @@ export default function ContractorEstimatePanel({
                 </div>
                 <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>
                   {estimate.lines.length} line{estimate.lines.length === 1 ? "" : "s"} · Estimate date {formatDate(estimate.quoteDate)}{estimate.validUntil ? ` · Valid through ${formatDate(estimate.validUntil)}` : ""}
+                  {estimate.attachments?.length ? ` · ${estimate.attachments.length} equipment form${estimate.attachments.length === 1 ? "" : "s"}` : ""}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -385,7 +456,7 @@ export default function ContractorEstimatePanel({
           width={900}
           closeOnBackdrop={false}
           onClose={() => {
-            if (busy) return;
+            if (busy || attachmentBusy) return;
             setEditor(null);
             setError("");
             setConfirmAction(null);
@@ -447,6 +518,55 @@ export default function ContractorEstimatePanel({
           <Field label="Notes / scope">
             <TA rows={3} value={editor.notes} disabled={!editable} maxLength={CONTRACTOR_ESTIMATE_MAX_NOTES_LENGTH} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setEditor({ ...editor, notes: event.target.value })} placeholder="Scope, exclusions, or estimate notes…" />
           </Field>
+
+          <section style={{ marginTop: 16, padding: 14, border: `1px solid ${T.borderSoft}`, borderRadius: 12, background: T.surfaceSoft }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: T.ink }}>Equipment forms</div>
+                <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>.xlsx only · 15 MB per file · maximum 10. Forms stay private to P1 and the current contractor assignment.</div>
+              </div>
+              {editable && editor.id && editor.attachments.length < 10 && (
+                <label className="btn-soft" style={{ padding: "7px 11px", fontSize: 11, cursor: attachmentBusy ? "default" : "pointer", opacity: attachmentBusy ? 0.65 : 1 }}>
+                  {attachmentBusy === "upload" ? "Uploading…" : "+ Attach forms"}
+                  <input
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    multiple
+                    disabled={Boolean(attachmentBusy)}
+                    onChange={uploadEquipmentForms}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              )}
+            </div>
+            {!editor.id && editable && (
+              <div style={{ marginTop: 10, fontSize: 11, color: T.warn }}>Save the estimate as a draft first, then reopen it to attach Heatcraft or Carrier forms.</div>
+            )}
+            {editor.attachments.length > 0 ? (
+              <div style={{ display: "grid", gap: 7, marginTop: 11 }}>
+                {editor.attachments.map(attachment => (
+                  <div key={attachment.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 10px", border: `1px solid ${T.borderSoft}`, borderRadius: 9, background: T.surface }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: T.ink, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.originalName}</div>
+                      <div style={{ fontSize: 9, color: T.subtle, marginTop: 2 }}>{(attachment.sizeBytes / 1024 / 1024).toFixed(2)} MB</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button type="button" className="btn-soft" disabled={Boolean(attachmentBusy)} onClick={() => void downloadEquipmentForm(attachment)} style={{ padding: "5px 8px", fontSize: 10 }}>
+                        {attachmentBusy === `download:${attachment.id}` ? "Opening…" : "Download"}
+                      </button>
+                      {editable && (
+                        <button type="button" className="btn-soft" disabled={Boolean(attachmentBusy)} onClick={() => void removeEquipmentForm(attachment)} style={{ padding: "5px 8px", fontSize: 10, color: T.danger }}>
+                          {attachmentBusy === `remove:${attachment.id}` ? "Removing…" : "Remove"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : editor.id ? (
+              <div style={{ marginTop: 10, fontSize: 11, color: T.subtle }}>No equipment forms attached.</div>
+            ) : null}
+          </section>
 
           <div style={{ marginTop: 18, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.8 }}>Line items</div>
@@ -516,8 +636,8 @@ export default function ContractorEstimatePanel({
                   : "Create one editable invoice draft from this estimate? The invoice will not be submitted and the work-order status will not change."}
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-                <button type="button" className="btn-soft" disabled={Boolean(busy)} onClick={() => setConfirmAction(null)}>Cancel</button>
-                <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => confirmAction === "submit" ? void save(true) : void convert()}>
+                <button type="button" className="btn-soft" disabled={Boolean(busy || attachmentBusy)} onClick={() => setConfirmAction(null)}>Cancel</button>
+                <button type="button" className="btn-primary" disabled={Boolean(busy || attachmentBusy)} onClick={() => confirmAction === "submit" ? void save(true) : void convert()}>
                   {busy === "submit" || busy === "convert" ? <><BtnSpinner />Working…</> : confirmAction === "submit" ? "Submit estimate" : "Create invoice draft"}
                 </button>
               </div>
@@ -529,20 +649,20 @@ export default function ContractorEstimatePanel({
               {editor.state === "draft" ? "Drafts and submitted estimates do not appear in invoice totals." : CONTRACTOR_ESTIMATE_STATE_LABELS[editor.state]}
             </div>
             <div className="estimate-footer-actions" style={{ display: "flex", gap: 8 }}>
-              <button type="button" className="btn-soft" disabled={Boolean(busy)} onClick={() => setEditor(null)}>{editable ? "Cancel" : "Close"}</button>
+              <button type="button" className="btn-soft" disabled={Boolean(busy || attachmentBusy)} onClick={() => setEditor(null)}>{editable ? "Cancel" : "Close"}</button>
               {editable && (
                 <>
-                  <button type="button" className="btn-soft" disabled={Boolean(busy)} onClick={() => void save(false)}>
+                  <button type="button" className="btn-soft" disabled={Boolean(busy || attachmentBusy)} onClick={() => void save(false)}>
                     {busy === "save" ? <><BtnSpinnerDark />Saving…</> : "Save draft"}
                   </button>
-                  <button type="button" className="btn-accent" disabled={Boolean(busy)} onClick={() => { setError(""); setConfirmAction("submit"); }}>Submit estimate</button>
+                  <button type="button" className="btn-accent" disabled={Boolean(busy || attachmentBusy)} onClick={() => { setError(""); setConfirmAction("submit"); }}>Submit estimate</button>
                 </>
               )}
               {editor.state === "submitted" && canConvertContractorEstimate({ state: editor.state }, access) && (
-                <button type="button" className="btn-accent" disabled={Boolean(busy)} onClick={() => { setError(""); setConfirmAction("convert"); }}>Convert to invoice</button>
+                <button type="button" className="btn-accent" disabled={Boolean(busy || attachmentBusy)} onClick={() => { setError(""); setConfirmAction("convert"); }}>Convert to invoice</button>
               )}
               {editor.state === "converted" && editor.convertedInvoiceId && !isManager && (
-                <button type="button" className="btn-accent" disabled={Boolean(busy)} onClick={() => void openInvoice(editor.convertedInvoiceId!)}>
+                <button type="button" className="btn-accent" disabled={Boolean(busy || attachmentBusy)} onClick={() => void openInvoice(editor.convertedInvoiceId!)}>
                   {busy === "open" ? <><BtnSpinner />Opening…</> : "Open invoice"}
                 </button>
               )}

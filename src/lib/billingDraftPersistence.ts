@@ -40,6 +40,7 @@ const normalizeLine = (line: unknown) => {
     isTaxable: !!value.isTaxable,
     taxTreatmentManual: !!value.taxTreatmentManual,
     sourceInvoiceLineId: text(value.sourceInvoiceLineId) || null,
+    sourceWorkOrderPartId: text(value.sourceWorkOrderPartId) || null,
     sourceUnitCost: value.sourceUnitCost == null
       ? null
       : optionalNumber(value.sourceUnitCost),
@@ -59,6 +60,7 @@ const normalizeForm = (form: unknown): Record<string, unknown> | null => {
     dueDate: text(value.dueDate),
     workOrderId: text(value.workOrderId),
     territory: text(value.territory),
+    equipmentTag: text(value.equipmentTag, "7-ELEVEN: Miscellaneous"),
     storeNumber: text(value.storeNumber),
     storeAddress: text(value.storeAddress),
     terms: text(value.terms, "Net 30"),

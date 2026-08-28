@@ -20,6 +20,17 @@ export type ContractorEstimateLine = {
   amount: number;
 };
 
+export type ContractorEstimateAttachment = {
+  id: string;
+  estimateId: string;
+  originalName: string;
+  storagePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  createdAt: string;
+};
+
 export type ContractorEstimate = {
   id: string;
   quoteNum: string;
@@ -42,6 +53,7 @@ export type ContractorEstimate = {
   createdAt: string;
   updatedAt: string;
   lines: ContractorEstimateLine[];
+  attachments: ContractorEstimateAttachment[];
 };
 
 export type EditableContractorEstimateLine = {

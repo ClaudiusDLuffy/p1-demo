@@ -28,6 +28,7 @@ import {
 } from "../../lib/workOrderTable";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
+import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
 export default function WorkOrderList(props: any) {
   const {
@@ -137,7 +138,7 @@ export default function WorkOrderList(props: any) {
     state: filterState,
     needsAction: viewMode === "needs_action",
     sort: sortBy,
-    pendingFirst: false,
+    pendingFirst: isManager,
     limit: pageSize,
     cursor: effectiveCursor.cursor,
     storeNumber: storeView?.storeNumber || null,
@@ -424,6 +425,8 @@ export default function WorkOrderList(props: any) {
               </button>
             )}
           </div>
+
+          <WorkOrderStatusLegend />
 
           <div className="desktop-only-table">
             <div className="card table-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>

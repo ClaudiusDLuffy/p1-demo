@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Modal } from "../../components/ui/Modal";
 import { Input } from "../../components/ui/Input";
@@ -33,6 +33,7 @@ import PhotoGallery from "../photos/PhotoGallery";
 import { useBillingInvoicePageQuery } from "../billing/queries";
 import { useInvoicesPageQuery } from "../invoices/queries";
 import {
+  useP1PartCostsQuery,
   useWorkOrderPartsQuery,
   useWorkOrdersPageQuery,
 } from "./queries";
@@ -74,8 +75,28 @@ const formatEta = (v: any, workOrder?: any): string => {
   });
 };
 
+type ActivityChannel = "all" | "field_note" | "internal_note" | "contractor_message" | "system_event" | "legacy";
+
+const channelForActivity = (activity: any): Exclude<ActivityChannel, "all"> =>
+  activity?.activityChannel
+  || (activity?.requiresSevenElevenSync
+    ? "field_note"
+    : activity?.isStaffOnly
+      ? "internal_note"
+      : activity?.type === "system"
+        ? "system_event"
+        : "legacy");
+
+const ACTIVITY_CHANNEL_LABELS: Record<Exclude<ActivityChannel, "all">, string> = {
+  field_note: "Field note",
+  internal_note: "P1 internal",
+  contractor_message: "P1 / contractor chat",
+  system_event: "System",
+  legacy: "Legacy note",
+};
+
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doMarkPaid, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onBackToAllWorkOrders, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -101,19 +122,52 @@ export default function WorkOrderDetail(props: any) {
     limit: 25,
   }, detailEnabled && Boolean(woData?.store));
   const partsQuery = useWorkOrderPartsQuery(selectedWO, detailEnabled);
+  const p1PartCostsQuery = useP1PartCostsQuery(
+    selectedWO,
+    detailEnabled && isManager,
+  );
   const invoices = contractorInvoiceQuery.data?.items || suppliedInvoices;
   const billingInvoices = billingInvoiceQuery.data?.items || suppliedBillingInvoices;
   const workOrders = storeHistoryQuery.data?.items || suppliedWorkOrders;
-  const woParts = partsQuery.data || suppliedWoParts;
+  const woParts = useMemo(() => {
+    const rows = partsQuery.data || suppliedWoParts;
+    if (!isManager) return rows;
+    const costs = new Map(
+      (p1PartCostsQuery.data || []).map((cost: any) => [cost.partId, cost.unitCost]),
+    );
+    return rows.map((part: any) => ({
+      ...part,
+      p1UnitCost: costs.has(part.id) ? costs.get(part.id) : part.p1UnitCost ?? null,
+    }));
+  }, [isManager, p1PartCostsQuery.data, partsQuery.data, suppliedWoParts]);
   const openCreate = openCreateInvoice || (() => setModal("createInvoice"));
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [deletingInvId, setDeletingInvId] = useState<string | null>(null);
-  const [markingPaidInvId, setMarkingPaidInvId] = useState<string | null>(null);
   const [retractingInvId, setRetractingInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
   const [invoiceMenuId, setInvoiceMenuId] = useState<string | null>(null);
+  const isFieldTechnician = !isManager && currentUser?.role === "contractor" && Boolean(
+    currentUser?.contractorAccessLevel === "report_only"
+    || woData?.assignedTechnicianProfileId === currentUser?.id
+    || (
+      woData?.technicianOnJob
+      && String(woData.technicianOnJob).trim().toLowerCase()
+        === String(currentUser?.name || "").trim().toLowerCase()
+    ),
+  );
+  const defaultNoteChannel: Exclude<ActivityChannel, "all" | "system_event" | "legacy"> = isManager
+    ? "internal_note"
+    : isFieldTechnician
+      ? "field_note"
+      : "contractor_message";
+  const [noteChannel, setNoteChannel] = useState(defaultNoteChannel);
+  const [activityFilter, setActivityFilter] = useState<ActivityChannel>("all");
+  useEffect(() => {
+    setNoteChannel(defaultNoteChannel);
+    setActivityFilter("all");
+  }, [defaultNoteChannel, selectedWO]);
   const copyWorkOrderNumber = async () => {
     try {
       await navigator.clipboard.writeText(String(woData.id));
@@ -159,12 +213,28 @@ export default function WorkOrderDetail(props: any) {
       ? null
       : storeHistoryQuery.data?.totalCount,
   );
-  const visibleActivities = useMemo(
+  const allVisibleActivities = useMemo(
     () => (woData?.activities || []).filter(
       (activity: any) => isManager || !isInternalWorkOrderActivity(activity),
     ),
     [isManager, woData?.activities],
   );
+  const visibleActivities = useMemo(
+    () => activityFilter === "all"
+      ? allVisibleActivities
+      : allVisibleActivities.filter(
+          (activity: any) => channelForActivity(activity) === activityFilter,
+        ),
+    [activityFilter, allVisibleActivities],
+  );
+  const activityChannelCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: allVisibleActivities.length };
+    for (const activity of allVisibleActivities) {
+      const channel = channelForActivity(activity);
+      counts[channel] = (counts[channel] || 0) + 1;
+    }
+    return counts;
+  }, [allVisibleActivities]);
   const sameCategory = useMemo(
     () => woData ? storeHistory.filter(w => w.category === woData.category).length : 0,
     [storeHistory, woData]
@@ -274,7 +344,14 @@ export default function WorkOrderDetail(props: any) {
             const aging = getSlaAgingStyle(woData);
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
-                <button onClick={() => onBackFromWorkOrder?.()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                  <button onClick={() => onBackFromWorkOrder?.()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to previous view</button>
+                  {isManager && (
+                    <button type="button" onClick={() => onBackToAllWorkOrders?.()} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>
+                      Back to all work orders
+                    </button>
+                  )}
+                </div>
 
                 {isManager && woData.billingOnly && (
                   <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
@@ -479,8 +556,8 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
                         <Badge conf={PRIORITY[woData.priority]} />
-                        <Badge conf={STATUS[woData.status]} />
-                        {woData.functionalStatus && <Badge conf={{ label: `FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
+                        <Badge conf={{ ...(STATUS[woData.status] || {}), label: `Portal: ${STATUS[woData.status]?.label || woData.status}` }} />
+                        {woData.functionalStatus && <Badge conf={{ label: `7-Eleven FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
                         {sla2
                           ? <SlaBadge responseBreachAt={woData.responseBreachAt} resolutionBreachAt={woData.resolutionBreachAt} responseMetAt={woData.startTimeRaw} size="sm" />
                           : sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
@@ -688,27 +765,30 @@ export default function WorkOrderDetail(props: any) {
                       >
                         <div style={{ flex: "1 1 280px" }}>
                           <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>
-                            {invoicingComplete ? "Contractor invoicing complete" : "Contractor may still be invoicing"}
+                            {invoicingComplete ? "Contractor job closed — invoicing complete" : "Contractor job remains open for invoicing"}
                           </div>
                           <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
                             {invoicingComplete
                               ? "Staff can safely continue the billing handoff. A new or corrected contractor invoice automatically reopens this step."
                               : canFinishInvoicing
-                                ? "Confirm that no more invoices are coming for this work order."
+                                ? "Use the final action only after every trip invoice has been submitted. P1 will still review and bill separately."
                                 : "This becomes ready after field work is complete and every draft or rejected invoice is resolved."}
                           </div>
                         </div>
                         {!isManager && canFinishInvoicing && !invoicingComplete && (
                           <button
                             type="button"
-                            onClick={() => void doFinishContractorInvoicing?.(woData.id)}
+                            onClick={() => {
+                              if (!window.confirm("Confirm all contractor invoices for this work order have been submitted and close it on the contractor side?")) return;
+                              void doFinishContractorInvoicing?.(woData.id);
+                            }}
                             disabled={isLoading("finishInvoicing_" + woData.id)}
                             className="btn-primary"
                             style={loadingStyle("finishInvoicing_" + woData.id)}
                           >
                             {isLoading("finishInvoicing_" + woData.id)
                               ? <><BtnSpinner />Saving...</>
-                              : "Done invoicing"}
+                              : "Done invoicing — close contractor job"}
                           </button>
                         )}
                       </div>
@@ -807,14 +887,6 @@ export default function WorkOrderDetail(props: any) {
                                       <button onClick={() => { setRejectingInv(inv); setRejectReason(""); }} className="btn-soft wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11, color: T.danger, borderColor: `${T.danger}44` }}>Reject</button>
                                     </>
                                   )}
-                                  {isManager && inv.state === "approved" && (
-                                    <button
-                                      onClick={() => setMarkingPaidInvId(inv.id)}
-                                      disabled={rowBusy || isLoading("markPaid_" + inv.id)}
-                                      className="btn-primary wo-invoice-action"
-                                      style={{ padding: "6px 10px", fontSize: 11, opacity: rowBusy ? 0.7 : 1, cursor: rowBusy ? "default" : "pointer" }}
-                                    >{rowBusy || isLoading("markPaid_" + inv.id) ? <><BtnSpinner />…</> : "Sent to QuickBooks"}</button>
-                                  )}
                                   {canReviewInvoices && inv.state === "rejected" && doRetractInvoiceRejection && (
                                     <button onClick={() => setRetractingInvId(inv.id)} className="btn-accent wo-invoice-action" style={{ padding: "6px 10px", fontSize: 11 }}>Undo rejection</button>
                                   )}
@@ -850,9 +922,6 @@ export default function WorkOrderDetail(props: any) {
                                             )}
                                             <button onClick={() => { setInvoiceMenuId(null); setRejectingInv(inv); setRejectReason(""); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.danger, fontFamily: "inherit" }}>Reject</button>
                                           </>
-                                        )}
-                                        {isManager && inv.state === "approved" && (
-                                          <button onClick={() => { setInvoiceMenuId(null); setMarkingPaidInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Sent to QuickBooks</button>
                                         )}
                                         {canReviewInvoices && inv.state === "rejected" && doRetractInvoiceRejection && (
                                           <button onClick={() => { setInvoiceMenuId(null); setRetractingInvId(inv.id); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.accent, fontFamily: "inherit" }}>Undo rejection and approve</button>
@@ -925,36 +994,6 @@ export default function WorkOrderDetail(props: any) {
 
                     {/* Per-row soft delete. Contractors reach this only for
                         their own draft/rejected invoice; the RPC rechecks it. */}
-                    {markingPaidInvId && (() => {
-                      const inv = woAllInvoices.find((i: any) => i.id === markingPaidInvId);
-                      if (!inv) return null;
-                      const isBusy = busyInvId === inv.id || isLoading("markPaid_" + inv.id);
-                      return (
-                        <Modal onClose={() => { if (!isBusy) setMarkingPaidInvId(null); }} title="Send invoice to QuickBooks" width={420}>
-                          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                            Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span> as sent to QuickBooks?
-                          </div>
-                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                            <button onClick={() => setMarkingPaidInvId(null)} disabled={isBusy} className="btn-soft">Cancel</button>
-                            <button
-                              onClick={async () => {
-                                setBusyInvId(inv.id);
-                                try {
-                                  await doMarkPaid(inv.id);
-                                  setMarkingPaidInvId(null);
-                                } finally {
-                                  setBusyInvId(null);
-                                }
-                              }}
-                              disabled={isBusy}
-                              className="btn-primary"
-                              style={{ padding: "10px 18px", opacity: isBusy ? 0.7 : 1, cursor: isBusy ? "default" : "pointer" }}
-                            >{isBusy ? <><BtnSpinner />Sending...</> : "Sent to QuickBooks"}</button>
-                          </div>
-                        </Modal>
-                      );
-                    })()}
-
                     {deletingInvId && (() => {
                       const inv = woAllInvoices.find((i: any) => i.id === deletingInvId);
                       if (!inv) return null;
@@ -1237,7 +1276,7 @@ export default function WorkOrderDetail(props: any) {
                     {/* Activity */}
                     <div className="card" style={{ padding: 22 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Activity · {woData.activityPage?.totalCount ?? visibleActivities.length}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Field notes &amp; conversation · {woData.activityPage?.totalCount ?? allVisibleActivities.length}</div>
                         {isManager && (
                           <div className="desktop-only-activity-action" style={{ alignItems: "center", gap: 8 }}>
                             <button type="button" className="btn-soft" onClick={copyWorkOrderNumber} style={{ padding: "7px 12px", fontSize: 11 }}>
@@ -1247,10 +1286,79 @@ export default function WorkOrderDetail(props: any) {
                           </div>
                         )}
                       </div>
+                      <div
+                        role="tablist"
+                        aria-label="Activity channels"
+                        style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}
+                      >
+                        {[
+                          { key: "all", label: "All" },
+                          { key: "field_note", label: "Field notes" },
+                          ...(isManager ? [{ key: "internal_note", label: "P1 internal" }] : []),
+                          { key: "contractor_message", label: isManager ? "Contractor chat" : "Messages" },
+                          { key: "system_event", label: "System" },
+                          ...(activityChannelCounts.legacy ? [{ key: "legacy", label: "Legacy" }] : []),
+                        ].map(tab => {
+                          const active = activityFilter === tab.key;
+                          return (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              onClick={() => setActivityFilter(tab.key as ActivityChannel)}
+                              style={{
+                                padding: "6px 9px",
+                                borderRadius: 999,
+                                border: `1px solid ${active ? T.accent : T.borderSoft}`,
+                                background: active ? T.accentSoft : T.surface,
+                                color: active ? T.accent : T.muted,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                                fontSize: 10,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {tab.label} · {activityChannelCounts[tab.key] || 0}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>
+                          Post to
+                          <select
+                            aria-label="Choose note channel"
+                            value={noteChannel}
+                            onChange={event => setNoteChannel(event.target.value as typeof noteChannel)}
+                            style={{ marginLeft: 7, padding: "7px 28px 7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 11 }}
+                          >
+                            {isManager ? (
+                              <>
+                                <option value="internal_note">P1 internal only</option>
+                                <option value="field_note">Field note for 7-Eleven</option>
+                                <option value="contractor_message">Contractor chat</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="field_note">Field note for 7-Eleven</option>
+                                <option value="contractor_message">Message to P1</option>
+                              </>
+                            )}
+                          </select>
+                        </label>
+                        <span style={{ color: T.subtle, fontSize: 10 }}>
+                          {noteChannel === "field_note"
+                            ? "Creates a 7-Eleven update task."
+                            : noteChannel === "internal_note"
+                              ? "Visible only to P1 staff."
+                              : "Visible to P1 and the assigned contractor; not sent to 7-Eleven."}
+                        </span>
+                      </div>
                       <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                        <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id); }} placeholder="Add a note..." style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
+                        <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id, noteChannel); }} placeholder={noteChannel === "internal_note" ? "Add an internal P1 note..." : noteChannel === "contractor_message" ? "Write a message..." : "Add a field note for 7-Eleven..."} style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
                         <button
-                          onClick={() => doPostNote(woData.id)}
+                          onClick={() => doPostNote(woData.id, noteChannel)}
                           disabled={isLoading("postNote_" + woData.id)}
                           className="btn-primary desktop-only-activity-action"
                           style={{ opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", alignItems: "center", gap: 6 }}
@@ -1277,7 +1385,7 @@ export default function WorkOrderDetail(props: any) {
                           </button>
                         )}
                         <button
-                          onClick={() => doPostNote(woData.id)}
+                          onClick={() => doPostNote(woData.id, noteChannel)}
                           disabled={isLoading("postNote_" + woData.id)}
                           className="btn-primary"
                           style={{ opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
@@ -1302,7 +1410,8 @@ export default function WorkOrderDetail(props: any) {
                         </div>
                       )}
                       {visibleActivities.map((e: any, i: number) => {
-                        const canDelete = !!e.id && e.type !== "system" && !!e.authorId && (isManager || e.authorId === currentUser.id);
+                        const activityChannel = channelForActivity(e);
+                        const canDelete = !!e.id && activityChannel !== "system_event" && e.type !== "system" && !!e.authorId && (isManager || e.authorId === currentUser.id);
                         const menuOpen = activityMenuId === e.id;
                         const staffEntered = ["manager", "dispatcher", "back_office"].includes(e.enteredByRole);
                         const originLabel = e.isStaffOverride
@@ -1324,9 +1433,12 @@ export default function WorkOrderDetail(props: any) {
                                     {originLabel}
                                   </span>
                                 )}
+                                <span style={{ display: "inline-block", marginLeft: 8, padding: "2px 6px", borderRadius: 6, fontSize: 9, fontWeight: 700, color: activityChannel === "field_note" ? T.accent : activityChannel === "internal_note" ? T.violet : activityChannel === "contractor_message" ? "#166534" : T.subtle, background: activityChannel === "field_note" ? T.accentSoft : activityChannel === "internal_note" ? T.violetSoft : activityChannel === "contractor_message" ? "#DCFCE7" : T.surfaceSoft, border: `1px solid ${activityChannel === "field_note" ? `${T.accent}44` : activityChannel === "internal_note" ? `${T.violet}44` : activityChannel === "contractor_message" ? "#22C55E55" : T.borderSoft}` }}>
+                                  {ACTIVITY_CHANNEL_LABELS[activityChannel]}
+                                </span>
                               </div>
                               <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginTop: 3 }}>{e.text}</div>
-                              {isManager && e.requiresSevenElevenSync && (
+                              {isManager && activityChannel === "field_note" && e.requiresSevenElevenSync && (
                                 <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, padding: "5px 8px", borderRadius: 8, background: e.syncedToSevenElevenAt ? T.successSoft : T.warnSoft, border: `1px solid ${e.syncedToSevenElevenAt ? `${T.success}44` : `${T.warn}55`}`, color: e.syncedToSevenElevenAt ? T.success : "#73560C", fontSize: 10, fontWeight: 700, cursor: isLoading("sync711_" + e.id) ? "wait" : "pointer" }}>
                                   <input
                                     type="checkbox"
@@ -1338,7 +1450,7 @@ export default function WorkOrderDetail(props: any) {
                                   {e.syncedToSevenElevenAt ? "Updated in 7-Eleven" : "Needs 7-Eleven update"}
                                 </label>
                               )}
-                              {isManager && e.id && (staffEntered || e.isStaffOverride || e.requiresContractorAttention) && (
+                              {isManager && e.id && ["field_note", "contractor_message", "legacy"].includes(activityChannel) && (staffEntered || e.isStaffOverride || e.requiresContractorAttention) && (
                                 <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, marginLeft: e.requiresSevenElevenSync ? 7 : 0, padding: "5px 8px", borderRadius: 8, background: e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#DCFCE7" : T.surfaceSoft, border: `1px solid ${e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#22C55E66" : T.borderSoft}`, color: e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#166534" : T.muted, fontSize: 10, fontWeight: 700, cursor: isLoading("contractorAttention_" + e.id) ? "wait" : "pointer" }}>
                                   <input
                                     type="checkbox"
@@ -1390,6 +1502,11 @@ export default function WorkOrderDetail(props: any) {
                           </div>
                         );
                       })}
+                      {visibleActivities.length === 0 && (
+                        <div style={{ padding: "18px 10px", textAlign: "center", color: T.subtle, fontSize: 12 }}>
+                          No activity in this channel on the loaded timeline.
+                        </div>
+                      )}
                       {woData.activityPage?.hasMore && (
                         <button
                           type="button"
@@ -1397,7 +1514,7 @@ export default function WorkOrderDetail(props: any) {
                           disabled={loadingMoreActivities}
                           onClick={() => onLoadMoreActivities?.()}
                           style={{ width: "100%", justifyContent: "center" }}
-                        >{loadingMoreActivities ? <><BtnSpinnerDark />Loading activity...</> : `Load older activity (${visibleActivities.length} of ${woData.activityPage.totalCount})`}</button>
+                        >{loadingMoreActivities ? <><BtnSpinnerDark />Loading activity...</> : `Load older activity (${allVisibleActivities.length} of ${woData.activityPage.totalCount})`}</button>
                       )}
                     </div>
                   </div>
@@ -1585,6 +1702,8 @@ const P1_ORDER_STATUS_META: Record<string, { label: string; bg: string; fg: stri
 function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, isPartBilled, loadingStates, T }: any) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<any>({});
+  const [p1CostDrafts, setP1CostDrafts] = useState<Record<string, string>>({});
+  const [p1CostErrors, setP1CostErrors] = useState<Record<string, string>>({});
   const startEdit = (p: any) => {
     setEditingId(p.id);
     setDraft({
@@ -1606,6 +1725,37 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
     setEditingId(null);
   };
   const receivedCount = parts.filter((p: any) => p.status === "received").length;
+  const p1CostValue = (part: any) => p1CostDrafts[part.id]
+    ?? (part.p1UnitCost == null ? "" : String(part.p1UnitCost));
+  const updateP1Purchase = async (part: any, status: string) => {
+    const rawCost = p1CostValue(part).trim();
+    const parsedCost = rawCost === "" ? null : Number(rawCost);
+    if (
+      (status === "ordered" || status === "received")
+      && (parsedCost == null || !Number.isFinite(parsedCost) || parsedCost <= 0)
+    ) {
+      setP1CostErrors(current => ({
+        ...current,
+        [part.id]: "Enter a P1 unit cost greater than zero before advancing this part.",
+      }));
+      return;
+    }
+    if (parsedCost != null && (!Number.isFinite(parsedCost) || parsedCost < 0)) {
+      setP1CostErrors(current => ({
+        ...current,
+        [part.id]: "P1 unit cost must be zero or greater.",
+      }));
+      return;
+    }
+    setP1CostErrors(current => ({ ...current, [part.id]: "" }));
+    const saved = await doSetP1PartOrderStatus?.(part.id, status, parsedCost);
+    if (saved) {
+      setP1CostDrafts(current => ({
+        ...current,
+        [part.id]: parsedCost == null ? "" : String(parsedCost),
+      }));
+    }
+  };
   return (
     <div className="card" style={{ padding: 18 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
@@ -1677,18 +1827,55 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 8, flexWrap: "wrap" }}>
                     {isP1Order ? (
                       isManager ? (
-                        <Sel
-                          value={p.p1OrderStatus || "requested"}
-                          disabled={p1Updating}
-                          onChange={(e: any) => doSetP1PartOrderStatus?.(p.id, e.target.value)}
-                          aria-label={`P1 purchasing status for ${p.description}`}
-                          style={{ padding: "5px 10px", fontSize: 11, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
-                        >
-                          <option value="requested">Requested</option>
-                          <option value="ordered">Ordered</option>
-                          <option value="received">Received</option>
-                          <option value="cancelled">Cancelled</option>
-                        </Sel>
+                        <div style={{ display: "grid", gap: 5, minWidth: 250 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "minmax(105px, 1fr) minmax(105px, 1fr)", gap: 6 }}>
+                            <label style={{ display: "grid", gap: 3, fontSize: 9, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                              P1 unit cost
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                                value={p1CostValue(p)}
+                                disabled={p1Updating}
+                                onChange={(event: any) => setP1CostDrafts(current => ({
+                                  ...current,
+                                  [p.id]: event.target.value,
+                                }))}
+                                aria-label={`P1 unit cost for ${p.description}`}
+                                placeholder="$0.00"
+                                style={{ padding: "5px 8px", fontSize: 11 }}
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 3, fontSize: 9, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                              P1 status
+                              <Sel
+                                value={p.p1OrderStatus || "requested"}
+                                disabled={p1Updating}
+                                onChange={(e: any) => void updateP1Purchase(p, e.target.value)}
+                                aria-label={`P1 purchasing status for ${p.description}`}
+                                style={{ padding: "5px 8px", fontSize: 11, borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
+                              >
+                                <option value="requested">Requested</option>
+                                <option value="ordered">Ordered</option>
+                                <option value="received">Received</option>
+                                <option value="cancelled">Cancelled</option>
+                              </Sel>
+                            </label>
+                          </div>
+                          {p1CostValue(p) !== "" && p1CostValue(p) !== String(p.p1UnitCost ?? "") && (
+                            <button
+                              type="button"
+                              className="btn-soft"
+                              disabled={p1Updating}
+                              onClick={() => void updateP1Purchase(p, p.p1OrderStatus || "requested")}
+                              style={{ padding: "4px 8px", fontSize: 10, justifySelf: "start" }}
+                            >Save P1 cost</button>
+                          )}
+                          {p1CostErrors[p.id] && (
+                            <span style={{ fontSize: 10, color: T.danger }}>{p1CostErrors[p.id]}</span>
+                          )}
+                        </div>
                       ) : (
                         <span style={{ fontSize: 10, color: T.muted }}>P1 purchasing owns this request</span>
                       )

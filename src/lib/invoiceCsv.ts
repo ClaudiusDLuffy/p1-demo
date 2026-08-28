@@ -29,6 +29,8 @@ export type StaffInvoiceCsvInput = {
   taxState?: unknown;
   tax_state?: unknown;
   territory?: unknown;
+  equipmentTag?: unknown;
+  equipment_tag?: unknown;
   lines?: StaffInvoiceCsvLine[];
 };
 
@@ -52,6 +54,7 @@ export type StaffInvoiceCsvRow = {
   rate: number;
   amount: number;
   taxRate: string;
+  equipmentTag: string;
   className: string;
 };
 
@@ -75,6 +78,7 @@ const HEADERS = [
   "Rate",
   "*Amount",
   "Tax Rate",
+  "Equipment Tag",
   "Class",
 ] as const;
 
@@ -91,14 +95,14 @@ const formatDate = (value: unknown) => {
   if (!raw) return "";
 
   const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (iso) return `${Number(iso[2])}/${Number(iso[3])}/${iso[1]}`;
+  if (iso) return `${iso[2].padStart(2, "0")}/${iso[3].padStart(2, "0")}/${iso[1]}`;
 
   const us = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (us) return `${Number(us[1])}/${Number(us[2])}/${us[3]}`;
+  if (us) return `${us[1].padStart(2, "0")}/${us[2].padStart(2, "0")}/${us[3]}`;
 
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;
 };
 
 const territoryFromState = (value: unknown) => {
@@ -132,6 +136,9 @@ function buildInvoiceCsvRows(
 
   const store = storeNumber(invoice);
   const shippingTo = store ? `7-ELEVEN STORE - ${store}` : "";
+  const equipmentTag = String(
+    invoice.equipmentTag ?? invoice.equipment_tag ?? "",
+  ).trim();
   const invoiceNumber = String(invoice.num || "").trim();
   const workOrderNumber = String(
     invoice.wot ?? invoice.workOrderId ?? "",
@@ -164,7 +171,9 @@ function buildInvoiceCsvRows(
         ? formatDate(invoice.dueDateRaw ?? invoice.dueDate)
         : "",
       location: first ? territory : "",
-      shippingTo: first ? shippingTo : "",
+      // SaasAnt uses Sub Customer for the store. Keep Shipping To blank so
+      // QuickBooks cannot interpret a location string as a shipping charge.
+      shippingTo: "",
       storeNumber: first ? store : "",
       memo: "",
       messageOnInvoice: "",
@@ -175,6 +184,7 @@ function buildInvoiceCsvRows(
       rate: roundMoney(rate),
       amount: lineAmount,
       taxRate: taxRateText(invoice, taxable),
+      equipmentTag: first ? equipmentTag : "",
       className: "",
     };
   });
@@ -223,6 +233,7 @@ const rowCells = (row: StaffInvoiceCsvRow) => [
   numberText(row.rate),
   numberText(row.amount),
   row.taxRate,
+  row.equipmentTag,
   row.className,
 ];
 

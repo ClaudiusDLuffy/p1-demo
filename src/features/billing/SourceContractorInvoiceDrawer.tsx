@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
+import { downloadInvoicePdfBlob } from "../../lib/db";
 import { useInvoiceByIdQuery } from "../invoices/queries";
 
 type SourceContractorInvoiceLine = {
@@ -23,6 +25,8 @@ type SourceContractorInvoice = {
   subtotal?: number | null;
   salesTax?: number | null;
   total?: number | null;
+  pdfStoragePath?: string | null;
+  originalPdfName?: string | null;
 };
 
 export default function SourceContractorInvoiceDrawer({
@@ -35,28 +39,73 @@ export default function SourceContractorInvoiceDrawer({
   fmt: (value: number) => string;
 }) {
   const query = useInvoiceByIdQuery(invoiceId, Boolean(invoiceId));
-  if (!invoiceId) return null;
-
+  const [pdfState, setPdfState] = useState<{
+    storagePath: string;
+    url: string | null;
+    error: string;
+  } | null>(null);
   const invoice = query.data as unknown as SourceContractorInvoice | null | undefined;
+  const storagePath = invoice?.pdfStoragePath || null;
+  const currentPdfState = storagePath && pdfState?.storagePath === storagePath
+    ? pdfState
+    : null;
+  const pdfUrl = currentPdfState?.url || null;
+  const pdfError = currentPdfState?.error || "";
+  const pdfLoading = Boolean(storagePath && !currentPdfState);
+
+  useEffect(() => {
+    if (!storagePath) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    void downloadInvoicePdfBlob(storagePath)
+      .then(blob => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(
+          blob.type === "application/pdf"
+            ? blob
+            : new Blob([blob], { type: "application/pdf" }),
+        );
+        setPdfState({ storagePath, url: objectUrl, error: "" });
+      })
+      .catch(error => {
+        if (cancelled) return;
+        setPdfState({
+          storagePath,
+          url: null,
+          error: error instanceof Error ? error.message : "Original PDF could not be loaded",
+        });
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [storagePath]);
+
+  const downloadOriginalPdf = () => {
+    if (!pdfUrl || !invoice) return;
+    const link = document.createElement("a");
+    link.href = pdfUrl;
+    link.download = invoice.originalPdfName || `invoice-${invoice.num}.pdf`;
+    link.click();
+  };
+
+  if (!invoiceId) return null;
 
   return (
     <div
       role="presentation"
-      onClick={event => {
-        if (event.target === event.currentTarget) onClose();
-      }}
       style={{
         position: "fixed",
         inset: 0,
         zIndex: 80,
-        background: "rgba(31,30,28,0.28)",
+        background: "transparent",
         display: "flex",
         justifyContent: "flex-end",
+        pointerEvents: "none",
       }}
     >
       <aside
-        role="dialog"
-        aria-modal="true"
+        role="complementary"
         aria-label="Source contractor invoice"
         style={{
           width: "min(620px, 96vw)",
@@ -67,6 +116,7 @@ export default function SourceContractorInvoiceDrawer({
           boxShadow: "-14px 0 40px rgba(31,30,28,0.18)",
           padding: 22,
           boxSizing: "border-box",
+          pointerEvents: "auto",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
@@ -108,7 +158,40 @@ export default function SourceContractorInvoiceDrawer({
               <div><div style={{ fontSize: 9, color: T.subtle, textTransform: "uppercase", fontWeight: 800 }}>Status</div><div style={{ marginTop: 3, textTransform: "capitalize" }}>{invoice.state}</div></div>
             </div>
 
-            <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, overflow: "hidden" }}>
+            {invoice.pdfStoragePath ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Original contractor PDF</div>
+                  <div style={{ display: "flex", gap: 7 }}>
+                    <button type="button" className="btn-soft" disabled={!pdfUrl} onClick={() => pdfUrl && window.open(pdfUrl, "_blank", "noopener,noreferrer")}>Open in new tab</button>
+                    <button type="button" className="btn-soft" disabled={!pdfUrl} onClick={downloadOriginalPdf}>Download</button>
+                  </div>
+                </div>
+                {pdfLoading && (
+                  <div role="status" style={{ minHeight: 240, display: "grid", placeItems: "center", border: `1px solid ${T.borderSoft}`, borderRadius: 10, color: T.muted }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}><BtnSpinner /> Loading original PDF…</span>
+                  </div>
+                )}
+                {pdfError && (
+                  <div role="alert" style={{ padding: 12, borderRadius: 9, color: T.danger, background: T.dangerSoft }}>
+                    The original PDF could not be opened: {pdfError}
+                  </div>
+                )}
+                {pdfUrl && !pdfLoading && (
+                  <iframe
+                    src={pdfUrl}
+                    title={`Original contractor invoice ${invoice.num}`}
+                    style={{ width: "100%", height: "calc(100vh - 250px)", minHeight: 520, border: `1px solid ${T.borderSoft}`, borderRadius: 10, background: "white" }}
+                  />
+                )}
+              </div>
+            ) : (
+              <div role="status" style={{ padding: 13, borderRadius: 9, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", marginBottom: 14 }}>
+                No original PDF was attached to this contractor invoice. The structured invoice data is shown below.
+              </div>
+            )}
+
+            {!invoice.pdfStoragePath && <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, overflow: "hidden" }}>
               <div style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr) 60px 90px 100px", gap: 8, padding: "9px 10px", background: T.surfaceSoft, fontSize: 9, color: T.subtle, fontWeight: 800, textTransform: "uppercase" }}>
                 <span>Type</span><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span>
               </div>
@@ -124,13 +207,13 @@ export default function SourceContractorInvoiceDrawer({
               {(invoice.lines || []).length === 0 && (
                 <div style={{ padding: 18, color: T.subtle, fontSize: 12 }}>No structured line items were saved on this invoice.</div>
               )}
-            </div>
+            </div>}
 
-            <div style={{ display: "grid", justifyContent: "end", gap: 6, marginTop: 16, fontSize: 12 }}>
+            {!invoice.pdfStoragePath && <div style={{ display: "grid", justifyContent: "end", gap: 6, marginTop: 16, fontSize: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 50 }}><span style={{ color: T.muted }}>Subtotal</span><span className="mono">{fmt(Number(invoice.subtotal || 0))}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 50 }}><span style={{ color: T.muted }}>Sales tax</span><span className="mono">{fmt(Number(invoice.salesTax || 0))}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 50, paddingTop: 7, borderTop: `1px solid ${T.border}`, fontWeight: 800 }}><span>Total</span><span className="mono">{fmt(Number(invoice.total || 0))}</span></div>
-            </div>
+            </div>}
           </>
         )}
       </aside>
