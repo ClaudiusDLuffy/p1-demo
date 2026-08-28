@@ -23,6 +23,7 @@ import type {
   ContractorEstimateAttachment,
   ContractorEstimateLine,
   ContractorEstimateLineType,
+  ContractorEstimateTemplate,
   EditableContractorEstimateLine,
 } from "./contractorEstimate";
 import { workOrderCanEnterSevenElevenQueue } from "./workOrderView";
@@ -890,6 +891,55 @@ export async function loadContractorEstimatesForWorkOrder(
 
 const ESTIMATE_ATTACHMENT_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const ESTIMATE_ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
+
+type ContractorEstimateTemplateRow =
+  Database["public"]["Tables"]["contractor_estimate_templates"]["Row"];
+
+const mapContractorEstimateTemplate = (
+  template: ContractorEstimateTemplateRow,
+): ContractorEstimateTemplate => ({
+  id: template.id,
+  templateKey: template.template_key as ContractorEstimateTemplate["templateKey"],
+  displayName: template.display_name,
+  description: template.description || "",
+  versionLabel: template.version_label,
+  originalName: template.original_name,
+  storagePath: template.storage_path,
+  mimeType: template.mime_type,
+  sizeBytes: Number(template.size_bytes),
+  sha256: template.sha256,
+  publishedAt: template.published_at,
+});
+
+export async function loadContractorEstimateTemplates(): Promise<ContractorEstimateTemplate[]> {
+  const sb = supabase();
+  const { data, error } = await sb
+    .from("contractor_estimate_templates")
+    .select("*")
+    .eq("is_active", true)
+    .order("display_name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapContractorEstimateTemplate);
+}
+
+export async function downloadContractorEstimateTemplate(
+  template: ContractorEstimateTemplate,
+): Promise<void> {
+  const sb = supabase();
+  const { data, error } = await sb.storage
+    .from("contractor-estimate-templates")
+    .download(template.storagePath);
+  if (error) throw error;
+  const url = URL.createObjectURL(data);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = template.originalName;
+    link.click();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+}
 
 export async function uploadContractorEstimateAttachment(
   estimateId: string,

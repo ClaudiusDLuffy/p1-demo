@@ -330,6 +330,57 @@ export type Database = {
           },
         ]
       }
+      contractor_estimate_templates: {
+        Row: {
+          created_at: string
+          description: string
+          display_name: string
+          id: string
+          is_active: boolean
+          mime_type: string
+          original_name: string
+          published_at: string
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          template_key: string
+          updated_at: string
+          version_label: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          mime_type: string
+          original_name: string
+          published_at?: string
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          template_key: string
+          updated_at?: string
+          version_label: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          mime_type?: string
+          original_name?: string
+          published_at?: string
+          sha256?: string
+          size_bytes?: number
+          storage_path?: string
+          template_key?: string
+          updated_at?: string
+          version_label?: string
+        }
+        Relationships: []
+      }
       contractor_estimate_lines: {
         Row: {
           amount: number | null

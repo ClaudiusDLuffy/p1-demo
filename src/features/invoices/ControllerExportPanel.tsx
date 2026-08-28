@@ -125,7 +125,7 @@ export default function ControllerExportPanel({
   const [busyAction, setBusyAction] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(!compact);
+  const [showHistory, setShowHistory] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [actor, setActor] = useState("");

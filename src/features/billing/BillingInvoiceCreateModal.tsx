@@ -1005,7 +1005,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     onClose?.();
   };
 
-  const discardAndClose = () => {
+  const resetAfterSaveOrDiscard = () => {
     if (typeof window !== "undefined") {
       try {
         removeBillingDraft(window.localStorage, draftStorageKey);
@@ -1049,6 +1049,10 @@ export default function BillingInvoiceCreateModal(props: any) {
     setDraftState("idle");
     setDraftSavedAt(null);
     setDraggingLine(null);
+  };
+
+  const discardAndClose = () => {
+    resetAfterSaveOrDiscard();
     onClose?.();
   };
 
@@ -1208,7 +1212,10 @@ export default function BillingInvoiceCreateModal(props: any) {
       const documentLabel = isCapitalQuote ? "Capital quote" : "Invoice";
       fire?.(`${documentLabel} #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
       onCreated?.(payload.invoice);
-      discardAndClose();
+      // A successful save has its own parent handoff to the exact invoice
+      // detail. Do not run the cancel/close callback, which intentionally
+      // restores the originating work order.
+      resetAfterSaveOrDiscard();
     } catch (err: any) {
       fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${err.message || err}`);
     } finally {

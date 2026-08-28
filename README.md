@@ -34,3 +34,21 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Publish contractor estimate templates
+
+Heatcraft and Carrier workbooks are stored in the private Supabase bucket, not
+in `public/` or Git. Apply
+`supabase/migrations/0102_private_contractor_estimate_templates.sql`, then run:
+
+```bash
+npm run publish:contractor-templates -- \
+  --heatcraft "/path/to/Heatcraft Selector Model.xlsx" \
+  --carrier "/path/to/Carrier Survey.xlsx"
+```
+
+The publisher reads `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY` (or
+`SUPABASE_SERVICE_ROLE_KEY`) from `.env.local`. Add `--dry-run` to validate the
+files without uploading them. After publishing, run
+`supabase/audits/0102_contractor_estimate_template_verification.sql`; every
+column, including `all_checks_pass`, must return `true`.
