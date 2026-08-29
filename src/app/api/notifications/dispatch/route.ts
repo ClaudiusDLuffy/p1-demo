@@ -6,6 +6,20 @@ import type { Database } from "../../../../lib/supabase/database.types";
 
 const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
 
+type DispatchWorkOrder = Pick<
+  Database["public"]["Tables"]["work_orders"]["Row"],
+  | "id"
+  | "incident_id"
+  | "store_number"
+  | "city"
+  | "store_state"
+  | "address"
+  | "priority"
+  | "summary"
+  | "description"
+  | "contractor_id"
+>;
+
 const jsonError = (message: string, status: number) =>
   NextResponse.json({ error: message }, { status });
 
@@ -46,7 +60,7 @@ async function requireStaff(req: NextRequest) {
   return { sb, user, profile };
 }
 
-const mapWorkOrder = (wo: any) => ({
+const mapWorkOrder = (wo: DispatchWorkOrder) => ({
   id: wo.id,
   incidentId: wo.incident_id,
   storeNumber: wo.store_number,
@@ -62,9 +76,9 @@ export async function POST(req: NextRequest) {
   const auth = await requireStaff(req);
   if ("error" in auth) return auth.error;
 
-  let body: any = {};
+  let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    body = await req.json() as Record<string, unknown>;
   } catch {
     return jsonError("Invalid JSON body", 400);
   }
@@ -74,7 +88,7 @@ export async function POST(req: NextRequest) {
   if (!workOrderId) return jsonError("workOrderId is required", 400);
 
   const { sb } = auth;
-  const { data: wo, error: woError } = await (sb as any)
+  const { data: wo, error: woError } = await sb
     .from("work_orders")
     .select("id,incident_id,store_number,city,store_state,address,priority,summary,description,contractor_id,deleted_at")
     .eq("id", workOrderId)
@@ -84,16 +98,29 @@ export async function POST(req: NextRequest) {
   if (woError) return jsonError(woError.message, 500);
   if (!wo) return jsonError("Work order not found", 404);
 
-  const contractorId = overrideContractorId || wo.contractor_id;
+  if (
+    overrideContractorId
+    && overrideContractorId !== wo.contractor_id
+  ) {
+    return jsonError(
+      "Contractor no longer matches the work order assignment",
+      409,
+    );
+  }
+
+  const contractorId = wo.contractor_id;
   if (!contractorId) return jsonError("Work order is not assigned to a contractor", 400);
 
   const { data: contractor, error: contractorError } = await sb
     .from("profiles")
-    .select("id,email,name,company")
+    .select("id,email,name,company,role,active")
     .eq("id", contractorId)
     .maybeSingle();
 
   if (contractorError) return jsonError(contractorError.message, 500);
+  if (contractor?.role !== "contractor" || !contractor.active) {
+    return jsonError("Assigned contractor account is inactive or invalid", 409);
+  }
   if (!contractor?.email) return jsonError("Contractor email not found", 400);
 
   try {

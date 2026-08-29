@@ -123,16 +123,35 @@ export async function POST(request: NextRequest) {
 
   const { data: contractor, error: contractorError } = await sb
     .from("profiles")
-    .select("id,name,email,company,active,contractor_organization_id")
+    .select("id,name,email,company,role,active,contractor_organization_id")
     .eq("id", contractorId)
     .maybeSingle();
 
   if (contractorError) return jsonError(contractorError.message, 500);
   if (!contractor) return jsonError("Contractor profile not found", 404);
+  if (contractor.role !== "contractor" || !contractor.active) {
+    return jsonError("Contractor account is inactive or invalid", 409);
+  }
 
-  const recipientEmails: string[] = contractor.active && contractor.email
-    ? [contractor.email]
-    : [];
+  let canonicalContractorId = contractor.id;
+  if (contractor.contractor_organization_id) {
+    const { data: organization, error: organizationError } = await sb
+      .from("organizations")
+      .select("canonical_contractor_id")
+      .eq("id", contractor.contractor_organization_id)
+      .eq("active", true)
+      .maybeSingle();
+    if (organizationError) return jsonError(organizationError.message, 500);
+    if (
+      !organization?.canonical_contractor_id
+      || organization.canonical_contractor_id !== contractor.id
+    ) {
+      return jsonError("Contractor company identity is invalid", 409);
+    }
+    canonicalContractorId = organization.canonical_contractor_id;
+  }
+
+  const recipientEmails: string[] = contractor.email ? [contractor.email] : [];
   if (invoice.created_by && invoice.created_by !== contractor.id) {
     const { data: creator, error: creatorError } = await sb
       .from("profiles")
@@ -146,11 +165,32 @@ export async function POST(request: NextRequest) {
         && creator?.contractor_organization_id
           === contractor.contractor_organization_id
       );
-    const creatorCanInvoice = creator?.contractor_organization_id
-      ? ["company_admin", "invoice"].includes(
-          creator.contractor_access_level || "",
-        )
-      : (creator?.contractor_tier || "direct") === "direct";
+    let creatorCanInvoice = false;
+    if (creator?.contractor_organization_id) {
+      creatorCanInvoice = creator.id === canonicalContractorId
+        && creator.contractor_access_level === "company_admin";
+      if (
+        !creatorCanInvoice
+        && creator.id !== canonicalContractorId
+        && creator.contractor_access_level === "invoice"
+      ) {
+        const { data: technicianLink, error: technicianLinkError } = await sb
+          .from("contractor_technicians")
+          .select("id")
+          .eq("profile_id", creator.id)
+          .eq("contractor_id", canonicalContractorId)
+          .eq("is_active", true)
+          .limit(1)
+          .maybeSingle();
+        if (technicianLinkError) {
+          return jsonError(technicianLinkError.message, 500);
+        }
+        creatorCanInvoice = Boolean(technicianLink);
+      }
+    } else {
+      creatorCanInvoice = creator?.id === canonicalContractorId
+        && (creator.contractor_tier || "direct") === "direct";
+    }
     if (
       creator?.role === "contractor"
       && creator.active
@@ -160,21 +200,6 @@ export async function POST(request: NextRequest) {
     ) {
       recipientEmails.push(creator.email);
     }
-  }
-  if (contractor.contractor_organization_id) {
-    const { data: companyMembers, error: memberError } = await sb
-      .from("profiles")
-      .select("email")
-      .eq("contractor_organization_id", contractor.contractor_organization_id)
-      .eq("role", "contractor")
-      .eq("active", true)
-      .eq("contractor_access_level", "company_admin");
-    if (memberError) return jsonError(memberError.message, 500);
-    recipientEmails.push(
-      ...(companyMembers || [])
-        .map((profile: { email?: string | null }) => profile.email || "")
-        .filter(Boolean),
-    );
   }
 
   try {

@@ -42,6 +42,40 @@ test("QuickBooks archive downloads require the handoff capability", () => {
   assert.match(batchBranch, /status: 403|, 403\)/);
 });
 
+test("contractor notifications stay bound to validated contractor identities", () => {
+  const dispatchRoute = read("src/app/api/notifications/dispatch/route.ts");
+  assert.match(
+    dispatchRoute,
+    /overrideContractorId\s*&&\s*overrideContractorId !== wo\.contractor_id/,
+  );
+  assert.match(dispatchRoute, /const contractorId = wo\.contractor_id/);
+  assert.match(
+    dispatchRoute,
+    /contractor\?\.role !== "contractor" \|\| !contractor\.active/,
+  );
+
+  const attentionRoute = read(
+    "src/app/api/notifications/contractor-attention/route.ts",
+  );
+  assert.match(attentionRoute, /\.select\("email,role,active"\)/);
+  assert.match(
+    attentionRoute,
+    /contractor\?\.role !== "contractor" \|\| !contractor\.active/,
+  );
+
+  const reviewRoute = read(
+    "src/app/api/notifications/invoice-review/route.ts",
+  );
+  assert.match(
+    reviewRoute,
+    /\.select\("id,name,email,company,role,active,contractor_organization_id"\)/,
+  );
+  assert.match(
+    reviewRoute,
+    /contractor\.role !== "contractor" \|\| !contractor\.active/,
+  );
+});
+
 test("the service key remains server-only and is never exposed as a public variable", () => {
   const serverClient = read("src/lib/supabase/server.ts");
   assert.match(serverClient, /SUPABASE_SECRET_KEY/);
