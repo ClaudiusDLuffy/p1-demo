@@ -88,11 +88,14 @@ export async function POST(req: NextRequest) {
 
   const { data: contractor, error: contractorError } = await auth.sb
     .from("profiles")
-    .select("email")
+    .select("email,role,active")
     .eq("id", workOrder.contractor_id)
     .maybeSingle();
 
   if (contractorError) return jsonError(contractorError.message, 500);
+  if (contractor?.role !== "contractor" || !contractor.active) {
+    return jsonError("Assigned contractor account is inactive or invalid", 409);
+  }
   if (!contractor?.email) return jsonError("Contractor email not found", 400);
 
   try {

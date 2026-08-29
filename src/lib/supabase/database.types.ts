@@ -1135,6 +1135,50 @@ export type Database = {
           },
         ]
       }
+      organizations: {
+        Row: {
+          active: boolean
+          canonical_contractor_id: string | null
+          created_at: string
+          id: string
+          name: string
+          plan: string
+          settings: Json
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          canonical_contractor_id?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          plan?: string
+          settings?: Json
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          canonical_contractor_id?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          plan?: string
+          settings?: Json
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organizations_canonical_contractor_id_fkey"
+            columns: ["canonical_contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       photos: {
         Row: {
           caption: string | null
@@ -1254,6 +1298,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "profiles_contractor_organization_id_fkey"
+            columns: ["contractor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "profiles_dispatcher_id_fkey"
             columns: ["dispatcher_id"]

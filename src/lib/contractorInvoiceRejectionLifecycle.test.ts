@@ -91,7 +91,21 @@ test("rejection notification endpoint authenticates staff and scopes company rec
   assert.match(notificationRoute, /isInvoiceControllerProfile/);
   assert.doesNotMatch(notificationRoute, /INVOICE_CONTROLLER_EMAIL/);
   assert.match(notificationRoute, /\.eq\("active", true\)/);
-  assert.match(notificationRoute, /\.eq\("contractor_access_level", "company_admin"\)/);
+  assert.match(notificationRoute, /\.from\("organizations"\)/);
+  assert.match(notificationRoute, /canonical_contractor_id/);
+  assert.match(
+    notificationRoute,
+    /organization\.canonical_contractor_id !== contractor\.id/,
+  );
+  assert.match(notificationRoute, /\.from\("contractor_technicians"\)/);
+  assert.match(notificationRoute, /\.eq\("profile_id", creator\.id\)/);
+  assert.match(notificationRoute, /\.eq\("contractor_id", canonicalContractorId\)/);
+  assert.match(notificationRoute, /\.eq\("is_active", true\)/);
+  assert.match(
+    notificationRoute,
+    /creator\.id === canonicalContractorId[\s\S]*creator\.contractor_access_level === "company_admin"/,
+  );
+  assert.doesNotMatch(notificationRoute, /const \{ data: companyMembers/);
   assert.match(notificationRoute, /invoice\.created_by/);
   assert.match(notificationRoute, /revision: invoice\.review_revision/);
   assert.doesNotMatch(notificationRoute, /report_only/);
