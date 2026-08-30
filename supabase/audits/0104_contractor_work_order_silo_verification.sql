@@ -116,11 +116,22 @@ with access_function as (
    and policy.polcmd in ('r', '*')
 ), technician_directory_policy as (
   select
-    count(*) filter (where policy.polcmd in ('r', '*')) = 1 as one_read_policy,
+    count(*) filter (
+      where policy.polname = 'ct_read'
+        and policy.polcmd = 'r'
+    ) = 1 as scoped_read_policy_present,
     bool_and(
       lower(pg_get_expr(policy.polqual, policy.polrelid))
         like '%organization.canonical_contractor_id = viewer.id%'
-    ) filter (where policy.polcmd in ('r', '*')) as canonical_only
+    ) filter (
+      where policy.polname = 'ct_read'
+        and policy.polcmd = 'r'
+    ) as canonical_only,
+    bool_and(
+      policy.polname = 'ct_read'
+      or lower(pg_get_expr(policy.polqual, policy.polrelid)) like '%is_staff%'
+    ) filter (where policy.polcmd in ('r', '*'))
+      as all_other_read_capable_policies_staff_only
   from pg_policy policy
   where policy.polrelid = 'public.contractor_technicians'::regclass
 ), scope_helpers as (
@@ -585,8 +596,12 @@ with access_function as (
     legacy_invoice_rpcs.all_present
       and legacy_invoice_rpcs.untrusted_execute_blocked
       as legacy_invoice_rpc_execute_blocked,
-    technician_directory_policy.one_read_policy
+    technician_directory_policy.scoped_read_policy_present
       and coalesce(technician_directory_policy.canonical_only, false)
+      and coalesce(
+        technician_directory_policy.all_other_read_capable_policies_staff_only,
+        false
+      )
       as technician_directory_canonical_only,
     (
       select relrowsecurity

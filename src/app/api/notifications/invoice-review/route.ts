@@ -164,14 +164,12 @@ export async function POST(request: NextRequest) {
         contractor.contractor_organization_id
         && creator?.contractor_organization_id
           === contractor.contractor_organization_id
-      );
+    );
     let creatorCanInvoice = false;
     if (creator?.contractor_organization_id) {
-      creatorCanInvoice = creator.id === canonicalContractorId
-        && creator.contractor_access_level === "company_admin";
+      creatorCanInvoice = creator.contractor_access_level === "company_admin";
       if (
         !creatorCanInvoice
-        && creator.id !== canonicalContractorId
         && creator.contractor_access_level === "invoice"
       ) {
         const { data: technicianLink, error: technicianLinkError } = await sb
