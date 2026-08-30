@@ -93,7 +93,7 @@ const SCRC_TECHS: { name: string; tier: "direct" | "mr_freeze" | "contracted" }[
   { name: "Zach Anderson", tier: "contracted" },
   { name: "Gabe Moxley", tier: "contracted" },
   { name: "Patrick Petit", tier: "contracted" },
-  { name: "Raymon Rush", tier: "contracted" },
+  { name: "Raymond Rush", tier: "contracted" },
   { name: "Nate Slayers", tier: "contracted" },
 ];
 
