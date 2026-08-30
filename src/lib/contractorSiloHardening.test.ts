@@ -163,6 +163,10 @@ test("the production audit verifies policies, RPC execution mode, roles, and liv
   assert.match(audit, /technician\.is_active = true/);
   assert.match(audit, /expected_scoped_policies/);
   assert.match(audit, /expected_staff_only_policies/);
+  assert.match(
+    audit,
+    /policy\.polname = 'ct_read'[\s\S]*all_other_read_capable_policies_staff_only/,
+  );
   assert.match(audit, /work_order_assignment_history_staff_read/);
   assert.match(audit, /contractor_invoice_payment_holds_read/);
   assert.match(audit, /controller_export_items_read/);

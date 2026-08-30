@@ -103,8 +103,9 @@ test("rejection notification endpoint authenticates staff and scopes company rec
   assert.match(notificationRoute, /\.eq\("is_active", true\)/);
   assert.match(
     notificationRoute,
-    /creator\.id === canonicalContractorId[\s\S]*creator\.contractor_access_level === "company_admin"/,
+    /creatorCanInvoice = creator\.contractor_access_level === "company_admin"/,
   );
+  assert.match(notificationRoute, /belongsToInvoiceCompany/);
   assert.doesNotMatch(notificationRoute, /const \{ data: companyMembers/);
   assert.match(notificationRoute, /invoice\.created_by/);
   assert.match(notificationRoute, /revision: invoice\.review_revision/);
