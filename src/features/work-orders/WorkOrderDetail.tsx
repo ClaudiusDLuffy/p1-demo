@@ -1187,6 +1187,9 @@ export default function WorkOrderDetail(props: any) {
                                     value={technician.profileId || `legacy:${technician.id}`}
                                   >
                                     {technician.name}
+                                    {!technician.profileId
+                                      ? " — record only (no portal login)"
+                                      : ""}
                                   </option>
                                 ))}
                               </Sel>
