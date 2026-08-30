@@ -92,20 +92,30 @@ export async function loadAllProfiles(): Promise<any[]> {
   ));
 }
 
-// Contractor technicians — RLS returns all rows to staff, own rows to a
-// contractor. Used to populate the "Technician on Job" dropdown.
+// Contractor technicians — RLS returns all rows to staff and only authorized
+// company rows to contractors. A linked portal profile is the canonical display
+// identity; the table name remains the fallback for record-only legacy rows.
 export async function loadTechnicians(): Promise<any[]> {
   const sb = supabase();
-  const { data, error } = await sb.from("contractor_technicians").select("*").order("name");
+  const { data, error } = await sb
+    .from("contractor_technicians")
+    .select("*, portal_profile:profiles!contractor_technicians_profile_id_fkey(name)")
+    .order("name");
   if (error) throw error;
-  return (data || []).map((t: any) => ({
-    id: t.id,
-    contractorId: t.contractor_id,
-    profileId: t.profile_id || null,
-    name: t.name,
-    tier: t.tier,
-    isActive: t.is_active,
-  }));
+  return (data || []).map((t: any) => {
+    const portalProfile = Array.isArray(t.portal_profile)
+      ? t.portal_profile[0]
+      : t.portal_profile;
+    return {
+      id: t.id,
+      contractorId: t.contractor_id,
+      profileId: t.profile_id || null,
+      name: portalProfile?.name || t.name,
+      storedName: t.name,
+      tier: t.tier,
+      isActive: t.is_active,
+    };
+  });
 }
 
 const mapProfile = (p: any, staffPermissions: string[] = []) => ({

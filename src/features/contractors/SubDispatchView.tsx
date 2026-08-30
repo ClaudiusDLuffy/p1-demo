@@ -223,6 +223,9 @@ export default function SubDispatchView(props: any) {
                                 : option.id}
                             >
                               {option.name}
+                              {companyMode && !option.profileId
+                                ? " — record only (no portal login)"
+                                : ""}
                             </option>
                           ))}
                         </Sel>
