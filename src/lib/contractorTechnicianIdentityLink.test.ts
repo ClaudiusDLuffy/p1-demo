@@ -10,6 +10,13 @@ const migration = read(
 const audit = read(
   "supabase/audits/0106_contractor_technician_identity_verification.sql",
 );
+const aliasRepair = read(
+  "supabase/migrations/0107_raymon_rush_alias_repair.sql",
+);
+const aliasRepairAudit = read(
+  "supabase/audits/0107_raymon_rush_alias_repair_verification.sql",
+);
+const bootstrap = read("scripts/bootstrap.ts");
 const databaseLoader = read("src/lib/db.ts");
 const workOrderDetail = read(
   "src/features/work-orders/WorkOrderDetail.tsx",
@@ -116,5 +123,48 @@ test("the production audit verifies identity linkage and assignment integrity", 
   assert.match(
     audit,
     /work_order\.assigned_technician_profile_id = viewer\.id/,
+  );
+});
+
+test("the bootstrap roster uses Raymond Rush's canonical spelling", () => {
+  assert.match(bootstrap, /name: "Raymond Rush"/);
+  assert.doesNotMatch(bootstrap, /name: "Raymon Rush"/);
+});
+
+test("the deployed Raymon typo receives an immutable follow-up repair", () => {
+  assert.match(aliasRepair, /"Raymon Rush"/);
+  assert.match(aliasRepair, /'raymonrush'/);
+  assert.match(aliasRepair, /lower\(canonical\.email\) = 'scrcdallastexas@gmail\.com'/);
+  assert.match(aliasRepair, /lower\(profile\.email\) = 'rayrush50@gmail\.com'/);
+  assert.match(
+    aliasRepair,
+    /set name = format\([\s\S]*is_active = false[\s\S]*technician\.profile_id is null/,
+  );
+  assert.match(
+    aliasRepair,
+    /update public\.work_orders work_order[\s\S]*assigned_technician_profile_id = rush_profile_id[\s\S]*technician_on_job = canonical_name/,
+  );
+  assert.doesNotMatch(aliasRepair, /delete from public\./i);
+  assert.match(aliasRepair, /^begin;/m);
+  assert.match(aliasRepair, /^commit;/m);
+});
+
+test("the follow-up audit catches every known Rush spelling", () => {
+  for (const expected of [
+    "contractor_company_and_assignment_wall_preserved",
+    "raymond_rush_profile_configured",
+    "raymond_rush_portal_link_configured",
+    "all_rush_alias_duplicates_removed",
+    "rush_work_orders_identity_linked",
+    "alias_without_rush_identity_count",
+    "current_assignments_valid",
+    "assignment_history_consistent",
+    "all_checks_pass",
+  ]) {
+    assert.match(aliasRepairAudit, new RegExp(expected));
+  }
+  assert.match(
+    aliasRepairAudit,
+    /in \('rush', 'rushraymond', 'raymondrush', 'raymonrush'\)/,
   );
 });
