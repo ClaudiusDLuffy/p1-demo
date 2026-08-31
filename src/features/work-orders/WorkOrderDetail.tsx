@@ -326,6 +326,35 @@ export default function WorkOrderDetail(props: any) {
     workOrderStatus: woData?.status,
     invoiceStates: contractorInvoiceStates,
   });
+  const contractorInvoiceRequiringAttention = woAllInvoices.find(invoice =>
+    contractorCompletionControl.action === "correct_invoice"
+      ? canEditRejectedContractorInvoice(invoice, currentUser, isManager)
+      : contractorCompletionControl.action === "finish_invoice"
+        && canDeleteOwnContractorInvoice(invoice, currentUser, isManager)
+        && String(invoice.state || "").trim().toLowerCase() === "draft"
+  );
+  const openContractorCompletionAction = () => {
+    if (contractorCompletionControl.action === "create_invoice") {
+      openCreate(null);
+      return;
+    }
+    if (["finish_invoice", "correct_invoice"].includes(contractorCompletionControl.action || "")) {
+      if (contractorInvoiceRequiringAttention) {
+        openCreate(contractorInvoiceRequiringAttention);
+      } else {
+        fire(contractorCompletionControl.blockedReason || "Finish the open invoice before completing this job.");
+      }
+      return;
+    }
+    if (contractorCompletionControl.action === "complete" && contractorCompletionControl.enabled) {
+      setModal("closeComplete");
+    }
+  };
+  const contractorCompletionGuidesInvoice = [
+    "create_invoice",
+    "finish_invoice",
+    "correct_invoice",
+  ].includes(contractorCompletionControl.action || "");
   const canCompleteWorkAndInvoicing = contractorCompletionControl.enabled;
   const contractorInvoicingGuidance = contractorCompletionControl.blockedReason
     || (canCompleteWorkAndInvoicing
@@ -707,14 +736,15 @@ export default function WorkOrderDetail(props: any) {
                           )}
                           {contractorCompletionControl.visible && (
                             <button
-                              onClick={() => setModal("closeComplete")}
-                              disabled={!contractorCompletionControl.enabled || isLoading("closeComplete_" + woData.id)}
+                              type="button"
+                              onClick={openContractorCompletionAction}
+                              disabled={isLoading("closeComplete_" + woData.id)}
                               title={contractorCompletionControl.blockedReason || undefined}
                               className="btn-primary"
                               style={{
                                 ...loadingStyle("closeComplete_" + woData.id),
-                                opacity: !contractorCompletionControl.enabled || isLoading("closeComplete_" + woData.id) ? 0.58 : 1,
-                                cursor: !contractorCompletionControl.enabled || isLoading("closeComplete_" + woData.id) ? "not-allowed" : "pointer",
+                                opacity: isLoading("closeComplete_" + woData.id) ? 0.58 : 1,
+                                cursor: isLoading("closeComplete_" + woData.id) ? "default" : "pointer",
                               }}
                             >
                               {isLoading("closeComplete_" + woData.id)
@@ -756,7 +786,9 @@ export default function WorkOrderDetail(props: any) {
                           follow-up visits until the WO closes. The per-invoice
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
-                      {woData.status !== "closed" && !isManager && canInvoice && <button onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>}
+                      {woData.status !== "closed" && !isManager && canInvoice && !contractorCompletionGuidesInvoice && (
+                        <button type="button" onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>
+                      )}
                       {/* Staff retain only the explicit no-invoice exception.
                           Invoice-backed work orders close from Billing when staff
                           records Billed to 7-Eleven. */}
