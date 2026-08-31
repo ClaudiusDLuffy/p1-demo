@@ -19,23 +19,35 @@ test("invoice-capable contractors always see the final action on eligible work",
     {
       visible: true,
       enabled: false,
+      action: "create_invoice",
       label: "Create invoice to complete job",
       blockedReason: "Submit at least one contractor invoice before completing work and invoicing.",
     },
   );
 });
 
-test("drafts and rejected invoices visibly block atomic completion", () => {
-  for (const state of ["draft", "rejected"]) {
-    const control = getContractorCompletionControl({
-      ...eligibleInvoiceContractor,
-      invoiceStates: [state],
-    });
-    assert.equal(control.visible, true, state);
-    assert.equal(control.enabled, false, state);
-    assert.equal(control.label, "Finish invoice to complete job", state);
-    assert.match(control.blockedReason || "", /drafts.*rejected invoices/i, state);
-  }
+test("draft invoices route contractors back to the draft", () => {
+  const control = getContractorCompletionControl({
+    ...eligibleInvoiceContractor,
+    invoiceStates: ["draft"],
+  });
+  assert.equal(control.visible, true);
+  assert.equal(control.enabled, false);
+  assert.equal(control.action, "finish_invoice");
+  assert.equal(control.label, "Finish invoice to complete job");
+  assert.match(control.blockedReason || "", /submit or delete drafts/i);
+});
+
+test("rejected invoices route contractors to correction first", () => {
+  const control = getContractorCompletionControl({
+    ...eligibleInvoiceContractor,
+    invoiceStates: ["submitted", "draft", "rejected"],
+  });
+  assert.equal(control.visible, true);
+  assert.equal(control.enabled, false);
+  assert.equal(control.action, "correct_invoice");
+  assert.equal(control.label, "Correct invoice to complete job");
+  assert.match(control.blockedReason || "", /rejected invoices/i);
 });
 
 test("a ready invoice set enables the one atomic completion action", () => {
@@ -48,6 +60,7 @@ test("a ready invoice set enables the one atomic completion action", () => {
       {
         visible: true,
         enabled: true,
+        action: "complete",
         label: "Complete work & invoicing",
         blockedReason: null,
       },
@@ -60,6 +73,7 @@ test("a ready invoice set enables the one atomic completion action", () => {
     invoiceStates: ["submitted", "draft"],
   });
   assert.equal(mixedControl.enabled, false);
+  assert.equal(mixedControl.action, "finish_invoice");
   assert.equal(mixedControl.label, "Finish invoice to complete job");
 });
 
@@ -84,5 +98,6 @@ test("the control stays unavailable outside the approved contractor work scope",
     });
     assert.equal(control.visible, false, JSON.stringify(override));
     assert.equal(control.enabled, false, JSON.stringify(override));
+    assert.equal(control.action, null, JSON.stringify(override));
   }
 });

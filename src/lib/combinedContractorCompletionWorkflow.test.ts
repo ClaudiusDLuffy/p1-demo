@@ -65,10 +65,16 @@ test("invoice-capable contractors call the combined RPC and patch only after com
 test("the portal exposes one combined contractor control while preserving exceptions", () => {
   assert.match(detail, /getContractorCompletionControl/);
   assert.match(detail, /contractorCompletionControl\.visible/);
-  assert.match(detail, /disabled=\{!contractorCompletionControl\.enabled/);
+  assert.match(detail, /contractorCompletionControl\.action === "create_invoice"[\s\S]*openCreate\(null\)/);
+  assert.match(detail, /\["finish_invoice", "correct_invoice"\]\.includes[\s\S]*openCreate\(contractorInvoiceRequiringAttention\)/);
+  assert.match(detail, /contractorCompletionControl\.action === "complete" && contractorCompletionControl\.enabled[\s\S]*setModal\("closeComplete"\)/);
+  assert.doesNotMatch(detail, /disabled=\{!contractorCompletionControl\.enabled/);
+  assert.match(detail, /canInvoice && !contractorCompletionGuidesInvoice/);
   assert.match(detail, /woAllInvoices\.length > 0 \|\| contractorCompletionControl\.visible/);
+  assert.match(completionControl, /action: "create_invoice" \| "finish_invoice" \| "correct_invoice" \| "complete" \| null/);
   assert.match(completionControl, /Create invoice to complete job/);
   assert.match(completionControl, /Finish invoice to complete job/);
+  assert.match(completionControl, /Correct invoice to complete job/);
   assert.match(completionControl, /Complete work & invoicing/);
   assert.match(detail, /Complete work & invoicing/);
   assert.match(detail, /!canInvoice && woData\.status !== "completed"/);

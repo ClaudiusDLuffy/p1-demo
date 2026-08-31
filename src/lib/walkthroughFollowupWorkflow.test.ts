@@ -8,6 +8,7 @@ const shell = read("src/components/PortalShell.tsx");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const billingEditor = read("src/features/billing/BillingInvoiceCreateModal.tsx");
 const sourceDrawer = read("src/features/billing/SourceContractorInvoiceDrawer.tsx");
+const sourcePreview = read("src/features/billing/PrivatePdfCanvasPreview.tsx");
 const nextConfig = read("next.config.ts");
 const queueMigration = read("supabase/migrations/0093_work_order_queue_pinning.sql");
 const billingMigration = read("supabase/migrations/0094_staff_billing_sorting.sql");
@@ -38,15 +39,17 @@ test("saving a P1 invoice opens its exact billing detail instead of restoring th
   assert.doesNotMatch(saveFlow, /discardAndClose\(\)/);
 });
 
-test("source invoice drawer renders the authenticated original PDF and keeps structured data as fallback", () => {
+test("source invoice drawer renders the authenticated original PDF without a browser plugin and keeps structured data as fallback", () => {
   assert.match(sourceDrawer, /downloadInvoicePdfBlob\(storagePath\)/);
   assert.match(sourceDrawer, /URL\.createObjectURL/);
   assert.match(sourceDrawer, /Original contractor PDF/);
-  assert.match(sourceDrawer, /<iframe/);
+  assert.match(sourceDrawer, /<PrivatePdfCanvasPreview/);
+  assert.doesNotMatch(sourceDrawer, /<iframe|<embed|<object/);
+  assert.match(sourcePreview, /pdfjs-dist\/webpack\.mjs/);
+  assert.match(sourcePreview, /page\.render\(/);
   assert.match(sourceDrawer, /No original PDF was attached/);
   assert.match(sourceDrawer, /pointerEvents: "none"/);
   assert.match(sourceDrawer, /role="complementary"/);
-  assert.match(nextConfig, /frame-src 'self' blob:/);
   assert.match(nextConfig, /object-src 'none'/);
 });
 

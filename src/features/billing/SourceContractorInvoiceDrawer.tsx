@@ -5,6 +5,7 @@ import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
 import { downloadInvoicePdfBlob } from "../../lib/db";
 import { useInvoiceByIdQuery } from "../invoices/queries";
+import PrivatePdfCanvasPreview from "./PrivatePdfCanvasPreview";
 
 type SourceContractorInvoiceLine = {
   id?: string;
@@ -41,6 +42,7 @@ export default function SourceContractorInvoiceDrawer({
   const query = useInvoiceByIdQuery(invoiceId, Boolean(invoiceId));
   const [pdfState, setPdfState] = useState<{
     storagePath: string;
+    blob: Blob | null;
     url: string | null;
     error: string;
   } | null>(null);
@@ -50,6 +52,7 @@ export default function SourceContractorInvoiceDrawer({
     ? pdfState
     : null;
   const pdfUrl = currentPdfState?.url || null;
+  const pdfBlob = currentPdfState?.blob || null;
   const pdfError = currentPdfState?.error || "";
   const pdfLoading = Boolean(storagePath && !currentPdfState);
 
@@ -60,17 +63,17 @@ export default function SourceContractorInvoiceDrawer({
     void downloadInvoicePdfBlob(storagePath)
       .then(blob => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(
-          blob.type === "application/pdf"
-            ? blob
-            : new Blob([blob], { type: "application/pdf" }),
-        );
-        setPdfState({ storagePath, url: objectUrl, error: "" });
+        const normalizedPdfBlob = blob.type === "application/pdf"
+          ? blob
+          : new Blob([blob], { type: "application/pdf" });
+        objectUrl = URL.createObjectURL(normalizedPdfBlob);
+        setPdfState({ storagePath, blob: normalizedPdfBlob, url: objectUrl, error: "" });
       })
       .catch(error => {
         if (cancelled) return;
         setPdfState({
           storagePath,
+          blob: null,
           url: null,
           error: error instanceof Error ? error.message : "Original PDF could not be loaded",
         });
@@ -163,7 +166,11 @@ export default function SourceContractorInvoiceDrawer({
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Original contractor PDF</div>
                   <div style={{ display: "flex", gap: 7 }}>
-                    <button type="button" className="btn-soft" disabled={!pdfUrl} onClick={() => pdfUrl && window.open(pdfUrl, "_blank", "noopener,noreferrer")}>Open in new tab</button>
+                    {pdfUrl ? (
+                      <a className="btn-soft" href={pdfUrl} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+                    ) : (
+                      <button type="button" className="btn-soft" disabled>Open in new tab</button>
+                    )}
                     <button type="button" className="btn-soft" disabled={!pdfUrl} onClick={downloadOriginalPdf}>Download</button>
                   </div>
                 </div>
@@ -177,11 +184,10 @@ export default function SourceContractorInvoiceDrawer({
                     The original PDF could not be opened: {pdfError}
                   </div>
                 )}
-                {pdfUrl && !pdfLoading && (
-                  <iframe
-                    src={pdfUrl}
+                {pdfBlob && !pdfLoading && (
+                  <PrivatePdfCanvasPreview
+                    blob={pdfBlob}
                     title={`Original contractor invoice ${invoice.num}`}
-                    style={{ width: "100%", height: "calc(100vh - 250px)", minHeight: 520, border: `1px solid ${T.borderSoft}`, borderRadius: 10, background: "white" }}
                   />
                 )}
               </div>

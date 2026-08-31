@@ -1,6 +1,8 @@
 export type ContractorCompletionControl = {
   visible: boolean;
+  /** Whether the atomic complete-work-and-invoicing action is currently valid. */
   enabled: boolean;
+  action: "create_invoice" | "finish_invoice" | "correct_invoice" | "complete" | null;
   label: string;
   blockedReason: string | null;
 };
@@ -29,8 +31,6 @@ const READY_INVOICE_STATES = new Set([
   "paid",
 ]);
 
-const BLOCKING_INVOICE_STATES = new Set(["draft", "rejected"]);
-
 /**
  * Keeps the contractor's final action discoverable without weakening the
  * atomic completion rule enforced by complete_contractor_work_and_invoicing.
@@ -54,6 +54,7 @@ export const getContractorCompletionControl = ({
     return {
       visible: false,
       enabled: false,
+      action: null,
       label: "Complete work & invoicing",
       blockedReason: null,
     };
@@ -65,16 +66,26 @@ export const getContractorCompletionControl = ({
   const hasReadyInvoice = normalizedInvoiceStates.some(state =>
     READY_INVOICE_STATES.has(state)
   );
-  const hasBlockingInvoice = normalizedInvoiceStates.some(state =>
-    BLOCKING_INVOICE_STATES.has(state)
-  );
+  const hasDraftInvoice = normalizedInvoiceStates.includes("draft");
+  const hasRejectedInvoice = normalizedInvoiceStates.includes("rejected");
 
-  if (hasBlockingInvoice) {
+  if (hasRejectedInvoice) {
     return {
       visible: true,
       enabled: false,
+      action: "correct_invoice",
+      label: "Correct invoice to complete job",
+      blockedReason: "Correct or delete rejected invoices before completing work and invoicing.",
+    };
+  }
+
+  if (hasDraftInvoice) {
+    return {
+      visible: true,
+      enabled: false,
+      action: "finish_invoice",
       label: "Finish invoice to complete job",
-      blockedReason: "Submit or delete drafts and resolve rejected invoices before completing work and invoicing.",
+      blockedReason: "Submit or delete drafts before completing work and invoicing.",
     };
   }
 
@@ -82,6 +93,7 @@ export const getContractorCompletionControl = ({
     return {
       visible: true,
       enabled: false,
+      action: "create_invoice",
       label: "Create invoice to complete job",
       blockedReason: "Submit at least one contractor invoice before completing work and invoicing.",
     };
@@ -90,6 +102,7 @@ export const getContractorCompletionControl = ({
   return {
     visible: true,
     enabled: true,
+    action: "complete",
     label: "Complete work & invoicing",
     blockedReason: null,
   };
