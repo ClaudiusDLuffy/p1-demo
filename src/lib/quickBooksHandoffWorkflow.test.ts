@@ -7,6 +7,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 const migration = read("supabase/migrations/0096_guarded_quickbooks_handoff.sql");
 const route = read("src/app/api/controller-exports/route.ts");
 const panel = read("src/features/invoices/ControllerExportPanel.tsx");
+const invoiceList = read("src/features/invoices/InvoiceList.tsx");
 
 test("downloading stages a batch without marking contractor invoices paid", () => {
   const stage = migration.match(/create or replace function public\.stage_controller_invoice_export[\s\S]*?\nend;\n\$\$;/)?.[0] || "";
@@ -39,4 +40,22 @@ test("the controller audit is filterable, exportable, and retains item detail", 
   assert.match(panel, /Re-download ZIP/);
   assert.match(route, /oldestPendingAt/);
   assert.match(panel, /Wednesday contractor-payment run/);
+});
+
+test("authorized accounting can select an approved handoff batch on desktop or mobile", () => {
+  assert.match(invoiceList, /const \[selectedHandoffIds, setSelectedHandoffIds\] = useState/);
+  assert.match(invoiceList, /canHandoffQuickBooks\(currentUser\)[\s\S]*invTab === "approved"/);
+  assert.match(invoiceList, /else if \(next\.size < 500\) next\.add\(invoiceId\)/);
+  assert.match(invoiceList, /Select all visible approved invoices for QuickBooks handoff/);
+  assert.match(invoiceList, /Select invoice \$\{inv\.num\} for QuickBooks handoff/g);
+  assert.match(invoiceList, /selectedInvoiceIds=\{selectedHandoffInvoiceIds\}/);
+  assert.match(panel, /JSON\.stringify\(hasSelection \? \{ invoiceIds: selectedIds \} : \{\}\)/);
+  assert.match(panel, /onClearSelected\?\.\(\)/);
+  assert.match(panel, /Download selected ZIP/);
+});
+
+test("a selected handoff remains available when the full approved queue exceeds the archive limit", () => {
+  assert.match(panel, /\|\| \(!hasSelection && \(approvedCount === 0 \|\| overLimit\)\)/);
+  assert.match(panel, /overLimit && !hasSelection/);
+  assert.match(panel, /Open the Approved tab, select up to \{exportLimit\} invoices/);
 });

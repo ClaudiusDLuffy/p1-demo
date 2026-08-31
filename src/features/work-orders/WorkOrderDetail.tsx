@@ -22,6 +22,7 @@ import {
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
+import { getContractorCompletionControl } from "../../lib/contractorCompletion";
 import {
   canFlagWorkOrderCapital,
   getSlaAgingStyle,
@@ -317,11 +318,23 @@ export default function WorkOrderDetail(props: any) {
     && woData?.status !== "closed"
     && (woData?.billingOnly || woData?.functionalStatus === "Completed")
     && contractorInvoiceSetReady;
-  const canCompleteWorkAndInvoicing = canInvoice
-    && !woData?.billingOnly
-    && !invoicingComplete
-    && contractorInvoiceSetReady
-    && !["assigned", "parts", "closed", "capital", "pending_capital_completion"].includes(woData?.status);
+  const contractorCompletionControl = getContractorCompletionControl({
+    isManager,
+    canInvoice,
+    billingOnly: woData?.billingOnly,
+    invoicingComplete,
+    workOrderStatus: woData?.status,
+    invoiceStates: contractorInvoiceStates,
+  });
+  const canCompleteWorkAndInvoicing = contractorCompletionControl.enabled;
+  const contractorInvoicingGuidance = contractorCompletionControl.blockedReason
+    || (canCompleteWorkAndInvoicing
+      ? "Use Complete work & invoicing to finish field work and confirm the current invoice set together."
+      : contractorInvoiceSetReady
+        ? "The contractor can complete field work and invoicing together when ready."
+        : contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state))
+          ? "Submit or delete drafts and resolve rejected invoices before completing work and invoicing."
+          : "Submit at least one contractor invoice before completing work and invoicing.");
   // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
   // his work actions (pause / close complete / submit report / resume) as long
   // as the job itself is alive — driven by whether the WO is closed, NOT by the
@@ -692,9 +705,21 @@ export default function WorkOrderDetail(props: any) {
                               {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Mark work complete"}
                             </button>
                           )}
-                          {canCompleteWorkAndInvoicing && (
-                            <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
-                              {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Complete work & invoicing"}
+                          {contractorCompletionControl.visible && (
+                            <button
+                              onClick={() => setModal("closeComplete")}
+                              disabled={!contractorCompletionControl.enabled || isLoading("closeComplete_" + woData.id)}
+                              title={contractorCompletionControl.blockedReason || undefined}
+                              className="btn-primary"
+                              style={{
+                                ...loadingStyle("closeComplete_" + woData.id),
+                                opacity: !contractorCompletionControl.enabled || isLoading("closeComplete_" + woData.id) ? 0.58 : 1,
+                                cursor: !contractorCompletionControl.enabled || isLoading("closeComplete_" + woData.id) ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              {isLoading("closeComplete_" + woData.id)
+                                ? <><BtnSpinner />Completing...</>
+                                : contractorCompletionControl.label}
                             </button>
                           )}
                         </>
@@ -757,7 +782,7 @@ export default function WorkOrderDetail(props: any) {
                       />
                     )}
 
-                    {woAllInvoices.length > 0 && (isManager || canInvoice) && (
+                    {(woAllInvoices.length > 0 || contractorCompletionControl.visible) && (isManager || canInvoice) && (
                       <div
                         role="status"
                         className="card"
@@ -782,13 +807,7 @@ export default function WorkOrderDetail(props: any) {
                               ? "Staff can safely continue the billing handoff. A new or corrected contractor invoice automatically reopens this step."
                               : woData?.billingOnly && canFinishInvoicing
                                 ? "Use the final action after every contractor invoice has been submitted. P1 will still review and bill separately."
-                                : canCompleteWorkAndInvoicing
-                                  ? "Use Complete work & invoicing to finish field work and confirm the current invoice set together."
-                                  : contractorInvoiceSetReady
-                                    ? "The contractor can complete field work and invoicing together when ready."
-                                  : contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state))
-                                    ? "Submit or delete drafts and resolve rejected invoices before completing work and invoicing."
-                                    : "Submit at least one contractor invoice before completing work and invoicing."}
+                                : contractorInvoicingGuidance}
                           </div>
                         </div>
                         {!isManager && woData?.billingOnly && canFinishInvoicing && !invoicingComplete && (
