@@ -9,7 +9,10 @@ import { Modal } from "../../components/ui/Modal";
 import { T, INV_STATE } from "../../lib/constants";
 import { canEditRejectedContractorInvoice } from "../../lib/invoicePermissions";
 import { InvoiceSortKey, SortDirection } from "../../lib/invoiceSort";
-import { isInvoiceController } from "../../lib/staffPermissions";
+import {
+  canHandoffQuickBooks,
+  isInvoiceController,
+} from "../../lib/staffPermissions";
 import ControllerExportPanel from "./ControllerExportPanel";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useCursorPagination } from "../../lib/useCursorPagination";
@@ -23,6 +26,7 @@ export default function InvoiceList(props: any) {
   const [sortKey, setSortKey] = useState<InvoiceSortKey>("recent");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(() => new Set());
+  const [selectedHandoffIds, setSelectedHandoffIds] = useState<Set<string>>(() => new Set());
   const [batchDialog, setBatchDialog] = useState<"approve" | "reject" | null>(null);
   const [batchReason, setBatchReason] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
@@ -88,6 +92,33 @@ export default function InvoiceList(props: any) {
     () => (invoicePageQuery.data?.items || []) as any[],
     [invoicePageQuery.data?.items],
   );
+  const handoffSelectionMode = canHandoffQuickBooks(currentUser)
+    && invTab === "approved";
+  const handoffSelectableInvoices = useMemo(
+    () => handoffSelectionMode
+      ? visibleInvoices.filter(invoice =>
+          invoice.state === "approved"
+          && (invoice.invoiceType || "contractor") === "contractor"
+          && !invoice.qboSyncedAt
+          && !invoice.paymentHoldAt,
+        )
+      : [],
+    [handoffSelectionMode, visibleInvoices],
+  );
+  const handoffSelectableIdSet = useMemo(
+    () => new Set<string>(handoffSelectableInvoices.map(invoice => String(invoice.id))),
+    [handoffSelectableInvoices],
+  );
+  const selectedVisibleHandoffInvoices = useMemo(
+    () => handoffSelectableInvoices.filter(invoice => selectedHandoffIds.has(String(invoice.id))),
+    [handoffSelectableInvoices, selectedHandoffIds],
+  );
+  const allVisibleHandoffSelected = handoffSelectableInvoices.length > 0
+    && handoffSelectableInvoices.every(invoice => selectedHandoffIds.has(String(invoice.id)));
+  const selectedHandoffInvoiceIds = useMemo(
+    () => [...selectedHandoffIds],
+    [selectedHandoffIds],
+  );
 
   const reviewableInvoices = useMemo(
     () => canBatchReview
@@ -140,6 +171,31 @@ export default function InvoiceList(props: any) {
     });
   };
 
+  const toggleHandoffSelection = (invoiceId: string) => {
+    if (!handoffSelectableIdSet.has(invoiceId)) return;
+    setSelectedHandoffIds(previous => {
+      const next = new Set(previous);
+      if (next.has(invoiceId)) next.delete(invoiceId);
+      else if (next.size < 500) next.add(invoiceId);
+      return next;
+    });
+  };
+
+  const toggleAllVisibleHandoff = () => {
+    setSelectedHandoffIds(previous => {
+      const next = new Set(previous);
+      if (allVisibleHandoffSelected) {
+        handoffSelectableInvoices.forEach(invoice => next.delete(String(invoice.id)));
+        return next;
+      }
+      for (const invoice of handoffSelectableInvoices) {
+        if (next.size >= 500) break;
+        next.add(String(invoice.id));
+      }
+      return next;
+    });
+  };
+
   const closeBatchDialog = () => {
     if (batchBusy) return;
     setBatchDialog(null);
@@ -171,7 +227,12 @@ export default function InvoiceList(props: any) {
           {/* ═════ INVOICES ═════ */}
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
-              <ControllerExportPanel invoices={invoices} currentUser={currentUser} />
+              <ControllerExportPanel
+                invoices={invoices}
+                currentUser={currentUser}
+                selectedInvoiceIds={selectedHandoffInvoiceIds}
+                onClearSelected={() => setSelectedHandoffIds(new Set())}
+              />
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
                 <div className="mobile-tabs invoice-tabs" style={{ display: "flex", gap: 0, borderBottom: `2px solid ${T.borderSoft}` }}>
                   {invoiceTabs.map(t => (
@@ -242,22 +303,25 @@ export default function InvoiceList(props: any) {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: T.surfaceSoft }}>
-                      {canBatchReview && (
+                      {(canBatchReview || handoffSelectionMode) && (
                         <th style={{ width: 42, padding: "12px 10px", textAlign: "center", borderBottom: `1px solid ${T.borderSoft}` }}>
                           <input
                             ref={(element: HTMLInputElement | null) => {
                               if (element) {
-                                element.indeterminate = selectedReviewInvoices.length > 0
-                                  && !allVisibleReviewableSelected;
+                                element.indeterminate = handoffSelectionMode
+                                  ? selectedVisibleHandoffInvoices.length > 0 && !allVisibleHandoffSelected
+                                  : selectedReviewInvoices.length > 0 && !allVisibleReviewableSelected;
                               }
                             }}
                             type="checkbox"
-                            checked={allVisibleReviewableSelected}
-                            disabled={reviewableInvoices.length === 0}
-                            onChange={toggleAllVisibleReviewable}
-                            aria-label="Select all visible submitted and revised invoices"
-                            title="Select reviewable invoices"
-                            style={{ width: 16, height: 16, accentColor: T.accent, cursor: reviewableInvoices.length ? "pointer" : "default" }}
+                            checked={handoffSelectionMode ? allVisibleHandoffSelected : allVisibleReviewableSelected}
+                            disabled={handoffSelectionMode ? handoffSelectableInvoices.length === 0 : reviewableInvoices.length === 0}
+                            onChange={handoffSelectionMode ? toggleAllVisibleHandoff : toggleAllVisibleReviewable}
+                            aria-label={handoffSelectionMode
+                              ? "Select all visible approved invoices for QuickBooks handoff"
+                              : "Select all visible submitted and revised invoices"}
+                            title={handoffSelectionMode ? "Select approved invoices for handoff" : "Select reviewable invoices"}
+                            style={{ width: 16, height: 16, accentColor: T.accent, cursor: (handoffSelectionMode ? handoffSelectableInvoices.length : reviewableInvoices.length) ? "pointer" : "default" }}
                           />
                         </th>
                       )}
@@ -282,16 +346,26 @@ export default function InvoiceList(props: any) {
                   <tbody>
                     {visibleInvoices.map(inv => {
                       const reviewable = reviewableIdSet.has(String(inv.id));
+                      const handoffSelectable = handoffSelectableIdSet.has(String(inv.id));
+                      const selectedForCurrentAction = handoffSelectionMode
+                        ? selectedHandoffIds.has(String(inv.id))
+                        : selectedReviewIds.has(String(inv.id));
                       return (
-                      <tr key={inv.id} onClick={() => setSelectedInvoice(inv.id)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", background: selectedReviewIds.has(String(inv.id)) ? T.accentSoft : undefined }}>
-                        {canBatchReview && (
+                      <tr key={inv.id} onClick={() => setSelectedInvoice(inv.id)} style={{ borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", background: selectedForCurrentAction ? T.accentSoft : undefined }}>
+                        {(canBatchReview || handoffSelectionMode) && (
                           <td onClick={(event) => event.stopPropagation()} style={{ width: 42, padding: "13px 10px", textAlign: "center" }}>
-                            {reviewable && (
+                            {(handoffSelectionMode ? handoffSelectable : reviewable) && (
                               <input
                                 type="checkbox"
-                                checked={selectedReviewIds.has(String(inv.id))}
-                                onChange={() => toggleReviewSelection(String(inv.id))}
-                                aria-label={`Select invoice ${inv.num} for batch review`}
+                                checked={handoffSelectionMode
+                                  ? selectedHandoffIds.has(String(inv.id))
+                                  : selectedReviewIds.has(String(inv.id))}
+                                onChange={() => handoffSelectionMode
+                                  ? toggleHandoffSelection(String(inv.id))
+                                  : toggleReviewSelection(String(inv.id))}
+                                aria-label={handoffSelectionMode
+                                  ? `Select invoice ${inv.num} for QuickBooks handoff`
+                                  : `Select invoice ${inv.num} for batch review`}
                                 style={{ width: 16, height: 16, accentColor: T.accent, cursor: "pointer" }}
                               />
                             )}
@@ -348,7 +422,7 @@ export default function InvoiceList(props: any) {
                     style={{
                       background: "#fff",
                       borderRadius: 12,
-                      border: `1px solid ${selectedReviewIds.has(String(inv.id)) ? T.accent : T.borderSoft}`,
+                      border: `1px solid ${(handoffSelectionMode ? selectedHandoffIds : selectedReviewIds).has(String(inv.id)) ? T.accent : T.borderSoft}`,
                       padding: "14px 16px",
                       marginBottom: 10,
                       cursor: "pointer",
@@ -357,13 +431,20 @@ export default function InvoiceList(props: any) {
                   >
                     <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                        {canBatchReview && reviewableIdSet.has(String(inv.id)) && (
+                        {((handoffSelectionMode && handoffSelectableIdSet.has(String(inv.id)))
+                          || (!handoffSelectionMode && canBatchReview && reviewableIdSet.has(String(inv.id)))) && (
                           <input
                             type="checkbox"
-                            checked={selectedReviewIds.has(String(inv.id))}
+                            checked={handoffSelectionMode
+                              ? selectedHandoffIds.has(String(inv.id))
+                              : selectedReviewIds.has(String(inv.id))}
                             onClick={(event) => event.stopPropagation()}
-                            onChange={() => toggleReviewSelection(String(inv.id))}
-                            aria-label={`Select invoice ${inv.num} for batch review`}
+                            onChange={() => handoffSelectionMode
+                              ? toggleHandoffSelection(String(inv.id))
+                              : toggleReviewSelection(String(inv.id))}
+                            aria-label={handoffSelectionMode
+                              ? `Select invoice ${inv.num} for QuickBooks handoff`
+                              : `Select invoice ${inv.num} for batch review`}
                             style={{ width: 18, height: 18, accentColor: T.accent, cursor: "pointer" }}
                           />
                         )}

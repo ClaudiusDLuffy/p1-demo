@@ -10,6 +10,7 @@ const dataLayer = read("src/lib/db.ts");
 const hook = read("src/features/work-orders/useWorkOrders.ts");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const shell = read("src/components/PortalShell.tsx");
+const completionControl = read("src/lib/contractorCompletion.ts");
 const billingDetail = read("src/features/billing/BillingInvoiceDetail.tsx");
 
 const rpcStart = migration.indexOf(
@@ -62,12 +63,19 @@ test("invoice-capable contractors call the combined RPC and patch only after com
 });
 
 test("the portal exposes one combined contractor control while preserving exceptions", () => {
-  assert.match(detail, /const canCompleteWorkAndInvoicing = canInvoice/);
+  assert.match(detail, /getContractorCompletionControl/);
+  assert.match(detail, /contractorCompletionControl\.visible/);
+  assert.match(detail, /disabled=\{!contractorCompletionControl\.enabled/);
+  assert.match(detail, /woAllInvoices\.length > 0 \|\| contractorCompletionControl\.visible/);
+  assert.match(completionControl, /Create invoice to complete job/);
+  assert.match(completionControl, /Finish invoice to complete job/);
+  assert.match(completionControl, /Complete work & invoicing/);
   assert.match(detail, /Complete work & invoicing/);
   assert.match(detail, /!canInvoice && woData\.status !== "completed"/);
   assert.match(detail, /woData\?\.billingOnly && canFinishInvoicing/);
   assert.match(shell, /title=\{combinesContractorCompletion \? "Complete work & invoicing" : "Mark work complete"\}/);
   assert.match(shell, /This confirms that every contractor invoice/);
+  assert.match(shell, /Once every invoice for this job is submitted/);
   assert.match(shell, /if \(completed !== false\) setModal\(null\)/);
   assert.match(detail, /setModal\("closeWithoutInvoice"\)/);
   assert.match(detail, /Close — no invoice/);

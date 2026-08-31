@@ -116,10 +116,14 @@ export default function ControllerExportPanel({
   invoices,
   currentUser,
   compact = false,
+  selectedInvoiceIds = [],
+  onClearSelected,
 }: {
   invoices: ControllerInvoice[];
   currentUser: StaffPermissionProfile | null | undefined;
   compact?: boolean;
+  selectedInvoiceIds?: string[];
+  onClearSelected?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [busyAction, setBusyAction] = useState("");
@@ -206,6 +210,17 @@ export default function ControllerExportPanel({
   const canHandoff = queueQuery.data?.canHandoff
     ?? canHandoffQuickBooks(currentUser);
   const overLimit = approvedCount > exportLimit;
+  const selectedIds = useMemo(
+    () => [...new Set(selectedInvoiceIds.map(invoiceId => String(invoiceId || "").trim()).filter(Boolean))],
+    [selectedInvoiceIds],
+  );
+  const selectedCount = selectedIds.length;
+  const hasSelection = selectedCount > 0;
+  const selectedOverLimit = selectedCount > exportLimit;
+  const stageDisabled = Boolean(busyAction)
+    || queueQuery.isLoading
+    || selectedOverLimit
+    || (!hasSelection && (approvedCount === 0 || overLimit));
   const actors = useMemo(() => historyQuery.data?.actors || [], [historyQuery.data?.actors]);
 
   const refresh = async () => {
@@ -218,15 +233,15 @@ export default function ControllerExportPanel({
     ]);
   };
 
-  const stageAll = async () => {
-    if (!canHandoff || approvedCount === 0 || overLimit || busyAction) return;
+  const stageInvoices = async () => {
+    if (!canHandoff || stageDisabled) return;
     setBusyAction("stage");
     setError(null);
     setNotice(null);
     try {
       const response = await controllerExportRequest("/api/controller-exports", {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify(hasSelection ? { invoiceIds: selectedIds } : {}),
       });
       if (!response.ok) {
         const payload = await response.json().catch((): ErrorPayload => ({}));
@@ -238,6 +253,7 @@ export default function ControllerExportPanel({
         `QuickBooks-Handoff-${new Date().toISOString().slice(0, 10)}.zip`,
       );
       setNotice(`Batch ${batchId.slice(0, 8)} staged. Invoices remain Approved until the QuickBooks import is confirmed.`);
+      onClearSelected?.();
       setShowHistory(true);
       await refresh();
     } catch (downloadError) {
@@ -375,6 +391,7 @@ export default function ControllerExportPanel({
             {canHandoff
               ? " Downloading stages a batch; only confirmation marks it sent."
               : " The queue is visible, but only the accounting handoff owner can stage or confirm it."}
+            {hasSelection ? ` ${selectedCount} approved invoice${selectedCount === 1 ? " is" : "s are"} selected.` : ""}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -382,15 +399,31 @@ export default function ControllerExportPanel({
             {showHistory ? "Hide audit log" : "View audit log"}
           </button>
           {canHandoff && (
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={stageAll}
-              disabled={Boolean(busyAction) || approvedCount === 0 || overLimit || queueQuery.isLoading}
-              style={{ display: "flex", alignItems: "center", gap: 7, opacity: busyAction || approvedCount === 0 || overLimit || queueQuery.isLoading ? 0.55 : 1 }}
-            >
-              {busyAction === "stage" ? <><BtnSpinner />Building package…</> : "Download handoff ZIP"}
-            </button>
+            <>
+              {hasSelection && (
+                <button
+                  type="button"
+                  className="btn-soft"
+                  onClick={onClearSelected}
+                  disabled={Boolean(busyAction)}
+                >
+                  Clear selected
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={stageInvoices}
+                disabled={stageDisabled}
+                style={{ display: "flex", alignItems: "center", gap: 7, opacity: stageDisabled ? 0.55 : 1 }}
+              >
+                {busyAction === "stage"
+                  ? <><BtnSpinner />Building package…</>
+                  : hasSelection
+                    ? `Download selected ZIP (${selectedCount})`
+                    : "Download handoff ZIP"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -403,9 +436,14 @@ export default function ControllerExportPanel({
           {oldestPendingAt ? ` (oldest: ${dateTime(oldestPendingAt)})` : ""}. Resolve these before the Wednesday contractor-payment run.
         </div>
       )}
-      {overLimit && (
+      {overLimit && !hasSelection && (
         <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
-          This queue exceeds the safe {exportLimit}-invoice archive limit. Export a selected/smaller batch before continuing.
+          This queue exceeds the safe {exportLimit}-invoice archive limit. Open the Approved tab, select up to {exportLimit} invoices, then download the selected ZIP.
+        </div>
+      )}
+      {selectedOverLimit && (
+        <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
+          Select no more than {exportLimit} invoices for one handoff ZIP.
         </div>
       )}
       {notice && <div role="status" style={{ fontSize: 11, color: T.success, marginTop: 8 }}>{notice}</div>}

@@ -4267,6 +4267,11 @@ export default function PortalShell() {
           <Modal onClose={() => { setModal(null); setSubmittedInvoiceNum(null); }} title={`Invoice #${submittedInvoiceNum} submitted`} width={440}>
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 22, lineHeight: 1.55 }}>
               Submitted to AFM for approval. You can find a copy in your Invoices tab anytime.
+              {!isManager && currentUser?.canInvoice === true && (
+                <div style={{ marginTop: 8 }}>
+                  Once every invoice for this job is submitted, return to the work order and choose Complete work &amp; invoicing.
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => { fire(`Invoice #${submittedInvoiceNum} saved`); setModal(null); setSubmittedInvoiceNum(null); }} className="btn-soft">Done</button>
