@@ -41,7 +41,7 @@ async function requireStaff(req: NextRequest) {
     return { error: jsonError("Forbidden", 403) };
   }
 
-  return { sb };
+  return { sb, profile };
 }
 
 export async function POST(req: NextRequest) {
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
   const { data: activity, error: activityError } = await auth.sb
     .from("activities")
-    .select("id,work_order_id,requires_contractor_attention,deleted_at")
+    .select("id,work_order_id,requires_contractor_attention,contractor_assignment_version,created_at,deleted_at")
     .eq("id", activityId)
     .eq("work_order_id", workOrderId)
     .is("deleted_at", null)
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
   const { data: workOrder, error: workOrderError } = await auth.sb
     .from("work_orders")
-    .select("contractor_id")
+    .select("contractor_id,contractor_assignment_version,contractor_assignment_started_at")
     .eq("id", workOrderId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -84,6 +84,22 @@ export async function POST(req: NextRequest) {
   if (workOrderError) return jsonError(workOrderError.message, 500);
   if (!workOrder?.contractor_id) {
     return jsonError("Work order is not assigned to a contractor", 400);
+  }
+
+  const activityCreatedAt = Date.parse(activity.created_at || "");
+  const assignmentStartedAt = Date.parse(
+    workOrder.contractor_assignment_started_at || "",
+  );
+  if (
+    activity.contractor_assignment_version !== workOrder.contractor_assignment_version
+    || !Number.isFinite(activityCreatedAt)
+    || !Number.isFinite(assignmentStartedAt)
+    || activityCreatedAt < assignmentStartedAt
+  ) {
+    return jsonError(
+      "Contractor assignment changed before the notification could be sent",
+      409,
+    );
   }
 
   const { data: contractor, error: contractorError } = await auth.sb
@@ -98,14 +114,71 @@ export async function POST(req: NextRequest) {
   }
   if (!contractor?.email) return jsonError("Contractor email not found", 400);
 
+  const { data: deliveryClaim, error: claimError } = await auth.sb.rpc(
+    "claim_contractor_activity_alert_delivery",
+    {
+      p_activity_id: activityId,
+      p_work_order_id: workOrderId,
+      p_actor_id: auth.profile.id,
+    },
+  );
+  if (claimError) return jsonError(claimError.message, 409);
+  if (deliveryClaim === "already_sent") {
+    return NextResponse.json({
+      success: true,
+      delivery: "already_sent",
+    });
+  }
+  if (deliveryClaim === "pending_or_unknown") {
+    return NextResponse.json(
+      { success: false, delivery: "pending_or_unknown" },
+      { status: 202 },
+    );
+  }
+  if (deliveryClaim === "delivery_unknown") {
+    return NextResponse.json(
+      { success: false, delivery: "delivery_unknown" },
+      { status: 202 },
+    );
+  }
+  if (deliveryClaim !== "new_claim") {
+    return jsonError("Contractor notification claim returned an invalid state", 500);
+  }
+
   try {
     await sendContractorPortalPing(contractor.email);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Notification send failed";
+    const { error: completionError } = await auth.sb.rpc(
+      "complete_contractor_activity_alert_delivery",
+      {
+        p_activity_id: activityId,
+        p_status: "unknown",
+        p_error_message: message,
+      },
+    );
     return jsonError(
-      error instanceof Error ? error.message : "Notification send failed",
+      completionError
+        ? `${message}; delivery outcome and audit confirmation are unknown: ${completionError.message}`
+        : `Contractor email delivery could not be confirmed: ${message}`,
+      502,
+    );
+  }
+
+  const { error: completionError } = await auth.sb.rpc(
+    "complete_contractor_activity_alert_delivery",
+    {
+      p_activity_id: activityId,
+      p_status: "sent",
+      p_error_message: null,
+    },
+  );
+  if (completionError) {
+    return jsonError(
+      `Contractor email sent, but delivery confirmation failed: ${completionError.message}`,
       500,
     );
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, delivery: "sent" });
 }

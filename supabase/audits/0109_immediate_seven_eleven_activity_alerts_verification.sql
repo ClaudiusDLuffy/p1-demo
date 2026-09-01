@@ -5,21 +5,21 @@
 
 with function_state as (
   select
-    procedure.oid,
-    procedure.proname,
-    procedure.prosecdef,
-    lower(pg_get_functiondef(procedure.oid)) as body,
-    coalesce(procedure.proconfig, '{}'::text[]) as config,
-    has_function_privilege('anon', procedure.oid, 'EXECUTE')
+    proc_row.oid,
+    proc_row.proname,
+    proc_row.prosecdef,
+    lower(pg_get_functiondef(proc_row.oid)) as body,
+    coalesce(proc_row.proconfig, '{}'::text[]) as config,
+    has_function_privilege('anon', proc_row.oid, 'EXECUTE')
       as anonymous_can_execute,
-    has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
+    has_function_privilege('authenticated', proc_row.oid, 'EXECUTE')
       as authenticated_can_execute,
-    has_function_privilege('service_role', procedure.oid, 'EXECUTE')
+    has_function_privilege('service_role', proc_row.oid, 'EXECUTE')
       as service_role_can_execute
-  from pg_proc procedure
-  join pg_namespace namespace on namespace.oid = procedure.pronamespace
-  where namespace.nspname = 'public'
-    and procedure.proname in (
+  from pg_proc proc_row
+  join pg_namespace namespace_row on namespace_row.oid = proc_row.pronamespace
+  where namespace_row.nspname = 'public'
+    and proc_row.proname in (
       'stamp_activity_actor_audit',
       'enforce_activity_channel_update',
       'get_portal_work_order',
@@ -30,35 +30,35 @@ with function_state as (
 ), trigger_state as (
   select
     count(*) filter (
-      where trigger.tgname = 'stamp_activity_actor_audit_trigger'
-        and procedure.proname = 'stamp_activity_actor_audit'
-        and not trigger.tgisinternal
+      where trigger_row.tgname = 'stamp_activity_actor_audit_trigger'
+        and proc_row.proname = 'stamp_activity_actor_audit'
+        and not trigger_row.tgisinternal
     ) as insert_trigger_count,
     count(*) filter (
-      where trigger.tgname = 'enforce_activity_channel_update_trigger'
-        and procedure.proname = 'enforce_activity_channel_update'
-        and not trigger.tgisinternal
+      where trigger_row.tgname = 'enforce_activity_channel_update_trigger'
+        and proc_row.proname = 'enforce_activity_channel_update'
+        and not trigger_row.tgisinternal
     ) as update_trigger_count,
     coalesce(bool_or(
-      trigger.tgname = 'enforce_activity_channel_update_trigger'
-      and pg_get_triggerdef(trigger.oid) ilike '%event_key%'
-      and pg_get_triggerdef(trigger.oid) ilike '%type%'
+      trigger_row.tgname = 'enforce_activity_channel_update_trigger'
+      and pg_get_triggerdef(trigger_row.oid) ilike '%event_key%'
+      and pg_get_triggerdef(trigger_row.oid) ilike '%type%'
     ), false) as update_trigger_covers_identity
-  from pg_trigger trigger
-  join pg_proc procedure on procedure.oid = trigger.tgfoid
-  where trigger.tgrelid = 'public.activities'::regclass
+  from pg_trigger trigger_row
+  join pg_proc proc_row on proc_row.oid = trigger_row.tgfoid
+  where trigger_row.tgrelid = 'public.activities'::regclass
 ), constraint_state as (
   select
     count(*) filter (
-      where constraint.conname = 'activities_channel_sync_check'
-        and pg_get_constraintdef(constraint.oid) ilike
+      where constraint_row.conname = 'activities_channel_sync_check'
+        and pg_get_constraintdef(constraint_row.oid) ilike
           '%requires_7eleven_sync%activity_channel%field_note%'
     ) as sync_constraint_count,
     count(*) filter (
-      where constraint.conname = 'activities_internal_channel_check'
+      where constraint_row.conname = 'activities_internal_channel_check'
     ) as internal_constraint_count
-  from pg_constraint constraint
-  where constraint.conrelid = 'public.activities'::regclass
+  from pg_constraint constraint_row
+  where constraint_row.conrelid = 'public.activities'::regclass
 ), realtime_state as (
   select exists (
     select 1

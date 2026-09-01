@@ -19,6 +19,7 @@ export type Database = {
           activity_channel: string
           author_id: string | null
           author_name: string
+          contractor_assignment_version: number
           contractor_attention_acknowledged_at: string | null
           contractor_attention_acknowledged_by: string | null
           created_at: string | null
@@ -43,6 +44,7 @@ export type Database = {
           activity_channel?: string
           author_id?: string | null
           author_name: string
+          contractor_assignment_version?: number
           contractor_attention_acknowledged_at?: string | null
           contractor_attention_acknowledged_by?: string | null
           created_at?: string | null
@@ -67,6 +69,7 @@ export type Database = {
           activity_channel?: string
           author_id?: string | null
           author_name?: string
+          contractor_assignment_version?: number
           contractor_attention_acknowledged_at?: string | null
           contractor_attention_acknowledged_by?: string | null
           created_at?: string | null
@@ -118,6 +121,61 @@ export type Database = {
           },
           {
             foreignKeyName: "activities_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contractor_activity_alert_deliveries: {
+        Row: {
+          activity_id: string
+          claimed_at: string
+          completed_at: string | null
+          contractor_assignment_version: number
+          contractor_id: string
+          error_message: string | null
+          status: string
+          work_order_id: string
+        }
+        Insert: {
+          activity_id: string
+          claimed_at?: string
+          completed_at?: string | null
+          contractor_assignment_version: number
+          contractor_id: string
+          error_message?: string | null
+          status?: string
+          work_order_id: string
+        }
+        Update: {
+          activity_id?: string
+          claimed_at?: string
+          completed_at?: string | null
+          contractor_assignment_version?: number
+          contractor_id?: string
+          error_message?: string | null
+          status?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_activity_alert_deliveries_activity_id_fkey"
+            columns: ["activity_id"]
+            isOneToOne: true
+            referencedRelation: "activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_activity_alert_deliveries_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_activity_alert_deliveries_work_order_id_fkey"
             columns: ["work_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"
@@ -2680,6 +2738,22 @@ export type Database = {
           p_request_signature: string
         }
         Returns: string | null
+      }
+      claim_contractor_activity_alert_delivery: {
+        Args: {
+          p_activity_id: string
+          p_actor_id: string
+          p_work_order_id: string
+        }
+        Returns: string
+      }
+      complete_contractor_activity_alert_delivery: {
+        Args: {
+          p_activity_id: string
+          p_error_message?: string | null
+          p_status: string
+        }
+        Returns: undefined
       }
       complete_controller_invoice_export: {
         Args: {
