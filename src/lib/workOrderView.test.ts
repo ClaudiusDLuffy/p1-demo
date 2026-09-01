@@ -39,7 +39,7 @@ test("staff action reasons cover operational and billing follow-up", () => {
       hasUnreadNotes: true,
       pendingSevenElevenSyncCount: 1,
     }, true),
-    ["Assignment needed", "Unread activity"],
+    ["Assignment needed", "Unread activity", "7-Eleven update pending"],
   );
   assert.deepEqual(
     getWorkOrderActionReasons({ status: "pending_invoice" }, true),
@@ -79,18 +79,19 @@ test("an overdue SLA does not make an otherwise active work order action-require
   );
 });
 
-test("pending 7-Eleven updates are detected from either count or summary flag", () => {
+test("pending 7-Eleven updates are detected immediately on active work", () => {
   assert.equal(workOrderHasPendingSevenElevenSync({ functionalStatus: "Completed", pendingSevenElevenSyncCount: 2 }), true);
   assert.equal(workOrderHasPendingSevenElevenSync({ status: "closed", hasPendingSevenElevenSync: true }), true);
-  assert.equal(workOrderHasPendingSevenElevenSync({ functionalStatus: "Awaiting Parts", pendingSevenElevenSyncCount: 2 }), false);
+  assert.equal(workOrderHasPendingSevenElevenSync({ status: "wip", pendingSevenElevenSyncCount: 2 }), true);
+  assert.equal(workOrderHasPendingSevenElevenSync({ status: "parts", hasPendingSevenElevenSync: true }), true);
   assert.equal(workOrderHasPendingSevenElevenSync({ functionalStatus: "Completed", pendingSevenElevenSyncCount: 0 }), false);
 });
 
 test("pending 7-Eleven updates rise first without changing the selected order within groups", () => {
   const sorted = sortWorkOrders([
     { id: "ordinary-newest", createdAt: "2026-08-06T15:00:00Z" },
-    { id: "sync-oldest", createdAt: "2026-08-06T13:00:00Z", functionalStatus: "Completed", pendingSevenElevenSyncCount: 1 },
-    { id: "sync-newest", createdAt: "2026-08-06T14:00:00Z", functionalStatus: "Completed", pendingSevenElevenSyncCount: 1 },
+    { id: "sync-oldest", createdAt: "2026-08-06T13:00:00Z", status: "wip", pendingSevenElevenSyncCount: 1 },
+    { id: "sync-newest", createdAt: "2026-08-06T14:00:00Z", status: "parts", pendingSevenElevenSyncCount: 1 },
   ], "newest");
 
   assert.deepEqual(
@@ -113,6 +114,26 @@ test("started work advances progress even when no ETA was entered", () => {
       { label: "Work started", done: true },
       { label: "Asset captured", done: false },
     ],
+  );
+});
+
+test("an authoritative pending count keeps the 7-Eleven progress step open", () => {
+  const steps = getWorkOrderProgressSteps({
+    status: "pending_invoice",
+    contractor: "pro_ops",
+    startTime: "2026-07-27T13:45:00.000Z",
+    assetMake: "True",
+    assetModel: "T-49",
+    assetSerial: "SERIAL-1",
+    pendingSevenElevenSyncCount: 1,
+  }, [{
+    requiresSevenElevenSync: true,
+    syncedToSevenElevenAt: "2026-07-27T15:00:00.000Z",
+  }]);
+
+  assert.deepEqual(
+    steps.find(step => step.label === "7-Eleven updated"),
+    { label: "7-Eleven updated", done: false },
   );
 });
 

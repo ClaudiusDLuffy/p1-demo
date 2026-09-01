@@ -151,18 +151,45 @@ export default function useWorkOrders({
     invalidateWorkOrders();
   };
 
-  // Local optimistic patch helper (visual update before DB confirms)
+  const pendingSevenElevenCountFor = (workOrder: any) => Math.max(
+    Number(workOrder?.pendingSevenElevenSyncCount || 0),
+    Array.isArray(workOrder?.pendingSevenElevenActivities)
+      ? workOrder.pendingSevenElevenActivities.length
+      : 0,
+    Array.isArray(workOrder?.activities)
+      ? workOrder.activities.filter(
+          (activity: any) => activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt,
+        ).length
+      : 0,
+  );
+
+  // Local optimistic patch helper (visual update before DB confirms). A new
+  // unsynced field note also updates the summary immediately; the invalidated
+  // server projection remains authoritative after the write settles.
   const patchLocalWO = (id: string, patch: any, newActivity?: any) => {
-    setWorkOrders(prev => prev.map(w => w.id === id ? {
-      ...w,
-      ...patch,
-      activities: newActivity ? [newActivity, ...(w.activities || [])] : (w.activities || []),
-    } : w));
+    setWorkOrders(prev => prev.map(w => {
+      if (w.id !== id) return w;
+      const createsPendingSevenElevenUpdate = !!newActivity?.requiresSevenElevenSync
+        && !newActivity?.syncedToSevenElevenAt;
+      return {
+        ...w,
+        ...patch,
+        ...(createsPendingSevenElevenUpdate
+          ? {
+              pendingSevenElevenSyncCount: pendingSevenElevenCountFor(w) + 1,
+              hasPendingSevenElevenSync: true,
+            }
+          : {}),
+        activities: newActivity ? [newActivity, ...(w.activities || [])] : (w.activities || []),
+      };
+    }));
   };
   const workflowAuditFor = (
     woId: string,
     eventKey?: string,
     eventData?: import("../../lib/supabase/database.types").Json,
+    activityChannel?: "field_note" | "internal_note" | "contractor_message" | "system_event" | "legacy",
+    requiresSevenElevenSync = false,
   ) => ({
     staffOverride: !!isManager,
     overrideForContractorId: isManager
@@ -170,6 +197,8 @@ export default function useWorkOrders({
       : null,
     eventKey,
     eventData,
+    activityChannel,
+    requiresSevenElevenSync,
   });
   const localActivity = (
     text: string,
@@ -178,6 +207,7 @@ export default function useWorkOrders({
     eventKey?: string,
     requiresSevenElevenSync = false,
     staffOnly = false,
+    activityChannel?: "field_note" | "internal_note" | "contractor_message" | "system_event" | "legacy",
   ) => ({
     author: type === "system" ? "System" : currentUser.name,
     time: dateNow(),
@@ -189,6 +219,14 @@ export default function useWorkOrders({
     overrideForContractorId: null,
     eventKey: eventKey || (type === "system" ? "system" : "note"),
     eventData: {},
+    activityChannel: activityChannel
+      || (requiresSevenElevenSync
+        ? "field_note"
+        : staffOnly
+          ? "internal_note"
+          : type === "system"
+            ? "system_event"
+            : "legacy"),
     requiresSevenElevenSync,
     syncedToSevenElevenAt: null,
   });
@@ -375,9 +413,24 @@ export default function useWorkOrders({
 
   const doDeleteActivity = async (woId: string, activityId: string) => {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    setWorkOrders(prev => prev.map(w => w.id === woId
-      ? { ...w, activities: (w.activities || []).filter((a: any) => a.id !== activityId) }
-      : w));
+    setWorkOrders(prev => prev.map(w => {
+      if (w.id !== woId) return w;
+      const deleted = (w.activities || []).find((activity: any) => activity.id === activityId);
+      const removedPendingSevenElevenUpdate = !!deleted?.requiresSevenElevenSync
+        && !deleted?.syncedToSevenElevenAt;
+      const pendingCount = removedPendingSevenElevenUpdate
+        ? Math.max(0, pendingSevenElevenCountFor(w) - 1)
+        : pendingSevenElevenCountFor(w);
+      return {
+        ...w,
+        activities: (w.activities || []).filter((activity: any) => activity.id !== activityId),
+        pendingSevenElevenActivities: (w.pendingSevenElevenActivities || []).filter(
+          (activity: any) => activity.id !== activityId,
+        ),
+        pendingSevenElevenSyncCount: pendingCount,
+        hasPendingSevenElevenSync: pendingCount > 0,
+      };
+    }));
     fire("Comment deleted");
     await dbCall(async () => {
       await deleteActivity(activityId);
@@ -463,14 +516,26 @@ export default function useWorkOrders({
       patch.startTimeRaw = firstStartIso;
     }
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, patch, localActivity(text, "note", isManager, "check_in", true));
+    patchLocalWO(woId, patch, localActivity(text, "note", isManager, "check_in", true, false, "field_note"));
     fire("Work started · 7-Eleven update pending");
     await dbCall(async () => {
       const dbPatch: any = { status: "wip", functionalStatus: "Work in Progress" };
       if (!existing?.startTimeRaw) dbPatch.startTime = firstStartIso;
       await updateWorkOrder(woId, dbPatch);
       await openWorkOrderVisit(woId, requestedStartIso);
-      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "check_in", { checkedInAt: requestedStartIso, notes: notes.trim() || null }));
+      await insertActivity(
+        woId,
+        currentUser.name,
+        text,
+        "note",
+        workflowAuditFor(
+          woId,
+          "check_in",
+          { checkedInAt: requestedStartIso, notes: notes.trim() || null },
+          "field_note",
+          true,
+        ),
+      );
     }, "Start work failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("startWork_" + woId, false);
@@ -523,12 +588,24 @@ export default function useWorkOrders({
     if (legacyEta) updates.partEta = legacyEta;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const partsSnapshot = qc.getQueryData(WO_PARTS_KEY);
-    patchLocalWO(woId, updates, localActivity(text, "note", isManager));
-    fire("Paused — awaiting parts");
+    patchLocalWO(woId, updates, localActivity(text, "note", isManager, "job_paused", true, false, "field_note"));
+    fire("Paused — awaiting parts · 7-Eleven update pending");
     await dbCall(async () => {
       await updateWorkOrder(woId, updates);
       await closeWorkOrderVisit(woId, pauseIso);
-      await insertActivity(woId, currentUser.name, text, "note", workflowAuditFor(woId, "job_paused", { pausedAt: pauseIso, reason, notes: notes || null }));
+      await insertActivity(
+        woId,
+        currentUser.name,
+        text,
+        "note",
+        workflowAuditFor(
+          woId,
+          "job_paused",
+          { pausedAt: pauseIso, reason, notes: notes || null },
+          "field_note",
+          true,
+        ),
+      );
       if (cleanParts.length) {
         const inserted: any[] = [];
         for (const p of cleanParts) {
@@ -752,18 +829,28 @@ export default function useWorkOrders({
             activityText: text,
           });
           const fieldPatch = existing?.functionalStatus === "Completed" ? {} : patch;
-          patchLocalWO(woId, {
-            ...fieldPatch,
-            status: result.workOrderStatus,
-            contractorInvoicingCompletedAt: result.completedAt,
-            contractorInvoicingCompletedBy:
-              result.completedBy || currentUser?.id || null,
-            contractorInvoicingAssignmentVersion:
-              existing?.contractorAssignmentVersion ?? null,
-            contractorInvoicingWorkflowCycle:
-              existing?.workflowCycle ?? null,
-            contractorInvoicingCompletionSource: result.source || "contractor",
-          });
+          const completionActivity = result.workCompletionApplied
+            ? {
+                ...localActivity(text, "note", false, "job_completed", true, false, "field_note"),
+                id: result.completionActivityId || undefined,
+              }
+            : undefined;
+          patchLocalWO(
+            woId,
+            {
+              ...fieldPatch,
+              status: result.workOrderStatus,
+              contractorInvoicingCompletedAt: result.completedAt,
+              contractorInvoicingCompletedBy:
+                result.completedBy || currentUser?.id || null,
+              contractorInvoicingAssignmentVersion:
+                existing?.contractorAssignmentVersion ?? null,
+              contractorInvoicingWorkflowCycle:
+                existing?.workflowCycle ?? null,
+              contractorInvoicingCompletionSource: result.source || "contractor",
+            },
+            completionActivity,
+          );
           invalidateBoth();
           fire(result.applied
             ? "Work and invoicing completed — staff can continue approval and billing"
@@ -777,7 +864,7 @@ export default function useWorkOrders({
       }
 
       const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-      patchLocalWO(woId, patch, localActivity(text, "note", isManager, "job_completed", true));
+      patchLocalWO(woId, patch, localActivity(text, "note", isManager, "job_completed", true, false, "field_note"));
       let completionResult: { applied: boolean; reason?: string } | null = null;
       const saved = await dbCall(async () => {
         completionResult = await completeWorkOrderOnce(woId, {
@@ -1301,9 +1388,10 @@ export default function useWorkOrders({
     requestedChannel: "field_note" | "internal_note" | "contractor_message" = currentUser?.role === "contractor"
       ? "field_note"
       : "internal_note",
+    explicitText?: string,
   ) => {
-    const text = noteText.trim();
-    if (!text) return;
+    const text = (explicitText ?? noteText).trim();
+    if (!text) return false;
     const channel = currentUser?.role === "contractor" && requestedChannel === "internal_note"
       ? "contractor_message"
       : requestedChannel;
@@ -1311,10 +1399,10 @@ export default function useWorkOrders({
     setLoading("postNote_" + woId, true);
     try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    setNoteText("");
-    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", activityChannel: channel, enteredByRole: currentUser?.role || "system", isStaffOverride: false, isStaffOnly, requiresSevenElevenSync: channel === "field_note", syncedToSevenElevenAt: null }, ...(w.activities || [])] } : w));
+    if (explicitText === undefined) setNoteText("");
+    patchLocalWO(woId, {}, { author: currentUser.name, time: dateNow(), text, type: "note", activityChannel: channel, enteredByRole: currentUser?.role || "system", isStaffOverride: false, isStaffOnly, requiresSevenElevenSync: channel === "field_note", syncedToSevenElevenAt: null });
     fire(channel === "internal_note" ? "Internal note posted" : channel === "contractor_message" ? "Message posted" : "Field note posted");
-    await dbCall(async () => {
+    const saved = await dbCall(async () => {
       await insertActivity(woId, currentUser.name, text, "note", {
         eventKey: "note",
         activityChannel: channel,
@@ -1322,6 +1410,7 @@ export default function useWorkOrders({
         requiresSevenElevenSync: channel === "field_note",
       });
     }, "Note save failed", () => restoreWorkOrders(snapshot));
+    return saved;
     } finally {
       setLoading("postNote_" + woId, false);
     }
@@ -1449,18 +1538,31 @@ export default function useWorkOrders({
       await markActivitySevenElevenSynced(activityId, synced);
       setWorkOrders(prev => prev.map(w => {
         if (w.id !== woId) return w;
+        const changedActivity = (w.activities || []).find((activity: any) => activity.id === activityId);
+        const wasPending = !!changedActivity?.requiresSevenElevenSync
+          && !changedActivity?.syncedToSevenElevenAt;
+        const willBePending = !!changedActivity?.requiresSevenElevenSync && !synced;
+        const pendingDelta = Number(willBePending) - Number(wasPending);
+        const pendingCount = Math.max(0, pendingSevenElevenCountFor(w) + pendingDelta);
         const activities = (w.activities || []).map((activity: any) =>
           activity.id === activityId
             ? { ...activity, syncedToSevenElevenAt: synced ? new Date().toISOString() : null }
             : activity
         );
-        const pending = activities.filter((activity: any) => activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt);
+        const pending = (w.pendingSevenElevenActivities || [])
+          .filter((activity: any) => activity.id !== activityId);
+        if (willBePending && changedActivity) {
+          pending.unshift({
+            ...changedActivity,
+            syncedToSevenElevenAt: null,
+          });
+        }
         return {
           ...w,
           activities,
           pendingSevenElevenActivities: pending,
-          pendingSevenElevenSyncCount: pending.length,
-          hasPendingSevenElevenSync: pending.length > 0,
+          pendingSevenElevenSyncCount: pendingCount,
+          hasPendingSevenElevenSync: pendingCount > 0,
         };
       }));
       invalidateWorkOrders();

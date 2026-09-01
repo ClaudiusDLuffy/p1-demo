@@ -241,12 +241,12 @@ export const workOrderHasPendingSevenElevenSync = (
   )
 );
 
+// A persisted activity flag is the source of truth. Do not hide it behind the
+// work-order status: check-in, pause/checkout, and job notes require portal
+// updates while the technician is still working the call.
 export const workOrderCanEnterSevenElevenQueue = (
   wo: WorkOrderViewRow | null | undefined,
-) => Boolean(
-  wo?.status === "closed"
-  || (wo?.functionalStatus || wo?.functional_status) === "Completed"
-);
+) => Boolean(wo);
 
 export const canFlagWorkOrderCapital = (
   wo: WorkOrderViewRow | null | undefined,
@@ -281,9 +281,11 @@ export const getWorkOrderProgressSteps = (
   const assetCaptured = Boolean(wo?.assetMake && wo?.assetModel && wo?.assetSerial);
   const reachedCompleted = ["completed", "pending_invoice", "pending_approval", "closed"].includes(status);
   const trackedSyncUpdates = activities.filter((activity) => activity.requiresSevenElevenSync);
-  const reachedPortalUpdated = trackedSyncUpdates.length > 0
-    ? trackedSyncUpdates.every((activity) => Boolean(activity.syncedToSevenElevenAt))
-    : ["pending_invoice", "pending_approval", "closed"].includes(status);
+  const reachedPortalUpdated = workOrderHasPendingSevenElevenSync(wo)
+    ? false
+    : trackedSyncUpdates.length > 0
+      ? trackedSyncUpdates.every((activity) => Boolean(activity.syncedToSevenElevenAt))
+      : ["pending_invoice", "pending_approval", "closed"].includes(status);
 
   const rawSteps = [
     { label: "Created", condition: true },

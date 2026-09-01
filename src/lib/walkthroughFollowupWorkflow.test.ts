@@ -10,7 +10,7 @@ const billingEditor = read("src/features/billing/BillingInvoiceCreateModal.tsx")
 const sourceDrawer = read("src/features/billing/SourceContractorInvoiceDrawer.tsx");
 const sourcePreview = read("src/features/billing/PrivatePdfCanvasPreview.tsx");
 const nextConfig = read("next.config.ts");
-const queueMigration = read("supabase/migrations/0093_work_order_queue_pinning.sql");
+const queueMigration = read("supabase/migrations/0109_immediate_seven_eleven_activity_alerts.sql");
 const billingMigration = read("supabase/migrations/0094_staff_billing_sorting.sql");
 
 test("invoice and billing detours return to the originating work order", () => {

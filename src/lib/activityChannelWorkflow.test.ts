@@ -8,6 +8,7 @@ const migration = read("supabase/migrations/0095_activity_channels.sql");
 const db = read("src/lib/db.ts");
 const hook = read("src/features/work-orders/useWorkOrders.ts");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
+const activityPanels = read("src/features/work-orders/WorkOrderActivityPanels.tsx");
 
 test("activity channels are constrained and only field notes can enter the 7-Eleven queue", () => {
   assert.match(migration, /add column if not exists activity_channel/);
@@ -58,13 +59,15 @@ test("legacy workflow events are classified server-side without trusting the bro
   assert.match(db, /activity_channel: audit\.activityChannel \|\| "legacy"/);
 });
 
-test("portal posts and displays field, internal, contractor-chat, and system streams separately", () => {
+test("portal uses dedicated 7-Eleven and general activity areas", () => {
   assert.match(hook, /requestedChannel: "field_note" \| "internal_note" \| "contractor_message"/);
   assert.match(hook, /staffOnly: isStaffOnly/);
   assert.match(hook, /requiresSevenElevenSync: channel === "field_note"/);
-  assert.match(detail, /aria-label="Activity channels"/);
-  assert.match(detail, /P1 internal only/);
-  assert.match(detail, /Field note for 7-Eleven/);
-  assert.match(detail, /Contractor chat/);
-  assert.match(detail, /activityChannel === "field_note" && e\.requiresSevenElevenSync/);
+  assert.match(detail, /<WorkOrderActivityPanels/);
+  assert.match(activityPanels, /7-Eleven updates \/ job notes/);
+  assert.match(activityPanels, /General chat &amp; activity/);
+  assert.match(activityPanels, /P1 internal only/);
+  assert.match(activityPanels, /P1 \+ assigned contractor/);
+  assert.match(activityPanels, /activityChannel === "field_note" && activity\.requiresSevenElevenSync/);
+  assert.doesNotMatch(activityPanels, /aria-label="Activity channels"|Choose note channel/);
 });

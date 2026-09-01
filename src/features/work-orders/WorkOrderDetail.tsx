@@ -44,6 +44,7 @@ import {
 } from "../../lib/storeWorkOrderHistory";
 import StoreWorkOrderHistory from "./StoreWorkOrderHistory";
 import VisitTimeline from "./VisitTimeline";
+import WorkOrderActivityPanels from "./WorkOrderActivityPanels";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -74,26 +75,6 @@ const formatEta = (v: any, workOrder?: any): string => {
     minute: "2-digit",
     hour12: true,
   });
-};
-
-type ActivityChannel = "all" | "field_note" | "internal_note" | "contractor_message" | "system_event" | "legacy";
-
-const channelForActivity = (activity: any): Exclude<ActivityChannel, "all"> =>
-  activity?.activityChannel
-  || (activity?.requiresSevenElevenSync
-    ? "field_note"
-    : activity?.isStaffOnly
-      ? "internal_note"
-      : activity?.type === "system"
-        ? "system_event"
-        : "legacy");
-
-const ACTIVITY_CHANNEL_LABELS: Record<Exclude<ActivityChannel, "all">, string> = {
-  field_note: "Field note",
-  internal_note: "P1 internal",
-  contractor_message: "P1 / contractor chat",
-  system_event: "System",
-  legacy: "Legacy note",
 };
 
 export default function WorkOrderDetail(props: any) {
@@ -149,26 +130,9 @@ export default function WorkOrderDetail(props: any) {
   const [retractingInvId, setRetractingInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
   const [invoiceMenuId, setInvoiceMenuId] = useState<string | null>(null);
-  const isFieldTechnician = !isManager && currentUser?.role === "contractor" && Boolean(
-    currentUser?.contractorAccessLevel === "report_only"
-    || woData?.assignedTechnicianProfileId === currentUser?.id
-    || (
-      woData?.technicianOnJob
-      && String(woData.technicianOnJob).trim().toLowerCase()
-        === String(currentUser?.name || "").trim().toLowerCase()
-    ),
-  );
-  const defaultNoteChannel: Exclude<ActivityChannel, "all" | "system_event" | "legacy"> = isManager
-    ? "internal_note"
-    : isFieldTechnician
-      ? "field_note"
-      : "contractor_message";
-  const [noteChannel, setNoteChannel] = useState(defaultNoteChannel);
-  const [activityFilter, setActivityFilter] = useState<ActivityChannel>("all");
   useEffect(() => {
-    setNoteChannel(defaultNoteChannel);
-    setActivityFilter("all");
-  }, [defaultNoteChannel, selectedWO]);
+    setNoteText("");
+  }, [selectedWO, setNoteText]);
   const copyWorkOrderNumber = async () => {
     try {
       await navigator.clipboard.writeText(String(woData.id));
@@ -220,22 +184,6 @@ export default function WorkOrderDetail(props: any) {
     ),
     [isManager, woData?.activities],
   );
-  const visibleActivities = useMemo(
-    () => activityFilter === "all"
-      ? allVisibleActivities
-      : allVisibleActivities.filter(
-          (activity: any) => channelForActivity(activity) === activityFilter,
-        ),
-    [activityFilter, allVisibleActivities],
-  );
-  const activityChannelCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: allVisibleActivities.length };
-    for (const activity of allVisibleActivities) {
-      const channel = channelForActivity(activity);
-      counts[channel] = (counts[channel] || 0) + 1;
-    }
-    return counts;
-  }, [allVisibleActivities]);
   const sameCategory = useMemo(
     () => woData ? storeHistory.filter(w => w.category === woData.category).length : 0,
     [storeHistory, woData]
@@ -1278,7 +1226,7 @@ export default function WorkOrderDetail(props: any) {
                         on completed/closed jobs; identical from the board and History
                         (same detail component). */}
                     {(["completed", "pending_invoice", "pending_approval", "closed"].includes(woData.status) || woData.assetModel || woData.resolutionCode) && (() => {
-                      const closeAct = visibleActivities.find((a: any) => /(?:sent to QuickBooks|marked paid) by /i.test(a.text || ""));
+                      const closeAct = allVisibleActivities.find((a: any) => /(?:sent to QuickBooks|marked paid) by /i.test(a.text || ""));
                       const closedBy = closeAct ? (closeAct.text.match(/(?:sent to QuickBooks|marked paid) by ([^.]+)/i)?.[1]?.trim() || null) : null;
                       const rec = [
                         { l: "Equipment make", v: woData.assetMake || "—" },
@@ -1343,250 +1291,35 @@ export default function WorkOrderDetail(props: any) {
                       loadingStates={loadingStates}
                     />
 
-                    {/* Activity */}
-                    <div className="card" style={{ padding: 22 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Field notes &amp; conversation · {woData.activityPage?.totalCount ?? allVisibleActivities.length}</div>
-                        {isManager && (
-                          <div className="desktop-only-activity-action" style={{ alignItems: "center", gap: 8 }}>
-                            <button type="button" className="btn-soft" onClick={copyWorkOrderNumber} style={{ padding: "7px 12px", fontSize: 11 }}>
-                              Copy work order number
-                            </button>
-                            <button onClick={doAiEnhance} disabled={aiEnhancing} style={{ padding: "7px 14px", borderRadius: 8, background: aiEnhancing ? T.borderSoft : T.ink, color: aiEnhancing ? T.muted : T.bg, border: "none", cursor: aiEnhancing ? "default" : "pointer", fontWeight: 600, fontSize: 11, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>{aiEnhancing ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loadingâ€¦</> : <>AI enhance notes <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4 }}>PREVIEW</span></>}</button>
-                          </div>
-                        )}
-                      </div>
-                      <div
-                        role="tablist"
-                        aria-label="Activity channels"
-                        style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}
-                      >
-                        {[
-                          { key: "all", label: "All" },
-                          { key: "field_note", label: "Field notes" },
-                          ...(isManager ? [{ key: "internal_note", label: "P1 internal" }] : []),
-                          { key: "contractor_message", label: isManager ? "Contractor chat" : "Messages" },
-                          { key: "system_event", label: "System" },
-                          ...(activityChannelCounts.legacy ? [{ key: "legacy", label: "Legacy" }] : []),
-                        ].map(tab => {
-                          const active = activityFilter === tab.key;
-                          return (
-                            <button
-                              key={tab.key}
-                              type="button"
-                              role="tab"
-                              aria-selected={active}
-                              onClick={() => setActivityFilter(tab.key as ActivityChannel)}
-                              style={{
-                                padding: "6px 9px",
-                                borderRadius: 999,
-                                border: `1px solid ${active ? T.accent : T.borderSoft}`,
-                                background: active ? T.accentSoft : T.surface,
-                                color: active ? T.accent : T.muted,
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                                fontSize: 10,
-                                fontWeight: 700,
-                              }}
-                            >
-                              {tab.label} · {activityChannelCounts[tab.key] || 0}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>
-                          Post to
-                          <select
-                            aria-label="Choose note channel"
-                            value={noteChannel}
-                            onChange={event => setNoteChannel(event.target.value as typeof noteChannel)}
-                            style={{ marginLeft: 7, padding: "7px 28px 7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 11 }}
-                          >
-                            {isManager ? (
-                              <>
-                                <option value="internal_note">P1 internal only</option>
-                                <option value="field_note">Field note for 7-Eleven</option>
-                                <option value="contractor_message">Contractor chat</option>
-                              </>
-                            ) : (
-                              <>
-                                <option value="field_note">Field note for 7-Eleven</option>
-                                <option value="contractor_message">Message to P1</option>
-                              </>
-                            )}
-                          </select>
-                        </label>
-                        <span style={{ color: T.subtle, fontSize: 10 }}>
-                          {noteChannel === "field_note"
-                            ? "Creates a 7-Eleven update task."
-                            : noteChannel === "internal_note"
-                              ? "Visible only to P1 staff."
-                              : "Visible to P1 and the assigned contractor; not sent to 7-Eleven."}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                        <input value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doPostNote(woData.id, noteChannel); }} placeholder={noteChannel === "internal_note" ? "Add an internal P1 note..." : noteChannel === "contractor_message" ? "Write a message..." : "Add a field note for 7-Eleven..."} style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surfaceSoft, outline: "none" }} />
-                        <button
-                          onClick={() => doPostNote(woData.id, noteChannel)}
-                          disabled={isLoading("postNote_" + woData.id)}
-                          className="btn-primary desktop-only-activity-action"
-                          style={{ opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", alignItems: "center", gap: 6 }}
-                        >
-                          {isLoading("postNote_" + woData.id) ? <><BtnSpinner />Posting...</> : "Post"}
-                        </button>
-                      </div>
-                      <div className="mobile-only-activity-actions" style={{ display: "none", gap: 8, marginBottom: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                        {isManager && (
-                          <button type="button" onClick={copyWorkOrderNumber} className="btn-soft" style={{ fontSize: 11 }}>
-                            Copy work order number
-                          </button>
-                        )}
-                        {isManager && (
-                          <button
-                            onClick={doAiEnhance}
-                            disabled={aiEnhancing}
-                            className="btn-primary"
-                            style={{ opacity: aiEnhancing ? 0.7 : 1, cursor: aiEnhancing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
-                          >
-                            {aiEnhancing
-                              ? <><span style={{ display: "inline-block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> Loading…</>
-                              : <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, lineHeight: 1.05 }}><span style={{ whiteSpace: "nowrap" }}>AI enhance notes</span><span style={{ fontSize: 8, fontWeight: 700, padding: "0 6px", borderRadius: 6, background: T.accent, color: "#fff", letterSpacing: 0.4, lineHeight: 1.4 }}>PREVIEW</span></span>}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => doPostNote(woData.id, noteChannel)}
-                          disabled={isLoading("postNote_" + woData.id)}
-                          className="btn-primary"
-                          style={{ opacity: isLoading("postNote_" + woData.id) ? 0.7 : 1, cursor: isLoading("postNote_" + woData.id) ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
-                        >
-                          {isLoading("postNote_" + woData.id) ? <><BtnSpinner />Posting...</> : "Post"}
-                        </button>
-                      </div>
-                      {aiNote && (
-                        <div style={{ background: T.surfaceSoft, border: `1px dashed ${T.accent}`, borderRadius: 12, padding: 18, marginBottom: 16, animation: "fadeUp 0.3s" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: 0.8, display: "flex", alignItems: "center", gap: 6 }}>✨ AI Enhance <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: T.accent, color: "#fff" }}>PREVIEW</span></span>
-                            <button onClick={() => setAiNote(null)} className="btn-soft" style={{ padding: "4px 10px", fontSize: 10 }}>Close</button>
-                          </div>
-                          {aiNote === "__PREVIEW__" ? (
-                            <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.65 }}>
-                              <div style={{ fontWeight: 600, color: T.ink, marginBottom: 6 }}>This feature is wired up and ready.</div>
-                              When live, this rewrites the contractor's raw note into a polished, AFM-ready summary using Claude — keeping technical accuracy but adding structure and professional tone. Eliminates the midnight rewriting bottleneck. <span style={{ color: T.accent, fontWeight: 600 }}>Activates at handover.</span>
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.65 }}>{aiNote}</div>
-                          )}
-                        </div>
-                      )}
-                      {visibleActivities.map((e: any, i: number) => {
-                        const activityChannel = channelForActivity(e);
-                        const canDelete = !!e.id && activityChannel !== "system_event" && e.type !== "system" && !!e.authorId && (isManager || e.authorId === currentUser.id);
-                        const menuOpen = activityMenuId === e.id;
-                        const staffEntered = ["manager", "dispatcher", "back_office"].includes(e.enteredByRole);
-                        const originLabel = e.isStaffOverride
-                          ? "Staff override"
-                          : staffEntered
-                            ? "Staff-entered"
-                            : e.enteredByRole === "contractor"
-                              ? "Contractor-entered"
-                              : null;
-                        return (
-                          <div key={e.id || i} style={{ display: "flex", gap: 12, marginBottom: 16, animation: i === 0 ? "fadeUp 0.3s" : "none", position: "relative" }}>
-                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: e.type === "system" ? T.border : T.accent, marginTop: 6, flexShrink: 0 }} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12 }}>
-                                <span style={{ fontWeight: 600, color: T.ink }}>{e.author}</span>
-                                <span style={{ color: T.subtle, marginLeft: 8, fontSize: 11 }}>{e.time}</span>
-                                {originLabel && (
-                                  <span style={{ display: "inline-block", marginLeft: 8, padding: "2px 6px", borderRadius: 6, fontSize: 9, fontWeight: 700, color: e.isStaffOverride ? "#73560C" : T.muted, background: e.isStaffOverride ? T.warnSoft : T.surfaceSoft, border: `1px solid ${e.isStaffOverride ? `${T.warn}55` : T.borderSoft}` }}>
-                                    {originLabel}
-                                  </span>
-                                )}
-                                <span style={{ display: "inline-block", marginLeft: 8, padding: "2px 6px", borderRadius: 6, fontSize: 9, fontWeight: 700, color: activityChannel === "field_note" ? T.accent : activityChannel === "internal_note" ? T.violet : activityChannel === "contractor_message" ? "#166534" : T.subtle, background: activityChannel === "field_note" ? T.accentSoft : activityChannel === "internal_note" ? T.violetSoft : activityChannel === "contractor_message" ? "#DCFCE7" : T.surfaceSoft, border: `1px solid ${activityChannel === "field_note" ? `${T.accent}44` : activityChannel === "internal_note" ? `${T.violet}44` : activityChannel === "contractor_message" ? "#22C55E55" : T.borderSoft}` }}>
-                                  {ACTIVITY_CHANNEL_LABELS[activityChannel]}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginTop: 3 }}>{e.text}</div>
-                              {isManager && activityChannel === "field_note" && e.requiresSevenElevenSync && (
-                                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, padding: "5px 8px", borderRadius: 8, background: e.syncedToSevenElevenAt ? T.successSoft : T.warnSoft, border: `1px solid ${e.syncedToSevenElevenAt ? `${T.success}44` : `${T.warn}55`}`, color: e.syncedToSevenElevenAt ? T.success : "#73560C", fontSize: 10, fontWeight: 700, cursor: isLoading("sync711_" + e.id) ? "wait" : "pointer" }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={!!e.syncedToSevenElevenAt}
-                                    disabled={isLoading("sync711_" + e.id)}
-                                    onChange={(event) => doMarkSevenElevenSynced(woData.id, e.id, event.target.checked)}
-                                    style={{ width: 14, height: 14, accentColor: T.success, cursor: "inherit" }}
-                                  />
-                                  {e.syncedToSevenElevenAt ? "Updated in 7-Eleven" : "Needs 7-Eleven update"}
-                                </label>
-                              )}
-                              {isManager && e.id && ["field_note", "contractor_message", "legacy"].includes(activityChannel) && (staffEntered || e.isStaffOverride || e.requiresContractorAttention) && (
-                                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, marginLeft: e.requiresSevenElevenSync ? 7 : 0, padding: "5px 8px", borderRadius: 8, background: e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#DCFCE7" : T.surfaceSoft, border: `1px solid ${e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#22C55E66" : T.borderSoft}`, color: e.requiresContractorAttention && !e.contractorAcknowledgedAt ? "#166534" : T.muted, fontSize: 10, fontWeight: 700, cursor: isLoading("contractorAttention_" + e.id) ? "wait" : "pointer" }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={!!e.requiresContractorAttention}
-                                    disabled={isLoading("contractorAttention_" + e.id)}
-                                    onChange={(event) => doMarkContractorAttention(woData.id, e.id, event.target.checked)}
-                                    style={{ width: 14, height: 14, accentColor: "#16A34A", cursor: "inherit" }}
-                                  />
-                                  {e.contractorAcknowledgedAt
-                                    ? "Contractor acknowledged"
-                                    : e.requiresContractorAttention
-                                      ? "Needs contractor action"
-                                      : "Request contractor action"}
-                                </label>
-                              )}
-                              {!isManager && e.requiresContractorAttention && (
-                                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, padding: "6px 9px", borderRadius: 8, background: e.contractorAcknowledgedAt ? T.surfaceSoft : "#DCFCE7", border: `1px solid ${e.contractorAcknowledgedAt ? T.borderSoft : "#22C55E66"}`, color: e.contractorAcknowledgedAt ? T.muted : "#166534", fontSize: 10, fontWeight: 700, cursor: isLoading("contractorAck_" + e.id) ? "wait" : "pointer" }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={!!e.contractorAcknowledgedAt}
-                                    disabled={!!e.contractorAcknowledgedAt || isLoading("contractorAck_" + e.id)}
-                                    onChange={(event) => doAcknowledgeContractorAttention(woData.id, e.id, event.target.checked)}
-                                    style={{ width: 14, height: 14, accentColor: "#16A34A", cursor: "inherit" }}
-                                  />
-                                  {e.contractorAcknowledgedAt ? "Reviewed" : "Needs your attention"}
-                                </label>
-                              )}
-                            </div>
-                            {canDelete && (
-                              <div style={{ position: "relative", flexShrink: 0 }}>
-                                <button
-                                  onClick={() => setActivityMenuId(menuOpen ? null : e.id)}
-                                  aria-label="Activity actions"
-                                  style={{ width: 36, height: 36, padding: 0, borderRadius: 6, border: "none", background: menuOpen ? T.bgWarm : "transparent", color: T.subtle, cursor: "pointer", fontSize: 16, lineHeight: 1, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" }}
-                                >…</button>
-                                {menuOpen && (
-                                  <>
-                                    <div onClick={() => setActivityMenuId(null)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                                    <div style={{ position: "absolute", top: 28, right: 0, zIndex: 41, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(31,30,28,0.12)", minWidth: 120, overflow: "hidden" }}>
-                                      <button
-                                        onClick={() => { setActivityMenuId(null); setPendingDelete({ woId: woData.id, activityId: e.id }); setModal("deleteActivity"); }}
-                                        style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: T.danger, fontFamily: "inherit" }}
-                                      >Delete</button>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {visibleActivities.length === 0 && (
-                        <div style={{ padding: "18px 10px", textAlign: "center", color: T.subtle, fontSize: 12 }}>
-                          No activity in this channel on the loaded timeline.
-                        </div>
-                      )}
-                      {woData.activityPage?.hasMore && (
-                        <button
-                          type="button"
-                          className="btn-soft"
-                          disabled={loadingMoreActivities}
-                          onClick={() => onLoadMoreActivities?.()}
-                          style={{ width: "100%", justifyContent: "center" }}
-                        >{loadingMoreActivities ? <><BtnSpinnerDark />Loading activity...</> : `Load older activity (${allVisibleActivities.length} of ${woData.activityPage.totalCount})`}</button>
-                      )}
-                    </div>
+                    <WorkOrderActivityPanels
+                      key={woData.id}
+                      activities={allVisibleActivities}
+                      totalCount={woData.activityPage?.totalCount}
+                      pendingSevenElevenCount={woData.pendingSevenElevenSyncCount}
+                      hasMore={woData.activityPage?.hasMore}
+                      loadingMore={loadingMoreActivities}
+                      onLoadMore={() => onLoadMoreActivities?.()}
+                      fieldNoteText={noteText}
+                      setFieldNoteText={setNoteText}
+                      doPostNote={doPostNote}
+                      onCopyWorkOrder={copyWorkOrderNumber}
+                      aiNote={aiNote}
+                      setAiNote={setAiNote}
+                      aiEnhancing={aiEnhancing}
+                      doAiEnhance={doAiEnhance}
+                      workOrderId={woData.id}
+                      isManager={isManager}
+                      currentUser={currentUser}
+                      activityMenuId={activityMenuId}
+                      setActivityMenuId={setActivityMenuId}
+                      setPendingDelete={setPendingDelete}
+                      setModal={setModal}
+                      isLoading={isLoading}
+                      doMarkSevenElevenSynced={doMarkSevenElevenSynced}
+                      doMarkContractorAttention={doMarkContractorAttention}
+                      doAcknowledgeContractorAttention={doAcknowledgeContractorAttention}
+                    />
+
                   </div>
 
                   {/* Right sidebar */}
@@ -1657,7 +1390,7 @@ export default function WorkOrderDetail(props: any) {
                     )}
                     <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 14 }}>Progress</div>
-                      {getWorkOrderProgressSteps(woData, visibleActivities).map((s, i, a) => (
+                      {getWorkOrderProgressSteps(woData, allVisibleActivities).map((s, i, a) => (
                         <div key={i} style={{ display: "flex", gap: 12, position: "relative" }}>
                           {i < a.length - 1 && <div style={{ position: "absolute", left: 9, top: 20, width: 2, height: 20, background: s.done && a[i + 1]?.done ? T.success : T.borderSoft }} />}
                           <div style={{ width: 20, height: 20, borderRadius: "50%", border: s.done ? "none" : `2px solid ${T.border}`, background: s.done ? T.success : T.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
