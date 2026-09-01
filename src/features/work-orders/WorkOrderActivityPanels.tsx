@@ -473,7 +473,9 @@ export default function WorkOrderActivityPanels({
             <span style={{ color: T.subtle, fontSize: 10 }}>
               {isManager && generalChannel === "internal_note"
                 ? "Visible only to authorized P1 staff."
-                : "Visible to P1 and the assigned contractor; never sent to 7-Eleven."}
+                : isManager
+                  ? "Visible to P1 and the assigned contractor. Posting automatically sends a portal email; never sent to 7-Eleven."
+                  : "Visible to P1 and the assigned contractor; never sent to 7-Eleven."}
             </span>
             <button
               type="button"
@@ -482,7 +484,13 @@ export default function WorkOrderActivityPanels({
               disabled={posting || !generalText.trim()}
               style={{ minHeight: 40, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: posting || !generalText.trim() ? 0.65 : 1, cursor: posting || !generalText.trim() ? "default" : "pointer" }}
             >
-              {posting ? <><BtnSpinner />Posting...</> : isManager && generalChannel === "internal_note" ? "Post internal note" : "Send message"}
+              {posting
+                ? <><BtnSpinner />Posting...</>
+                : isManager && generalChannel === "internal_note"
+                  ? "Post internal note"
+                  : isManager
+                    ? "Send & notify contractor"
+                    : "Send message"}
             </button>
           </div>
           <ActivityEntryList

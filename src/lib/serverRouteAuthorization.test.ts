@@ -62,6 +62,22 @@ test("contractor notifications stay bound to validated contractor identities", (
     attentionRoute,
     /contractor\?\.role !== "contractor" \|\| !contractor\.active/,
   );
+  assert.match(
+    attentionRoute,
+    /activity\.contractor_assignment_version !== workOrder\.contractor_assignment_version/,
+  );
+  assert.match(
+    attentionRoute,
+    /activityCreatedAt < assignmentStartedAt/,
+  );
+  assert.match(
+    attentionRoute,
+    /claim_contractor_activity_alert_delivery/,
+  );
+  assert.match(
+    attentionRoute,
+    /p_actor_id: auth\.profile\.id/,
+  );
 
   const reviewRoute = read(
     "src/app/api/notifications/invoice-review/route.ts",

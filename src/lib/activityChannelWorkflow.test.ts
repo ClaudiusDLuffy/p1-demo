@@ -71,3 +71,24 @@ test("portal uses dedicated 7-Eleven and general activity areas", () => {
   assert.match(activityPanels, /activityChannel === "field_note" && activity\.requiresSevenElevenSync/);
   assert.doesNotMatch(activityPanels, /aria-label="Activity channels"|Choose note channel/);
 });
+
+test("staff contractor-visible chat is atomically flagged before its automatic email", () => {
+  assert.match(db, /requires_contractor_attention: !!audit\.requiresContractorAttention/);
+  assert.match(db, /if \(!audit\.requiresContractorAttention\)[\s\S]*?return null/);
+  assert.match(db, /insert\.select\("id"\)\.single\(\)/);
+  assert.match(
+    hook,
+    /shouldAutomaticallyNotifyContractor\([\s\S]*?currentUser\?\.role,[\s\S]*?channel/,
+  );
+  assert.match(
+    hook,
+    /requiresContractorAttention: automaticallyNotifyContractor/,
+  );
+  assert.match(
+    hook,
+    /if \(automaticallyNotifyContractor && activityId\)[\s\S]*?await notifyContractorAttention\(woId, activityId\)/,
+  );
+  assert.match(hook, /Message posted and contractor alert saved, but notification delivery needs review/);
+  assert.match(activityPanels, /Posting automatically sends a portal email/);
+  assert.match(activityPanels, /Send &amp; notify contractor|Send & notify contractor/);
+});

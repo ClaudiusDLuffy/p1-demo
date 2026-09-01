@@ -1607,6 +1607,7 @@ export type ActivityAuditOptions = {
   eventKey?: string;
   eventData?: Json;
   requiresSevenElevenSync?: boolean;
+  requiresContractorAttention?: boolean;
   activityChannel?: "field_note" | "internal_note" | "contractor_message" | "system_event" | "legacy";
 };
 
@@ -1640,27 +1641,41 @@ export async function insertActivity(
   text: string,
   type: "note" | "system" | "ai" = "note",
   audit: ActivityAuditOptions = {},
-): Promise<void> {
+): Promise<string | null> {
   const sb = supabase();
   const { data: { user } } = await sb.auth.getUser();
   const eventKey = audit.eventKey || inferActivityEventKey(text, type);
-  const { error } = await sb.from("activities").insert({
-    work_order_id: workOrderId,
-    author_id: user?.id || null,
-    author_name: authorName,
-    text,
-    type,
-    is_staff_override: !!audit.staffOverride,
-    is_staff_only: !!audit.staffOnly,
-    override_for_contractor_id: audit.staffOverride
-      ? audit.overrideForContractorId || null
-      : null,
-    event_key: eventKey,
-    event_data: audit.eventData || {},
-    requires_7eleven_sync: !!audit.requiresSevenElevenSync,
-    activity_channel: audit.activityChannel || "legacy",
-  });
+  const insert = sb
+    .from("activities")
+    .insert({
+      work_order_id: workOrderId,
+      author_id: user?.id || null,
+      author_name: authorName,
+      text,
+      type,
+      is_staff_override: !!audit.staffOverride,
+      is_staff_only: !!audit.staffOnly,
+      override_for_contractor_id: audit.staffOverride
+        ? audit.overrideForContractorId || null
+        : null,
+      event_key: eventKey,
+      event_data: audit.eventData || {},
+      requires_7eleven_sync: !!audit.requiresSevenElevenSync,
+      requires_contractor_attention: !!audit.requiresContractorAttention,
+      activity_channel: audit.activityChannel || "legacy",
+    });
+
+  // Preserve the lean write-only behavior used by existing activity callers.
+  // Only the automatic contractor-alert path needs the inserted identifier.
+  if (!audit.requiresContractorAttention) {
+    const { error } = await insert;
+    if (error) throw error;
+    return null;
+  }
+
+  const { data, error } = await insert.select("id").single();
   if (error) throw error;
+  return data.id;
 }
 
 export async function markActivitySevenElevenSynced(

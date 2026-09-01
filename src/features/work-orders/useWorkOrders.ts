@@ -58,6 +58,12 @@ import {
   rpcErrorMessage,
 } from "../../lib/rpcConflict";
 import type { WorkOrderReopenMode } from "../../lib/workOrderReopen";
+import {
+  contractorAttentionRequestToast,
+  contractorNotificationToast,
+  shouldAutomaticallyNotifyContractor,
+  type ContractorNotificationDelivery,
+} from "../../lib/activityNotificationPolicy";
 
 const PART_STATUS_LABEL: Record<string, string> = {
   ordered: "Ordered",
@@ -1396,20 +1402,38 @@ export default function useWorkOrders({
       ? "contractor_message"
       : requestedChannel;
     const isStaffOnly = channel === "internal_note";
+    const automaticallyNotifyContractor = shouldAutomaticallyNotifyContractor(
+      currentUser?.role,
+      channel,
+    );
     setLoading("postNote_" + woId, true);
     try {
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     if (explicitText === undefined) setNoteText("");
-    patchLocalWO(woId, {}, { author: currentUser.name, time: dateNow(), text, type: "note", activityChannel: channel, enteredByRole: currentUser?.role || "system", isStaffOverride: false, isStaffOnly, requiresSevenElevenSync: channel === "field_note", syncedToSevenElevenAt: null });
-    fire(channel === "internal_note" ? "Internal note posted" : channel === "contractor_message" ? "Message posted" : "Field note posted");
+    patchLocalWO(woId, {}, { author: currentUser.name, time: dateNow(), text, type: "note", activityChannel: channel, enteredByRole: currentUser?.role || "system", isStaffOverride: false, isStaffOnly, requiresSevenElevenSync: channel === "field_note", syncedToSevenElevenAt: null, requiresContractorAttention: automaticallyNotifyContractor, contractorAcknowledgedAt: null });
+    if (!automaticallyNotifyContractor) {
+      fire(channel === "internal_note" ? "Internal note posted" : channel === "contractor_message" ? "Message posted" : "Field note posted");
+    }
+    let activityId: string | null = null;
     const saved = await dbCall(async () => {
-      await insertActivity(woId, currentUser.name, text, "note", {
+      activityId = await insertActivity(woId, currentUser.name, text, "note", {
         eventKey: "note",
         activityChannel: channel,
         staffOnly: isStaffOnly,
         requiresSevenElevenSync: channel === "field_note",
+        requiresContractorAttention: automaticallyNotifyContractor,
       });
     }, "Note save failed", () => restoreWorkOrders(snapshot));
+    if (!saved) return false;
+
+    if (automaticallyNotifyContractor && activityId) {
+      try {
+        const delivery = await notifyContractorAttention(woId, activityId);
+        fire(contractorNotificationToast(delivery));
+      } catch (emailError: any) {
+        fire(`Message posted and contractor alert saved, but notification delivery needs review: ${emailError.message || emailError}`);
+      }
+    }
     return saved;
     } finally {
       setLoading("postNote_" + woId, false);
@@ -1574,7 +1598,10 @@ export default function useWorkOrders({
     }
   };
 
-  const notifyContractorAttention = async (workOrderId: string, activityId: string) => {
+  const notifyContractorAttention = async (
+    workOrderId: string,
+    activityId: string,
+  ): Promise<ContractorNotificationDelivery> => {
     const sb = supabase();
     const { data } = await sb.auth.getSession();
     const token = data.session?.access_token;
@@ -1589,10 +1616,21 @@ export default function useWorkOrders({
       body: JSON.stringify({ workOrderId, activityId }),
     });
 
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const payload = await res.json().catch(() => ({}));
       throw new Error(payload.error || res.statusText || "Email request failed");
     }
+
+    const delivery = payload.delivery as ContractorNotificationDelivery | undefined;
+    if (!delivery || ![
+      "sent",
+      "already_sent",
+      "pending_or_unknown",
+      "delivery_unknown",
+    ].includes(delivery)) {
+      throw new Error("Email delivery returned an unknown state");
+    }
+    return delivery;
   };
 
   const patchContractorAttention = (
@@ -1634,8 +1672,8 @@ export default function useWorkOrders({
       invalidateWorkOrders();
       if (required) {
         try {
-          await notifyContractorAttention(woId, activityId);
-          fire("Contractor attention requested and portal email sent");
+          const delivery = await notifyContractorAttention(woId, activityId);
+          fire(contractorAttentionRequestToast(delivery));
         } catch (emailError: any) {
           fire(`Attention saved, but email failed: ${emailError.message || emailError}`);
         }
