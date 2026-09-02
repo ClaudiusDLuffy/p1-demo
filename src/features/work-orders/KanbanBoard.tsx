@@ -6,6 +6,7 @@ import { Ico } from "../../components/ui/Ico";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
 import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { getSlaAgingStyle, getWorkOrderDateMeta, sortWorkOrders } from "../../lib/workOrderView";
@@ -42,6 +43,7 @@ export default function KanbanBoard(props: any) {
           </span>
           <div className="kanban-card-flags" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0, maxWidth: "100%" }}>
             <span className="kanban-card-status" style={{ fontSize: 10, fontWeight: 700, color: st?.color, background: st?.bg, border: `1px solid ${st?.ring || st?.color}55`, borderRadius: 10, padding: "2px 6px", maxWidth: "100%", boxSizing: "border-box", lineHeight: 1.2 }}>{st?.label}</span>
+            <CapitalWorkOrderBadge workOrder={wo} small />
             <span className="kanban-card-priority" style={{ fontSize: 11, fontWeight: 700, color: pr?.color, flexShrink: 0 }}>{pr?.short}</span>
           </div>
         </div>

@@ -13,6 +13,7 @@ import { Field } from "../../components/ui/Field";
 import { Ico } from "../../components/ui/Ico";
 import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS, FUNCTIONAL_STATUS, MONTHS, P1_BUSINESS, SEVEN_BILL_TO } from "../../lib/constants";
 import {
@@ -25,6 +26,8 @@ import { timezoneForWorkOrder } from "../../lib/billingRules";
 import { getContractorCompletionControl } from "../../lib/contractorCompletion";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import {
+  canAssignWorkOrder,
+  canChangeWorkOrderAssignment,
   canDuplicateWorkOrderForReassignment,
   canRejectUnassignedWorkOrder,
 } from "../../lib/workOrderDispatchActions";
@@ -304,6 +307,16 @@ export default function WorkOrderDetail(props: any) {
   );
   const invoiceController = isInvoiceController(currentUser);
   const canReviewInvoices = isManager && !invoiceController;
+  const assignmentEligibility = {
+    isOperationalStaff: isManager,
+    isInvoiceController: invoiceController,
+    status: woData?.status,
+    functionalStatus: woData?.functionalStatus,
+    contractorId: woData?.contractor,
+    billingOnly: woData?.billingOnly,
+  };
+  const canAssignCurrentWorkOrder = canAssignWorkOrder(assignmentEligibility);
+  const canChangeCurrentAssignment = canChangeWorkOrderAssignment(assignmentEligibility);
   const canRejectDuringDispatch = canRejectUnassignedWorkOrder({
     isOperationalStaff: isManager,
     isInvoiceController: invoiceController,
@@ -587,6 +600,7 @@ export default function WorkOrderDetail(props: any) {
                       <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
                         <Badge conf={PRIORITY[woData.priority]} />
                         <Badge conf={{ ...(STATUS[woData.status] || {}), label: `Portal: ${STATUS[woData.status]?.label || woData.status}` }} />
+                        <CapitalWorkOrderBadge workOrder={woData} />
                         {woData.functionalStatus && <Badge conf={{ label: `7-Eleven FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
                         {sla2
                           ? <SlaBadge responseBreachAt={woData.responseBreachAt} resolutionBreachAt={woData.resolutionBreachAt} responseMetAt={woData.startTimeRaw} size="sm" />
@@ -675,7 +689,7 @@ export default function WorkOrderDetail(props: any) {
                       )}
                       {/* Quick-assign shows the FULL contractor list (same source as
                           the Create WO dropdown) so no contractor is unreachable. */}
-                      {woData.status === "unassigned" && isManager && contractorsOnly.map(c => (
+                      {canAssignCurrentWorkOrder && contractorsOnly.map(c => (
                         <button key={c.id} onClick={() => doAssign(woData.id, c.id)} disabled={isLoading("assign_" + woData.id)} className="btn-soft" style={loadingStyle("assign_" + woData.id)}>
                           {isLoading("assign_" + woData.id) ? <><BtnSpinnerDark />Assigning...</> : <>Assign to {c.name.split(" ")[0]}</>}
                         </button>
@@ -697,7 +711,7 @@ export default function WorkOrderDetail(props: any) {
                             : "Reject work order"}
                         </button>
                       )}
-                      {isManager && ["assigned", "wip", "parts"].includes(woData.status) && (
+                      {canChangeCurrentAssignment && (
                         <>
                           <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} disabled={isLoading("reassign_" + woData.id)} className="btn-soft" style={loadingStyle("reassign_" + woData.id)}>
                             {isLoading("reassign_" + woData.id) ? <><BtnSpinnerDark />Reassigning...</> : "Reassign"}
@@ -766,15 +780,17 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
                         </button>
                       )}
-                      {isManager && canFlagWorkOrderCapital(woData) && (
+                      {isManager && !invoiceController && canFlagWorkOrderCapital(woData) && (
                         <button onClick={() => void doCapitalFlag(woData.id)} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>
                       )}
-                      {woData.status === "capital" && isManager && (
+                      {woData.status === "capital" && isManager && !invoiceController && (
                         <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
-                          {isLoading("capitalDecline_" + woData.id) ? <><BtnSpinnerDark />Returning...</> : "Capital declined - return to dispatched"}
+                          {isLoading("capitalDecline_" + woData.id)
+                            ? <><BtnSpinnerDark />Returning...</>
+                            : `Capital declined - return to ${woData.contractor ? "dispatched" : "unassigned"}`}
                         </button>
                       )}
-                      {woData.status === "pending_capital_completion" && isManager && (
+                      {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
                         <button onClick={() => void doCapitalComplete(woData.id)} disabled={isLoading("capitalComplete_" + woData.id)} className="btn-accent" style={loadingStyle("capitalComplete_" + woData.id)}>
                           {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
                         </button>

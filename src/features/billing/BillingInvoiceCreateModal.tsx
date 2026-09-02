@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Modal } from "../../components/ui/Modal";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { Ico } from "../../components/ui/Ico";
 import { Sel } from "../../components/ui/Sel";
 import { PRIORITY, T, SEVEN_STAFF_BILL_TO } from "../../lib/constants";
@@ -32,6 +33,7 @@ import {
   STAFF_BILLING_LINE_TYPES,
 } from "../../lib/staffBilling";
 import { billingWorkOrderOptions } from "../../lib/billingWorkOrderOptions";
+import { isCapitalWorkOrder } from "../../lib/workOrderView";
 import { supabase } from "../../lib/supabase/client";
 import BillingWorkOrderActivityPanel from "./BillingWorkOrderActivityPanel";
 import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
@@ -1296,10 +1298,11 @@ export default function BillingInvoiceCreateModal(props: any) {
                       setValue("workOrderId", wo.id, { shouldDirty: true, shouldValidate: true });
                       setWoSearch("");
                     }}
-                    title={`${wo.id} - Store #${wo.store || "-"} - ${wo.summary || "No summary"}`}
+                    title={`${wo.id} - Store #${wo.store || "-"} - ${wo.summary || "No summary"}${isCapitalWorkOrder(wo) ? " - Capital" : ""}`}
                     style={{ width: "100%", minWidth: 0, padding: "9px 10px", border: "none", borderRadius: 7, background: selectedWorkOrderId === wo.id ? T.accentSoft : T.surface, color: T.ink, cursor: "pointer", textAlign: "left", fontFamily: "inherit", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                   >
                     <span className="mono" style={{ color: T.accent, fontWeight: 700 }}>{wo.id}</span>
+                    <CapitalWorkOrderBadge workOrder={wo} small />
                     <span style={{ color: T.muted }}> - Store #{wo.store || "-"} - {wo.summary || "No summary"}</span>
                   </button>
                 ))}
@@ -1308,7 +1311,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             <Sel {...register("workOrderId")} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
               <option value="">Standalone invoice</option>
               {workOrderOptions.map((wo: any) => (
-                <option key={wo.id} value={wo.id}>{wo.id} - Store #{wo.store || "-"} - {wo.summary || "No summary"}</option>
+                <option key={wo.id} value={wo.id}>{wo.id} - Store #{wo.store || "-"} - {wo.summary || "No summary"}{isCapitalWorkOrder(wo) ? " · Capital" : ""}</option>
               ))}
             </Sel>
           </div>

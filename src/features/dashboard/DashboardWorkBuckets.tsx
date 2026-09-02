@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useState } from "react";
 
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { PRIORITY, STATUS, T } from "../../lib/constants";
 import {
@@ -162,6 +163,7 @@ export default function DashboardWorkBuckets({
                         <span style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                           {priority && <span style={{ padding: "3px 7px", borderRadius: 999, color: priority.color, background: priority.bg, fontSize: 9, fontWeight: 800 }}>{priority.short}</span>}
                           {status && <span style={{ padding: "3px 7px", borderRadius: 999, color: status.color, background: status.bg, fontSize: 9, fontWeight: 800 }}>{status.label}</span>}
+                          <CapitalWorkOrderBadge workOrder={workOrder} small />
                         </span>
                         <span style={{ display: "flex", justifyContent: "flex-end", gap: 5, flexWrap: "wrap" }}>
                           {workOrder.hasUnreadNotes && <span title="New contractor activity for this login" style={{ padding: "3px 7px", borderRadius: 999, color: "#1D4ED8", background: "#DBEAFE", fontSize: 9, fontWeight: 800 }}>Unread</span>}

@@ -28,6 +28,8 @@ export type WorkOrderViewRow = {
   closedAt?: string | null;
   priority?: string | null;
   status?: string | null;
+  isCapital?: boolean | null;
+  capitalStatus?: string | null;
   functionalStatus?: string | null;
   functional_status?: string | null;
   hasUnreadNotes?: boolean | null;
@@ -36,6 +38,19 @@ export type WorkOrderViewRow = {
   hasPendingContractorAttention?: boolean | null;
   pendingContractorAttentionCount?: number | string | null;
 };
+
+const CAPITAL_LIFECYCLE_STATUSES = new Set([
+  "capital",
+  "pending_capital_completion",
+]);
+
+export const isCapitalLifecycleStage = (
+  wo: WorkOrderViewRow | null | undefined,
+) => CAPITAL_LIFECYCLE_STATUSES.has(String(wo?.status || ""));
+
+export const isCapitalWorkOrder = (
+  wo: WorkOrderViewRow | null | undefined,
+) => Boolean(wo?.isCapital || isCapitalLifecycleStage(wo));
 
 export type WorkOrderProgressActivity = {
   requiresSevenElevenSync?: boolean | null;

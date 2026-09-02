@@ -2989,6 +2989,13 @@ export type Database = {
         Args: { p_source_work_order_id: string }
         Returns: Json
       }
+      decline_capital_work_order: {
+        Args: {
+          p_expected_assignment_version: number
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
       transition_work_order_contractor: {
         Args: {
           p_expected_assignment_version: number

@@ -56,6 +56,13 @@ export const STATUS = {
   closed: { label: "Closed", color: T.subtle, bg: T.borderSoft, ring: T.border },
 };
 
+export const CAPITAL_BADGE = {
+  label: "Capital",
+  color: T.violet,
+  bg: T.violetSoft,
+  ring: "#D4C9E8",
+};
+
 export const FUNCTIONAL_STATUS = {
   Dispatched: { color: T.danger, bg: T.dangerSoft },
   "Work in Progress": { color: T.violet, bg: T.violetSoft },

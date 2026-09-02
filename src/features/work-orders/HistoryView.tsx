@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import { T } from "../../lib/constants";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { DatePickerField } from "../../components/ui/DateTimePicker";
@@ -192,7 +193,10 @@ export default function HistoryView(props: any) {
                         </div>
                         <div style={{ fontSize: 15, color: T.ink, fontWeight: 700, marginTop: 4 }}>{w.summary || "Closed work order"}</div>
                       </div>
-                      <span style={{ fontSize: 11, color: T.success, background: T.successSoft, borderRadius: 999, padding: "4px 8px", fontWeight: 700 }}>Closed</span>
+                      <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5, flexWrap: "wrap" }}>
+                        <CapitalWorkOrderBadge workOrder={w} small />
+                        <span style={{ fontSize: 11, color: T.success, background: T.successSoft, borderRadius: 999, padding: "4px 8px", fontWeight: 700 }}>Closed</span>
+                      </span>
                     </div>
                     <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12, color: T.muted }}>
                       <div>Store <strong style={{ color: T.ink }}>{w.store || "-"}</strong></div>
@@ -243,7 +247,10 @@ export default function HistoryView(props: any) {
                   {w.id}
                   <CopyWorkOrderButton value={w.id} />
                 </span>
-                <span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt(invTotalFor(w.id))}</span>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5, flexWrap: "wrap" }}>
+                  <CapitalWorkOrderBadge workOrder={w} small />
+                  <span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: T.ink }}>{fmt(invTotalFor(w.id))}</span>
+                </span>
               </div>
               <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, marginBottom: 4 }}>
                 {w.store ? `Store #${w.store}` : w.id}

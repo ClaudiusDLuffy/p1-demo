@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   updateWorkOrder, insertActivity, updateInvoiceState,
-  transitionWorkOrderContractor, deleteActivity, deleteWorkOrder,
+  transitionWorkOrderContractor, declineCapitalWorkOrder,
+  deleteActivity, deleteWorkOrder,
   rejectUnassignedWorkOrder, duplicateWorkOrderForReassignment,
   uploadPhotos, removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
@@ -65,6 +66,7 @@ import {
   shouldAutomaticallyNotifyContractor,
   type ContractorNotificationDelivery,
 } from "../../lib/activityNotificationPolicy";
+import { assignmentBoundaryPatch } from "../../lib/workOrderAssignmentBoundary";
 
 const PART_STATUS_LABEL: Record<string, string> = {
   ordered: "Ordered",
@@ -327,7 +329,7 @@ export default function useWorkOrders({
 
   const doAssign = async (woId: string, contractorId: string) => {
     const c = getUser(contractorId);
-    if (!c) { fire("Contractor not found"); return; }
+    if (!c) { fire("Contractor not found"); return false; }
     setLoading("assign_" + woId, true);
     try {
     let wo = workOrders.find(workOrder => workOrder.id === woId) || null;
@@ -336,29 +338,28 @@ export default function useWorkOrders({
         wo = await loadWorkOrderById(woId);
       } catch (error: unknown) {
         fire(`Could not load work order: ${rpcErrorMessage(error)}`);
-        return;
+        return false;
       }
     }
-    if (!wo) { fire("Work order not found"); return; }
-    const dispatchedAt = new Date().toISOString();
+    if (!wo) { fire("Work order not found"); return false; }
     const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(
-      woId,
-      { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" },
-      localActivity(text, "system", false, "work_order_assignment", false, true),
-    );
+    let transition = null;
     const ok = await dbCall(async () => {
-      await transitionWorkOrderContractor(
+      transition = await transitionWorkOrderContractor(
         woId,
         contractorId,
         Number(wo.contractorAssignmentVersion || 0),
       );
-    }, "Dispatch failed", () => restoreWorkOrders(snapshot));
-    if (ok) {
-      fire(`Dispatched to ${c.name}`);
-      await notifyDispatch(woId, contractorId);
-    }
+    }, "Dispatch failed");
+    if (!ok || !transition) return false;
+    patchLocalWO(
+      woId,
+      assignmentBoundaryPatch(wo, transition),
+      localActivity(text, "system", false, "work_order_assignment", false, true),
+    );
+    fire(`Dispatched to ${c.name}`);
+    await notifyDispatch(woId, contractorId);
+    return true;
     } finally {
       setLoading("assign_" + woId, false);
     }
@@ -373,17 +374,11 @@ export default function useWorkOrders({
         wo = await loadWorkOrderById(woId);
       } catch (error: unknown) {
         fire(`Could not load work order: ${rpcErrorMessage(error)}`);
-        return;
+        return false;
       }
     }
-    if (!wo) { fire("Work order not found"); return; }
+    if (!wo) { fire("Work order not found"); return false; }
     const text = `Work order unassigned by ${currentUser.name}.`;
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(
-      woId,
-      { status: "unassigned", contractor: null, eta: null, dispatchedAt: null, functionalStatus: "New" },
-      localActivity(text, "system", false, "work_order_unassigned", false, true),
-    );
     let transition = null;
     const ok = await dbCall(async () => {
       transition = await transitionWorkOrderContractor(
@@ -391,11 +386,16 @@ export default function useWorkOrders({
         null,
         Number(wo.contractorAssignmentVersion || 0),
       );
-    }, "Unassign failed", () => restoreWorkOrders(snapshot));
-    if (ok) {
-      const delivery = await notifyAssignmentRemoval(transition?.deliveryId);
-      fire(`Work order unassigned.${assignmentRemovalMessage(delivery)}`);
-    }
+    }, "Unassign failed");
+    if (!ok || !transition) return false;
+    patchLocalWO(
+      woId,
+      assignmentBoundaryPatch(wo, transition),
+      localActivity(text, "system", false, "work_order_unassigned", false, true),
+    );
+    const delivery = await notifyAssignmentRemoval(transition.deliveryId);
+    fire(`Work order unassigned.${assignmentRemovalMessage(delivery)}`);
+    return true;
     } finally {
       setLoading("unassign_" + woId, false);
     }
@@ -488,48 +488,17 @@ export default function useWorkOrders({
         wo = await loadWorkOrderById(woId);
       } catch (error: any) {
         fire(`Could not load work order: ${error.message || error}`);
-        return;
+        return false;
       }
     }
-    if (!wo) { fire("Work order not found"); return; }
+    if (!wo) { fire("Work order not found"); return false; }
     const oldName = wo?.contractor ? (getUser(wo.contractor)?.name || "Unassigned") : "Unassigned";
     const newC = getUser(newContractorId);
-    if (!newC) { fire("Contractor not found"); return; }
-    if (wo?.contractor === newContractorId) { fire("Already assigned to that contractor"); return; }
+    if (!newC) { fire("Contractor not found"); return false; }
+    if (wo?.contractor === newContractorId) { fire("Already assigned to that contractor"); return false; }
     setLoading("reassign_" + woId, true);
     try {
     const text = `Reassigned from ${oldName} to ${newC.name} by ${currentUser.name}.`;
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(
-      woId,
-      {
-        contractor: newContractorId,
-        status: "assigned",
-        functionalStatus: "Dispatched",
-        dispatchedAt: new Date().toISOString(),
-        eta: null,
-        startTime: null,
-        startTimeRaw: null,
-        endTime: null,
-        endTimeRaw: null,
-        technicianOnJob: null,
-        assetMake: null,
-        assetModel: null,
-        assetSerial: null,
-        assetYear: null,
-        resolutionCode: null,
-        resolutionNotes: null,
-        partNeeded: null,
-        partEta: null,
-        invoiceTotal: null,
-        repairQuote: null,
-        installQuote: null,
-        capitalNotes: null,
-        isCapital: false,
-        capitalStatus: null,
-      },
-      localActivity(text, "system", false, "work_order_reassigned", false, true),
-    );
     let transition = null;
     const ok = await dbCall(async () => {
       transition = await transitionWorkOrderContractor(
@@ -537,14 +506,19 @@ export default function useWorkOrders({
         newContractorId,
         Number(wo.contractorAssignmentVersion || 0),
       );
-    }, "Reassign failed", () => restoreWorkOrders(snapshot));
-    if (ok) {
-      const [delivery] = await Promise.all([
-        notifyAssignmentRemoval(transition?.deliveryId),
-        notifyDispatch(woId, newContractorId),
-      ]);
-      fire(`Reassigned to ${newC.name}.${assignmentRemovalMessage(delivery)}`);
-    }
+    }, "Reassign failed");
+    if (!ok || !transition) return false;
+    patchLocalWO(
+      woId,
+      assignmentBoundaryPatch(wo, transition),
+      localActivity(text, "system", false, "work_order_reassigned", false, true),
+    );
+    const [delivery] = await Promise.all([
+      notifyAssignmentRemoval(transition.deliveryId),
+      notifyDispatch(woId, newContractorId),
+    ]);
+    fire(`Reassigned to ${newC.name}.${assignmentRemovalMessage(delivery)}`);
+    return true;
     } finally {
       setLoading("reassign_" + woId, false);
     }
@@ -1359,20 +1333,35 @@ export default function useWorkOrders({
   const doCapitalDecline = async (woId: string) => {
     setLoading("capitalDecline_" + woId, true);
     try {
-    const text = `Capital replacement declined by ${currentUser.name}. Work order returned to dispatched.`;
+    const workOrder = workOrders.find(item => item.id === woId)
+      || await loadWorkOrderById(woId);
+    if (!workOrder) { fire("Work order not found"); return false; }
+    const result = await declineCapitalWorkOrder(
+      woId,
+      Number(workOrder.contractorAssignmentVersion || 0),
+    );
+    if (!result.applied) {
+      fire("Capital decline was not applied. Refresh and try again.");
+      return false;
+    }
+    const destination = result.contractorId ? "dispatched" : "the unassigned queue";
+    const text = `Capital replacement declined by ${currentUser.name}. Work order returned to ${destination}.`;
     const patch = {
-      status: "assigned",
-      functionalStatus: "Dispatched",
-      isCapital: false,
-      capitalStatus: null,
+      status: result.status,
+      functionalStatus: result.functionalStatus,
+      contractor: result.contractorId,
+      contractorAssignmentVersion: result.assignmentVersion,
+      isCapital: result.isCapital,
+      capitalStatus: result.capitalStatus,
     };
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "system"));
-    fire("Capital declined - returned to dispatched");
-    await dbCall(async () => {
-      await updateWorkOrder(woId, patch);
-      await insertActivity(woId, currentUser.name, text, "system");
-    }, "Capital decline failed", () => restoreWorkOrders(snapshot));
+    fire(`Capital declined - returned to ${destination}`);
+    invalidateWorkOrders();
+    return true;
+    } catch (error: unknown) {
+      invalidateWorkOrders();
+      fire(`Capital decline failed: ${rpcErrorMessage(error)}`);
+      return false;
     } finally {
       setLoading("capitalDecline_" + woId, false);
     }
@@ -1445,8 +1434,6 @@ export default function useWorkOrders({
     let skipped = unassigned.filter(w =>
       ["TX", "FL"].includes(stateCodeFromWorkOrder(w)),
     ).length;
-    const dispatchedAt = new Date().toISOString();
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     let hadError = false;
     const chunks = chunkArray(unassigned, 10);
     await mapChunksWithConcurrency(chunks, async chunk => {
@@ -1462,16 +1449,22 @@ export default function useWorkOrders({
         );
         if (!matched) { skipped++; continue; }
         const c = getUser(matched);
-        const text = `Auto-dispatched to ${c?.name || matched}. Territory + trade match.`;
-        patchLocalWO(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt }, localActivity(text, "system"));
+        const text = `Dispatched to ${c?.name || matched}${c?.company ? ` (${c.company})` : ""}.`;
         try {
-          await updateWorkOrder(w.id, { status: "assigned", contractor: matched, functionalStatus: "Dispatched", dispatchedAt });
-          await insertActivity(w.id, "System", text, "system");
+          const transition = await transitionWorkOrderContractor(
+            w.id,
+            matched,
+            Number(w.contractorAssignmentVersion || 0),
+          );
+          patchLocalWO(
+            w.id,
+            assignmentBoundaryPatch(w, transition),
+            localActivity(text, "system", false, "work_order_assignment", false, true),
+          );
           await notifyDispatch(w.id, matched);
           count++;
         } catch (e: any) {
           hadError = true;
-          restoreWorkOrders(snapshot);
           fire(`${w.id}: ${e.message || e}`);
         }
       }

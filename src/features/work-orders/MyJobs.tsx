@@ -3,6 +3,7 @@
 
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -222,7 +223,10 @@ export default function MyJobs(props: any) {
                       <div style={{ fontSize: 12, color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wo.summary || "—"}</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <Badge conf={STATUS[wo.status]} small />
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 5, flexWrap: "wrap" }}>
+                        <Badge conf={STATUS[wo.status]} small />
+                        <CapitalWorkOrderBadge workOrder={wo} small />
+                      </div>
                       <div style={{ fontSize: 10, color: T.subtle, marginTop: 4 }}>{wo.age}</div>
                     </div>
                   </div>

@@ -29,7 +29,7 @@ test("the work-order list includes closed store calls and preserves exact-store 
   assert.match(list, /useState\(!storeView\)/);
   assert.match(list, /storeNumber: storeView\?\.storeNumber \|\| null/);
   assert.match(list, /String\(workOrder\.store \|\| ""\) === storeView\.storeNumber/);
-  assert.match(list, /scope: hideClosed \? "operations" : "operations_all"/);
+  assert.match(list, /scope: hideClosed \? "active" : "all"/);
   assert.match(shell, /key=\{workOrderStoreView[\s\S]*store-\$\{workOrderStoreView\.requestId\}/);
 });
 

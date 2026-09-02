@@ -5,6 +5,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { Sel } from "../../components/ui/Sel";
 import { T, STATUS } from "../../lib/constants";
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
@@ -202,7 +203,10 @@ export default function SubDispatchView(props: any) {
                       {workOrder.store ? `Store #${workOrder.store}` : "-"}
                     </td>
                     <td style={{ padding: "14px 16px" }}>
-                      <Badge conf={STATUS[workOrder.status]} />
+                      <span style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                        <Badge conf={STATUS[workOrder.status]} />
+                        <CapitalWorkOrderBadge workOrder={workOrder} />
+                      </span>
                     </td>
                     <td style={{ padding: "14px 16px", fontSize: 13, color: assigned === "Unassigned" || assigned === "Not set" ? T.subtle : T.ink }}>
                       {assigned}

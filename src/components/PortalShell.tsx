@@ -102,6 +102,10 @@ import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
 import { isInvoiceController } from "../lib/staffPermissions";
 import { canonicalSevenElevenWorkOrderId } from "../lib/workOrderIdentity";
 import {
+  isCapitalLifecycleStage,
+  isCapitalWorkOrder,
+} from "../lib/workOrderView";
+import {
   PORTAL_AUTO_REFRESH_MS,
   shouldRefreshPortal,
 } from "../lib/portalRefresh";
@@ -3571,7 +3575,9 @@ export default function PortalShell() {
             Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "-") : "Unassigned"}</span>. Pick a new contractor - the original SLA deadline is preserved.
           </div>
           <div role="note" style={{ padding: "10px 12px", marginBottom: 16, borderRadius: 10, border: "1px solid #F59E0B66", background: "#FFFBEB", color: "#92400E", fontSize: 11, lineHeight: 1.5 }}>
-            Direct reassignment ends the current contractor&apos;s portal access and automatically emails them that the call was removed. If they performed work or may need to invoice, cancel and use <strong>Duplicate for reassignment</strong> so their original record remains available.
+            {isCapitalWorkOrder(woData)
+              ? <>The capital identity, approval state, and P1 capital quote stay on this work order. The former contractor loses portal access and is emailed automatically; resolve any open contractor invoices before reassigning.</>
+              : <>Direct reassignment ends the current contractor&apos;s portal access and automatically emails them that the call was removed. If they performed work or may need to invoice, cancel and use <strong>Duplicate for reassignment</strong> so their original record remains available.</>}
           </div>
           <div className="reassign-picker">
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>New contractor</div>
@@ -3686,9 +3692,11 @@ export default function PortalShell() {
                 if (!reassignTarget || reassignTarget === woData.contractor) return;
                 setModalLoading(true);
                 try {
-                  await doReassign(woData.id, reassignTarget);
-                  setModal(null);
-                  setReassignTarget("");
+                  const changed = await doReassign(woData.id, reassignTarget);
+                  if (changed) {
+                    setModal(null);
+                    setReassignTarget("");
+                  }
                 } finally {
                   setModalLoading(false);
                 }
@@ -3704,10 +3712,16 @@ export default function PortalShell() {
       {modal === "unassign" && woData && (
         <Modal onClose={() => setModal(null)} title="Unassign work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            Unassign this work order? This will move it back to <span style={{ color: T.ink, fontWeight: 600 }}>Unassigned</span> and clear the contractor.
+            {isCapitalLifecycleStage(woData)
+              ? <>Unassign this capital work order? It will remain in its current <span style={{ color: T.violet, fontWeight: 600 }}>Capital</span> stage with no contractor.</>
+              : isCapitalWorkOrder(woData)
+                ? <>Unassign this capital work order? It will move to <span style={{ color: T.ink, fontWeight: 600 }}>Unassigned</span> while retaining its capital identity and approval state.</>
+              : <>Unassign this work order? This will move it back to <span style={{ color: T.ink, fontWeight: 600 }}>Unassigned</span> and clear the contractor.</>}
           </div>
           <div role="note" style={{ padding: "10px 12px", marginTop: -8, marginBottom: 20, borderRadius: 10, border: "1px solid #F59E0B66", background: "#FFFBEB", color: "#92400E", fontSize: 11, lineHeight: 1.5 }}>
-            The current contractor will lose portal access and receive an automatic removal email. If invoicing may still be needed, use <strong>Duplicate for reassignment</strong> instead.
+            {isCapitalWorkOrder(woData)
+              ? <>The current contractor will lose portal access and receive an automatic removal email. The capital workflow and staff quote remain attached; resolve any open contractor invoices first.</>
+              : <>The current contractor will lose portal access and receive an automatic removal email. If invoicing may still be needed, use <strong>Duplicate for reassignment</strong> instead.</>}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -3715,8 +3729,8 @@ export default function PortalShell() {
               onClick={async () => {
                 setModalLoading(true);
                 try {
-                  await doUnassign(woData.id);
-                  setModal(null);
+                  const changed = await doUnassign(woData.id);
+                  if (changed) setModal(null);
                 } finally {
                   setModalLoading(false);
                 }

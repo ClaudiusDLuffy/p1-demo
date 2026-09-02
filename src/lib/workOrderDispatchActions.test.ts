@@ -2,9 +2,45 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canAssignWorkOrder,
+  canChangeWorkOrderAssignment,
   canDuplicateWorkOrderForReassignment,
   canRejectUnassignedWorkOrder,
 } from "./workOrderDispatchActions";
+
+test("operational staff can assign ordinary and capital-stage work orders", () => {
+  const common = {
+    isOperationalStaff: true,
+    isInvoiceController: false,
+    contractorId: null,
+    billingOnly: false,
+  };
+
+  assert.equal(canAssignWorkOrder({ ...common, status: "unassigned", functionalStatus: "New" }), true);
+  assert.equal(canAssignWorkOrder({ ...common, status: "capital", functionalStatus: "Work in Progress" }), true);
+  assert.equal(canAssignWorkOrder({ ...common, status: "pending_capital_completion", functionalStatus: "Pending Capital Completion" }), true);
+  assert.equal(canAssignWorkOrder({ ...common, status: "assigned", functionalStatus: "Dispatched" }), false);
+  assert.equal(canAssignWorkOrder({ ...common, status: "unassigned", functionalStatus: "Completed" }), false);
+  assert.equal(canAssignWorkOrder({ ...common, status: "capital", contractorId: "contractor-1" }), false);
+});
+
+test("capital reassignment remains limited to operational staff and active field stages", () => {
+  const common = {
+    isOperationalStaff: true,
+    isInvoiceController: false,
+    contractorId: "contractor-1",
+    billingOnly: false,
+  };
+
+  for (const status of ["assigned", "wip", "parts", "capital", "pending_capital_completion"]) {
+    assert.equal(canChangeWorkOrderAssignment({ ...common, status }), true, status);
+  }
+  assert.equal(canChangeWorkOrderAssignment({ ...common, status: "pending_invoice" }), false);
+  assert.equal(canChangeWorkOrderAssignment({ ...common, status: "closed" }), false);
+  assert.equal(canChangeWorkOrderAssignment({ ...common, status: "capital", isInvoiceController: true }), false);
+  assert.equal(canChangeWorkOrderAssignment({ ...common, status: "capital", isOperationalStaff: false }), false);
+  assert.equal(canChangeWorkOrderAssignment({ ...common, status: "capital", billingOnly: true }), false);
+});
 
 const rejectable = {
   isOperationalStaff: true,
