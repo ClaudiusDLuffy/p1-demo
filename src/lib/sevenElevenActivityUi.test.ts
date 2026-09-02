@@ -53,8 +53,11 @@ test("check-in and Pause parts are immediately optimistic and persisted as 7-Ele
     );
   }
   assert.match(hook, /localActivity\(text, "note", isManager, "job_completed", true, false, "field_note"\)/);
-  assert.match(hook, /result\.workCompletionApplied[\s\S]*?"job_completed", true, false, "field_note"[\s\S]*?completionActivityId/);
+  assert.match(hook, /completionResult = await completeWorkOrderOnce\(woId/);
+  assert.match(hook, /status: workOrderStatusAfterFieldCompletion\(existing\?\.status\)/);
   assert.match(hook, /pendingSevenElevenSyncCount: pendingSevenElevenCountFor\(w\) \+ 1/);
+  assert.match(hook, /existing\?\.functionalStatus !== "Work in Progress"/);
+  assert.match(detail, /woData\.functionalStatus === "Work in Progress"/);
 });
 
 test("sync, contractor-attention, delete, and shared pagination controls remain available", () => {

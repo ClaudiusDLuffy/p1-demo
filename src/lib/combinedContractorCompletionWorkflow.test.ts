@@ -51,37 +51,29 @@ test("the combined action is contractor-only and not anonymously executable", ()
   );
 });
 
-test("invoice-capable contractors call the combined RPC and patch only after commit", () => {
+test("the guarded combined RPC remains available for backward compatibility", () => {
   assert.match(dataLayer, /rpc\([\s\S]*"complete_contractor_work_and_invoicing"/);
-  assert.match(hook, /currentUser\?\.canInvoice === true/);
-  assert.match(hook, /await completeContractorWorkAndInvoicing\(woId/);
-  const callIndex = hook.indexOf("await completeContractorWorkAndInvoicing(woId");
-  const patchIndex = hook.indexOf("patchLocalWO(woId", callIndex);
-  assert.ok(callIndex >= 0 && patchIndex > callIndex);
-  assert.match(hook, /Could not complete work and invoicing/);
-  assert.match(hook, /existing\?\.functionalStatus === "Completed" \? \{\} : patch/);
+  assert.doesNotMatch(hook, /await completeContractorWorkAndInvoicing\(woId/);
+  assert.match(hook, /completionResult = await completeWorkOrderOnce\(woId/);
 });
 
-test("the portal exposes one combined contractor control while preserving exceptions", () => {
+test("the portal separates field completion from contractor invoicing", () => {
   assert.match(detail, /getContractorCompletionControl/);
   assert.match(detail, /contractorCompletionControl\.visible/);
-  assert.match(detail, /contractorCompletionControl\.action === "create_invoice"[\s\S]*openCreate\(null\)/);
-  assert.match(detail, /\["finish_invoice", "correct_invoice"\]\.includes[\s\S]*openCreate\(contractorInvoiceRequiringAttention\)/);
-  assert.match(detail, /contractorCompletionControl\.action === "complete" && contractorCompletionControl\.enabled[\s\S]*setModal\("closeComplete"\)/);
-  assert.doesNotMatch(detail, /disabled=\{!contractorCompletionControl\.enabled/);
-  assert.match(detail, /canInvoice && !contractorCompletionGuidesInvoice/);
-  assert.match(detail, /woAllInvoices\.length > 0 \|\| contractorCompletionControl\.visible/);
-  assert.match(completionControl, /action: "create_invoice" \| "finish_invoice" \| "correct_invoice" \| "complete" \| null/);
-  assert.match(completionControl, /Create invoice to complete job/);
-  assert.match(completionControl, /Finish invoice to complete job/);
-  assert.match(completionControl, /Correct invoice to complete job/);
-  assert.match(completionControl, /Complete work & invoicing/);
-  assert.match(detail, /Complete work & invoicing/);
-  assert.match(detail, /!canInvoice && woData\.status !== "completed"/);
-  assert.match(detail, /woData\?\.billingOnly && canFinishInvoicing/);
-  assert.match(shell, /title=\{combinesContractorCompletion \? "Complete work & invoicing" : "Mark work complete"\}/);
-  assert.match(shell, /This confirms that every contractor invoice/);
-  assert.match(shell, /Once every invoice for this job is submitted/);
+  assert.match(detail, /fieldWorkComplete: woData\?\.functionalStatus === "Completed"/);
+  assert.match(detail, /onClick=\{\(\) => setModal\("closeComplete"\)\}/);
+  assert.match(detail, /Mark work complete/);
+  assert.match(detail, /!isManager && canInvoice && \(/);
+  assert.match(detail, /Create invoice/);
+  assert.match(detail, /!isManager && canFinishInvoicing && !invoicingComplete/);
+  assert.match(detail, /Done invoicing — close contractor job/);
+  assert.doesNotMatch(detail, /Create invoice to complete job|Complete work & invoicing/);
+  assert.doesNotMatch(hook, /currentUser\?\.canInvoice === true[\s\S]*completeContractorWorkAndInvoicing/);
+  assert.match(completionControl, /Field completion is independent from invoice permissions/);
+  assert.match(completionControl, /label: "Mark work complete"/);
+  assert.match(shell, /title="Mark work complete"/);
+  assert.match(shell, /Contractor invoicing remains a separate workflow/);
+  assert.doesNotMatch(shell, /combinesContractorCompletion/);
   assert.match(shell, /if \(completed !== false\) setModal\(null\)/);
   assert.match(detail, /setModal\("closeWithoutInvoice"\)/);
   assert.match(detail, /Close — no invoice/);

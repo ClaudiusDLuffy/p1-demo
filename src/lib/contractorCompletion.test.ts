@@ -1,99 +1,82 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getContractorCompletionControl } from "./contractorCompletion";
+import {
+  getContractorCompletionControl,
+  workOrderStatusAfterFieldCompletion,
+} from "./contractorCompletion";
 
-const eligibleInvoiceContractor = {
+const eligibleFieldWork = {
   isManager: false,
-  canInvoice: true,
   billingOnly: false,
-  invoicingComplete: false,
+  fieldWorkComplete: false,
   workOrderStatus: "wip",
 };
 
-test("invoice-capable contractors always see the final action on eligible work", () => {
-  assert.deepEqual(
-    getContractorCompletionControl({
-      ...eligibleInvoiceContractor,
-      invoiceStates: [],
-    }),
-    {
-      visible: true,
-      enabled: false,
-      action: "create_invoice",
-      label: "Create invoice to complete job",
-      blockedReason: "Submit at least one contractor invoice before completing work and invoicing.",
-    },
-  );
-});
-
-test("draft invoices route contractors back to the draft", () => {
-  const control = getContractorCompletionControl({
-    ...eligibleInvoiceContractor,
-    invoiceStates: ["draft"],
+test("eligible contractors receive field completion without an invoice gate", () => {
+  assert.deepEqual(getContractorCompletionControl(eligibleFieldWork), {
+    visible: true,
+    enabled: true,
+    action: "complete",
+    label: "Mark work complete",
+    blockedReason: null,
   });
-  assert.equal(control.visible, true);
-  assert.equal(control.enabled, false);
-  assert.equal(control.action, "finish_invoice");
-  assert.equal(control.label, "Finish invoice to complete job");
-  assert.match(control.blockedReason || "", /submit or delete drafts/i);
 });
 
-test("rejected invoices route contractors to correction first", () => {
-  const control = getContractorCompletionControl({
-    ...eligibleInvoiceContractor,
-    invoiceStates: ["submitted", "draft", "rejected"],
-  });
-  assert.equal(control.visible, true);
-  assert.equal(control.enabled, false);
-  assert.equal(control.action, "correct_invoice");
-  assert.equal(control.label, "Correct invoice to complete job");
-  assert.match(control.blockedReason || "", /rejected invoices/i);
+test("invoice-driven statuses do not hide unfinished field completion", () => {
+  for (const workOrderStatus of [
+    "wip",
+    "pending_invoice",
+    "pending_approval",
+    "pending_payment",
+  ]) {
+    const control = getContractorCompletionControl({
+      ...eligibleFieldWork,
+      workOrderStatus,
+    });
+    assert.equal(control.visible, true, workOrderStatus);
+    assert.equal(control.action, "complete", workOrderStatus);
+    assert.equal(control.label, "Mark work complete", workOrderStatus);
+  }
 });
 
-test("a ready invoice set enables the one atomic completion action", () => {
-  for (const state of ["submitted", "revised", "approved", "paid"]) {
-    assert.deepEqual(
-      getContractorCompletionControl({
-        ...eligibleInvoiceContractor,
-        invoiceStates: [state],
-      }),
-      {
-        visible: true,
-        enabled: true,
-        action: "complete",
-        label: "Complete work & invoicing",
-        blockedReason: null,
-      },
-      state,
+test("field completion preserves invoice workflow queues", () => {
+  for (const workOrderStatus of [
+    "pending_invoice",
+    "pending_approval",
+    "pending_payment",
+  ]) {
+    assert.equal(
+      workOrderStatusAfterFieldCompletion(workOrderStatus),
+      workOrderStatus,
     );
   }
 
-  const mixedControl = getContractorCompletionControl({
-    ...eligibleInvoiceContractor,
-    invoiceStates: ["submitted", "draft"],
-  });
-  assert.equal(mixedControl.enabled, false);
-  assert.equal(mixedControl.action, "finish_invoice");
-  assert.equal(mixedControl.label, "Finish invoice to complete job");
+  for (const workOrderStatus of ["wip", "unassigned", null, undefined]) {
+    assert.equal(
+      workOrderStatusAfterFieldCompletion(workOrderStatus),
+      "completed",
+    );
+  }
 });
 
-test("the control stays unavailable outside the approved contractor work scope", () => {
+test("field completion stays unavailable outside the approved work scope", () => {
   const excludedInputs = [
     { isManager: true },
-    { canInvoice: false },
     { billingOnly: true },
-    { invoicingComplete: true },
+    { fieldWorkComplete: true },
+    { workOrderStatus: "unassigned" },
     { workOrderStatus: "assigned" },
     { workOrderStatus: "parts" },
+    { workOrderStatus: "completed" },
     { workOrderStatus: "closed" },
     { workOrderStatus: "capital" },
     { workOrderStatus: "pending_capital_completion" },
+    { workOrderStatus: "unexpected_status" },
   ];
 
   for (const override of excludedInputs) {
     const control = getContractorCompletionControl({
-      ...eligibleInvoiceContractor,
-      invoiceStates: ["submitted"],
+      ...eligibleFieldWork,
       ...override,
     });
     assert.equal(control.visible, false, JSON.stringify(override));

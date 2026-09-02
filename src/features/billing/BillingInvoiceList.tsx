@@ -120,9 +120,18 @@ function BillingInvoiceRows({
                   <td style={{ padding: "13px 14px", color: T.subtle }}>{invoice.date || invoice.invoiceDate}</td>
                   <td style={{ padding: "13px 14px", color: invoice.wot ? T.muted : T.subtle }}>
                     <div className="mono" style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      {invoice.wot || "Standalone"}
-                      {invoice.wot && <CopyWorkOrderButton value={invoice.wot} />}
+                      {invoice.externalWorkOrderId || invoice.wot || "Standalone"}
+                      {(invoice.externalWorkOrderId || invoice.wot) && (
+                        <CopyWorkOrderButton value={invoice.externalWorkOrderId || invoice.wot} />
+                      )}
                     </div>
+                    {invoice.externalWorkOrderId
+                      && invoice.wot
+                      && invoice.externalWorkOrderId !== invoice.wot && (
+                      <div className="mono" style={{ fontSize: 9, color: T.subtle, marginTop: 3 }}>
+                        P1 portal reassignment: {invoice.wot}
+                      </div>
+                    )}
                     {(invoice.sourceInvoices || []).length > 0 && (
                       <div style={{ fontSize: 10, color: T.subtle, marginTop: 3 }}>
                         {invoice.sourceInvoices.length} contractor invoice{invoice.sourceInvoices.length === 1 ? "" : "s"}
@@ -175,9 +184,18 @@ function BillingInvoiceRows({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingTop: 8, borderTop: `1px solid ${T.borderSoft}` }}>
               <span style={{ fontSize: 11, color: T.muted }}>
                 WO: <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 4, color: invoice.wot ? T.accent : T.subtle }}>
-                  {invoice.wot || "Standalone"}
-                  {invoice.wot && <CopyWorkOrderButton value={invoice.wot} />}
+                  {invoice.externalWorkOrderId || invoice.wot || "Standalone"}
+                  {(invoice.externalWorkOrderId || invoice.wot) && (
+                    <CopyWorkOrderButton value={invoice.externalWorkOrderId || invoice.wot} />
+                  )}
                 </span>
+                {invoice.externalWorkOrderId
+                  && invoice.wot
+                  && invoice.externalWorkOrderId !== invoice.wot && (
+                  <span className="mono" style={{ display: "block", fontSize: 9, color: T.subtle, marginTop: 3 }}>
+                    P1 portal reassignment: {invoice.wot}
+                  </span>
+                )}
                 {contractorBucket && sourceOwnerById.has(invoice.id) && <span> / already in Billing</span>}
               </span>
               <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(Math.round(invoice.total || 0))}</span>
@@ -389,8 +407,17 @@ export default function BillingInvoiceList(props: any) {
                     className="billing-ready-row"
                     style={{ display: "grid", gridTemplateColumns: "minmax(160px, 1fr) minmax(120px, 1fr) minmax(160px, 2fr) auto", alignItems: "center", gap: 14, padding: "12px 14px", borderBottom: index === visibleReadyWorkOrders.length - 1 ? "none" : `1px solid ${T.borderSoft}` }}
                   >
-                    <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent, fontSize: 11, fontWeight: 700 }}>
-                      {workOrder.id}<CopyWorkOrderButton value={workOrder.id} />
+                    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 3 }}>
+                      <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent, fontSize: 11, fontWeight: 700 }}>
+                        {workOrder.externalWorkOrderId || workOrder.duplicateRootWorkOrderId || workOrder.id}
+                        <CopyWorkOrderButton value={workOrder.externalWorkOrderId || workOrder.duplicateRootWorkOrderId || workOrder.id} />
+                      </span>
+                      {(workOrder.externalWorkOrderId || workOrder.duplicateRootWorkOrderId)
+                        && (workOrder.externalWorkOrderId || workOrder.duplicateRootWorkOrderId) !== workOrder.id && (
+                        <span className="mono" style={{ color: T.subtle, fontSize: 9 }}>
+                          P1 portal reassignment: {workOrder.id}
+                        </span>
+                      )}
                     </span>
                     <span style={{ color: T.ink, fontSize: 12 }}>Store #{workOrder.store || "-"}</span>
                     <span style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>

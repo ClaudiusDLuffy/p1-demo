@@ -263,6 +263,7 @@ type WorkOrderActivityPanelsProps = Omit<ActivityEntryListProps, "activities" | 
     text?: string,
   ) => Promise<boolean | void> | boolean | void;
   onCopyWorkOrder: () => void;
+  sevenElevenWorkOrderId?: string | null;
   aiNote: ReactNode;
   setAiNote: (note: ReactNode | null) => void;
   aiEnhancing: boolean;
@@ -280,6 +281,7 @@ export default function WorkOrderActivityPanels({
   setFieldNoteText,
   doPostNote,
   onCopyWorkOrder,
+  sevenElevenWorkOrderId,
   aiNote,
   setAiNote,
   aiEnhancing,
@@ -380,7 +382,7 @@ export default function WorkOrderActivityPanels({
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
               {isManager && (
                 <button type="button" className="btn-soft" onClick={onCopyWorkOrder} style={{ minHeight: 40, padding: "8px 11px", fontSize: 11 }}>
-                  Copy work order number
+                  Copy 7-Eleven WOT{sevenElevenWorkOrderId ? ` · ${sevenElevenWorkOrderId}` : ""}
                 </button>
               )}
               {isManager && (

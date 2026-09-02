@@ -33,6 +33,9 @@ export const WorkOrderSchema = z.object({
   contractor_invoicing_assignment_version: z.number().int().optional().nullable(),
   contractor_invoicing_workflow_cycle: z.number().int().optional().nullable(),
   contractor_invoicing_completion_source: z.string().optional().nullable(),
+  duplicated_from_work_order_id: z.string().optional().nullable(),
+  duplicate_root_work_order_id: z.string().optional().nullable(),
+  duplicate_sequence: z.number().int().positive().optional().nullable(),
 })
 
 export type WorkOrder = z.infer<typeof WorkOrderSchema>

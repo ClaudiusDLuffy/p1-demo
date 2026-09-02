@@ -71,6 +71,23 @@ test("deduplicates repeated configured owner emails", () => {
   );
 });
 
+test("reassignment dispatch keeps the canonical WOT and labels the portal copy", () => {
+  const plan = createDispatchNotificationPlan({
+    workOrder: {
+      ...workOrder,
+      id: "WOT0000001-1",
+      externalWorkOrderId: "WOT0000001",
+    },
+    contractorAssigned: true,
+    contractorEmail: "contractor@example.com",
+  });
+
+  assert.equal(plan.ownerSubject, "New TX Call Dispatched - WOT0000001");
+  assert.equal(plan.contractorSubject, "New Work Order Assigned - WOT0000001");
+  assert.match(plan.ownerBody, /Work Order: WOT0000001/);
+  assert.match(plan.ownerBody, /Portal reassignment reference: WOT0000001-1/);
+});
+
 test("rejection email identifies the invoice, work order, and correction reason", () => {
   const plan = createInvoiceReviewNotificationPlan({
     event: "rejected",
@@ -112,6 +129,21 @@ test("retraction email tells the contractor no resubmission is needed", () => {
   assert.match(plan.body, /no correction or resubmission is needed/i);
 });
 
+test("invoice review email uses the canonical WOT and labels a reassignment copy", () => {
+  const plan = createInvoiceReviewNotificationPlan({
+    event: "rejected",
+    recipients: ["contractor@example.com"],
+    invoice: {
+      num: "4353",
+      workOrderId: "WOT1007298-1",
+      externalWorkOrderId: "WOT1007298",
+    },
+  });
+
+  assert.match(plan.body, /Work Order: WOT1007298/);
+  assert.match(plan.body, /P1 portal reassignment reference: WOT1007298-1/);
+});
+
 test("payment hold email tells accounting why an invoice is excluded", () => {
   const plan = createInvoicePaymentHoldNotificationPlan({
     event: "placed",
@@ -132,4 +164,21 @@ test("payment hold email tells accounting why an invoice is excluded", () => {
   assert.match(plan.body, /Anderson Mechanical/);
   assert.match(plan.body, /\$155\.00/);
   assert.match(plan.body, /excluded from the QuickBooks handoff queue/);
+});
+
+test("payment hold email uses the canonical WOT and labels a reassignment copy", () => {
+  const plan = createInvoicePaymentHoldNotificationPlan({
+    event: "placed",
+    recipients: ["emily@example.com"],
+    invoice: {
+      num: "6880",
+      workOrderId: "WOT1143877-2",
+      externalWorkOrderId: "WOT1143877",
+    },
+    actorName: "Lynnette Price",
+    reason: "Controller review required",
+  });
+
+  assert.match(plan.body, /Work Order: WOT1143877/);
+  assert.match(plan.body, /P1 portal reassignment reference: WOT1143877-2/);
 });

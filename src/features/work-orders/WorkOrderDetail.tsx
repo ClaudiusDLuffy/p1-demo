@@ -23,6 +23,11 @@ import { isInvoiceController } from "../../lib/staffPermissions";
 import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
 import { getContractorCompletionControl } from "../../lib/contractorCompletion";
+import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
+import {
+  canDuplicateWorkOrderForReassignment,
+  canRejectUnassignedWorkOrder,
+} from "../../lib/workOrderDispatchActions";
 import {
   canFlagWorkOrderCapital,
   getSlaAgingStyle,
@@ -134,9 +139,10 @@ export default function WorkOrderDetail(props: any) {
     setNoteText("");
   }, [selectedWO, setNoteText]);
   const copyWorkOrderNumber = async () => {
+    const sevenElevenWorkOrderId = canonicalSevenElevenWorkOrderId(woData);
     try {
-      await navigator.clipboard.writeText(String(woData.id));
-      fire(`Work order ${woData.id} copied`);
+      await navigator.clipboard.writeText(sevenElevenWorkOrderId);
+      fire(`7-Eleven work order ${sevenElevenWorkOrderId} copied`);
     } catch {
       fire("Could not copy the work order number");
     }
@@ -268,50 +274,15 @@ export default function WorkOrderDetail(props: any) {
     && contractorInvoiceSetReady;
   const contractorCompletionControl = getContractorCompletionControl({
     isManager,
-    canInvoice,
     billingOnly: woData?.billingOnly,
-    invoicingComplete,
+    fieldWorkComplete: woData?.functionalStatus === "Completed",
     workOrderStatus: woData?.status,
-    invoiceStates: contractorInvoiceStates,
   });
-  const contractorInvoiceRequiringAttention = woAllInvoices.find(invoice =>
-    contractorCompletionControl.action === "correct_invoice"
-      ? canEditRejectedContractorInvoice(invoice, currentUser, isManager)
-      : contractorCompletionControl.action === "finish_invoice"
-        && canDeleteOwnContractorInvoice(invoice, currentUser, isManager)
-        && String(invoice.state || "").trim().toLowerCase() === "draft"
-  );
-  const openContractorCompletionAction = () => {
-    if (contractorCompletionControl.action === "create_invoice") {
-      openCreate(null);
-      return;
-    }
-    if (["finish_invoice", "correct_invoice"].includes(contractorCompletionControl.action || "")) {
-      if (contractorInvoiceRequiringAttention) {
-        openCreate(contractorInvoiceRequiringAttention);
-      } else {
-        fire(contractorCompletionControl.blockedReason || "Finish the open invoice before completing this job.");
-      }
-      return;
-    }
-    if (contractorCompletionControl.action === "complete" && contractorCompletionControl.enabled) {
-      setModal("closeComplete");
-    }
-  };
-  const contractorCompletionGuidesInvoice = [
-    "create_invoice",
-    "finish_invoice",
-    "correct_invoice",
-  ].includes(contractorCompletionControl.action || "");
-  const canCompleteWorkAndInvoicing = contractorCompletionControl.enabled;
-  const contractorInvoicingGuidance = contractorCompletionControl.blockedReason
-    || (canCompleteWorkAndInvoicing
-      ? "Use Complete work & invoicing to finish field work and confirm the current invoice set together."
-      : contractorInvoiceSetReady
-        ? "The contractor can complete field work and invoicing together when ready."
-        : contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state))
-          ? "Submit or delete drafts and resolve rejected invoices before completing work and invoicing."
-          : "Submit at least one contractor invoice before completing work and invoicing.");
+  const contractorInvoicingGuidance = canFinishInvoicing
+    ? "Every current contractor invoice is submitted. Use the final invoicing action when no more invoices are expected."
+    : contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state))
+      ? "Submit or delete drafts and resolve rejected invoices before finishing invoicing."
+      : "Create and submit the contractor invoices for this work order. Field completion is handled separately.";
   // Job-progress track runs PARALLEL to the invoice track. A contractor keeps
   // his work actions (pause / close complete / submit report / resume) as long
   // as the job itself is alive — driven by whether the WO is closed, NOT by the
@@ -319,8 +290,41 @@ export default function WorkOrderDetail(props: any) {
   // pending_approval, which previously hid these). Capital is excluded (it has
   // its own staff flow). Pausing/closing never touches existing invoices.
   const jobOpen = !["closed", "capital", "pending_capital_completion"].includes(woData?.status);
+  const sevenElevenWorkOrderId = canonicalSevenElevenWorkOrderId(woData);
+  const unrelatedIncidentWorkOrderIds = (
+    woData?.incidentReuse?.relatedWorkOrderIds || []
+  ).filter((workOrderId: string) =>
+    canonicalSevenElevenWorkOrderId(workOrderId) !== sevenElevenWorkOrderId
+  );
   const invoiceController = isInvoiceController(currentUser);
   const canReviewInvoices = isManager && !invoiceController;
+  const canRejectDuringDispatch = canRejectUnassignedWorkOrder({
+    isOperationalStaff: isManager,
+    isInvoiceController: invoiceController,
+    status: woData?.status,
+    functionalStatus: woData?.functionalStatus,
+    contractorId: woData?.contractor,
+    assignedTechnicianProfileId: woData?.assignedTechnicianProfileId,
+    technicianOnJob: woData?.technicianOnJob,
+    contractorAssignmentVersion: woData?.contractorAssignmentVersion,
+    contractorAssignmentStartedAt: woData?.contractorAssignmentStartedAt,
+    dispatchedAt: woData?.dispatchedAt,
+    startTime: woData?.startTimeRaw,
+    endTime: woData?.endTimeRaw,
+    billingOnly: woData?.billingOnly,
+    hasActiveInvoices: hasAnyLiveInvoice,
+  });
+  const canDuplicateForReassignment = canDuplicateWorkOrderForReassignment({
+    isOperationalStaff: isManager,
+    isInvoiceController: invoiceController,
+    workOrderId: woData?.id,
+    duplicateRootWorkOrderId: woData?.duplicateRootWorkOrderId,
+    status: woData?.status,
+    contractorId: woData?.contractor,
+    contractorAssignmentVersion: woData?.contractorAssignmentVersion,
+    billingOnly: woData?.billingOnly,
+    isCapital: woData?.isCapital,
+  });
   const isLoading = (key: string) => !!loadingStates[key];
   const loadingStyle = (key: string) => ({
     opacity: isLoading(key) ? 0.7 : 1,
@@ -437,7 +441,21 @@ export default function WorkOrderDetail(props: any) {
                 )}
 
                 {/* Alert stack — two-breach SLA replaces the single-deadline view */}
-                {isManager && woData.incidentReuse && (
+                {woData?.duplicateRootWorkOrderId && (
+                  <div role="status" className="card" style={{ background: T.accentSoft, border: `1px solid ${T.accentRing}`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 300px" }}>
+                      <div style={{ fontWeight: 800, color: T.accent, fontSize: 12 }}>P1 portal reassignment copy · <span className="mono">{woData.id}</span></div>
+                      <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>
+                        Use 7-Eleven WOT <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>{sevenElevenWorkOrderId}</span> for every portal update and outbound invoice. The suffixed P1 reference keeps this contractor visit and its invoices separate.
+                      </div>
+                    </div>
+                    <CopyWorkOrderButton
+                      value={sevenElevenWorkOrderId}
+                      onCopied={() => fire(`7-Eleven work order ${sevenElevenWorkOrderId} copied`)}
+                    />
+                  </div>
+                )}
+                {isManager && woData.incidentReuse && unrelatedIncidentWorkOrderIds.length > 0 && (
                   <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 20, color: T.warn, fontWeight: 800 }}>!</div>
                     <div style={{ flex: 1 }}>
@@ -445,7 +463,7 @@ export default function WorkOrderDetail(props: any) {
                         Reused incident number
                       </div>
                       <div style={{ fontSize: 11, color: "#73560C", marginTop: 2 }}>
-                        {woData.incidentId} also appears on {woData.incidentReuse.relatedWorkOrderIds.join(", ")}.
+                        {woData.incidentId} also appears on {unrelatedIncidentWorkOrderIds.join(", ")}.
                         {woData.incidentReuse.crossesState ? " The work orders span different states." : ""}
                         {" "}Treat each WOT as a separate call and verify the incident reference before updating 7-Eleven.
                       </div>
@@ -488,7 +506,7 @@ export default function WorkOrderDetail(props: any) {
                     <div style={{ fontSize: 20, color: T.warn, fontWeight: 800 }}>!</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, color: "#73560C", fontSize: 13 }}>
-                        {woData.pendingSevenElevenSyncCount} update{woData.pendingSevenElevenSyncCount === 1 ? "" : "s"} need to be copied to the 7-Eleven portal
+                        {woData.pendingSevenElevenSyncCount} update{woData.pendingSevenElevenSyncCount === 1 ? "" : "s"} need to be copied to the 7-Eleven portal for {sevenElevenWorkOrderId}
                       </div>
                       <div style={{ fontSize: 11, color: "#73560C", marginTop: 2 }}>Use the checkboxes in Activity after each update is entered in 7-Eleven.</div>
                     </div>
@@ -647,6 +665,23 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("assign_" + woData.id) ? <><BtnSpinnerDark />Assigning...</> : <>Assign to {c.name.split(" ")[0]}</>}
                         </button>
                       ))}
+                      {canRejectDuringDispatch && (
+                        <button
+                          type="button"
+                          onClick={() => setModal("rejectUnassignedWO")}
+                          disabled={isLoading("rejectUnassignedWO_" + woData.id)}
+                          className="btn-soft"
+                          style={{
+                            ...loadingStyle("rejectUnassignedWO_" + woData.id),
+                            color: T.danger,
+                            borderColor: `${T.danger}55`,
+                          }}
+                        >
+                          {isLoading("rejectUnassignedWO_" + woData.id)
+                            ? <><BtnSpinnerDark />Rejecting...</>
+                            : "Reject work order"}
+                        </button>
+                      )}
                       {isManager && ["assigned", "wip", "parts"].includes(woData.status) && (
                         <>
                           <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} disabled={isLoading("reassign_" + woData.id)} className="btn-soft" style={loadingStyle("reassign_" + woData.id)}>
@@ -656,6 +691,19 @@ export default function WorkOrderDetail(props: any) {
                             {isLoading("unassign_" + woData.id) ? <><BtnSpinnerDark />Unassigning...</> : "Unassign"}
                           </button>
                         </>
+                      )}
+                      {canDuplicateForReassignment && (
+                        <button
+                          type="button"
+                          onClick={() => setModal("duplicateForReassignment")}
+                          disabled={isLoading("duplicateForReassignment_" + woData.id)}
+                          className="btn-soft"
+                          style={loadingStyle("duplicateForReassignment_" + woData.id)}
+                        >
+                          {isLoading("duplicateForReassignment_" + woData.id)
+                            ? <><BtnSpinnerDark />Duplicating...</>
+                            : "Duplicate for reassignment"}
+                        </button>
                       )}
                       {woData.status === "assigned" && (
                         <>
@@ -667,27 +715,21 @@ export default function WorkOrderDetail(props: any) {
                           </button>
                         </>
                       )}
-                      {/* Invoice-capable contractors finish field work and the
-                          current invoice set with one atomic action. Report-only
-                          technicians retain field completion without invoice access. */}
+                      {/* Field completion is independent of invoice permission.
+                          Invoice-capable technicians retain the separate invoice
+                          workflow after marking the field work complete. */}
                       {!isManager && jobOpen && !["assigned", "parts"].includes(woData.status) && (
                         <>
-                          {woData.status !== "completed" && (
+                          {woData.functionalStatus === "Work in Progress" && (
                             <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
                               {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
-                            </button>
-                          )}
-                          {!canInvoice && woData.status !== "completed" && (
-                            <button onClick={() => setModal("closeComplete")} disabled={isLoading("closeComplete_" + woData.id)} className="btn-primary" style={loadingStyle("closeComplete_" + woData.id)}>
-                              {isLoading("closeComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Mark work complete"}
                             </button>
                           )}
                           {contractorCompletionControl.visible && (
                             <button
                               type="button"
-                              onClick={openContractorCompletionAction}
+                              onClick={() => setModal("closeComplete")}
                               disabled={isLoading("closeComplete_" + woData.id)}
-                              title={contractorCompletionControl.blockedReason || undefined}
                               className="btn-primary"
                               style={{
                                 ...loadingStyle("closeComplete_" + woData.id),
@@ -697,12 +739,14 @@ export default function WorkOrderDetail(props: any) {
                             >
                               {isLoading("closeComplete_" + woData.id)
                                 ? <><BtnSpinner />Completing...</>
-                                : contractorCompletionControl.label}
+                                : "Mark work complete"}
                             </button>
                           )}
                         </>
                       )}
-                      {isManager && ["wip", "pending_invoice", "pending_approval"].includes(woData.status) && (
+                      {isManager
+                        && woData.functionalStatus === "Work in Progress"
+                        && ["wip", "pending_invoice", "pending_approval"].includes(woData.status) && (
                         <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
                           {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
                         </button>
@@ -734,7 +778,7 @@ export default function WorkOrderDetail(props: any) {
                           follow-up visits until the WO closes. The per-invoice
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
-                      {woData.status !== "closed" && !isManager && canInvoice && !contractorCompletionGuidesInvoice && (
+                      {woData.status !== "closed" && !isManager && canInvoice && (
                         <button type="button" onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>
                       )}
                       {/* Staff retain only the explicit no-invoice exception.
@@ -762,7 +806,7 @@ export default function WorkOrderDetail(props: any) {
                       />
                     )}
 
-                    {(woAllInvoices.length > 0 || contractorCompletionControl.visible) && (isManager || canInvoice) && (
+                    {woAllInvoices.length > 0 && (isManager || canInvoice) && (
                       <div
                         role="status"
                         className="card"
@@ -785,12 +829,12 @@ export default function WorkOrderDetail(props: any) {
                           <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
                             {invoicingComplete
                               ? "Staff can safely continue the billing handoff. A new or corrected contractor invoice automatically reopens this step."
-                              : woData?.billingOnly && canFinishInvoicing
+                              : canFinishInvoicing
                                 ? "Use the final action after every contractor invoice has been submitted. P1 will still review and bill separately."
                                 : contractorInvoicingGuidance}
                           </div>
                         </div>
-                        {!isManager && woData?.billingOnly && canFinishInvoicing && !invoicingComplete && (
+                        {!isManager && canFinishInvoicing && !invoicingComplete && (
                           <button
                             type="button"
                             onClick={() => {
@@ -1303,6 +1347,7 @@ export default function WorkOrderDetail(props: any) {
                       setFieldNoteText={setNoteText}
                       doPostNote={doPostNote}
                       onCopyWorkOrder={copyWorkOrderNumber}
+                      sevenElevenWorkOrderId={sevenElevenWorkOrderId}
                       aiNote={aiNote}
                       setAiNote={setAiNote}
                       aiEnhancing={aiEnhancing}

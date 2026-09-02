@@ -194,9 +194,20 @@ export default function BillingInvoiceDetail(props: any) {
               <span style={{ color: T.muted }}>Due date</span><span className="mono" style={{ color: T.ink }}>{invoice.dueDate || "-"}</span>
               <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{invoice.terms || "Net 30"}</span>
               <span style={{ color: T.muted }}>Work order</span>
-              <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: invoice.wot ? T.accent : T.subtle }}>
-                {invoice.wot || "Standalone"}
-                {invoice.wot && <CopyWorkOrderButton value={invoice.wot} />}
+              <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: invoice.wot ? T.accent : T.subtle }}>
+                  {invoice.externalWorkOrderId || invoice.wot || "Standalone"}
+                  {(invoice.externalWorkOrderId || invoice.wot) && (
+                    <CopyWorkOrderButton value={invoice.externalWorkOrderId || invoice.wot} />
+                  )}
+                </span>
+                {invoice.externalWorkOrderId
+                  && invoice.wot
+                  && invoice.externalWorkOrderId !== invoice.wot && (
+                  <span className="mono" style={{ color: T.subtle, fontSize: 9 }}>
+                    P1 portal reassignment: {invoice.wot}
+                  </span>
+                )}
               </span>
               <span style={{ color: T.muted }}>Territory</span><span style={{ color: invoice.territory ? T.ink : T.subtle }}>{invoice.territory || "-"}</span>
               <span style={{ color: T.muted }}>Equipment tag</span><span style={{ color: invoice.equipmentTag ? T.ink : T.subtle }}>{invoice.equipmentTag || "-"}</span>

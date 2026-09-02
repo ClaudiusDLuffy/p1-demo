@@ -1,8 +1,10 @@
 import { getAccessToken, sendEmail } from "./graphClient";
+import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
 
 type DispatchNotificationInput = {
   workOrder: {
     id: string;
+    externalWorkOrderId?: string | null;
     incidentId?: string | null;
     store?: string | null;
     storeNumber?: string | null;
@@ -25,6 +27,7 @@ type InvoiceReviewNotificationInput = {
   invoice: {
     num: string;
     workOrderId: string;
+    externalWorkOrderId?: string | null;
     storeNumber?: string | null;
     rejectionReason?: string | null;
   };
@@ -36,6 +39,7 @@ type InvoicePaymentHoldNotificationInput = {
   invoice: {
     num: string;
     workOrderId?: string | null;
+    externalWorkOrderId?: string | null;
     contractorName?: string | null;
     total?: number | null;
   };
@@ -83,11 +87,45 @@ const addressLabel = (workOrder: DispatchNotificationInput["workOrder"]) =>
 const issueLabel = (workOrder: DispatchNotificationInput["workOrder"]) =>
   workOrder.summary || workOrder.description || "No issue summary provided";
 
+const dispatchWorkOrderReference = (
+  workOrder: DispatchNotificationInput["workOrder"],
+) => {
+  const externalId = canonicalSevenElevenWorkOrderId({
+    id: workOrder.id,
+    duplicateRootWorkOrderId: workOrder.externalWorkOrderId,
+  });
+  return {
+    externalId,
+    portalReferenceLine: externalId !== workOrder.id
+      ? `\nPortal reassignment reference: ${workOrder.id}`
+      : "",
+  };
+};
+
+const invoiceWorkOrderReference = (
+  invoice: {
+    workOrderId?: string | null;
+    externalWorkOrderId?: string | null;
+  },
+) => {
+  const portalReference = String(invoice.workOrderId || "").trim();
+  const externalId = canonicalSevenElevenWorkOrderId({
+    id: portalReference,
+    duplicateRootWorkOrderId: invoice.externalWorkOrderId,
+  });
+  return {
+    externalId: externalId || "Not captured",
+    portalReferenceLine: externalId && portalReference && externalId !== portalReference
+      ? `\nP1 portal reassignment reference: ${portalReference}`
+      : "",
+  };
+};
+
 const buildContractorBody = (
   workOrder: DispatchNotificationInput["workOrder"],
 ) => `You have been assigned a new work order.
 
-Work Order: ${workOrder.id}
+Work Order: ${dispatchWorkOrderReference(workOrder).externalId}${dispatchWorkOrderReference(workOrder).portalReferenceLine}
 Incident: ${workOrder.incidentId || "Not captured"}
 Store: #${storeLabel(workOrder)}
 Address: ${addressLabel(workOrder)}
@@ -105,7 +143,7 @@ const buildOwnerBody = (
   ? `A new work order has been dispatched${contractorName ? ` to ${contractorName}` : ""}.`
   : "A new work order is waiting for contractor assignment."}
 
-Work Order: ${workOrder.id}
+Work Order: ${dispatchWorkOrderReference(workOrder).externalId}${dispatchWorkOrderReference(workOrder).portalReferenceLine}
 Incident: ${workOrder.incidentId || "Not captured"}
 Store: #${storeLabel(workOrder)}
 Address: ${addressLabel(workOrder)}
@@ -136,14 +174,16 @@ export const createDispatchNotificationPlan = (
     ...(!contractorAssigned ? [SERVICE_INBOX] : []),
   ])];
   const stateLabel = String(workOrder.state || "").trim().toUpperCase();
+  const workOrderReference = dispatchWorkOrderReference(workOrder);
 
   return {
     contractorAssigned,
     contractorRecipients,
     internalRecipients,
     ownerSubject: contractorAssigned
-      ? `New ${stateLabel ? `${stateLabel} ` : ""}Call Dispatched - ${workOrder.id}`
-      : `New ${stateLabel ? `${stateLabel} ` : ""}Call Needs Assignment - ${workOrder.id}`,
+      ? `New ${stateLabel ? `${stateLabel} ` : ""}Call Dispatched - ${workOrderReference.externalId}`
+      : `New ${stateLabel ? `${stateLabel} ` : ""}Call Needs Assignment - ${workOrderReference.externalId}`,
+    contractorSubject: `New Work Order Assigned - ${workOrderReference.externalId}`,
     ownerBody: buildOwnerBody(workOrder, contractorAssigned, contractorName),
   };
 };
@@ -162,7 +202,7 @@ export async function sendDispatchNotification(input: DispatchNotificationInput)
     await sendEmail(
       accessToken,
       plan.contractorRecipients,
-      `New Work Order Assigned - ${workOrder.id}`,
+      plan.contractorSubject,
       buildContractorBody(workOrder),
     );
   }
@@ -203,6 +243,7 @@ export function createInvoiceReviewNotificationPlan(
       .filter(Boolean),
   )];
   const { invoice } = input;
+  const workOrderReference = invoiceWorkOrderReference(invoice);
 
   if (input.event === "rejected") {
     return {
@@ -211,7 +252,7 @@ export function createInvoiceReviewNotificationPlan(
       body: `Your contractor invoice needs corrections before it can be approved.
 
 Invoice: #${invoice.num}
-Work Order: ${invoice.workOrderId}
+Work Order: ${workOrderReference.externalId}${workOrderReference.portalReferenceLine}
 Store: #${invoice.storeNumber || "Not captured"}
 Reason: ${invoice.rejectionReason || "No reason provided"}
 
@@ -226,7 +267,7 @@ ${portalUrl()}`,
     body: `The prior rejection of your contractor invoice was withdrawn by P1 staff. The invoice is now approved; no correction or resubmission is needed.
 
 Invoice: #${invoice.num}
-Work Order: ${invoice.workOrderId}
+Work Order: ${workOrderReference.externalId}${workOrderReference.portalReferenceLine}
 Store: #${invoice.storeNumber || "Not captured"}
 
 Log in to review the updated status:
@@ -264,6 +305,7 @@ export function createInvoicePaymentHoldNotificationPlan(
     ? `$${Number(invoice.total || 0).toFixed(2)}`
     : "Not captured";
   const placed = input.event === "placed";
+  const workOrderReference = invoiceWorkOrderReference(invoice);
 
   return {
     recipients,
@@ -273,7 +315,7 @@ export function createInvoicePaymentHoldNotificationPlan(
     body: `${placed ? "A contractor invoice was placed on payment hold." : "A contractor invoice payment hold was released."}
 
 Invoice: #${invoice.num}
-Work Order: ${invoice.workOrderId || "Not captured"}
+Work Order: ${workOrderReference.externalId}${workOrderReference.portalReferenceLine}
 Contractor: ${invoice.contractorName || "Not captured"}
 Amount: ${amount}
 ${placed ? "Placed" : "Released"} by: ${input.actorName}

@@ -11,6 +11,7 @@ import {
 import { collectSupabasePages } from "../../../lib/paginatedQuery";
 import { createServerClient } from "../../../lib/supabase/server";
 import type { Database, Tables } from "../../../lib/supabase/database.types";
+import { canonicalSevenElevenWorkOrderId } from "../../../lib/workOrderIdentity";
 import { createZipArchive, type ZipArchiveEntry } from "../../../lib/zipArchive";
 
 export const runtime = "nodejs";
@@ -93,9 +94,14 @@ type InvoiceLineRow = Pick<Tables<"invoice_lines">,
   | "is_taxable"
 >;
 
-const invoiceForCsv = (invoice: InvoiceRow, lines: InvoiceLineRow[]) => ({
+const invoiceForCsv = (
+  invoice: InvoiceRow,
+  lines: InvoiceLineRow[],
+  externalWorkOrderId: string,
+) => ({
   num: invoice.num,
   wot: invoice.work_order_id,
+  externalWorkOrderId,
   store: invoice.store_number,
   invoiceDateRaw: invoice.invoice_date,
   serviceDateRaw: invoice.service_date,
@@ -559,7 +565,7 @@ export async function POST(request: NextRequest) {
   const contractorIds = [...new Set(invoices
     .map(invoice => invoice.contractor_id)
     .filter((id): id is string => Boolean(id)))];
-  const [lineResult, uploadResult, profileResult] = await Promise.all([
+  const [lineResult, uploadResult, profileResult, workOrderResult] = await Promise.all([
     auth.sb
       .from("invoice_lines")
       .select("invoice_id,position,type,description,qty,rate,amount,is_taxable")
@@ -580,11 +586,33 @@ export async function POST(request: NextRequest) {
         .select("id,name,company,email,phone")
         .in("id", contractorIds)
       : Promise.resolve({ data: [], error: null }),
+    workOrderIds.length
+      ? auth.sb
+        .from("work_orders")
+        .select("id,duplicate_root_work_order_id")
+        .in("id", workOrderIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const { data: lines, error: lineError } = lineResult;
   if (lineError) return jsonError(lineError.message, 500);
   if (uploadResult.error) return jsonError(uploadResult.error.message, 500);
   if (profileResult.error) return jsonError(profileResult.error.message, 500);
+  if (workOrderResult.error) return jsonError(workOrderResult.error.message, 500);
+
+  const externalWorkOrderIdById = new Map(
+    (workOrderResult.data || []).map(workOrder => [
+      workOrder.id,
+      canonicalSevenElevenWorkOrderId({
+        id: workOrder.id,
+        duplicate_root_work_order_id: workOrder.duplicate_root_work_order_id,
+      }),
+    ]),
+  );
+  const externalWorkOrderIdFor = (workOrderId: string | null) => {
+    if (!workOrderId) return "";
+    return externalWorkOrderIdById.get(workOrderId)
+      || canonicalSevenElevenWorkOrderId(workOrderId);
+  };
 
   const linesByInvoice = new Map<string, InvoiceLineRow[]>();
   for (const line of lines || []) {
@@ -664,13 +692,17 @@ export async function POST(request: NextRequest) {
         pdfBytes = new Uint8Array(await generatedPdf.arrayBuffer());
       }
       entries.push({
-        name: `Source-PDFs/Invoice-${filenameToken(invoice.num, "Invoice")}-${filenameToken(invoice.work_order_id, "Standalone")}.pdf`,
+        name: `Source-PDFs/Invoice-${filenameToken(invoice.num, "Invoice")}-${filenameToken(externalWorkOrderIdFor(invoice.work_order_id), "Standalone")}.pdf`,
         data: pdfBytes,
       });
     }
 
     const csv = generateInvoiceBatchCsv(invoices.map(invoice =>
-      invoiceForCsv(invoice, linesByInvoice.get(invoice.id) || []),
+      invoiceForCsv(
+        invoice,
+        linesByInvoice.get(invoice.id) || [],
+        externalWorkOrderIdFor(invoice.work_order_id),
+      ),
     ));
     entries.unshift({
       name: "QuickBooks-approved-invoices.csv",

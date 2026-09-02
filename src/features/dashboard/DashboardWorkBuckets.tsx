@@ -13,6 +13,11 @@ import {
 import { useCursorBuckets } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
 
+type DashboardIdentityWorkOrder = DashboardWorkOrder & {
+  externalWorkOrderId?: string | null;
+  duplicateRootWorkOrderId?: string | null;
+};
+
 const BUCKET_COLORS: Record<DashboardBucketId, string> = {
   pending_submission: "#B8478A",
   pending_approval: T.accent,
@@ -99,7 +104,7 @@ export default function DashboardWorkBuckets({
 
       <div className="dashboard-bucket-grid" style={{ display: "grid", gap: 12 }}>
         {buckets.map(bucket => {
-          const visibleRows = (bucket.query.data?.items || []) as DashboardWorkOrder[];
+          const visibleRows = (bucket.query.data?.items || []) as DashboardIdentityWorkOrder[];
           const isExpanded = expanded[bucket.id] === true;
           const color = BUCKET_COLORS[bucket.id];
           const position = positions[bucket.id];
@@ -130,6 +135,11 @@ export default function DashboardWorkBuckets({
                     const priority = PRIORITY[workOrder.priority as keyof typeof PRIORITY];
                     const status = STATUS[workOrder.status as keyof typeof STATUS];
                     const contractor = workOrder.contractor ? getUser?.(workOrder.contractor) : null;
+                    const copiedWorkOrderId = bucket.id === "seven_eleven_updates"
+                      ? workOrder.externalWorkOrderId
+                        || workOrder.duplicateRootWorkOrderId
+                        || workOrder.id
+                      : workOrder.id;
                     return (
                       <button
                         key={workOrder.id}
@@ -139,7 +149,7 @@ export default function DashboardWorkBuckets({
                       >
                         <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent, fontSize: 11, fontWeight: 750 }}>
                           {workOrder.id}
-                          <span onClick={event => event.stopPropagation()}><CopyWorkOrderButton value={workOrder.id} /></span>
+                          <span onClick={event => event.stopPropagation()}><CopyWorkOrderButton value={copiedWorkOrderId} /></span>
                         </span>
                         <span style={{ minWidth: 0 }}>
                           <span style={{ display: "block", color: T.ink, fontSize: 12, fontWeight: 650, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>

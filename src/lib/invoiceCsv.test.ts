@@ -112,3 +112,32 @@ test("builds a stable CSV filename", () => {
     "Invoice-P1-00042-WOT-0909771.csv",
   );
 });
+
+test("outbound invoice exports use the canonical WOT for a reassignment copy", () => {
+  const input = {
+    num: "P1-00077",
+    wot: "WOT1215047-2",
+    lines: [{ type: "Labor", description: "Repair", qty: 1, rate: 100 }],
+  };
+  const [row] = staffInvoiceCsvRows(input);
+  assert.equal(row.workOrderNumber, "WOT1215047");
+  assert.equal(
+    staffInvoiceCsvFilename(input),
+    "Invoice-P1-00077-WOT1215047.csv",
+  );
+});
+
+test("stored duplicate provenance takes precedence in accounting exports", () => {
+  const input = {
+    num: "P1-00078",
+    wot: "WOT1215047-2",
+    externalWorkOrderId: "WOT1215047",
+    lines: [{ type: "Labor", description: "Repair", qty: 1, rate: 100 }],
+  };
+  const [row] = staffInvoiceCsvRows(input);
+  assert.equal(row.workOrderNumber, "WOT1215047");
+  assert.equal(
+    staffInvoiceCsvFilename(input),
+    "Invoice-P1-00078-WOT1215047.csv",
+  );
+});

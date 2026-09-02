@@ -27,6 +27,7 @@ import type {
   EditableContractorEstimateLine,
 } from "./contractorEstimate";
 import { workOrderCanEnterSevenElevenQueue } from "./workOrderView";
+import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -525,6 +526,12 @@ const mapWO = (w: any) => ({
   billingReadyBy: w.billing_ready_by || null,
   contractorAssignmentStartedAt: w.contractor_assignment_started_at || null,
   contractorAssignmentVersion: Number(w.contractor_assignment_version || 0),
+  duplicatedFromWorkOrderId: w.duplicated_from_work_order_id || null,
+  duplicateRootWorkOrderId: w.duplicate_root_work_order_id || null,
+  duplicateSequence: w.duplicate_sequence == null
+    ? null
+    : Number(w.duplicate_sequence),
+  externalWorkOrderId: w.duplicate_root_work_order_id || w.id,
   workflowCycle: Number(w.workflow_cycle || 0),
   contractorInvoicingCompletedAt: w.contractor_invoicing_completed_at || null,
   contractorInvoicingCompletedBy: w.contractor_invoicing_completed_by || null,
@@ -1218,6 +1225,8 @@ const mapInvoice = (i: any) => ({
   id: i.id,
   num: i.num,
   wot: i.work_order_id,
+  workOrderId: i.work_order_id,
+  externalWorkOrderId: canonicalSevenElevenWorkOrderId(i.work_order_id),
   store: i.store_number,
   storeAddr: i.store_address,
   submissionKey: i.submission_key || null,
@@ -1740,6 +1749,47 @@ export async function deleteWorkOrder(workOrderId: string, authorName: string): 
   await insertActivity(workOrderId, "System", `Work order deleted by ${authorName}.`, "system");
 }
 
+export type RejectUnassignedWorkOrderResult = {
+  applied: boolean;
+  reason: string;
+  workOrderId: string;
+  rejectedAt: string;
+  rejectedBy: string;
+};
+
+export async function rejectUnassignedWorkOrder(
+  workOrderId: string,
+  reason: string,
+): Promise<RejectUnassignedWorkOrderResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("reject_unassigned_work_order", {
+    p_work_order_id: workOrderId,
+    p_reason: reason,
+  });
+  if (error) throw error;
+  return data as unknown as RejectUnassignedWorkOrderResult;
+}
+
+export type DuplicateWorkOrderForReassignmentResult = {
+  applied: boolean;
+  reason: string;
+  sourceWorkOrderId: string;
+  rootWorkOrderId: string;
+  workOrderId: string;
+  duplicateSequence: number;
+};
+
+export async function duplicateWorkOrderForReassignment(
+  workOrderId: string,
+): Promise<DuplicateWorkOrderForReassignmentResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("duplicate_work_order_for_reassignment", {
+    p_source_work_order_id: workOrderId,
+  });
+  if (error) throw error;
+  return data as unknown as DuplicateWorkOrderForReassignmentResult;
+}
+
 // Invoice soft delete is routed through an authenticated staff-only endpoint.
 // The server verifies the updated row and records an audit without allowing an
 // audit failure to masquerade as a failed delete. WO status remains unchanged.
@@ -1968,7 +2018,12 @@ export async function completeWorkOrderOnce(
     resolutionNotes?: string | null;
     activityText: string;
   },
-): Promise<{ applied: boolean; reason?: string; activityId?: string }> {
+): Promise<{
+  applied: boolean;
+  reason?: string;
+  activityId?: string;
+  workOrderStatus?: string;
+}> {
   const sb = supabase();
   const { data, error } = await sb.rpc("complete_work_order_once", {
     p_work_order_id: workOrderId,
@@ -1986,6 +2041,7 @@ export async function completeWorkOrderOnce(
     applied: boolean;
     reason?: string;
     activityId?: string;
+    workOrderStatus?: string;
   };
 }
 

@@ -12,6 +12,7 @@ import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 import { parseInvoicePdf } from "../../lib/invoicePdfParserClient";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
+import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useWorkOrderPartsQuery } from "../work-orders/queries";
 
 const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
@@ -183,6 +184,12 @@ export default function InvoiceCreateModal(props: any) {
 
   if (modal !== "createInvoice" || !woData) return null;
 
+  const externalWorkOrderId = canonicalSevenElevenWorkOrderId(woData);
+  const portalWorkOrderId = String(woData.id || "").trim();
+  const portalReassignmentReference = externalWorkOrderId !== portalWorkOrderId
+    ? portalWorkOrderId
+    : null;
+
   const close = () => {
     const today = todayIso();
     pdfParseAttempt.current += 1;
@@ -268,7 +275,14 @@ export default function InvoiceCreateModal(props: any) {
       closeOnBackdrop={false}
     >
       <form onSubmit={handleSubmit(onSubmit)}>
-        <div style={{ fontSize: 13, color: T.muted, marginBottom: isRejectedResubmission ? 12 : 20 }}>Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {woData.id}</div>
+        <div style={{ fontSize: 13, color: T.muted, marginBottom: isRejectedResubmission ? 12 : 20 }}>
+          Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {externalWorkOrderId}
+          {portalReassignmentReference && (
+            <span className="mono" style={{ display: "block", fontSize: 10, color: T.subtle, marginTop: 3 }}>
+              P1 portal reassignment: {portalReassignmentReference}
+            </span>
+          )}
+        </div>
 
         {isRejectedResubmission && (
           <div style={{ padding: "12px 14px", marginBottom: 18, borderRadius: 10, border: `1px solid ${T.danger}33`, background: T.dangerSoft }}>
@@ -309,9 +323,16 @@ export default function InvoiceCreateModal(props: any) {
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Work Order #</div>
-            <div style={{ minHeight: 42, display: "flex", alignItems: "center", gap: 5, padding: "7px 8px 7px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
-              {woData.id}
-              <CopyWorkOrderButton value={woData.id} />
+            <div style={{ minHeight: 42, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 2, padding: "7px 8px 7px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                {externalWorkOrderId}
+                <CopyWorkOrderButton value={externalWorkOrderId} />
+              </span>
+              {portalReassignmentReference && (
+                <span style={{ fontSize: 9, color: T.subtle }}>
+                  P1 portal reassignment: {portalReassignmentReference}
+                </span>
+              )}
             </div>
           </div>
           <div><div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store #</div><div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>#{woData.store}</div></div>

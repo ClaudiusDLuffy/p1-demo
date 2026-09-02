@@ -54,6 +54,7 @@ type PaymentHold = {
   invoiceId: string;
   invoiceNumber: string;
   workOrderId: string | null;
+  externalWorkOrderId: string | null;
   contractorName: string;
   total: number;
   holdAt: string;
@@ -463,7 +464,16 @@ export default function ControllerExportPanel({
             {(holdsQuery.data?.holds || []).map(hold => (
               <div key={hold.invoiceId} style={{ display: "grid", gridTemplateColumns: "minmax(85px,.6fr) minmax(90px,.7fr) minmax(140px,1.2fr) minmax(180px,1.6fr) auto", gap: 8, alignItems: "center", fontSize: 10, color: T.muted }}>
                 <span className="mono" style={{ color: T.danger, fontWeight: 800 }}>#{hold.invoiceNumber}</span>
-                <span className="mono">{hold.workOrderId || "—"}</span>
+                <span className="mono">
+                  {hold.externalWorkOrderId || hold.workOrderId || "—"}
+                  {hold.externalWorkOrderId
+                    && hold.workOrderId
+                    && hold.externalWorkOrderId !== hold.workOrderId && (
+                    <span style={{ display: "block", fontFamily: "inherit", color: T.subtle }}>
+                      P1 portal reassignment: {hold.workOrderId}
+                    </span>
+                  )}
+                </span>
                 <span>{hold.contractorName}</span>
                 <span title={hold.reason}>{hold.reason} · {hold.holdByName} · {dateTime(hold.holdAt)}</span>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
