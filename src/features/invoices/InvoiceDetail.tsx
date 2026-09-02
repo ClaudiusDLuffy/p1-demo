@@ -15,6 +15,7 @@ import {
   canHandoffQuickBooks,
   isInvoiceController,
 } from "../../lib/staffPermissions";
+import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useMemo, useState } from "react";
 import { useBillingInvoicePageQuery } from "../billing/queries";
 
@@ -83,6 +84,13 @@ export default function InvoiceDetail(props: any) {
     () => inv ? workOrders.find(w => w.id === inv.wot) : null,
     [workOrders, inv]
   );
+  const externalWorkOrderId = canonicalSevenElevenWorkOrderId({
+    id: inv?.wot,
+    duplicateRootWorkOrderId: inv?.externalWorkOrderId,
+  });
+  const portalReassignmentReference = externalWorkOrderId !== String(inv?.wot || "").trim()
+    ? String(inv?.wot || "").trim()
+    : null;
   const linkedStaffInvoices = useMemo(
     () => !isManager || !inv
       ? []
@@ -468,9 +476,16 @@ export default function InvoiceDetail(props: any) {
                         <span style={{ color: T.muted }}>Service date</span><span className="mono" style={{ color: T.ink }}>{inv.serviceDate}</span>
                         <span style={{ color: T.muted }}>Terms</span><span style={{ color: T.ink }}>{inv.terms || "Net 30"}</span>
                         <span style={{ color: T.muted }}>Work order</span>
-                        <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent }}>
-                          {inv.wot}
-                          {inv.wot && <CopyWorkOrderButton value={inv.wot} />}
+                        <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                          <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: T.accent }}>
+                            {externalWorkOrderId}
+                            {externalWorkOrderId && <CopyWorkOrderButton value={externalWorkOrderId} />}
+                          </span>
+                          {portalReassignmentReference && (
+                            <span className="mono" style={{ color: T.subtle, fontSize: 9 }}>
+                              P1 portal reassignment: {portalReassignmentReference}
+                            </span>
+                          )}
                         </span>
                         <span style={{ color: T.muted }}>CME</span><span className="mono" style={{ color: T.ink }}>{inv.cme || "—"}</span>
                         <span style={{ color: T.muted }}>Status</span><span><Badge conf={INV_STATE[inv.state]} small /></span>

@@ -2457,6 +2457,9 @@ export type Database = {
           deleted_by: string | null
           description: string | null
           dispatched_at: string | null
+          duplicate_root_work_order_id: string | null
+          duplicate_sequence: number | null
+          duplicated_from_work_order_id: string | null
           end_time: string | null
           eta: string | null
           functional_status:
@@ -2534,6 +2537,9 @@ export type Database = {
           deleted_by?: string | null
           description?: string | null
           dispatched_at?: string | null
+          duplicate_root_work_order_id?: string | null
+          duplicate_sequence?: number | null
+          duplicated_from_work_order_id?: string | null
           end_time?: string | null
           eta?: string | null
           functional_status?:
@@ -2611,6 +2617,9 @@ export type Database = {
           deleted_by?: string | null
           description?: string | null
           dispatched_at?: string | null
+          duplicate_root_work_order_id?: string | null
+          duplicate_sequence?: number | null
+          duplicated_from_work_order_id?: string | null
           end_time?: string | null
           eta?: string | null
           functional_status?:
@@ -2656,6 +2665,20 @@ export type Database = {
           workflow_cycle?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "work_orders_duplicate_root_work_order_id_fkey"
+            columns: ["duplicate_root_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_orders_duplicated_from_work_order_id_fkey"
+            columns: ["duplicated_from_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "work_orders_assigned_technician_profile_id_fkey"
             columns: ["assigned_technician_profile_id"]
@@ -2789,6 +2812,10 @@ export type Database = {
         Args: { p_actor_id: string; p_invoice_id: string; p_reason: string }
         Returns: Json
       }
+      reject_unassigned_work_order: {
+        Args: { p_reason: string; p_work_order_id: string }
+        Returns: Json
+      }
       complete_p1_parts_alert_delivery: {
         Args: {
           p_delivery_id: string
@@ -2863,6 +2890,10 @@ export type Database = {
       }
       delete_own_contractor_invoice: {
         Args: { p_invoice_id: string }
+        Returns: Json
+      }
+      duplicate_work_order_for_reassignment: {
+        Args: { p_source_work_order_id: string }
         Returns: Json
       }
       complete_contractor_work_and_invoicing: {

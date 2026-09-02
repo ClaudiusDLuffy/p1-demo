@@ -6,13 +6,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   updateWorkOrder, insertActivity, updateInvoiceState,
   unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
+  rejectUnassignedWorkOrder, duplicateWorkOrderForReassignment,
   uploadPhotos, removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
   requestP1PartOrder, setP1PartOrderStatusWithCost,
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
   openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
-  completeContractorWorkAndInvoicing,
   moveWorkOrderStraightToBilling,
   completeCapitalWork,
   closeWorkOrderWithoutInvoice,
@@ -58,6 +58,7 @@ import {
   rpcErrorMessage,
 } from "../../lib/rpcConflict";
 import type { WorkOrderReopenMode } from "../../lib/workOrderReopen";
+import { workOrderStatusAfterFieldCompletion } from "../../lib/contractorCompletion";
 import {
   contractorAttentionRequestToast,
   contractorNotificationToast,
@@ -359,6 +360,53 @@ export default function useWorkOrders({
     }
   };
 
+  const doRejectUnassignedWO = async (woId: string, reason: string) => {
+    const normalizedReason = String(reason || "").trim();
+    if (normalizedReason.length < 5 || normalizedReason.length > 500) {
+      fire("Enter a rejection reason between 5 and 500 characters.");
+      return false;
+    }
+
+    setLoading("rejectUnassignedWO_" + woId, true);
+    try {
+      await rejectUnassignedWorkOrder(woId, normalizedReason);
+      setWorkOrders(prev => prev.filter(workOrder => workOrder.id !== woId));
+      qc.removeQueries({ queryKey: [...WORK_ORDER_BY_ID_KEY, woId], exact: true });
+      qc.removeQueries({ queryKey: workOrderDetailsKey(woId), exact: true });
+      setSelectedWO(null);
+      setAiNote(null);
+      setPage("dashboard");
+      invalidateWorkOrders();
+      fire(`Work order ${woId} rejected and removed from dispatch.`);
+      return true;
+    } catch (error: unknown) {
+      invalidateWorkOrders();
+      fire(`Reject failed: ${rpcErrorMessage(error)}`);
+      return false;
+    } finally {
+      setLoading("rejectUnassignedWO_" + woId, false);
+    }
+  };
+
+  const doDuplicateForReassignment = async (woId: string) => {
+    setLoading("duplicateForReassignment_" + woId, true);
+    try {
+      const result = await duplicateWorkOrderForReassignment(woId);
+      invalidateWorkOrders();
+      setAiNote(null);
+      setSelectedWO(result.workOrderId);
+      setPage("wo_detail");
+      fire(`Created ${result.workOrderId}. It is unassigned and ready to dispatch.`);
+      return result;
+    } catch (error: unknown) {
+      invalidateWorkOrders();
+      fire(`Duplicate failed: ${rpcErrorMessage(error)}`);
+      return null;
+    } finally {
+      setLoading("duplicateForReassignment_" + woId, false);
+    }
+  };
+
   const doReassign = async (woId: string, newContractorId: string) => {
     let wo = workOrders.find(w => w.id === woId) || null;
     if (!wo) {
@@ -563,6 +611,10 @@ export default function useWorkOrders({
     setLoading("pauseWork_" + woId, true);
     try {
     const existing = workOrders.find(w => w.id === woId);
+    if (existing?.functionalStatus !== "Work in Progress") {
+      fire("Only work in progress can be paused for parts");
+      return false;
+    }
     const timeZone = timezoneForWorkOrder(existing);
     const pauseIso = pauseDateInput && pauseTimeInput
       ? storeLocalDateTimeToIso(pauseDateInput, pauseTimeInput, timeZone)
@@ -808,7 +860,7 @@ export default function useWorkOrders({
       const cleanNotes = (resolutionNotes || "").trim();
       const text = `Job completed and clocked out at ${formattedEnd}. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.${cleanNotes ? ` Closing notes: ${cleanNotes}` : ""}`;
       const patch: any = {
-        status: "completed",
+        status: workOrderStatusAfterFieldCompletion(existing?.status),
         functionalStatus: "Completed",
         assetMake: make,
         assetModel: model,
@@ -820,58 +872,13 @@ export default function useWorkOrders({
       };
       if (assetYear) patch.assetYear = assetYear;
 
-      // Invoice-capable contractors use one atomic RPC. If invoice validation
-      // fails, PostgreSQL rolls the field completion back with it.
-      if (!isManager && currentUser?.canInvoice === true && !existing?.billingOnly) {
-        try {
-          const result = await completeContractorWorkAndInvoicing(woId, {
-            completedAt: endIso,
-            assetMake: make,
-            assetModel: model,
-            assetSerial: serial,
-            assetYear: assetYear || null,
-            resolutionCode: resolution || null,
-            resolutionNotes: cleanNotes || null,
-            activityText: text,
-          });
-          const fieldPatch = existing?.functionalStatus === "Completed" ? {} : patch;
-          const completionActivity = result.workCompletionApplied
-            ? {
-                ...localActivity(text, "note", false, "job_completed", true, false, "field_note"),
-                id: result.completionActivityId || undefined,
-              }
-            : undefined;
-          patchLocalWO(
-            woId,
-            {
-              ...fieldPatch,
-              status: result.workOrderStatus,
-              contractorInvoicingCompletedAt: result.completedAt,
-              contractorInvoicingCompletedBy:
-                result.completedBy || currentUser?.id || null,
-              contractorInvoicingAssignmentVersion:
-                existing?.contractorAssignmentVersion ?? null,
-              contractorInvoicingWorkflowCycle:
-                existing?.workflowCycle ?? null,
-              contractorInvoicingCompletionSource: result.source || "contractor",
-            },
-            completionActivity,
-          );
-          invalidateBoth();
-          fire(result.applied
-            ? "Work and invoicing completed — staff can continue approval and billing"
-            : "Work and invoicing were already completed");
-          return true;
-        } catch (error: any) {
-          invalidateBoth();
-          fire(`Could not complete work and invoicing: ${rpcErrorMessage(error)}`);
-          return false;
-        }
-      }
-
       const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
       patchLocalWO(woId, patch, localActivity(text, "note", isManager, "job_completed", true, false, "field_note"));
-      let completionResult: { applied: boolean; reason?: string } | null = null;
+      let completionResult: {
+        applied: boolean;
+        reason?: string;
+        workOrderStatus?: string;
+      } | null = null;
       const saved = await dbCall(async () => {
         completionResult = await completeWorkOrderOnce(woId, {
           completedAt: endIso,
@@ -1715,7 +1722,8 @@ export default function useWorkOrders({
     workOrders, setWorkOrders,
     loadingStates,
     patchLocalWO, localActivity, dbCall,
-    doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
+    doAssign, doStraightToBilling, doUnassign, doDeleteWO,
+    doRejectUnassignedWO, doDuplicateForReassignment, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,

@@ -17,6 +17,7 @@ import {
   roundStaffBillingMarkupPercent,
 } from "../../../lib/staffBilling";
 import { isQuickBooksEquipmentTag } from "../../../lib/quickBooksEquipmentTags";
+import { canonicalSevenElevenWorkOrderId } from "../../../lib/workOrderIdentity";
 import {
   isInvoiceControllerProfile,
   loadStaffPermissions,
@@ -125,11 +126,18 @@ const shortMonthDay = (d: string | null) => {
     : date.toLocaleString("en-US", { month: "short", day: "numeric" });
 };
 
-const mapInvoice = (invoice: any, lines: any[]) => ({
+const mapInvoice = (
+  invoice: any,
+  lines: any[],
+  externalWorkOrderId: string | null = canonicalSevenElevenWorkOrderId(
+    invoice.work_order_id,
+  ) || null,
+) => ({
   id: invoice.id,
   num: invoice.num,
   wot: invoice.work_order_id,
   workOrderId: invoice.work_order_id,
+  externalWorkOrderId,
   store: invoice.store_number,
   storeAddr: invoice.store_address,
   contractor: invoice.contractor_id,
@@ -506,6 +514,43 @@ async function loadChunkedRows(
   return rows.flat();
 }
 
+async function loadExternalWorkOrderIds(
+  sb: ReturnType<typeof createServerClient>,
+  workOrderIds: Array<string | null | undefined>,
+) {
+  const ids = Array.from(new Set(
+    workOrderIds
+      .map(workOrderId => String(workOrderId || "").trim())
+      .filter(Boolean),
+  ));
+  if (ids.length === 0) return new Map<string, string>();
+
+  const workOrders = await loadChunkedRows(ids, chunk => (sb as any)
+    .from("work_orders")
+    .select("id, duplicate_root_work_order_id")
+    .in("id", chunk));
+
+  return new Map<string, string>(workOrders.map(workOrder => [
+    String(workOrder.id),
+    String(
+      workOrder.duplicate_root_work_order_id
+        || canonicalSevenElevenWorkOrderId(workOrder.id)
+        || workOrder.id,
+    ),
+  ]));
+}
+
+const externalWorkOrderIdForInvoice = (
+  invoice: any,
+  externalWorkOrderIds: Map<string, string>,
+) => {
+  const workOrderId = String(invoice.work_order_id || "").trim();
+  if (!workOrderId) return null;
+  return externalWorkOrderIds.get(workOrderId)
+    || canonicalSevenElevenWorkOrderId(workOrderId)
+    || workOrderId;
+};
+
 async function loadStaffInvoicesPage(
   sb: ReturnType<typeof createServerClient>,
   input: {
@@ -564,6 +609,10 @@ async function loadStaffInvoicesPage(
       .order("position", { ascending: true })
       .order("id", { ascending: true })),
   ]);
+  const externalWorkOrderIds = await loadExternalWorkOrderIds(
+    sb,
+    [...page.items, ...sourceRows].map(invoice => invoice.work_order_id),
+  );
 
   const linesByInvoice: Record<string, any[]> = {};
   for (const line of [...staffLines, ...sourceLines]) {
@@ -572,7 +621,11 @@ async function loadStaffInvoicesPage(
   const sourceById = new Map(
     sourceRows.map(source => [
       source.id,
-      mapInvoice(source, linesByInvoice[source.id] || []),
+      mapInvoice(
+        source,
+        linesByInvoice[source.id] || [],
+        externalWorkOrderIdForInvoice(source, externalWorkOrderIds),
+      ),
     ]),
   );
   const sourceIdsByStaff: Record<string, string[]> = {};
@@ -583,7 +636,11 @@ async function loadStaffInvoicesPage(
   return {
     ...page,
     items: page.items.map(invoice => {
-      const mapped = mapInvoice(invoice, linesByInvoice[invoice.id] || []);
+      const mapped = mapInvoice(
+        invoice,
+        linesByInvoice[invoice.id] || [],
+        externalWorkOrderIdForInvoice(invoice, externalWorkOrderIds),
+      );
       const sourceInvoices = (sourceIdsByStaff[invoice.id] || [])
         .map(sourceId => sourceById.get(sourceId))
         .filter(Boolean);
@@ -629,9 +686,11 @@ async function loadStaffInvoiceById(
   ]);
 
   const sourceInvoiceIds = sourceLinks.map(link => link.contractor_invoice_id);
+  let sourceRows: any[] = [];
+  let sourceLines: any[] = [];
   let sourceInvoices: any[] = [];
   if (sourceInvoiceIds.length > 0) {
-    const [sourceRows, sourceLines] = await Promise.all([
+    [sourceRows, sourceLines] = await Promise.all([
       collectSupabasePages<any>((from, to) => (sb as any)
         .from("invoices")
         .select("*")
@@ -649,22 +708,35 @@ async function loadStaffInvoiceById(
         .order("id", { ascending: true })
         .range(from, to)),
     ]);
-    const sourceLinesByInvoice: Record<string, any[]> = {};
-    for (const line of sourceLines) {
-      (sourceLinesByInvoice[line.invoice_id] ||= []).push(line);
-    }
-    const sourceById = new Map(
-      sourceRows.map(row => [
-        row.id,
-        mapInvoice(row, sourceLinesByInvoice[row.id] || []),
-      ]),
-    );
-    sourceInvoices = sourceInvoiceIds
-      .map(id => sourceById.get(id))
-      .filter(Boolean);
   }
 
-  const mapped = mapInvoice(invoice, staffLines);
+  const externalWorkOrderIds = await loadExternalWorkOrderIds(
+    sb,
+    [invoice, ...sourceRows].map(row => row.work_order_id),
+  );
+  const sourceLinesByInvoice: Record<string, any[]> = {};
+  for (const line of sourceLines) {
+    (sourceLinesByInvoice[line.invoice_id] ||= []).push(line);
+  }
+  const sourceById = new Map(
+    sourceRows.map(row => [
+      row.id,
+      mapInvoice(
+        row,
+        sourceLinesByInvoice[row.id] || [],
+        externalWorkOrderIdForInvoice(row, externalWorkOrderIds),
+      ),
+    ]),
+  );
+  sourceInvoices = sourceInvoiceIds
+    .map(id => sourceById.get(id))
+    .filter(Boolean);
+
+  const mapped = mapInvoice(
+    invoice,
+    staffLines,
+    externalWorkOrderIdForInvoice(invoice, externalWorkOrderIds),
+  );
   return {
     ...mapped,
     sourceInvoices,
@@ -708,10 +780,18 @@ async function loadContractorInvoiceSources(
   for (const line of lineRows || []) {
     (linesByInvoice[line.invoice_id] ||= []).push(line);
   }
+  const externalWorkOrderIds = await loadExternalWorkOrderIds(
+    sb,
+    (invoiceRows || []).map((invoice: any) => invoice.work_order_id),
+  );
   const invoicesById = new Map(
     (invoiceRows || []).map((invoice: any) => [
       invoice.id,
-      mapInvoice(invoice, linesByInvoice[invoice.id] || []),
+      mapInvoice(
+        invoice,
+        linesByInvoice[invoice.id] || [],
+        externalWorkOrderIdForInvoice(invoice, externalWorkOrderIds),
+      ),
     ]),
   );
   return sourceInvoiceIds

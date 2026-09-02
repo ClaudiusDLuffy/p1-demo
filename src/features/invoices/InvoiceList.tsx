@@ -16,7 +16,43 @@ import {
 import ControllerExportPanel from "./ControllerExportPanel";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useCursorPagination } from "../../lib/useCursorPagination";
+import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useInvoicesPageQuery } from "./queries";
+
+type InvoiceWorkOrderIdentity = {
+  wot?: string | null;
+  externalWorkOrderId?: string | null;
+};
+
+function InvoiceWorkOrderReference({
+  invoice,
+}: {
+  invoice: InvoiceWorkOrderIdentity;
+}) {
+  const portalWorkOrderId = String(invoice?.wot || "").trim();
+  const externalWorkOrderId = canonicalSevenElevenWorkOrderId({
+    id: portalWorkOrderId,
+    duplicateRootWorkOrderId: invoice?.externalWorkOrderId,
+  });
+  const portalReassignmentReference = externalWorkOrderId !== portalWorkOrderId
+    ? portalWorkOrderId
+    : null;
+
+  if (!externalWorkOrderId) return <span style={{ color: T.subtle }}>-</span>;
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+      <span className="mono" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted }}>
+        {externalWorkOrderId}
+        <CopyWorkOrderButton value={externalWorkOrderId} />
+      </span>
+      {portalReassignmentReference && (
+        <span className="mono" style={{ fontSize: 9, color: T.subtle }}>
+          P1 portal reassignment: {portalReassignmentReference}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function InvoiceList(props: any) {
   const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices, onEditRejected } = props;
@@ -373,10 +409,7 @@ export default function InvoiceList(props: any) {
                         )}
                         <td className="mono" style={{ padding: "13px 14px", fontWeight: 600, fontSize: 11, color: T.accent }}>#{inv.num}</td>
                         <td style={{ padding: "13px 14px" }}>
-                          <span className="mono" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted }}>
-                            {inv.wot}
-                            {inv.wot && <CopyWorkOrderButton value={inv.wot} />}
-                          </span>
+                          <InvoiceWorkOrderReference invoice={inv} />
                         </td>
                         {isManager && <td style={{ padding: "13px 14px", color: T.inkSoft }}>{getUser(inv.contractor)?.name}</td>}
                         <td style={{ padding: "13px 14px" }}>
@@ -465,10 +498,7 @@ export default function InvoiceList(props: any) {
                     )}
                     <div className="mobile-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}` }}>
                       <span style={{ fontSize: 11, color: T.muted }}>
-                        WO: <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "monospace", color: T.accent }}>
-                          {inv.wot}
-                          {inv.wot && <CopyWorkOrderButton value={inv.wot} />}
-                        </span>
+                        WO: <InvoiceWorkOrderReference invoice={inv} />
                       </span>
                       <span style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: T.ink }}>
                         {fmt(Math.round(inv.total))}

@@ -5,6 +5,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { P1_BUSINESS, SEVEN_STAFF_BILL_TO } from "./constants";
+import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
 
 // Single source of truth lives in constants.ts; aliased to P1 here so the
 // existing PDF layout code reads the same. DO NOT reintroduce a local copy.
@@ -30,6 +31,7 @@ export type Invoice = {
   num: string;
   documentKind?: "invoice" | "capital_quote";
   wot: string;
+  externalWorkOrderId?: string | null;
   store: string;
   storeAddr?: string;
   invoiceDate: string;
@@ -74,6 +76,9 @@ type InvoicePdfOpts = {
 };
 export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, opts: InvoicePdfOpts = {}): jsPDF {
   const isContractor = opts.perspective === "contractor";
+  const displayedWorkOrderId = canonicalSevenElevenWorkOrderId(
+    inv.externalWorkOrderId || inv.wot,
+  );
   const isCapitalQuote = !isContractor && inv.documentKind === "capital_quote";
   const fromName = opts.fromName || "Contractor";
   const fromEmail = String(opts.fromEmail || "").trim();
@@ -180,7 +185,7 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
     doc.text(`${billTo.name}`, M + 240, y);
   }
   doc.setFont("helvetica", "bold");
-  doc.text(inv.wot, W - M - 130, y);
+  doc.text(displayedWorkOrderId, W - M - 130, y);
 
   y += 13;
   doc.setFont("helvetica", "normal");
@@ -341,7 +346,7 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
 
 export function downloadInvoicePDF(inv: Invoice): void {
   const doc = generateInvoicePDF(inv);
-  doc.save(`Invoice-${inv.num}-${inv.wot}.pdf`);
+  doc.save(invoiceFilename(inv));
 }
 
 // Used when we want the raw bytes (e.g. to upload to Supabase Storage)
@@ -375,6 +380,11 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function invoiceFilename(inv: Pick<Invoice, "num" | "wot">): string {
-  return `Invoice-${inv.num}-${inv.wot}.pdf`;
+export function invoiceFilename(
+  inv: Pick<Invoice, "num" | "wot" | "externalWorkOrderId">,
+): string {
+  const workOrderId = canonicalSevenElevenWorkOrderId(
+    inv.externalWorkOrderId || inv.wot,
+  );
+  return `Invoice-${inv.num}-${workOrderId}.pdf`;
 }

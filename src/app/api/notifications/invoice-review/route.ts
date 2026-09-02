@@ -88,6 +88,18 @@ export async function POST(request: NextRequest) {
   if (invoiceError) return jsonError(invoiceError.message, 500);
   if (!invoice) return jsonError("Contractor invoice not found", 404);
 
+  const { data: workOrderIdentity, error: workOrderIdentityError } = await sb
+    .from("work_orders")
+    .select("id,duplicate_root_work_order_id")
+    .eq("id", invoice.work_order_id)
+    .maybeSingle();
+  if (workOrderIdentityError) {
+    return jsonError(workOrderIdentityError.message, 500);
+  }
+  if (!workOrderIdentity) {
+    return jsonError("Invoice work order not found", 409);
+  }
+
   if (event === "rejected") {
     if (invoice.state !== "rejected" || !invoice.rejection_reason) {
       return jsonError("Invoice is not currently rejected", 409);
@@ -207,6 +219,8 @@ export async function POST(request: NextRequest) {
       invoice: {
         num: invoice.num,
         workOrderId: invoice.work_order_id,
+        externalWorkOrderId: workOrderIdentity.duplicate_root_work_order_id
+          || workOrderIdentity.id,
         storeNumber: invoice.store_number,
         rejectionReason: invoice.rejection_reason,
       },

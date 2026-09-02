@@ -18,6 +18,7 @@ type DispatchWorkOrder = Pick<
   | "summary"
   | "description"
   | "contractor_id"
+  | "duplicate_root_work_order_id"
 >;
 
 const jsonError = (message: string, status: number) =>
@@ -62,6 +63,7 @@ async function requireStaff(req: NextRequest) {
 
 const mapWorkOrder = (wo: DispatchWorkOrder) => ({
   id: wo.id,
+  externalWorkOrderId: wo.duplicate_root_work_order_id || wo.id,
   incidentId: wo.incident_id,
   storeNumber: wo.store_number,
   city: wo.city,
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
   const { sb } = auth;
   const { data: wo, error: woError } = await sb
     .from("work_orders")
-    .select("id,incident_id,store_number,city,store_state,address,priority,summary,description,contractor_id,deleted_at")
+    .select("id,incident_id,store_number,city,store_state,address,priority,summary,description,contractor_id,duplicate_root_work_order_id,deleted_at")
     .eq("id", workOrderId)
     .is("deleted_at", null)
     .maybeSingle();

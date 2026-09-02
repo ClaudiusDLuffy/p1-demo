@@ -100,6 +100,7 @@ import {
 } from "../lib/portalNavigation";
 import { assertStaffInvoiceIntegrity } from "../lib/staffInvoiceIntegrity";
 import { isInvoiceController } from "../lib/staffPermissions";
+import { canonicalSevenElevenWorkOrderId } from "../lib/workOrderIdentity";
 import {
   PORTAL_AUTO_REFRESH_MS,
   shouldRefreshPortal,
@@ -1163,6 +1164,7 @@ export default function PortalShell() {
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [reassignTarget, setReassignTarget] = useState<string>("");
   const [reassignSearch, setReassignSearch] = useState("");
+  const [rejectWorkOrderReason, setRejectWorkOrderReason] = useState("");
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const pullStartYRef = useRef<number | null>(null);
   const pullEligibleRef = useRef(false);
@@ -1366,7 +1368,8 @@ export default function PortalShell() {
   const { workOrders, setWorkOrders,
     loadingStates,
     patchLocalWO, localActivity, dbCall,
-    doAssign, doStraightToBilling, doUnassign, doDeleteWO, doReassign,
+    doAssign, doStraightToBilling, doUnassign, doDeleteWO,
+    doRejectUnassignedWO, doDuplicateForReassignment, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
@@ -1741,10 +1744,6 @@ export default function PortalShell() {
       : null,
     [maskedWorkOrders, selectedWO, selectedWorkOrderForView]
   );
-  const combinesContractorCompletion = !isManager
-    && currentUser?.canInvoice === true
-    && !woData?.billingOnly;
-  const contractorFieldAlreadyComplete = woData?.functionalStatus === "Completed";
   const resetReopenForm = useCallback(() => {
     setReopenTarget(null);
     setReopenMode("");
@@ -2112,12 +2111,17 @@ export default function PortalShell() {
       // A stale or historically truncated line array must never be rendered
       // beside a header total that was calculated from more lines.
       const exportInvoice = await loadBillingInvoiceForExport(invoice);
+      const externalWorkOrderId = canonicalSevenElevenWorkOrderId(
+        exportInvoice.externalWorkOrderId
+          || exportInvoice.wot
+          || exportInvoice.workOrderId,
+      );
       const { triggerBlobDownload, generateStaffInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
       const logoDataUrl = await loadLogoDataUrl();
       const blob = generateStaffInvoicePDFBlob({
         num: exportInvoice.num,
         documentKind: exportInvoice.documentKind || "invoice",
-        wot: exportInvoice.wot || "Standalone",
+        wot: externalWorkOrderId || "Standalone",
         store: exportInvoice.store || "",
         storeAddr: exportInvoice.storeAddr || "",
         invoiceDate: exportInvoice.invoiceDate || exportInvoice.invoiceDateRaw || "",
@@ -2130,7 +2134,7 @@ export default function PortalShell() {
         total: exportInvoice.total || 0,
       }, logoDataUrl);
       const documentLabel = exportInvoice.documentKind === "capital_quote" ? "Capital-Quote" : "Invoice";
-      triggerBlobDownload(blob, `${documentLabel}-${exportInvoice.num}-${exportInvoice.wot || "Standalone"}.pdf`);
+      triggerBlobDownload(blob, `${documentLabel}-${exportInvoice.num}-${externalWorkOrderId || "Standalone"}.pdf`);
       fire(`${documentLabel === "Capital-Quote" ? "Capital quote" : "Invoice"} ${exportInvoice.num} downloaded`);
     } catch (e: any) {
       fire(`Download failed: ${e.message || e}`);
@@ -2140,7 +2144,14 @@ export default function PortalShell() {
     try {
       const exportInvoice = await loadBillingInvoiceForExport(invoice);
       const { downloadStaffInvoiceCsv } = await import("../lib/invoiceCsv");
-      downloadStaffInvoiceCsv(exportInvoice);
+      downloadStaffInvoiceCsv({
+        ...exportInvoice,
+        externalWorkOrderId: canonicalSevenElevenWorkOrderId(
+          exportInvoice.externalWorkOrderId
+            || exportInvoice.wot
+            || exportInvoice.workOrderId,
+        ),
+      });
       fire(`Invoice ${exportInvoice.num} CSV downloaded`);
     } catch (e: any) {
       fire(`CSV download failed: ${e.message || e}`);
@@ -3710,6 +3721,128 @@ export default function PortalShell() {
         </Modal>
       )}
 
+      {modal === "rejectUnassignedWO" && woData && (
+        <Modal
+          onClose={() => {
+            if (modalLoading) return;
+            setRejectWorkOrderReason("");
+            setModal(null);
+          }}
+          title="Reject work order?"
+          width={480}
+          closeOnBackdrop={!modalLoading}
+        >
+          <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+            Reject <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>{woData.id}</span>{" "}
+            <CopyWorkOrderButton value={woData.id} /> before assignment? It will leave every active portal queue and no contractor will be notified.
+            <br /><br />
+            This is a recoverable soft removal with a staff-only audit record. A later intake email for the same work-order number remains archived until an admin restores it.
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <Field label="Reason (required)">
+              <TA
+                rows={3}
+                maxLength={500}
+                value={rejectWorkOrderReason}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setRejectWorkOrderReason(event.target.value)}
+                placeholder="Why is this call being rejected?"
+                autoFocus
+              />
+            </Field>
+            <div style={{ marginTop: 5, textAlign: "right", fontSize: 10, color: T.subtle }}>
+              {rejectWorkOrderReason.trim().length}/500
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 20, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => {
+                setRejectWorkOrderReason("");
+                setModal(null);
+              }}
+              disabled={modalLoading}
+              className="btn-soft"
+            >Cancel</button>
+            <button
+              type="button"
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  const rejected = await doRejectUnassignedWO(
+                    woData.id,
+                    rejectWorkOrderReason,
+                  );
+                  if (rejected) {
+                    setRejectWorkOrderReason("");
+                    setModal(null);
+                  }
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading
+                || rejectWorkOrderReason.trim().length < 5
+                || rejectWorkOrderReason.trim().length > 500}
+              style={{
+                padding: "10px 18px",
+                borderRadius: 10,
+                background: T.danger,
+                color: "#fff",
+                border: "none",
+                cursor: modalLoading ? "default" : "pointer",
+                fontWeight: 600,
+                fontSize: 12,
+                fontFamily: "inherit",
+                opacity: modalLoading
+                  || rejectWorkOrderReason.trim().length < 5
+                  || rejectWorkOrderReason.trim().length > 500
+                  ? 0.6
+                  : 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >{modalLoading ? <><BtnSpinner />Rejecting...</> : "Reject work order"}</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "duplicateForReassignment" && woData && (
+        <Modal
+          onClose={() => { if (!modalLoading) setModal(null); }}
+          title="Duplicate for reassignment?"
+          width={500}
+          closeOnBackdrop={!modalLoading}
+        >
+          <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.6 }}>
+            Create a new unassigned copy of <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>{woData.id}</span>{" "}
+            <CopyWorkOrderButton value={woData.id} /> for a different contractor?
+            <br /><br />
+            The new portal record will use the next available suffix from the canonical 7-Eleven number, such as <span className="mono" style={{ color: T.ink }}>{woData.duplicateRootWorkOrderId || woData.id}-1</span>, while 7-Eleven updates and outbound billing continue using <span className="mono" style={{ color: T.ink }}>{woData.duplicateRootWorkOrderId || woData.id}</span>. It copies the 7-Eleven intake, store, priority, SLA, AFM, and NTE information.
+            <br /><br />
+            The original work order remains unchanged so its current contractor can finish invoicing. Technician details, invoices, notes, activities, visits, photos, reports, estimates, parts, and other prior workflow records are not copied.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => setModal(null)} disabled={modalLoading} className="btn-soft">Cancel</button>
+            <button
+              type="button"
+              onClick={async () => {
+                setModalLoading(true);
+                try {
+                  const duplicate = await doDuplicateForReassignment(woData.id);
+                  if (duplicate) setModal(null);
+                } finally {
+                  setModalLoading(false);
+                }
+              }}
+              disabled={modalLoading}
+              className="btn-primary"
+              style={modalActionStyle}
+            >{modalLoading ? <><BtnSpinner />Duplicating...</> : "Create unassigned duplicate"}</button>
+          </div>
+        </Modal>
+      )}
+
       {modal === "deleteWO" && woData && (
         <Modal onClose={() => setModal(null)} title="Delete work order?" width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
@@ -4138,22 +4271,13 @@ export default function PortalShell() {
       {modal === "closeComplete" && woData && !isManager && (
         <Modal
           onClose={() => setModal(null)}
-          title={combinesContractorCompletion ? "Complete work & invoicing" : "Mark work complete"}
+          title="Mark work complete"
           width={540}
         >
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
-            {combinesContractorCompletion
-              ? contractorFieldAlreadyComplete
-                ? `Field work for Store #${woData.store} is already complete. Confirm the current contractor invoice set to finish this job.`
-                : `Complete field work for Store #${woData.store} and confirm the current contractor invoice set in one action.`
-              : `Complete the job for Store #${woData.store}. Asset info is required.`}
+            Complete the job for Store #{woData.store}. Asset info is required. Contractor invoicing remains a separate workflow.
           </div>
-          {combinesContractorCompletion && (
-            <div style={{ padding: "12px 14px", marginBottom: 16, background: T.successSoft, borderRadius: 10, border: `1px solid ${T.success}33`, color: T.ink, fontSize: 12, lineHeight: 1.5 }}>
-              This confirms that every contractor invoice for this work order has been submitted. P1 review and billing remain separate.
-            </div>
-          )}
-          {(!combinesContractorCompletion || !contractorFieldAlreadyComplete) && <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gap: 14 }}>
             <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Asset information (required)</div>
               <Field label="Equipment make"><Input value={assetMakeInput} onChange={(e: any) => setAssetMakeInput(e.target.value)} placeholder="e.g. Taylor" /></Field>
@@ -4181,7 +4305,7 @@ export default function PortalShell() {
               <Field label="End date"><DatePickerField value={closeDateInput} onChange={setCloseDateInput} /></Field>
               <Field label="End time"><TimePickerField value={closeTimeInput} onChange={setCloseTimeInput} /></Field>
             </div>
-          </div>}
+          </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
@@ -4192,7 +4316,7 @@ export default function PortalShell() {
               const m = assetModelInput.trim();
               const s = assetSerialInput.trim();
               const y = parseInt(assetYearInput, 10);
-              if ((!mk || !m || !s) && !contractorFieldAlreadyComplete) { fire("Equipment make, model, and serial number are required"); return; }
+              if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
               const completedAt = closeDateInput && closeTimeInput
                 ? storeLocalDateTimeToIso(
                     closeDateInput,
@@ -4209,11 +4333,7 @@ export default function PortalShell() {
               disabled={modalLoading}
               className="btn-primary"
               style={modalActionStyle}
-            >{modalLoading
-              ? <><BtnSpinner />Completing...</>
-              : combinesContractorCompletion
-                ? "Complete work & invoicing"
-                : "Mark work complete"}</button>
+            >{modalLoading ? <><BtnSpinner />Completing...</> : "Mark work complete"}</button>
           </div>
         </Modal>
       )}

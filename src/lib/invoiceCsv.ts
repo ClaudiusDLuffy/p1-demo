@@ -1,4 +1,5 @@
 import { normalizeStaffBillingLineType } from "./staffBilling";
+import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
 
 export type StaffInvoiceCsvLine = {
   type?: unknown;
@@ -15,6 +16,7 @@ export type StaffInvoiceCsvInput = {
   num?: unknown;
   wot?: unknown;
   workOrderId?: unknown;
+  externalWorkOrderId?: unknown;
   store?: unknown;
   storeNumber?: unknown;
   invoiceDate?: unknown;
@@ -141,7 +143,14 @@ function buildInvoiceCsvRows(
   ).trim();
   const invoiceNumber = String(invoice.num || "").trim();
   const workOrderNumber = String(
-    invoice.wot ?? invoice.workOrderId ?? "",
+    canonicalSevenElevenWorkOrderId(
+      String(
+        invoice.externalWorkOrderId
+          ?? invoice.wot
+          ?? invoice.workOrderId
+          ?? "",
+      ),
+    ),
   ).trim();
   const territory = String(invoice.territory || "").trim()
     || territoryFromState(invoice.taxState ?? invoice.tax_state);
@@ -272,7 +281,14 @@ const filenameToken = (value: unknown, fallback: string) => {
 export function invoiceCsvFilename(invoice: StaffInvoiceCsvInput): string {
   const num = filenameToken(invoice.num, "Draft");
   const workOrder = filenameToken(
-    invoice.wot || invoice.workOrderId,
+    canonicalSevenElevenWorkOrderId(
+      String(
+        invoice.externalWorkOrderId
+          || invoice.wot
+          || invoice.workOrderId
+          || "",
+      ),
+    ),
     "Standalone",
   );
   return `Invoice-${num}-${workOrder}.csv`;

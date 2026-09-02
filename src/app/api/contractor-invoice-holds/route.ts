@@ -75,6 +75,23 @@ export async function GET(request: NextRequest) {
     (invoices || []).map(invoice => [invoice.id, invoice]),
   );
 
+  const workOrderIds = [...new Set(
+    (invoices || []).map(invoice => invoice.work_order_id).filter(Boolean),
+  )];
+  const { data: workOrderIdentities, error: workOrderIdentityError } = workOrderIds.length > 0
+    ? await auth.sb
+      .from("work_orders")
+      .select("id,duplicate_root_work_order_id")
+      .in("id", workOrderIds)
+    : { data: [], error: null };
+  if (workOrderIdentityError) return jsonError(workOrderIdentityError.message, 500);
+  const externalWorkOrderIdById = new Map(
+    (workOrderIdentities || []).map(workOrder => [
+      workOrder.id,
+      workOrder.duplicate_root_work_order_id || workOrder.id,
+    ]),
+  );
+
   const profileIds = [...new Set([
     ...(invoices || []).map(invoice => invoice.contractor_id),
     ...(holds || []).map(hold => hold.placed_by),
@@ -104,6 +121,8 @@ export async function GET(request: NextRequest) {
         invoiceId: invoice.id,
         invoiceNumber: invoice.num,
         workOrderId: invoice.work_order_id,
+        externalWorkOrderId: externalWorkOrderIdById.get(invoice.work_order_id)
+          || invoice.work_order_id,
         contractorName: contractor?.company || contractor?.name || "Unknown contractor",
         total: Number(invoice.total || 0),
         holdAt: hold.placed_at,
@@ -154,6 +173,14 @@ export async function PATCH(request: NextRequest) {
   if (invoiceError) return jsonError(invoiceError.message, 500);
   if (!invoice) return jsonError("Contractor invoice not found", 404);
 
+  const { data: workOrderIdentity, error: workOrderIdentityError } = await auth.sb
+    .from("work_orders")
+    .select("id,duplicate_root_work_order_id")
+    .eq("id", invoice.work_order_id)
+    .maybeSingle();
+  if (workOrderIdentityError) return jsonError(workOrderIdentityError.message, 500);
+  if (!workOrderIdentity) return jsonError("Invoice work order not found", 409);
+
   try {
     const rpcName = action === "hold"
       ? "place_contractor_invoice_payment_hold"
@@ -182,6 +209,8 @@ export async function PATCH(request: NextRequest) {
         invoice: {
           num: invoice.num,
           workOrderId: invoice.work_order_id,
+          externalWorkOrderId: workOrderIdentity.duplicate_root_work_order_id
+            || workOrderIdentity.id,
           contractorName: contractor?.company || contractor?.name || null,
           total: Number(invoice.total || 0),
         },

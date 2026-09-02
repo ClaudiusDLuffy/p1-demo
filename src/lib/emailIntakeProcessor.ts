@@ -113,20 +113,44 @@ const findWorkOrderMatch = async (parsed: ParsedWorkOrder): Promise<IntakeWorkOr
   const candidates: WorkOrderMatchCandidate[] = [];
 
   for (const id of ids) {
-    const { data, error } = await sb
-      .from("work_orders")
-      .select("id,deleted_at")
-      .eq("id", id)
-      .maybeSingle();
+    const [exactResult, continuationResult] = await Promise.all([
+      sb
+        .from("work_orders")
+        .select("id,deleted_at")
+        .eq("id", id)
+        .maybeSingle(),
+      /^WOT\d{6,12}$/i.test(id)
+        ? sb
+          .from("work_orders")
+          .select("id,deleted_at,duplicate_sequence")
+          .eq("duplicate_root_work_order_id", id)
+          .order("duplicate_sequence", { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+    ]);
 
-    if (error) {
-      throw new Error(`Work order lookup failed for ${id}: ${error.message}`);
+    if (exactResult.error) {
+      throw new Error(
+        `Work order lookup failed for ${id}: ${exactResult.error.message}`,
+      );
     }
-    if (data?.id) {
+    if (continuationResult.error) {
+      throw new Error(
+        `Work-order continuation lookup failed for ${id}: ${continuationResult.error.message}`,
+      );
+    }
+    if (exactResult.data?.id) {
       candidates.push({
-        id: data.id,
-        deletedAt: data.deleted_at,
+        id: exactResult.data.id,
+        deletedAt: exactResult.data.deleted_at,
         matchedBy: "work_order_id",
+      });
+    }
+    for (const continuation of continuationResult.data || []) {
+      candidates.push({
+        id: continuation.id,
+        deletedAt: continuation.deleted_at,
+        matchedBy: "canonical_work_order_id",
+        duplicateSequence: continuation.duplicate_sequence,
       });
     }
   }
