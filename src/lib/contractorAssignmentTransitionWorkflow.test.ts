@@ -213,7 +213,7 @@ test("the portal uses the atomic transition and automatically attempts its durab
   );
   assert.match(
     workOrderHook,
-    /notifyAssignmentRemoval\(transition\?\.deliveryId\)[\s\S]*notifyDispatch\(woId, newContractorId\)/,
+    /notifyAssignmentRemoval\(transition\.deliveryId\)[\s\S]*notifyDispatch\(woId, newContractorId\)/,
   );
 
   assert.match(

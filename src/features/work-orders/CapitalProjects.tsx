@@ -3,6 +3,7 @@
 
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { Ico } from "../../components/ui/Ico";
 import { T } from "../../lib/constants";
 import { useEffect, useState } from "react";
@@ -40,7 +41,7 @@ export default function CapitalProjects(props: any) {
                 <div className="mobile-alert-icon" style={{ width: 40, height: 40, borderRadius: 10, background: T.violet, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#fff" /></div>
                 <div className="mobile-alert-body">
                   <div style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
-                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Equipment orders — separate from regular pipeline, 4-12 week lifecycle</div>
+                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Focused capital view — these calls also remain searchable in Work orders</div>
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
@@ -79,7 +80,10 @@ export default function CapitalProjects(props: any) {
                         <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: T.violet }}>{wo.id}</span>
                         <CopyWorkOrderButton value={wo.id} />
                       </span>
-                      {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
+                      <span style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                        <CapitalWorkOrderBadge workOrder={wo} />
+                        {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
+                      </span>
                     </div>
                     {wo.status === "pending_capital_completion" && (
                       <div style={{ marginBottom: 9 }}>
@@ -94,7 +98,7 @@ export default function CapitalProjects(props: any) {
                         <div style={{ fontSize: 12, fontWeight: 500 }}>{wo.partNeeded || "TBD"}</div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: T.subtle, marginTop: 10 }}>Contractor: {getUser(wo.contractor)?.name}</div>
+                    <div style={{ fontSize: 11, color: T.subtle, marginTop: 10 }}>Contractor: {getUser(wo.contractor)?.name || "Unassigned"}</div>
                   </div>
                 ))}
               </div>

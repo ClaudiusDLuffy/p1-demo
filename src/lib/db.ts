@@ -1806,6 +1806,12 @@ export type WorkOrderContractorTransitionResult = {
   workOrderId: string;
   contractorId: string | null;
   assignmentVersion: number;
+  status: string;
+  functionalStatus: string | null;
+  isCapital: boolean;
+  capitalStatus: string | null;
+  assignmentStartedAt: string | null;
+  dispatchedAt: string | null;
   deliveryId: string | null;
   deliveryStatus: AssignmentTransitionDeliveryStatus | null;
 };
@@ -1826,6 +1832,32 @@ export async function transitionWorkOrderContractor(
   );
   if (error) throw error;
   return data as WorkOrderContractorTransitionResult;
+}
+
+export type DeclineCapitalWorkOrderResult = {
+  applied: boolean;
+  reason: "capital_declined" | string;
+  workOrderId: string;
+  status: string;
+  functionalStatus: string | null;
+  contractorId: string | null;
+  assignmentVersion: number;
+  isCapital: boolean;
+  capitalStatus: string | null;
+  activityId: string | null;
+};
+
+export async function declineCapitalWorkOrder(
+  workOrderId: string,
+  expectedAssignmentVersion: number,
+): Promise<DeclineCapitalWorkOrderResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc("decline_capital_work_order", {
+    p_work_order_id: workOrderId,
+    p_expected_assignment_version: expectedAssignmentVersion,
+  });
+  if (error) throw error;
+  return data as DeclineCapitalWorkOrderResult;
 }
 
 // Invoice soft delete is routed through an authenticated staff-only endpoint.

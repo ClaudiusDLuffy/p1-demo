@@ -3,6 +3,7 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
 import { T, INV_STATE, STAFF_INV_STATE } from "../../lib/constants";
@@ -421,6 +422,7 @@ export default function BillingInvoiceList(props: any) {
                     </span>
                     <span style={{ color: T.ink, fontSize: 12 }}>Store #{workOrder.store || "-"}</span>
                     <span style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
+                      <CapitalWorkOrderBadge workOrder={workOrder} small />
                       {workOrder.billingOnly && (
                         <span style={{ flex: "0 0 auto", padding: "3px 7px", borderRadius: 999, background: "#FEF3C7", color: "#92400E", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.35 }}>
                           Billing only · no dispatch

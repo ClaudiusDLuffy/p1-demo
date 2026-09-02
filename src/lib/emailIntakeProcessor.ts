@@ -414,7 +414,7 @@ export async function processEmail(
           const sb = createServerClient();
           const { error } = await sb
             .from("work_orders")
-            .update({ status: "capital" })
+            .update({ status: "capital", is_capital: true })
             .eq("id", match.id)
             .is("deleted_at", null);
 

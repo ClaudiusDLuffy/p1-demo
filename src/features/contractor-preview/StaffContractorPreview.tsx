@@ -4,6 +4,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { INV_STATE, PRIORITY, STATUS, T } from "../../lib/constants";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import {
@@ -173,7 +174,7 @@ export default function StaffContractorPreview({
                         <CopyWorkOrderButton value={workOrder.id} />
                         <Badge conf={PRIORITY[workOrder.priority as keyof typeof PRIORITY]} small />
                         <Badge conf={STATUS[workOrder.status as keyof typeof STATUS]} small />
-                        {workOrder.isCapital && <span style={{ color: T.violet, fontSize: 10, fontWeight: 800 }}>Capital</span>}
+                        <CapitalWorkOrderBadge workOrder={workOrder} small />
                       </div>
                       <div style={{ marginTop: 7, color: T.ink, fontSize: 12, fontWeight: 750 }}>
                         Store #{workOrder.store || "—"} · {workOrder.summary || workOrder.description || "No summary"}

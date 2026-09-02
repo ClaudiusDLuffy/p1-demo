@@ -8,6 +8,7 @@ import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
 import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { SlaBadge } from "../../components/SlaBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { stateCodeFromWorkOrder } from "../../lib/billingRules";
@@ -90,8 +91,7 @@ export default function WorkOrderList(props: any) {
   const fallbackTableWOs = useMemo(() => {
     const sorted = sortWorkOrders(
       fallbackStateFilteredWOs.filter((w: any) =>
-        !["capital", "pending_capital_completion"].includes(w.status)
-        && (!isManager || !hideClosed || w.status !== "closed")
+        (!isManager || !hideClosed || w.status !== "closed")
         && (viewMode !== "needs_action" || workOrderNeedsAction(w, isManager)),
       ),
       sortBy,
@@ -126,7 +126,7 @@ export default function WorkOrderList(props: any) {
     next: nextPage,
   } = useCursorPagination(cursorSignature);
   const workOrderPageQuery = useWorkOrdersPageQuery({
-    scope: hideClosed ? "operations" : "operations_all",
+    scope: hideClosed ? "active" : "all",
     search: deferredSearch,
     contractorId: filterC !== "all" ? filterC : null,
     priority: deferredColumnFilters.priority && deferredColumnFilters.priority !== "all"
@@ -471,7 +471,12 @@ export default function WorkOrderList(props: any) {
                             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
                         </td>
-                        <td style={{ padding: "10px" }}><Badge conf={STATUS[wo.status]} small /></td>
+                        <td style={{ padding: "10px" }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                            <Badge conf={STATUS[wo.status]} small />
+                            <CapitalWorkOrderBadge workOrder={wo} small />
+                          </span>
+                        </td>
                         <td style={{ padding: "10px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
                         <td className="mono" style={{ padding: "10px", fontSize: 11, color: T.subtle }}>
                           <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -545,6 +550,7 @@ export default function WorkOrderList(props: any) {
                     <div className="mobile-card-badges" style={{ display: "flex", gap: 6 }}>
                       <Badge conf={PRIORITY[wo.priority]} small />
                       <Badge conf={STATUS[wo.status]} small />
+                      <CapitalWorkOrderBadge workOrder={wo} small />
                     </div>
                   </div>
                   <div className="mobile-card-title" style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 4 }}>

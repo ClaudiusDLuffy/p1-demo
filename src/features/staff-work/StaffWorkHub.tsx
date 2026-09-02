@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
@@ -235,6 +236,7 @@ export default function StaffWorkHub({
                   <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>
                     {priority && <span style={chipStyle(priority.bg, priority.color)}>{priority.label}</span>}
                     {status && <span style={chipStyle(status.bg, status.color)}>{status.label}</span>}
+                    <CapitalWorkOrderBadge workOrder={workOrder} small />
                     {row.actionReasons.map(reason => (
                       <span key={reason} style={chipStyle(T.surfaceSoft, T.muted)}>{reason}</span>
                     ))}

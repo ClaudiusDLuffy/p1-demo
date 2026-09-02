@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
+import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import type { StoreHistoryWorkOrder } from "../../lib/storeWorkOrderHistory";
 
@@ -129,6 +130,7 @@ export default function StoreWorkOrderHistory({
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {priority && <Badge conf={priority} />}
                   <Badge conf={status} />
+                  <CapitalWorkOrderBadge workOrder={workOrder} />
                 </div>
               </div>
               <div style={{ marginTop: 7, fontSize: 11, fontWeight: 650, color: T.inkSoft, lineHeight: 1.45 }}>

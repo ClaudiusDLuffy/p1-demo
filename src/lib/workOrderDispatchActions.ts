@@ -8,10 +8,54 @@ const DUPLICABLE_WORK_ORDER_STATUSES = new Set([
   "pending_payment",
 ]);
 
+const ASSIGNABLE_ACTIVE_STATUSES = new Set([
+  "assigned",
+  "wip",
+  "parts",
+  "capital",
+  "pending_capital_completion",
+]);
+
+const CAPITAL_ASSIGNMENT_STATUSES = new Set([
+  "capital",
+  "pending_capital_completion",
+]);
+
 type StaffActionContext = {
   isOperationalStaff: boolean;
   isInvoiceController?: boolean;
 };
+
+export type WorkOrderAssignmentEligibility = StaffActionContext & {
+  status?: string | null;
+  functionalStatus?: string | null;
+  contractorId?: string | null;
+  billingOnly?: boolean | null;
+};
+
+const hasOperationalAssignmentAccess = (
+  input: WorkOrderAssignmentEligibility,
+) => input.isOperationalStaff
+  && !input.isInvoiceController
+  && !input.billingOnly;
+
+export function canAssignWorkOrder(
+  input: WorkOrderAssignmentEligibility,
+): boolean {
+  if (!hasOperationalAssignmentAccess(input) || input.contractorId) return false;
+
+  const status = String(input.status || "");
+  return CAPITAL_ASSIGNMENT_STATUSES.has(status)
+    || (status === "unassigned" && input.functionalStatus === "New");
+}
+
+export function canChangeWorkOrderAssignment(
+  input: WorkOrderAssignmentEligibility,
+): boolean {
+  return hasOperationalAssignmentAccess(input)
+    && Boolean(input.contractorId)
+    && ASSIGNABLE_ACTIVE_STATUSES.has(String(input.status || ""));
+}
 
 export type RejectWorkOrderEligibility = StaffActionContext & {
   status?: string | null;

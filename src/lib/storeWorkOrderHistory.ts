@@ -2,6 +2,7 @@ export type StoreHistoryWorkOrder = {
   id: string;
   store?: string | null;
   status?: string | null;
+  isCapital?: boolean | null;
   priority?: string | null;
   category?: string | null;
   subCategory?: string | null;
