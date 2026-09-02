@@ -1777,17 +1777,55 @@ export type DuplicateWorkOrderForReassignmentResult = {
   rootWorkOrderId: string;
   workOrderId: string;
   duplicateSequence: number;
+  deliveryId: string | null;
+  deliveryStatus: AssignmentTransitionDeliveryStatus | null;
 };
 
 export async function duplicateWorkOrderForReassignment(
   workOrderId: string,
 ): Promise<DuplicateWorkOrderForReassignmentResult> {
   const sb = supabase();
-  const { data, error } = await sb.rpc("duplicate_work_order_for_reassignment", {
-    p_source_work_order_id: workOrderId,
-  });
+  const { data, error } = await sb.rpc(
+    "duplicate_work_order_for_reassignment_notified",
+    { p_source_work_order_id: workOrderId },
+  );
   if (error) throw error;
   return data as unknown as DuplicateWorkOrderForReassignmentResult;
+}
+
+export type AssignmentTransitionDeliveryStatus =
+  | "pending"
+  | "claimed"
+  | "sent"
+  | "unknown"
+  | "skipped";
+
+export type WorkOrderContractorTransitionResult = {
+  applied: boolean;
+  reason: "assigned" | "reassigned" | "unassigned" | string;
+  workOrderId: string;
+  contractorId: string | null;
+  assignmentVersion: number;
+  deliveryId: string | null;
+  deliveryStatus: AssignmentTransitionDeliveryStatus | null;
+};
+
+export async function transitionWorkOrderContractor(
+  workOrderId: string,
+  newContractorId: string | null,
+  expectedAssignmentVersion: number,
+): Promise<WorkOrderContractorTransitionResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "transition_work_order_contractor",
+    {
+      p_work_order_id: workOrderId,
+      p_new_contractor_id: newContractorId,
+      p_expected_assignment_version: expectedAssignmentVersion,
+    },
+  );
+  if (error) throw error;
+  return data as WorkOrderContractorTransitionResult;
 }
 
 // Invoice soft delete is routed through an authenticated staff-only endpoint.
@@ -1893,61 +1931,6 @@ export async function finishContractorInvoicing(
   );
   if (error) throw error;
   return data as FinishContractorInvoicingResult;
-}
-
-// Sets contractor_id = null, status = 'unassigned', clears eta + dispatched_at,
-// and writes a system activity entry.
-export async function unassignWorkOrder(workOrderId: string, authorName: string): Promise<void> {
-  const sb = supabase();
-  const { error } = await sb.from("work_orders").update({
-    contractor_id: null,
-    status: "unassigned",
-    functional_status: "New",
-    eta: null,
-    dispatched_at: null,
-  }).eq("id", workOrderId);
-  if (error) throw error;
-  await insertActivity(
-    workOrderId,
-    "System",
-    `Work order unassigned by ${authorName}.`,
-    "system",
-    { staffOnly: true, eventKey: "work_order_unassigned" },
-  );
-}
-
-// Swaps contractor_id, keeps status as 'assigned', preserves the original
-// SLA deadline (we never touch sla_deadline_at). The caller passes display
-// names so the activity entry reads cleanly.
-export async function reassignWorkOrder(
-  workOrderId: string,
-  newContractorId: string,
-  oldContractorName: string,
-  newContractorName: string,
-  authorName: string,
-): Promise<void> {
-  const sb = supabase();
-  const { error } = await sb.from("work_orders").update({
-    contractor_id: newContractorId,
-    status: "assigned",
-    functional_status: "Dispatched",
-  }).eq("id", workOrderId);
-  if (error) throw error;
-  await insertActivity(
-    workOrderId,
-    "System",
-    `Reassigned from ${oldContractorName || "Unassigned"} to ${newContractorName} by ${authorName}.`,
-    "system",
-    {
-      staffOnly: true,
-      eventKey: "work_order_reassigned",
-      eventData: {
-        previousContractor: oldContractorName || "Unassigned",
-        newContractor: newContractorName,
-        reassignedBy: authorName,
-      },
-    },
-  );
 }
 
 // Case-insensitive WOT lookup. The manual Create form has an in-memory

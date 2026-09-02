@@ -21,6 +21,15 @@ type DispatchNotificationInput = {
   contractorName?: string | null;
 };
 
+type WorkOrderAssignmentRemovalNotificationInput = {
+  recipientEmail: string;
+  transitionType: "reassigned" | "unassigned" | "duplicated_for_reassignment";
+  workOrder: {
+    id: string;
+    externalWorkOrderId?: string | null;
+  };
+};
+
 type InvoiceReviewNotificationInput = {
   event: "rejected" | "retraction";
   recipients: string[];
@@ -215,6 +224,59 @@ export async function sendDispatchNotification(input: DispatchNotificationInput)
       plan.ownerBody,
     );
   }
+}
+
+export function createWorkOrderAssignmentRemovalNotificationPlan(
+  input: WorkOrderAssignmentRemovalNotificationInput,
+) {
+  const recipient = input.recipientEmail.trim().toLowerCase();
+  const externalWorkOrderId = canonicalSevenElevenWorkOrderId({
+    id: input.workOrder.id,
+    duplicateRootWorkOrderId: input.workOrder.externalWorkOrderId,
+  });
+  const preservesBillingRecord = input.transitionType === "duplicated_for_reassignment";
+  const introduction = preservesBillingRecord
+    ? "P1 created a separate reassignment copy for ongoing field service. Your team should stop field work on this call."
+    : "This work order has been removed from your team's active field assignment and may no longer appear under My Jobs in the portal.";
+  const portalGuidance = preservesBillingRecord
+    ? "Your original portal record remains available only for documenting work already performed and submitting any approved incurred costs."
+    : "No action is required in the portal for this removal.";
+
+  return {
+    recipients: recipient ? [recipient] : [],
+    subject: preservesBillingRecord
+      ? `Field Assignment Updated - ${externalWorkOrderId}`
+      : `Work Order Removed From Your Assignment - ${externalWorkOrderId}`,
+    body: `${introduction}
+
+Work Order: ${externalWorkOrderId}
+
+Please do not dispatch or continue work unless P1 Service assigns this work order to you again.
+
+${portalGuidance}
+
+If work has already started or approved costs were incurred, contact P1 Service at ${SERVICE_INBOX} for billing instructions.`,
+  };
+}
+
+export async function sendWorkOrderAssignmentRemovalNotification(
+  input: WorkOrderAssignmentRemovalNotificationInput,
+) {
+  const plan = createWorkOrderAssignmentRemovalNotificationPlan(input);
+  if (plan.recipients.length === 0) {
+    throw new Error("Outgoing contractor email not found");
+  }
+
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    throw new Error("Missing Graph access token");
+  }
+  await sendEmail(
+    accessToken,
+    plan.recipients,
+    plan.subject,
+    plan.body,
+  );
 }
 
 export async function sendContractorPortalPing(contractorEmail: string) {

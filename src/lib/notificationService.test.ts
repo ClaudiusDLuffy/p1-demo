@@ -4,6 +4,7 @@ import {
   createDispatchNotificationPlan,
   createInvoicePaymentHoldNotificationPlan,
   createInvoiceReviewNotificationPlan,
+  createWorkOrderAssignmentRemovalNotificationPlan,
 } from "./notificationService";
 
 const workOrder = {
@@ -86,6 +87,48 @@ test("reassignment dispatch keeps the canonical WOT and labels the portal copy",
   assert.equal(plan.contractorSubject, "New Work Order Assigned - WOT0000001");
   assert.match(plan.ownerBody, /Work Order: WOT0000001/);
   assert.match(plan.ownerBody, /Portal reassignment reference: WOT0000001-1/);
+});
+
+test("assignment removal email is scoped only to the outgoing contractor", () => {
+  const plan = createWorkOrderAssignmentRemovalNotificationPlan({
+    recipientEmail: " Former.Contractor@Example.com ",
+    transitionType: "reassigned",
+    workOrder,
+  });
+
+  assert.deepEqual(plan.recipients, ["former.contractor@example.com"]);
+  assert.equal(
+    plan.subject,
+    "Work Order Removed From Your Assignment - WOT0000001",
+  );
+  assert.match(plan.body, /removed from your team's active field assignment/i);
+  assert.match(plan.body, /Please do not dispatch or continue work/i);
+  assert.match(plan.body, /approved costs were incurred/i);
+  assert.match(plan.body, /service@p1pros\.com/);
+  assert.doesNotMatch(plan.body, /new contractor|receiving contractor|reassigned to/i);
+  assert.doesNotMatch(plan.body, /removed by|initiated by/i);
+});
+
+test("assignment removal email keeps the canonical WOT without exposing the reassignment copy", () => {
+  const plan = createWorkOrderAssignmentRemovalNotificationPlan({
+    recipientEmail: "contractor@example.com",
+    transitionType: "duplicated_for_reassignment",
+    workOrder: {
+      id: "WOT0000001",
+      externalWorkOrderId: "WOT0000001",
+    },
+  });
+
+  assert.equal(
+    plan.subject,
+    "Field Assignment Updated - WOT0000001",
+  );
+  assert.match(plan.body, /Work Order: WOT0000001/);
+  assert.doesNotMatch(plan.body, /WOT0000001-1/);
+  assert.match(plan.body, /created a separate reassignment copy/i);
+  assert.match(plan.body, /stop field work/i);
+  assert.match(plan.body, /original portal record remains available/i);
+  assert.doesNotMatch(plan.body, /removed from your P1 Pros Portal assignment/i);
 });
 
 test("rejection email identifies the invoice, work order, and correction reason", () => {

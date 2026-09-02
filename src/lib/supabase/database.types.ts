@@ -183,6 +183,95 @@ export type Database = {
           },
         ]
       }
+      contractor_assignment_transition_deliveries: {
+        Row: {
+          claimed_at: string | null
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          event_key: string
+          external_work_order_id: string
+          id: string
+          initiated_by: string | null
+          outgoing_assignment_version: number
+          outgoing_contractor_company: string | null
+          outgoing_contractor_email: string | null
+          outgoing_contractor_id: string
+          outgoing_contractor_name: string
+          related_work_order_id: string | null
+          status: string
+          transition_type: string
+          work_order_id: string
+        }
+        Insert: {
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          event_key: string
+          external_work_order_id: string
+          id?: string
+          initiated_by?: string | null
+          outgoing_assignment_version: number
+          outgoing_contractor_company?: string | null
+          outgoing_contractor_email?: string | null
+          outgoing_contractor_id: string
+          outgoing_contractor_name: string
+          related_work_order_id?: string | null
+          status?: string
+          transition_type: string
+          work_order_id: string
+        }
+        Update: {
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          event_key?: string
+          external_work_order_id?: string
+          id?: string
+          initiated_by?: string | null
+          outgoing_assignment_version?: number
+          outgoing_contractor_company?: string | null
+          outgoing_contractor_email?: string | null
+          outgoing_contractor_id?: string
+          outgoing_contractor_name?: string
+          related_work_order_id?: string | null
+          status?: string
+          transition_type?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catd_initiated_by_fkey"
+            columns: ["initiated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "catd_outgoing_contractor_fkey"
+            columns: ["outgoing_contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "catd_related_work_order_fkey"
+            columns: ["related_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "catd_work_order_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       afms: {
         Row: {
           created_at: string | null
@@ -2895,6 +2984,30 @@ export type Database = {
       duplicate_work_order_for_reassignment: {
         Args: { p_source_work_order_id: string }
         Returns: Json
+      }
+      duplicate_work_order_for_reassignment_notified: {
+        Args: { p_source_work_order_id: string }
+        Returns: Json
+      }
+      transition_work_order_contractor: {
+        Args: {
+          p_expected_assignment_version: number
+          p_new_contractor_id: string | null
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
+      claim_contractor_assignment_transition_delivery: {
+        Args: { p_actor_id: string; p_delivery_id: string }
+        Returns: Json
+      }
+      complete_contractor_assignment_transition_delivery: {
+        Args: {
+          p_delivery_id: string
+          p_error_message?: string | null
+          p_status: string
+        }
+        Returns: undefined
       }
       complete_contractor_work_and_invoicing: {
         Args: {

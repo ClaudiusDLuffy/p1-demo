@@ -12,13 +12,18 @@ import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function HistoryView(props: any) {
-  const { page, isManager, canReopen, onRequestReopen, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
+  const { page, isManager, currentUser, canReopen, onRequestReopen, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
+  const contractorId = !isManager
+    ? currentUser?.contractorAccountId || currentUser?.id || null
+    : null;
+  const isContractorHistory = !isManager;
   const deferredSearch = useDeferredValue(histSearch || "");
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("closed");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const pageSize = 24;
   const cursorSignature = JSON.stringify({
     search: deferredSearch.trim(),
+    contractorId,
     histContractor,
     histReso,
     histFrom,
@@ -34,7 +39,12 @@ export default function HistoryView(props: any) {
   const historyPageQuery = useWorkOrdersPageQuery({
     scope: "history",
     search: deferredSearch,
-    contractorId: histContractor !== "all" ? histContractor : null,
+    // The RPC remains SECURITY INVOKER and therefore RLS scoped. Passing the
+    // contractor account as an additional filter makes the intent explicit and
+    // prevents a contractor History request from ever becoming a broad query.
+    contractorId: isManager
+      ? histContractor !== "all" ? histContractor : null
+      : contractorId,
     resolution: histReso,
     from: histFrom || undefined,
     to: histTo || undefined,
@@ -43,7 +53,7 @@ export default function HistoryView(props: any) {
     tableSortDirection: sortDirection,
     limit: pageSize,
     cursor: effectiveCursor.cursor,
-  }, page === "history" && !selectedWO);
+  }, page === "history" && !selectedWO && (isManager || Boolean(contractorId)));
 
   const fallbackClosedWOs = (closedWOs || []).filter((w: any) => {
     const search = (histSearch || "").toLowerCase();
@@ -51,7 +61,8 @@ export default function HistoryView(props: any) {
     if (search && !String(w.id || "").toLowerCase().includes(search)
       && !String(w.store || "").toLowerCase().includes(search)
       && !String(w.summary || "").toLowerCase().includes(search)) return false;
-    if (histContractor !== "all" && w.contractor !== histContractor) return false;
+    if (isManager && histContractor !== "all" && w.contractor !== histContractor) return false;
+    if (isContractorHistory && w.contractor !== contractorId) return false;
     if (histReso !== "all" && (w.resolutionCode || "unknown") !== histReso) return false;
     if (histFrom && closedAt && closedAt < new Date(`${histFrom}T00:00:00`)) return false;
     if (histTo && closedAt && closedAt > new Date(`${histTo}T23:59:59`)) return false;
@@ -89,16 +100,23 @@ export default function HistoryView(props: any) {
       <section style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div>
-            <h1 className="display" style={{ fontSize: 28, color: T.ink, margin: 0 }}>History</h1>
+            <h1 className="display" style={{ fontSize: 28, color: T.ink, margin: 0 }}>
+              {isContractorHistory ? "Closed jobs" : "History"}
+            </h1>
             <div style={{ fontSize: 13, color: T.muted, marginTop: 6 }}>
               {totalCount} closed work order{totalCount === 1 ? "" : "s"} - {fmt(totalClosedValue)}
             </div>
+            {isContractorHistory && (
+              <div role="status" style={{ fontSize: 11, color: T.subtle, marginTop: 5 }}>
+                Read-only history for work orders that remain assigned to your company.
+              </div>
+            )}
           </div>
           <div className="filter-bar" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               value={histSearch}
               onChange={(e: any) => setHistSearch(e.target.value)}
-              placeholder="Search history..."
+              placeholder={isContractorHistory ? "Search closed jobs..." : "Search history..."}
               style={{ minWidth: 220, padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
             />
             {isManager && (
@@ -129,7 +147,7 @@ export default function HistoryView(props: any) {
                 { value: "priority", label: "Priority" },
                 { value: "store", label: "Store" },
                 { value: "summary", label: "Summary" },
-                { value: "contractor", label: "Contractor" },
+                ...(isManager ? [{ value: "contractor" as const, label: "Contractor" }] : []),
               ]}
               onColumnChange={value => {
                 setSortColumn(value);

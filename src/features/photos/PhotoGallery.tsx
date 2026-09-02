@@ -25,13 +25,14 @@ type PhotoGalleryProps = {
   imageErrors?: Record<string, boolean>;
   setImageErrors: Dispatch<SetStateAction<Record<string, boolean>>>;
   setLightbox: (url: string) => void;
-  doAddPhotos: (workOrderId: string, files: FileList | null) => void | Promise<unknown>;
-  doRemovePhoto: (workOrderId: string, path: string) => void | Promise<unknown>;
+  doAddPhotos?: (workOrderId: string, files: FileList | null) => void | Promise<unknown>;
+  doRemovePhoto?: (workOrderId: string, path: string) => void | Promise<unknown>;
   fire?: (message: string) => void;
   loadingStates?: Record<string, boolean>;
+  readOnly?: boolean;
 };
 
-export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, fire, loadingStates = {} }: PhotoGalleryProps) {
+export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, fire, loadingStates = {}, readOnly = false }: PhotoGalleryProps) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -229,16 +230,20 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                               Select
                             </button>
                           )}
-                          <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
-                            <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
-                            {adding ? <><BtnSpinnerDark />Uploading...</> : "Take photo"}
-                            <input type="file" accept="image/*" capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
-                          </label>
-                          <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
-                            <Ico d="M4 5h16v14H4zM4 15l4-4 4 4 2-2 6 6M15 9h.01" size={13} />
-                            Choose photos
-                            <input type="file" accept="image/*" multiple disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos(woId, e.target.files); e.target.value = ""; }} />
-                          </label>
+                          {!readOnly && doAddPhotos && (
+                            <>
+                              <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
+                                <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
+                                {adding ? <><BtnSpinnerDark />Uploading...</> : "Take photo"}
+                                <input type="file" accept="image/*" capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos?.(woId, e.target.files); e.target.value = ""; }} />
+                              </label>
+                              <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
+                                <Ico d="M4 5h16v14H4zM4 15l4-4 4 4 2-2 6 6M15 9h.01" size={13} />
+                                Choose photos
+                                <input type="file" accept="image/*" multiple disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos?.(woId, e.target.files); e.target.value = ""; }} />
+                              </label>
+                            </>
+                          )}
                         </div>
                       </div>
                       {(photos || []).length === 0
@@ -356,7 +361,11 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                                             : <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={15} color="currentColor" />}
                                         </button>
                                       )}
-                                      {!selecting && <button disabled={removing} onClick={e => { e.stopPropagation(); doRemovePhoto(woId, path); }} style={{ position: "absolute", top: 4, right: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(31,30,28,0.8)", border: "none", color: "#fff", fontSize: 16, cursor: removing ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: removing ? 0.7 : 1, zIndex: 2 }}>{removing ? "..." : "x"}</button>}
+                                      {!readOnly && doRemovePhoto && (
+                                        <>
+                                          {!selecting && <button disabled={removing} onClick={e => { e.stopPropagation(); doRemovePhoto?.(woId, path); }} style={{ position: "absolute", top: 4, right: 4, width: 36, height: 36, borderRadius: "50%", background: "rgba(31,30,28,0.8)", border: "none", color: "#fff", fontSize: 16, cursor: removing ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: removing ? 0.7 : 1, zIndex: 2 }}>{removing ? "..." : "x"}</button>}
+                                        </>
+                                      )}
                                     </div>
                                   );
                                 })}
