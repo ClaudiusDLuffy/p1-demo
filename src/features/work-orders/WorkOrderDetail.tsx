@@ -259,6 +259,11 @@ export default function WorkOrderDetail(props: any) {
   }, [woBillingInvoices, woData?.status]);
   const hasAnyLiveInvoice = woAllInvoices.length > 0 || woBillingInvoices.length > 0;
   const canInvoice = !isManager && currentUser?.canInvoice === true;
+  // Contractor History is a reference archive. Keep every server-changing
+  // control out of this detail even if an old or malformed row has an active
+  // status; RLS still remains the authoritative visibility boundary.
+  const contractorHistoryReadOnly = !isManager
+    && (page === "history" || woData?.status === "closed");
   const invoicingComplete = Boolean(
     woData?.contractorInvoicingCompletedAt
       && woData.contractorInvoicingAssignmentVersion === woData.contractorAssignmentVersion
@@ -268,7 +273,8 @@ export default function WorkOrderDetail(props: any) {
   const contractorInvoiceSetReady = contractorInvoiceStates.some(state =>
     ["submitted", "revised", "approved", "paid"].includes(state),
   ) && !contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state));
-  const canFinishInvoicing = canInvoice
+  const canFinishInvoicing = !contractorHistoryReadOnly
+    && canInvoice
     && woData?.status !== "closed"
     && (woData?.billingOnly || woData?.functionalStatus === "Completed")
     && contractorInvoiceSetReady;
@@ -382,6 +388,15 @@ export default function WorkOrderDetail(props: any) {
                         ? <><BtnSpinner />Reopening...</>
                         : "Reopen work order"}
                     </button>
+                  </div>
+                )}
+
+                {contractorHistoryReadOnly && (
+                  <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: T.surfaceSoft, borderColor: T.borderSoft }}>
+                    <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>Closed job · read only</div>
+                    <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                      This record remains available for reference. Work-order, invoice, note, photo, part, and assignment changes are disabled here.
+                    </div>
                   </div>
                 )}
 
@@ -705,7 +720,7 @@ export default function WorkOrderDetail(props: any) {
                             : "Duplicate for reassignment"}
                         </button>
                       )}
-                      {woData.status === "assigned" && (
+                      {!contractorHistoryReadOnly && woData.status === "assigned" && (
                         <>
                           <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
                             {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
@@ -718,7 +733,7 @@ export default function WorkOrderDetail(props: any) {
                       {/* Field completion is independent of invoice permission.
                           Invoice-capable technicians retain the separate invoice
                           workflow after marking the field work complete. */}
-                      {!isManager && jobOpen && !["assigned", "parts"].includes(woData.status) && (
+                      {!contractorHistoryReadOnly && !isManager && jobOpen && !["assigned", "parts"].includes(woData.status) && (
                         <>
                           {woData.functionalStatus === "Work in Progress" && (
                             <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
@@ -764,7 +779,7 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
                         </button>
                       )}
-                      {woData.status === "parts" && (
+                      {!contractorHistoryReadOnly && woData.status === "parts" && (
                         <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
                           {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : "Resume work"}
                         </button>
@@ -778,7 +793,7 @@ export default function WorkOrderDetail(props: any) {
                           follow-up visits until the WO closes. The per-invoice
                           approve/reject/mark-paid actions are rendered in the
                           invoice group block below. */}
-                      {woData.status !== "closed" && !isManager && canInvoice && (
+                      {!contractorHistoryReadOnly && woData.status !== "closed" && !isManager && canInvoice && (
                         <button type="button" onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>
                       )}
                       {/* Staff retain only the explicit no-invoice exception.
@@ -795,7 +810,7 @@ export default function WorkOrderDetail(props: any) {
 
                     </div>
 
-                    {!invoiceController && (isManager || canInvoice) && (
+                    {!contractorHistoryReadOnly && !invoiceController && (isManager || canInvoice) && (
                       <ContractorEstimatePanel
                         workOrder={woData}
                         currentUser={currentUser}
@@ -824,10 +839,16 @@ export default function WorkOrderDetail(props: any) {
                       >
                         <div style={{ flex: "1 1 280px" }}>
                           <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>
-                            {invoicingComplete ? "Contractor job closed — invoicing complete" : "Contractor job remains open for invoicing"}
+                            {contractorHistoryReadOnly
+                              ? "Closed job invoice record"
+                              : invoicingComplete
+                                ? "Contractor job closed — invoicing complete"
+                                : "Contractor job remains open for invoicing"}
                           </div>
                           <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
-                            {invoicingComplete
+                            {contractorHistoryReadOnly
+                              ? "Invoice information is available for reference and download only."
+                              : invoicingComplete
                               ? "Staff can safely continue the billing handoff. A new or corrected contractor invoice automatically reopens this step."
                               : canFinishInvoicing
                                 ? "Use the final action after every contractor invoice has been submitted. P1 will still review and bill separately."
@@ -873,19 +894,21 @@ export default function WorkOrderDetail(props: any) {
                           .slice()
                           .sort((a: any, b: any) => (a.invoiceDate || "").localeCompare(b.invoiceDate || ""))
                           .map((inv: any, idx: number) => {
-                            const isMyDraft = inv.state === "draft" && (
+                            const isMyDraft = !contractorHistoryReadOnly && inv.state === "draft" && (
                               inv.contractor === (currentUser?.contractorAccountId || currentUser?.id)
                               || isManager
                             );
-                            const isMyRejectedInvoice = canEditRejectedContractorInvoice(
+                            const isMyRejectedInvoice = !contractorHistoryReadOnly && canEditRejectedContractorInvoice(
                               inv,
                               currentUser,
                               isManager,
                             );
-                            const canDeleteInvoice = isManager || canDeleteOwnContractorInvoice(
-                              inv,
-                              currentUser,
-                              isManager,
+                            const canDeleteInvoice = !contractorHistoryReadOnly && (
+                              isManager || canDeleteOwnContractorInvoice(
+                                inv,
+                                currentUser,
+                                isManager,
+                              )
                             );
                             const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Sent to QuickBooks" } as any)[inv.state] || inv.state;
                             const stateColor = (
@@ -1053,7 +1076,7 @@ export default function WorkOrderDetail(props: any) {
 
                     {/* Per-row soft delete. Contractors reach this only for
                         their own draft/rejected invoice; the RPC rechecks it. */}
-                    {deletingInvId && (() => {
+                    {!contractorHistoryReadOnly && deletingInvId && (() => {
                       const inv = woAllInvoices.find((i: any) => i.id === deletingInvId);
                       if (!inv) return null;
                       const isBusy = busyInvId === inv.id || isLoading("deleteInvoice_" + inv.id);
@@ -1168,7 +1191,7 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                     )}
 
-                    {woData.status !== "closed" && (() => {
+                    {!contractorHistoryReadOnly && woData.status !== "closed" && (() => {
                       const isDispatchTier = currentUser?.contractorTier === "mr_freeze";
                       const isDirectTier = currentUser?.contractorTier === "direct" || currentUser?.contractorTier == null;
                       const isContractedTier = currentUser?.contractorTier === "contracted";
@@ -1333,6 +1356,7 @@ export default function WorkOrderDetail(props: any) {
                       doRemovePhoto={doRemovePhoto}
                       fire={fire}
                       loadingStates={loadingStates}
+                      readOnly={contractorHistoryReadOnly}
                     />
 
                     <WorkOrderActivityPanels
@@ -1363,6 +1387,7 @@ export default function WorkOrderDetail(props: any) {
                       doMarkSevenElevenSynced={doMarkSevenElevenSynced}
                       doMarkContractorAttention={doMarkContractorAttention}
                       doAcknowledgeContractorAttention={doAcknowledgeContractorAttention}
+                      readOnly={contractorHistoryReadOnly}
                     />
 
                   </div>
@@ -1476,12 +1501,13 @@ export default function WorkOrderDetail(props: any) {
                         isPartBilled={isPartBilled}
                         loadingStates={loadingStates}
                         T={T}
+                        readOnly={contractorHistoryReadOnly}
                       />
                     ) : woData.partNeeded ? (
                       <div className="card" style={{ padding: 18, background: T.warnSoft, borderColor: `${T.warn}33` }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.warn }}>{woData.status === "capital" ? "Equipment" : "Part"} on order</div>
-                          {doAddPart && (
+                          {!contractorHistoryReadOnly && doAddPart && (
                             <button
                               type="button"
                               onClick={() => doAddPart(woData.id, { description: "", status: "ordered" })}
@@ -1494,7 +1520,7 @@ export default function WorkOrderDetail(props: any) {
                         {woData.partEta && <div style={{ fontSize: 11, color: T.warn, marginTop: 4 }}>Expected return: {woData.partEta}</div>}
                       </div>
                     ) : (
-                      doAddPart && (woData.status === "parts" || woData.status === "wip" || isManager) && (
+                      !contractorHistoryReadOnly && doAddPart && (woData.status === "parts" || woData.status === "wip" || isManager) && (
                         <button
                           type="button"
                           onClick={() => doAddPart(woData.id, { description: "", status: "ordered" })}
@@ -1509,7 +1535,7 @@ export default function WorkOrderDetail(props: any) {
             );
           })()}
 
-          {modal === "workReport" && woData && (
+          {!contractorHistoryReadOnly && modal === "workReport" && woData && (
             <WorkReportForm
               woId={woData.id}
               woStore={woData.store}
@@ -1547,12 +1573,13 @@ const P1_ORDER_STATUS_META: Record<string, { label: string; bg: string; fg: stri
   cancelled: { label: "P1 request cancelled", bg: "#F3F4F6", fg: "#4B5563" },
 };
 
-function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, isPartBilled, loadingStates, T }: any) {
+function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, isPartBilled, loadingStates, T, readOnly = false }: any) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<any>({});
   const [p1CostDrafts, setP1CostDrafts] = useState<Record<string, string>>({});
   const [p1CostErrors, setP1CostErrors] = useState<Record<string, string>>({});
   const startEdit = (p: any) => {
+    if (readOnly) return;
     setEditingId(p.id);
     setDraft({
       description: p.description,
@@ -1563,6 +1590,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
     });
   };
   const saveEdit = async (p: any) => {
+    if (readOnly) return;
     await doUpdatePart(p.id, woId, {
       description: draft.description,
       partNumber: draft.partNumber,
@@ -1611,13 +1639,15 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle }}>Parts</div>
           <div style={{ fontSize: 11, color: T.muted }}>{receivedCount} of {parts.length} received</div>
         </div>
-        <button
-          type="button"
-          onClick={() => doAddPart(woId, { description: "New part", status: "ordered" })}
-          disabled={!!loadingStates["addPart_" + woId]}
-          className="btn-soft"
-          style={{ padding: "5px 12px", fontSize: 11 }}
-        >+ Add part</button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => doAddPart(woId, { description: "New part", status: "ordered" })}
+            disabled={!!loadingStates["addPart_" + woId]}
+            className="btn-soft"
+            style={{ padding: "5px 12px", fontSize: 11 }}
+          >+ Add part</button>
+        )}
       </div>
       <div style={{ display: "grid", gap: 10 }}>
         {parts.map((p: any) => {
@@ -1632,7 +1662,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
             : null;
           return (
             <div key={p.id} style={{ padding: 12, background: T.surfaceSoft, borderRadius: 10, border: `1px solid ${T.borderSoft}` }}>
-              {isEditing ? (
+              {isEditing && !readOnly ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.4fr 110px 70px", gap: 8 }}>
                     <Field label="Description"><Input value={draft.description} onChange={(e: any) => setDraft((d: any) => ({ ...d, description: e.target.value }))} /></Field>
@@ -1727,7 +1757,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                       ) : (
                         <span style={{ fontSize: 10, color: T.muted }}>P1 purchasing owns this request</span>
                       )
-                    ) : (
+                    ) : readOnly ? null : (
                       <Sel
                         value={p.status}
                         onChange={(e: any) => doUpdatePart(p.id, woId, { status: e.target.value })}
@@ -1740,7 +1770,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                       </Sel>
                     )}
                     <div style={{ display: "flex", gap: 6 }}>
-                      {!isP1Order && p.status !== "received" && doRequestP1PartOrder && (
+                      {!readOnly && !isP1Order && p.status !== "received" && doRequestP1PartOrder && (
                         <button
                           type="button"
                           onClick={() => doRequestP1PartOrder(p.id)}
@@ -1751,8 +1781,8 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                           {p1Updating ? "Requesting…" : "P1 to order"}
                         </button>
                       )}
-                      <button type="button" onClick={() => startEdit(p)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit</button>
-                      {isManager && doDeletePart && (
+                      {!readOnly && <button type="button" onClick={() => startEdit(p)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit</button>}
+                      {!readOnly && isManager && doDeletePart && (
                         <button type="button" onClick={() => doDeletePart(p.id, woId)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11, color: T.danger }}>Remove</button>
                       )}
                     </div>

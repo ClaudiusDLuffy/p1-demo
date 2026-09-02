@@ -256,11 +256,11 @@ test("the RPC result and execution grants match the future app contract", () => 
 test("the P1-only portal action confirms and opens the new unassigned copy", () => {
   assert.match(
     dataLayer,
-    /rpc\("duplicate_work_order_for_reassignment"[\s\S]*p_source_work_order_id: workOrderId/,
+    /rpc\([\s\S]*"duplicate_work_order_for_reassignment_notified"[\s\S]*p_source_work_order_id: workOrderId/,
   );
   assert.match(
     databaseTypes,
-    /duplicate_work_order_for_reassignment:[\s\S]*p_source_work_order_id: string[\s\S]*Returns: Json/,
+    /duplicate_work_order_for_reassignment_notified:[\s\S]*p_source_work_order_id: string[\s\S]*Returns: Json/,
   );
   assert.match(hook, /await duplicateWorkOrderForReassignment\(woId\)/);
   assert.match(hook, /setSelectedWO\(result\.workOrderId\)/);

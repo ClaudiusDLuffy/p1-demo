@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   updateWorkOrder, insertActivity, updateInvoiceState,
-  unassignWorkOrder, reassignWorkOrder, deleteActivity, deleteWorkOrder,
+  transitionWorkOrderContractor, deleteActivity, deleteWorkOrder,
   rejectUnassignedWorkOrder, duplicateWorkOrderForReassignment,
   uploadPhotos, removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
@@ -282,11 +282,64 @@ export default function useWorkOrders({
     }
   };
 
+  const notifyAssignmentRemoval = async (deliveryId?: string | null) => {
+    if (!deliveryId) return "not_required";
+
+    try {
+      const sb = supabase();
+      const { data } = await sb.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return "request_failed";
+
+      const response = await fetch("/api/notifications/assignment-removal", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deliveryId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.error(
+          "Outgoing contractor notification request failed",
+          payload.error || response.statusText,
+        );
+        return payload.delivery || "request_failed";
+      }
+      return payload.delivery || (payload.success ? "sent" : "request_failed");
+    } catch (error) {
+      console.error("Outgoing contractor notification request error", error);
+      return "request_failed";
+    }
+  };
+
+  const assignmentRemovalMessage = (delivery: string) => {
+    if (delivery === "sent" || delivery === "already_sent") {
+      return " The former contractor was notified automatically.";
+    }
+    if (delivery === "not_required") return "";
+    if (delivery === "not_deliverable") {
+      return " The former contractor has no deliverable email address; contact them manually.";
+    }
+    return " The assignment changed, but email delivery could not be confirmed; contact the former contractor manually.";
+  };
+
   const doAssign = async (woId: string, contractorId: string) => {
     const c = getUser(contractorId);
     if (!c) { fire("Contractor not found"); return; }
     setLoading("assign_" + woId, true);
     try {
+    let wo = workOrders.find(workOrder => workOrder.id === woId) || null;
+    if (!wo) {
+      try {
+        wo = await loadWorkOrderById(woId);
+      } catch (error: unknown) {
+        fire(`Could not load work order: ${rpcErrorMessage(error)}`);
+        return;
+      }
+    }
+    if (!wo) { fire("Work order not found"); return; }
     const dispatchedAt = new Date().toISOString();
     const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -295,15 +348,17 @@ export default function useWorkOrders({
       { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" },
       localActivity(text, "system", false, "work_order_assignment", false, true),
     );
-    fire(`Dispatched to ${c.name}`);
     const ok = await dbCall(async () => {
-      await updateWorkOrder(woId, { status: "assigned", contractor: contractorId, dispatchedAt, functionalStatus: "Dispatched" });
-      await insertActivity(woId, "System", text, "system", {
-        staffOnly: true,
-        eventKey: "work_order_assignment",
-      });
+      await transitionWorkOrderContractor(
+        woId,
+        contractorId,
+        Number(wo.contractorAssignmentVersion || 0),
+      );
     }, "Dispatch failed", () => restoreWorkOrders(snapshot));
-    if (ok) await notifyDispatch(woId, contractorId);
+    if (ok) {
+      fire(`Dispatched to ${c.name}`);
+      await notifyDispatch(woId, contractorId);
+    }
     } finally {
       setLoading("assign_" + woId, false);
     }
@@ -312,6 +367,16 @@ export default function useWorkOrders({
   const doUnassign = async (woId: string) => {
     setLoading("unassign_" + woId, true);
     try {
+    let wo = workOrders.find(workOrder => workOrder.id === woId) || null;
+    if (!wo) {
+      try {
+        wo = await loadWorkOrderById(woId);
+      } catch (error: unknown) {
+        fire(`Could not load work order: ${rpcErrorMessage(error)}`);
+        return;
+      }
+    }
+    if (!wo) { fire("Work order not found"); return; }
     const text = `Work order unassigned by ${currentUser.name}.`;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(
@@ -319,10 +384,18 @@ export default function useWorkOrders({
       { status: "unassigned", contractor: null, eta: null, dispatchedAt: null, functionalStatus: "New" },
       localActivity(text, "system", false, "work_order_unassigned", false, true),
     );
-    fire("Work order unassigned");
-    await dbCall(async () => {
-      await unassignWorkOrder(woId, currentUser.name);
+    let transition = null;
+    const ok = await dbCall(async () => {
+      transition = await transitionWorkOrderContractor(
+        woId,
+        null,
+        Number(wo.contractorAssignmentVersion || 0),
+      );
     }, "Unassign failed", () => restoreWorkOrders(snapshot));
+    if (ok) {
+      const delivery = await notifyAssignmentRemoval(transition?.deliveryId);
+      fire(`Work order unassigned.${assignmentRemovalMessage(delivery)}`);
+    }
     } finally {
       setLoading("unassign_" + woId, false);
     }
@@ -396,7 +469,8 @@ export default function useWorkOrders({
       setAiNote(null);
       setSelectedWO(result.workOrderId);
       setPage("wo_detail");
-      fire(`Created ${result.workOrderId}. It is unassigned and ready to dispatch.`);
+      const delivery = await notifyAssignmentRemoval(result.deliveryId);
+      fire(`Created ${result.workOrderId}. It is unassigned and ready to dispatch.${assignmentRemovalMessage(delivery)}`);
       return result;
     } catch (error: unknown) {
       invalidateWorkOrders();
@@ -417,6 +491,7 @@ export default function useWorkOrders({
         return;
       }
     }
+    if (!wo) { fire("Work order not found"); return; }
     const oldName = wo?.contractor ? (getUser(wo.contractor)?.name || "Unassigned") : "Unassigned";
     const newC = getUser(newContractorId);
     if (!newC) { fire("Contractor not found"); return; }
@@ -455,11 +530,21 @@ export default function useWorkOrders({
       },
       localActivity(text, "system", false, "work_order_reassigned", false, true),
     );
-    fire(`Reassigned to ${newC.name}`);
+    let transition = null;
     const ok = await dbCall(async () => {
-      await reassignWorkOrder(woId, newContractorId, oldName, newC.name, currentUser.name);
+      transition = await transitionWorkOrderContractor(
+        woId,
+        newContractorId,
+        Number(wo.contractorAssignmentVersion || 0),
+      );
     }, "Reassign failed", () => restoreWorkOrders(snapshot));
-    if (ok) await notifyDispatch(woId, newContractorId);
+    if (ok) {
+      const [delivery] = await Promise.all([
+        notifyAssignmentRemoval(transition?.deliveryId),
+        notifyDispatch(woId, newContractorId),
+      ]);
+      fire(`Reassigned to ${newC.name}.${assignmentRemovalMessage(delivery)}`);
+    }
     } finally {
       setLoading("reassign_" + woId, false);
     }

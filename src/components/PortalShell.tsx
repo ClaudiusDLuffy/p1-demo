@@ -1585,10 +1585,10 @@ export default function PortalShell() {
     if (workOrderReturnPage) {
       setPage(workOrderReturnPage);
       setWorkOrderReturnPage(null);
-    } else if (!isManager) {
+    } else if (!isManager && page !== "history") {
       setPage("my_jobs");
     }
-  }, [isManager, setSelectedWO, workOrderReturnPage]);
+  }, [isManager, page, setSelectedWO, workOrderReturnPage]);
 
   const rememberWorkOrderReturn = useCallback((workOrderId: string) => {
     if (!workOrderId) return;
@@ -2616,6 +2616,7 @@ export default function PortalShell() {
     ]
     : [
       { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge, attentionBadge: contractorAttentionBadge },
+      { id: "history", label: "Closed jobs", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
       ...(currentUser?.contractorTier === "mr_freeze" || currentUser?.canManageTeam ? [
         { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       ] : []),
@@ -2650,7 +2651,7 @@ export default function PortalShell() {
   // ===============================================================
   //  APP SHELL
   // ===============================================================
-  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: "History" };
+  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: isManager ? "History" : "Closed jobs" };
 
   // =====  // ===============================================================
   //  LAYOUT
@@ -3334,6 +3335,7 @@ export default function PortalShell() {
           <HistoryView
             page={page}
             isManager={isManager}
+            currentUser={currentUser}
             canReopen={isManager && !invoiceController}
             onRequestReopen={requestReopen}
             selectedWO={selectedWO}
@@ -3568,6 +3570,9 @@ export default function PortalShell() {
           <div className="reassign-copy" style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
             Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "-") : "Unassigned"}</span>. Pick a new contractor - the original SLA deadline is preserved.
           </div>
+          <div role="note" style={{ padding: "10px 12px", marginBottom: 16, borderRadius: 10, border: "1px solid #F59E0B66", background: "#FFFBEB", color: "#92400E", fontSize: 11, lineHeight: 1.5 }}>
+            Direct reassignment ends the current contractor&apos;s portal access and automatically emails them that the call was removed. If they performed work or may need to invoice, cancel and use <strong>Duplicate for reassignment</strong> so their original record remains available.
+          </div>
           <div className="reassign-picker">
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>New contractor</div>
             {assignableContractors.length >= 10 && (
@@ -3701,6 +3706,9 @@ export default function PortalShell() {
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             Unassign this work order? This will move it back to <span style={{ color: T.ink, fontWeight: 600 }}>Unassigned</span> and clear the contractor.
           </div>
+          <div role="note" style={{ padding: "10px 12px", marginTop: -8, marginBottom: 20, borderRadius: 10, border: "1px solid #F59E0B66", background: "#FFFBEB", color: "#92400E", fontSize: 11, lineHeight: 1.5 }}>
+            The current contractor will lose portal access and receive an automatic removal email. If invoicing may still be needed, use <strong>Duplicate for reassignment</strong> instead.
+          </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
             <button
@@ -3821,6 +3829,8 @@ export default function PortalShell() {
             The new portal record will use the next available suffix from the canonical 7-Eleven number, such as <span className="mono" style={{ color: T.ink }}>{woData.duplicateRootWorkOrderId || woData.id}-1</span>, while 7-Eleven updates and outbound billing continue using <span className="mono" style={{ color: T.ink }}>{woData.duplicateRootWorkOrderId || woData.id}</span>. It copies the 7-Eleven intake, store, priority, SLA, AFM, and NTE information.
             <br /><br />
             The original work order remains unchanged so its current contractor can finish invoicing. Technician details, invoices, notes, activities, visits, photos, reports, estimates, parts, and other prior workflow records are not copied.
+            <br /><br />
+            The current contractor will be emailed automatically to stop field work and use the original record only for approved incurred-cost invoicing.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button type="button" onClick={() => setModal(null)} disabled={modalLoading} className="btn-soft">Cancel</button>
