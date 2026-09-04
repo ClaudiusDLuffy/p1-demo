@@ -573,7 +573,7 @@ export default function WorkOrderDetail(props: any) {
                     {/* Header card */}
                     <div className="card" style={{ padding: 24, marginBottom: 16 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-                        <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>{woData.id}</span>
+                        <span className="mono work-order-reference" style={{ color: T.danger }}>{woData.id}</span>
                         <CopyWorkOrderButton
                           value={woData.id}
                           onCopied={() => fire(`Work order ${woData.id} copied`)}
@@ -581,9 +581,9 @@ export default function WorkOrderDetail(props: any) {
                         {woData.incidentId && <span style={{ color: T.subtle, fontSize: 12 }}>/</span>}
                         {woData.incidentId && <span className="mono" style={{ fontSize: 11, color: T.muted }}>{woData.incidentId}</span>}
                       </div>
-                      <div className="display" style={{ fontSize: 28, fontWeight: 500, color: T.ink, letterSpacing: -0.4, lineHeight: 1.1 }}>
+                      <h1 className="work-order-location-heading" style={{ margin: 0, fontSize: 28, color: T.ink, letterSpacing: -0.2, lineHeight: 1.1 }}>
                         {[woData.store ? `Store #${woData.store}` : null, woData.city || null].filter(Boolean).join(" · ") || woData.id}
-                      </div>
+                      </h1>
                       {woData.addr && <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{woData.addr}</div>}
                       <div className="wo-date-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
                         {[
