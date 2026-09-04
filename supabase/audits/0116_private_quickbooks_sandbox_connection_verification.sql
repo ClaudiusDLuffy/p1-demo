@@ -88,7 +88,16 @@ with table_checks as (
   select
     coalesce((
       select
-        position('15 minutes' in lower(pg_get_constraintdef(constraint_row.oid))) > 0
+        constraint_row.contype = 'c'
+          and constraint_row.convalidated
+          and pg_get_constraintdef(constraint_row.oid)
+            ilike '%expires_at > created_at%'
+          and pg_get_constraintdef(constraint_row.oid)
+            ilike '%expires_at <= (created_at +%'
+          and (
+            pg_get_constraintdef(constraint_row.oid) ilike '%00:15:00%'
+            or pg_get_constraintdef(constraint_row.oid) ilike '%15 minutes%'
+          )
       from pg_constraint constraint_row
       where constraint_row.conrelid = 'public.quickbooks_oauth_states'::regclass
         and constraint_row.conname = 'quickbooks_oauth_state_lifetime_check'

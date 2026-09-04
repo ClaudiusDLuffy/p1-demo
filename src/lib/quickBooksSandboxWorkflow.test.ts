@@ -39,6 +39,9 @@ test("OAuth state is high entropy, short lived, staff bound, and consumed once",
   assert.match(connectRoute, /actor_id: auth\.profile\.id/);
   assert.match(connectRoute, /begin_quickbooks_oauth_authorization/);
   assert.match(migration, /v_expires_at timestamptz := now\(\) \+ interval '10 minutes'/);
+  assert.match(audit, /constraint_row\.contype = 'c'/);
+  assert.match(audit, /constraint_row\.convalidated/);
+  assert.match(audit, /00:15:00/);
   assert.match(migration, /Disconnect the current QuickBooks company before starting another authorization/);
   assert.match(migration, /update public\.quickbooks_oauth_states oauth_state[\s\S]*oauth_state\.used_at is null/);
   assert.match(callbackRoute, /\.is\("used_at", null\)/);
