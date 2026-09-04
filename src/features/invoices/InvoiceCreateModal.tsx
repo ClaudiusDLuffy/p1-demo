@@ -323,7 +323,7 @@ export default function InvoiceCreateModal(props: any) {
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Work Order #</div>
-            <div style={{ minHeight: 42, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 2, padding: "7px 8px 7px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+            <div className="numeric-readable" style={{ minHeight: 42, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 2, padding: "7px 8px 7px 13px", borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surfaceSoft, fontSize: 13, color: T.ink }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                 {externalWorkOrderId}
                 <CopyWorkOrderButton value={externalWorkOrderId} />
@@ -389,9 +389,10 @@ export default function InvoiceCreateModal(props: any) {
                   inputMode="decimal"
                   title="Labor may be billed in quarter-hour increments (1.25 = 1 hour 15 minutes)."
                   {...register(`lines.${i}.qty` as const, { valueAsNumber: true })}
-                  style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, textAlign: "right", outline: "none" }}
+                  className="numeric-readable"
+                  style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }}
                 />
-                <input type="number" step="any" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+                <input className="numeric-readable" type="number" step="any" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }} />
                 <div className="mono inv-amount" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
                 <button type="button" className="inv-line-remove" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
               </div>
@@ -451,10 +452,10 @@ export default function InvoiceCreateModal(props: any) {
             {!uploadOnly && (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13, gap: 10 }}>
                 <span style={{ color: T.muted }}>Sales tax</span>
-                <input type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace", color: T.ink, textAlign: "right", outline: "none" }} />
+                <input className="numeric-readable" type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }} />
               </div>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.4 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="numeric-readable" style={{ fontSize: 22, color: T.ink, fontWeight: 750 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
             {uploadOnly && uploadedTotal > 0 && !uploadedLinesMatchTotal && (
               <div style={{ fontSize: 11, color: T.warn, lineHeight: 1.45, marginTop: 8, textAlign: "right" }}>
                 Lines differ from the PDF total by {fmt(uploadedLineDifference)}. Review before confirming.
@@ -476,7 +477,8 @@ export default function InvoiceCreateModal(props: any) {
                   step="0.01"
                   placeholder="0.00"
                   {...register("uploadedTotal")}
-                  style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.uploadedTotal ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13, fontFamily: "var(--font-jetbrains-mono), monospace" }}
+                  className="numeric-readable"
+                  style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.uploadedTotal ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
                 />
                 {errors.uploadedTotal && <span style={{ display: "block", marginTop: 5, fontSize: 11, color: T.danger }}>{errors.uploadedTotal.message}</span>}
               </label>

@@ -7,6 +7,7 @@ import {
   getWorkOrderProgressSteps,
   isInternalWorkOrderActivity,
   prioritizePendingSevenElevenUpdates,
+  resolveWorkOrderClosedBy,
   sortWorkOrders,
   workOrderHasPendingSevenElevenSync,
   workOrderNeedsAction,
@@ -175,4 +176,43 @@ test("ordinary operational activity remains contractor-visible", () => {
     }),
     false,
   );
+});
+
+test("closed-by attribution comes from the actual closure rather than payables activity", () => {
+  assert.equal(resolveWorkOrderClosedBy([
+    {
+      author: "Emily Barnhart",
+      eventKey: "invoice_export_confirmed",
+      text: "Contractor bill #460 entered in QuickBooks by Emily Barnhart.",
+    },
+    {
+      author: "System",
+      eventKey: "status_change",
+      text: "Work order closed by Lynzy Nicole.",
+    },
+  ]), "Lynzy Nicole");
+});
+
+test("closed-by attribution supports atomic no-invoice and billing closures", () => {
+  assert.equal(resolveWorkOrderClosedBy([{
+    author: "Gustavo Quintero",
+    eventKey: "work_order_closed_without_invoice",
+    eventData: { action: "closed_without_invoice" },
+    text: "Work order closed without an invoice by Gustavo Quintero.",
+  }]), "Gustavo Quintero");
+
+  assert.equal(resolveWorkOrderClosedBy([{
+    author: "Emily Barnhart",
+    eventKey: "staff_billing",
+    eventData: { action: "billed_to_7_eleven" },
+    text: "P1 invoice #714 billed to 7-Eleven. Work order closed.",
+  }]), "Emily Barnhart");
+});
+
+test("closed-by attribution does not guess from unrelated system activity", () => {
+  assert.equal(resolveWorkOrderClosedBy([{
+    author: "Emily Barnhart",
+    eventKey: "system",
+    text: "Contractor bill #460 entered in QuickBooks by Emily Barnhart.",
+  }]), null);
 });

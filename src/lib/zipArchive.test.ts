@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { crc32, createZipArchive } from "./zipArchive";
+import {
+  crc32,
+  createZipArchive,
+  zipArchiveByteLength,
+  zipArchiveHasEntry,
+} from "./zipArchive";
 
 test("CRC32 matches the standard reference vector", () => {
   assert.equal(crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
@@ -12,6 +17,10 @@ test("controller ZIP output contains local, central, and end records", () => {
     { name: "../Source-PDFs/invoice.pdf", data: new Uint8Array([1, 2, 3]) },
     { name: "QuickBooks.csv", data: new TextEncoder().encode("a,b\n1,2") },
   ]);
+  assert.equal(archive.byteLength, zipArchiveByteLength([
+    { name: "../Source-PDFs/invoice.pdf", data: new Uint8Array([1, 2, 3]) },
+    { name: "QuickBooks.csv", data: new TextEncoder().encode("a,b\n1,2") },
+  ]));
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
   const decoded = new TextDecoder().decode(archive);
 
@@ -21,4 +30,18 @@ test("controller ZIP output contains local, central, and end records", () => {
   assert.match(decoded, /Source-PDFs\/invoice\.pdf/);
   assert.doesNotMatch(decoded, /\.\.\//);
   assert.match(decoded, /QuickBooks\.csv/);
+  assert.equal(zipArchiveHasEntry(archive, "QuickBooks.csv"), true);
+  assert.equal(zipArchiveHasEntry(archive, "Missing.csv"), false);
+});
+
+test("entry detection ignores matching text inside a file payload", () => {
+  const archive = createZipArchive([{
+    name: "source.pdf",
+    data: new TextEncoder().encode("Contractor-bills-reference-manifest.csv"),
+  }]);
+
+  assert.equal(
+    zipArchiveHasEntry(archive, "Contractor-bills-reference-manifest.csv"),
+    false,
+  );
 });

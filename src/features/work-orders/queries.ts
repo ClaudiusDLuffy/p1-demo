@@ -11,6 +11,7 @@ import {
   loadP1PartCostsForWorkOrder,
   loadWorkOrderActivitiesPage,
   loadWorkOrderById,
+  loadWorkOrderFamily,
   loadWorkOrderDetails,
   loadWorkOrderPhotosPage,
   loadWorkOrdersPage,
@@ -36,6 +37,9 @@ export const workOrderDetailsKey = (workOrderId: string) =>
 
 export const workOrderByIdKey = (workOrderId: string) =>
   [...WORK_ORDER_BY_ID_KEY, workOrderId] as const;
+
+export const workOrderFamilyKey = (workOrderId: string) =>
+  [...WORK_ORDER_BY_ID_KEY, "family", workOrderId] as const;
 
 export function useWoPartsQuery(enabled = true) {
   return useQuery({
@@ -131,6 +135,16 @@ export function useWorkOrderByIdQuery(workOrderId: string | null | undefined, en
   return useQuery({
     queryKey: workOrderByIdKey(id),
     queryFn: () => loadWorkOrderById(id),
+    staleTime: 30_000,
+    enabled: enabled && id.length > 0,
+  });
+}
+
+export function useWorkOrderFamilyQuery(workOrderId: string | null | undefined, enabled = true) {
+  const id = String(workOrderId || "");
+  return useQuery({
+    queryKey: workOrderFamilyKey(id),
+    queryFn: () => loadWorkOrderFamily(id),
     staleTime: 30_000,
     enabled: enabled && id.length > 0,
   });

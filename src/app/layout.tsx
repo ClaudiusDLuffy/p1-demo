@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { Inter, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -38,15 +38,9 @@ const instrumentSerif = Instrument_Serif({
   display: "swap",
 });
 
-const jetBrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
-  display: "swap",
-});
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`h-full antialiased ${inter.variable} ${instrumentSerif.variable} ${jetBrainsMono.variable}`}>
+    <html lang="en" className={`h-full antialiased ${inter.variable} ${instrumentSerif.variable}`}>
       <body
         className="min-h-full"
         style={{

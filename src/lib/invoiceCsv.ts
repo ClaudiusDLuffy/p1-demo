@@ -1,5 +1,6 @@
 import { normalizeStaffBillingLineType } from "./staffBilling";
 import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
+import { escapeCsvCell } from "./csvSafety";
 
 export type StaffInvoiceCsvLine = {
   type?: unknown;
@@ -199,25 +200,11 @@ function buildInvoiceCsvRows(
   });
 }
 
-export function invoiceCsvRows(
-  invoice: StaffInvoiceCsvInput,
-): StaffInvoiceCsvRow[] {
-  return buildInvoiceCsvRows(invoice);
-}
-
 export function staffInvoiceCsvRows(
   invoice: StaffInvoiceCsvInput,
 ): StaffInvoiceCsvRow[] {
   return buildInvoiceCsvRows(invoice);
 }
-
-const protectSpreadsheetText = (value: string) =>
-  /^[=+\-@]/.test(value) ? `'${value}` : value;
-
-const escapeCsvCell = (value: string) => {
-  const escaped = value.replace(/"/g, "\"\"");
-  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
-};
 
 const numberText = (value: number) =>
   Number(value.toFixed(4)).toString();
@@ -249,25 +236,21 @@ const rowCells = (row: StaffInvoiceCsvRow) => [
 const generateCsv = (rows: StaffInvoiceCsvRow[]) =>
   [HEADERS, ...rows.map(rowCells)]
     .map(row => row
-      .map(value => escapeCsvCell(protectSpreadsheetText(String(value))))
+      .map(escapeCsvCell)
       .join(","))
     .join("\r\n");
-
-export function generateInvoiceCsv(invoice: StaffInvoiceCsvInput): string {
-  return generateCsv(invoiceCsvRows(invoice));
-}
 
 export function generateStaffInvoiceCsv(invoice: StaffInvoiceCsvInput): string {
   return generateCsv(staffInvoiceCsvRows(invoice));
 }
 
-export function generateInvoiceBatchCsv(
+export function generateStaffInvoiceBatchCsv(
   invoices: StaffInvoiceCsvInput[],
 ): string {
   if (invoices.length === 0) {
     throw new Error("No invoices are available to export");
   }
-  return generateCsv(invoices.flatMap(invoiceCsvRows));
+  return generateCsv(invoices.flatMap(staffInvoiceCsvRows));
 }
 
 const filenameToken = (value: unknown, fallback: string) => {
@@ -278,7 +261,7 @@ const filenameToken = (value: unknown, fallback: string) => {
   return token || fallback;
 };
 
-export function invoiceCsvFilename(invoice: StaffInvoiceCsvInput): string {
+export function staffInvoiceCsvFilename(invoice: StaffInvoiceCsvInput): string {
   const num = filenameToken(invoice.num, "Draft");
   const workOrder = filenameToken(
     canonicalSevenElevenWorkOrderId(
@@ -294,10 +277,6 @@ export function invoiceCsvFilename(invoice: StaffInvoiceCsvInput): string {
   return `Invoice-${num}-${workOrder}.csv`;
 }
 
-export function staffInvoiceCsvFilename(invoice: StaffInvoiceCsvInput): string {
-  return invoiceCsvFilename(invoice);
-}
-
 const triggerCsvDownload = (csv: string, filename: string) => {
   const blob = new Blob(["\uFEFF", csv], {
     type: "text/csv;charset=utf-8",
@@ -311,13 +290,6 @@ const triggerCsvDownload = (csv: string, filename: string) => {
   document.body.removeChild(anchor);
   setTimeout(() => URL.revokeObjectURL(url), 1_000);
 };
-
-export function downloadInvoiceCsv(invoice: StaffInvoiceCsvInput): void {
-  triggerCsvDownload(
-    generateInvoiceCsv(invoice),
-    invoiceCsvFilename(invoice),
-  );
-}
 
 export function downloadStaffInvoiceCsv(invoice: StaffInvoiceCsvInput): void {
   triggerCsvDownload(

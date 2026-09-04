@@ -149,7 +149,7 @@ export default function StaffContractorPreview({
                 <option value="revised">Revised</option>
                 <option value="rejected">Rejected</option>
                 <option value="approved">Approved</option>
-                <option value="paid">Sent to QuickBooks</option>
+                <option value="paid">Entered in QuickBooks</option>
               </select>
             )}
           </div>

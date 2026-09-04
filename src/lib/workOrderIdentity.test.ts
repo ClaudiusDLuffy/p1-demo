@@ -3,7 +3,32 @@ import test from "node:test";
 import {
   canonicalSevenElevenWorkOrderId,
   isReassignmentPortalReference,
+  normalizeExactPortalWorkOrderId,
 } from "./workOrderIdentity";
+
+test("complete portal WOT searches are normalized without accepting partial text", () => {
+  assert.equal(
+    normalizeExactPortalWorkOrderId("  wot1271715  "),
+    "WOT1271715",
+  );
+  assert.equal(
+    normalizeExactPortalWorkOrderId("wot1215047-2"),
+    "WOT1215047-2",
+  );
+
+  for (const value of [
+    "WOT2",
+    "WOT12717",
+    "WOT1271715-0",
+    "WOT1271715-",
+    "WOT1271715 extra",
+    "INC27385198",
+    "41591",
+    "temperature",
+  ]) {
+    assert.equal(normalizeExactPortalWorkOrderId(value), null, value);
+  }
+});
 
 test("explicit duplicate provenance owns the external 7-Eleven identity", () => {
   const copy = {

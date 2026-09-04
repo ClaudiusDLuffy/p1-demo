@@ -68,11 +68,16 @@ test("the portal separates field completion from contractor invoicing", () => {
   assert.match(detail, /!isManager && canFinishInvoicing && !invoicingComplete/);
   assert.match(detail, /Done invoicing — close contractor job/);
   assert.doesNotMatch(detail, /Create invoice to complete job|Complete work & invoicing/);
+  assert.match(detail, /resolveWorkOrderClosedBy\(allVisibleActivities\)/);
+  assert.doesNotMatch(detail, /entered in QuickBooks\|sent to QuickBooks\|marked paid/);
   assert.doesNotMatch(hook, /currentUser\?\.canInvoice === true[\s\S]*completeContractorWorkAndInvoicing/);
   assert.match(completionControl, /Field completion is independent from invoice permissions/);
   assert.match(completionControl, /label: "Mark work complete"/);
   assert.match(shell, /title="Mark work complete"/);
   assert.match(shell, /Contractor invoicing remains a separate workflow/);
+  assert.match(shell, /Field completion and invoicing closeout are separate/);
+  assert.match(shell, /Done invoicing — close contractor job/);
+  assert.doesNotMatch(shell, /Complete work &amp; invoicing/);
   assert.doesNotMatch(shell, /combinesContractorCompletion/);
   assert.match(shell, /if \(completed !== false\) setModal\(null\)/);
   assert.match(detail, /setModal\("closeWithoutInvoice"\)/);

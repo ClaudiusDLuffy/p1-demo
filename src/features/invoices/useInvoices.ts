@@ -497,31 +497,6 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     }
   };
 
-  const doDownloadInvoiceCsv = async (inv: any) => {
-    try {
-      let exportInvoice = inv;
-      if ((inv.lines || []).length === 0) {
-        if (!inv.pdfStoragePath) {
-          throw new Error("This invoice has no stored line items or PDF to read");
-        }
-
-        fire(`Reading line items from invoice ${inv.num}...`);
-        const { parseStoredInvoicePdf } = await import("../../lib/invoicePdfParserClient");
-        const parsed = await parseStoredInvoicePdf(inv.pdfStoragePath);
-        if ((parsed.lines || []).length === 0) {
-          throw new Error("No individual line items could be extracted from the invoice PDF");
-        }
-        exportInvoice = { ...inv, lines: parsed.lines };
-      }
-
-      const { downloadInvoiceCsv } = await import("../../lib/invoiceCsv");
-      downloadInvoiceCsv(exportInvoice);
-      fire(`Invoice ${inv.num} CSV downloaded`);
-    } catch (e: any) {
-      fire(`CSV download failed: ${e.message || e}`);
-    }
-  };
-
   // Staff cleanup retains its service endpoint. Contractors use a narrower,
   // atomic RPC that permits only their own current draft/rejected invoice and
   // writes the audit entry in the same transaction.
@@ -766,7 +741,7 @@ export default function useInvoices({ currentUser, profiles = [], fire }: any) {
     submittedInvoiceNum, setSubmittedInvoiceNum,
     pdfBusy, setPdfBusy,
     nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
-    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
+    doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
     lineAmount, invSubtotal, invTotal,
   };
 }

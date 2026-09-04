@@ -37,6 +37,7 @@ import {
   getWorkOrderDateMeta,
   getWorkOrderProgressSteps,
   isInternalWorkOrderActivity,
+  resolveWorkOrderClosedBy,
 } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
 import { useBillingInvoicePageQuery } from "../billing/queries";
@@ -926,7 +927,7 @@ export default function WorkOrderDetail(props: any) {
                                 isManager,
                               )
                             );
-                            const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Sent to QuickBooks" } as any)[inv.state] || inv.state;
+                            const stateLabel = ({ draft: "Draft", submitted: "Submitted", revised: "Revised", approved: "Approved", rejected: "Rejected", paid: "Entered in QuickBooks" } as any)[inv.state] || inv.state;
                             const stateColor = (
                               inv.state === "paid" ? T.success :
                               inv.state === "approved" ? T.accent :
@@ -1041,7 +1042,7 @@ export default function WorkOrderDetail(props: any) {
                     {rejectingInv && (
                       <Modal onClose={() => { setRejectingInv(null); setRejectReason(""); }} title={`Reject invoice #${rejectingInv.num}`} width={460}>
                         <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
-                          The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or sent to QuickBooks.
+                          The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or entered in QuickBooks.
                         </div>
                         <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
                         <TA rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" />
@@ -1309,8 +1310,7 @@ export default function WorkOrderDetail(props: any) {
                         on completed/closed jobs; identical from the board and History
                         (same detail component). */}
                     {(["completed", "pending_invoice", "pending_approval", "closed"].includes(woData.status) || woData.assetModel || woData.resolutionCode) && (() => {
-                      const closeAct = allVisibleActivities.find((a: any) => /(?:sent to QuickBooks|marked paid) by /i.test(a.text || ""));
-                      const closedBy = closeAct ? (closeAct.text.match(/(?:sent to QuickBooks|marked paid) by ([^.]+)/i)?.[1]?.trim() || null) : null;
+                      const closedBy = resolveWorkOrderClosedBy(allVisibleActivities);
                       const rec = [
                         { l: "Equipment make", v: woData.assetMake || "—" },
                         { l: "Asset model", v: woData.assetModel || "—" },

@@ -64,6 +64,47 @@ export type WorkOrderActivityVisibility = {
   text?: string | null;
 };
 
+export type WorkOrderClosureActivity = WorkOrderActivityVisibility & {
+  author?: string | null;
+  eventData?: unknown;
+};
+
+/**
+ * Resolve closure attribution only from an activity that actually closed the
+ * work order. Contractor-bill/QuickBooks activity is a separate workflow and
+ * must never be presented as the person who closed the job.
+ *
+ * Activities arrive newest-first, so the first matching close also handles a
+ * work order that was reopened and closed again.
+ */
+export const resolveWorkOrderClosedBy = (
+  activities: WorkOrderClosureActivity[] | null | undefined,
+) => {
+  for (const activity of activities || []) {
+    const text = String(activity?.text || "").trim();
+    const explicitCloser = text.match(
+      /^Work order closed(?: without an invoice)? by (.+?)(?:\.)?$/i,
+    )?.[1]?.trim();
+    if (explicitCloser) return explicitCloser;
+
+    const eventData = activity?.eventData;
+    const action = eventData
+      && typeof eventData === "object"
+      && !Array.isArray(eventData)
+      && "action" in eventData
+      ? String((eventData as { action?: unknown }).action || "")
+      : "";
+    const isBillingClose = activity?.eventKey === "staff_billing"
+      && (action === "billed_to_7_eleven" || /work order closed\.?$/i.test(text));
+    const isNoInvoiceClose = activity?.eventKey === "work_order_closed_without_invoice";
+    if (!isBillingClose && !isNoInvoiceClose) continue;
+
+    const author = String(activity?.author || "").trim();
+    if (author && author.toLowerCase() !== "system") return author;
+  }
+  return null;
+};
+
 export const isInternalWorkOrderActivity = (
   activity?: WorkOrderActivityVisibility | null,
 ) => {

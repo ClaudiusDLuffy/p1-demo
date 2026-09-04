@@ -73,7 +73,7 @@ export default function InvoiceList(props: any) {
     { id: "revised", l: "Revised", m: "Rev" },
     { id: "rejected", l: "Rejected", m: "Rej" },
     { id: "approved", l: "Approved", m: "Appr" },
-    { id: "paid", l: "Sent to QuickBooks", m: "Sent to QB" },
+    { id: "paid", l: "Entered in QuickBooks", m: "In QuickBooks" },
   ];
   const sortOptions = [
     { id: "recent", label: "Recently added" },
@@ -354,9 +354,9 @@ export default function InvoiceList(props: any) {
                             disabled={handoffSelectionMode ? handoffSelectableInvoices.length === 0 : reviewableInvoices.length === 0}
                             onChange={handoffSelectionMode ? toggleAllVisibleHandoff : toggleAllVisibleReviewable}
                             aria-label={handoffSelectionMode
-                              ? "Select all visible approved invoices for QuickBooks handoff"
+                              ? "Select all visible approved contractor bills for payables handoff"
                               : "Select all visible submitted and revised invoices"}
-                            title={handoffSelectionMode ? "Select approved invoices for handoff" : "Select reviewable invoices"}
+                            title={handoffSelectionMode ? "Select approved contractor bills for payables handoff" : "Select reviewable invoices"}
                             style={{ width: 16, height: 16, accentColor: T.accent, cursor: (handoffSelectionMode ? handoffSelectableInvoices.length : reviewableInvoices.length) ? "pointer" : "default" }}
                           />
                         </th>
@@ -400,7 +400,7 @@ export default function InvoiceList(props: any) {
                                   ? toggleHandoffSelection(String(inv.id))
                                   : toggleReviewSelection(String(inv.id))}
                                 aria-label={handoffSelectionMode
-                                  ? `Select invoice ${inv.num} for QuickBooks handoff`
+                                  ? `Select contractor bill ${inv.num} for payables handoff`
                                   : `Select invoice ${inv.num} for batch review`}
                                 style={{ width: 16, height: 16, accentColor: T.accent, cursor: "pointer" }}
                               />
@@ -476,7 +476,7 @@ export default function InvoiceList(props: any) {
                               ? toggleHandoffSelection(String(inv.id))
                               : toggleReviewSelection(String(inv.id))}
                             aria-label={handoffSelectionMode
-                              ? `Select invoice ${inv.num} for QuickBooks handoff`
+                              ? `Select contractor bill ${inv.num} for payables handoff`
                               : `Select invoice ${inv.num} for batch review`}
                             style={{ width: 18, height: 18, accentColor: T.accent, cursor: "pointer" }}
                           />

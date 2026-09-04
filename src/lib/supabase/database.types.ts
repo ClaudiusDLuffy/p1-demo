@@ -903,6 +903,9 @@ export type Database = {
       }
       controller_invoice_export_batches: {
         Row: {
+          archive_bytes: number | null
+          archive_format: string | null
+          archive_sha256: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
@@ -917,6 +920,9 @@ export type Database = {
           total: number
         }
         Insert: {
+          archive_bytes?: number | null
+          archive_format?: string | null
+          archive_sha256?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -931,6 +937,9 @@ export type Database = {
           total: number
         }
         Update: {
+          archive_bytes?: number | null
+          archive_format?: string | null
+          archive_sha256?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -975,6 +984,8 @@ export type Database = {
           exported_at: string
           invoice_id: string
           invoice_num: string
+          source_pdf_path: string | null
+          source_updated_at: string | null
           total: number
           work_order_id: string | null
         }
@@ -984,6 +995,8 @@ export type Database = {
           exported_at?: string
           invoice_id: string
           invoice_num: string
+          source_pdf_path?: string | null
+          source_updated_at?: string | null
           total: number
           work_order_id?: string | null
         }
@@ -993,6 +1006,8 @@ export type Database = {
           exported_at?: string
           invoice_id?: string
           invoice_num?: string
+          source_pdf_path?: string | null
+          source_updated_at?: string | null
           total?: number
           work_order_id?: string | null
         }
@@ -1582,6 +1597,204 @@ export type Database = {
           {
             foreignKeyName: "p1_parts_alert_settings_updated_by_fkey"
             columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_connection_events: {
+        Row: {
+          actor_id: string
+          authorization_attempt_hash: string | null
+          connection_id: string
+          created_at: string
+          details: Json
+          disconnect_claim_id: string | null
+          environment: string
+          event_type: string
+          id: string
+          realm_id: string
+        }
+        Insert: {
+          actor_id: string
+          authorization_attempt_hash?: string | null
+          connection_id: string
+          created_at?: string
+          details?: Json
+          disconnect_claim_id?: string | null
+          environment: string
+          event_type: string
+          id?: string
+          realm_id: string
+        }
+        Update: {
+          actor_id?: string
+          authorization_attempt_hash?: string | null
+          connection_id?: string
+          created_at?: string
+          details?: Json
+          disconnect_claim_id?: string | null
+          environment?: string
+          event_type?: string
+          id?: string
+          realm_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_connection_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_connection_events_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "quickbooks_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_connections: {
+        Row: {
+          access_token_ciphertext: string | null
+          access_token_expires_at: string | null
+          company_name: string | null
+          connected_at: string
+          connected_by: string
+          created_at: string
+          disconnect_claim_id: string | null
+          disconnect_claimed_at: string | null
+          disconnect_claimed_by: string | null
+          disconnected_at: string | null
+          disconnected_by: string | null
+          environment: string
+          id: string
+          last_authorization_attempt_created_at: string
+          last_authorization_attempt_hash: string
+          last_verified_at: string | null
+          realm_id: string
+          refresh_token_ciphertext: string | null
+          refresh_token_expires_at: string | null
+          scope: string
+          status: string
+          token_key_fingerprint: string
+          token_key_version: number
+          updated_at: string
+        }
+        Insert: {
+          access_token_ciphertext?: string | null
+          access_token_expires_at?: string | null
+          company_name?: string | null
+          connected_at?: string
+          connected_by: string
+          created_at?: string
+          disconnect_claim_id?: string | null
+          disconnect_claimed_at?: string | null
+          disconnect_claimed_by?: string | null
+          disconnected_at?: string | null
+          disconnected_by?: string | null
+          environment: string
+          id?: string
+          last_authorization_attempt_created_at: string
+          last_authorization_attempt_hash: string
+          last_verified_at?: string | null
+          realm_id: string
+          refresh_token_ciphertext?: string | null
+          refresh_token_expires_at?: string | null
+          scope?: string
+          status?: string
+          token_key_fingerprint: string
+          token_key_version?: number
+          updated_at?: string
+        }
+        Update: {
+          access_token_ciphertext?: string | null
+          access_token_expires_at?: string | null
+          company_name?: string | null
+          connected_at?: string
+          connected_by?: string
+          created_at?: string
+          disconnect_claim_id?: string | null
+          disconnect_claimed_at?: string | null
+          disconnect_claimed_by?: string | null
+          disconnected_at?: string | null
+          disconnected_by?: string | null
+          environment?: string
+          id?: string
+          last_authorization_attempt_created_at?: string
+          last_authorization_attempt_hash?: string
+          last_verified_at?: string | null
+          realm_id?: string
+          refresh_token_ciphertext?: string | null
+          refresh_token_expires_at?: string | null
+          scope?: string
+          status?: string
+          token_key_fingerprint?: string
+          token_key_version?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_connections_connected_by_fkey"
+            columns: ["connected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_connections_disconnected_by_fkey"
+            columns: ["disconnected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_connections_disconnect_claimed_by_fkey"
+            columns: ["disconnect_claimed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_oauth_states: {
+        Row: {
+          actor_id: string
+          created_at: string
+          environment: string
+          expires_at: string
+          redirect_uri: string
+          state_hash: string
+          used_at: string | null
+          used_realm_id: string | null
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          environment: string
+          expires_at: string
+          redirect_uri: string
+          state_hash: string
+          used_at?: string | null
+          used_realm_id?: string | null
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          environment?: string
+          expires_at?: string
+          redirect_uri?: string
+          state_hash?: string
+          used_at?: string | null
+          used_realm_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_oauth_states_actor_id_fkey"
+            columns: ["actor_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -2885,6 +3098,18 @@ export type Database = {
         }
         Returns: Json
       }
+      stage_contractor_bill_handoff: {
+        Args: {
+          p_actor_id: string
+          p_archive_bytes: number
+          p_archive_format: string
+          p_archive_sha256: string
+          p_batch_id: string
+          p_object_path: string
+          p_sources: Json
+        }
+        Returns: Json
+      }
       confirm_controller_invoice_export: {
         Args: { p_actor_id: string; p_batch_id: string }
         Returns: Json
@@ -2931,6 +3156,33 @@ export type Database = {
       complete_my_work_order_todo: {
         Args: { p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
+      }
+      begin_quickbooks_oauth_authorization: {
+        Args: {
+          p_actor_id: string
+          p_environment: string
+          p_redirect_uri: string
+          p_state_hash: string
+        }
+        Returns: Json
+      }
+      claim_quickbooks_connection_disconnect: {
+        Args: {
+          p_actor_id: string
+          p_claim_id: string
+          p_connection_id: string
+          p_expected_updated_at: string
+        }
+        Returns: Json
+      }
+      finalize_quickbooks_connection_disconnect: {
+        Args: {
+          p_actor_id: string
+          p_claim_id: string
+          p_connection_id: string
+          p_revocation_outcome: string
+        }
+        Returns: Json
       }
       configure_contractor_technician: {
         Args: {
@@ -3225,6 +3477,33 @@ export type Database = {
           p_terms: string
           p_valid_until: string | null
           p_work_order_id: string
+        }
+        Returns: Json
+      }
+      save_quickbooks_connection: {
+        Args: {
+          p_access_token_ciphertext: string
+          p_access_token_expires_at: string
+          p_actor_id: string
+          p_authorization_attempt_created_at: string
+          p_authorization_attempt_hash: string
+          p_company_name: string
+          p_environment: string
+          p_realm_id: string
+          p_refresh_token_ciphertext: string
+          p_refresh_token_expires_at: string | null
+          p_scope: string
+          p_token_key_fingerprint: string
+          p_token_key_version: number
+        }
+        Returns: Json
+      }
+      release_quickbooks_connection_disconnect: {
+        Args: {
+          p_actor_id: string
+          p_claim_id: string
+          p_connection_id: string
+          p_reason_code: string
         }
         Returns: Json
       }

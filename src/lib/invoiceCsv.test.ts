@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  generateInvoiceCsv,
   generateStaffInvoiceCsv,
   staffInvoiceCsvFilename,
   staffInvoiceCsvRows,
@@ -45,8 +44,8 @@ test("matches the supplied SaasAnt layout with one row per line item", () => {
   );
 });
 
-test("uses the same SaasAnt format for contractor invoice downloads", () => {
-  const csv = generateInvoiceCsv({
+test("maps taxable receivable lines to the SaasAnt tax-rate column", () => {
+  const csv = generateStaffInvoiceCsv({
     num: "4347",
     wot: "WOT0909771",
     store: "23995",
@@ -76,13 +75,24 @@ test("uses the same SaasAnt format for contractor invoice downloads", () => {
 
 test("does not silently replace missing invoice items with one total row", () => {
   assert.throws(
-    () => generateInvoiceCsv({
+    () => generateStaffInvoiceCsv({
       num: "6502",
       wot: "WOT0908035",
       lines: [],
     }),
     /No invoice line items are available to export/,
   );
+});
+
+test("protects receivable CSV text with control-obscured formula prefixes", () => {
+  const csv = generateStaffInvoiceCsv({
+    num: "\u0000=2+2",
+    store: "100",
+    lines: [{ type: "Labor", description: "\u0000@unsafe", qty: 1, rate: 1 }],
+  });
+
+  assert.match(csv, /'\u0000=2\+2/);
+  assert.match(csv, /'\u0000@unsafe/);
 });
 
 test("exposes first-row metadata and normalized product names", () => {

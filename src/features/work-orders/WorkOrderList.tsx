@@ -27,8 +27,9 @@ import {
   type WorkOrderTableColumn,
   type WorkOrderTableSort,
 } from "../../lib/workOrderTable";
+import { normalizeExactPortalWorkOrderId } from "../../lib/workOrderIdentity";
 import { useCursorPagination } from "../../lib/useCursorPagination";
-import { useWorkOrdersPageQuery } from "./queries";
+import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery } from "./queries";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
 export default function WorkOrderList(props: any) {
@@ -69,6 +70,7 @@ export default function WorkOrderList(props: any) {
   const pageSize = 10;
   const deferredSearch = useDeferredValue(search);
   const deferredColumnFilters = useDeferredValue(columnFilters);
+  const exactWorkOrderId = normalizeExactPortalWorkOrderId(deferredSearch);
 
   const exactStoreFilteredWOs = useMemo(
     () => storeView?.storeNumber
@@ -105,26 +107,35 @@ export default function WorkOrderList(props: any) {
     );
   }, [deferredColumnFilters, fallbackStateFilteredWOs, getUser, hideClosed, isManager, sortBy, tableSort, viewMode]);
 
-  const cursorSignature = JSON.stringify({
-    search: deferredSearch.trim(),
-    filterC,
-    filterP,
-    filterStatus,
-    filterState,
-    sortBy,
-    tableSort,
-    columnFilters: deferredColumnFilters,
-    hideClosed,
-    viewMode,
-    isManager,
-    storeNumber: storeView?.storeNumber || null,
-    storeRequestId: storeView?.requestId || null,
-  });
+  const cursorSignature = JSON.stringify(exactWorkOrderId
+    ? { exactWorkOrderId }
+    : {
+        search: deferredSearch.trim(),
+        filterC,
+        filterP,
+        filterStatus,
+        filterState,
+        sortBy,
+        tableSort,
+        columnFilters: deferredColumnFilters,
+        hideClosed,
+        viewMode,
+        isManager,
+        storeNumber: storeView?.storeNumber || null,
+        storeRequestId: storeView?.requestId || null,
+      });
   const {
     position: effectiveCursor,
     previous: previousPage,
     next: nextPage,
   } = useCursorPagination(cursorSignature);
+  const listQueryEnabled = page === "work_orders"
+    && !selectedWO
+    && !exactWorkOrderId;
+  const exactWorkOrderQuery = useWorkOrderFamilyQuery(
+    exactWorkOrderId,
+    page === "work_orders" && !selectedWO && Boolean(exactWorkOrderId),
+  );
   const workOrderPageQuery = useWorkOrdersPageQuery({
     scope: hideClosed ? "active" : "all",
     search: deferredSearch,
@@ -152,21 +163,32 @@ export default function WorkOrderList(props: any) {
     createdDateFilter: deferredColumnFilters.createdDate,
     updatedDateFilter: deferredColumnFilters.updatedDate,
     slaFilter: deferredColumnFilters.sla === "overdue" ? "overdue" : "all",
-  }, page === "work_orders" && !selectedWO);
+  }, listQueryEnabled);
 
   const serverPage = workOrderPageQuery.data;
-  const paginatedWOs = serverPage?.items
-    || fallbackTableWOs.slice(0, pageSize);
-  const totalRows = serverPage?.totalCount ?? fallbackTableWOs.length;
+  const paginatedWOs = exactWorkOrderId
+    ? exactWorkOrderQuery.data || []
+    : serverPage?.items || fallbackTableWOs.slice(0, pageSize);
+  const totalRows = exactWorkOrderId
+    ? exactWorkOrderQuery.data?.length || 0
+    : serverPage?.totalCount ?? fallbackTableWOs.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safePage = effectiveCursor.page;
+  const safePage = exactWorkOrderId ? 1 : effectiveCursor.page;
   const startIndex = (safePage - 1) * pageSize;
   const showingStart = totalRows === 0 ? 0 : startIndex + 1;
   const showingEnd = Math.min(startIndex + paginatedWOs.length, totalRows);
 
-  const pagingBusy = workOrderPageQuery.isFetching
+  const pagingBusy = !exactWorkOrderId && workOrderPageQuery.isFetching
     ? pagingDirection
     : null;
+
+  const emptyStateMessage = exactWorkOrderId
+    ? exactWorkOrderQuery.isFetching
+      ? `Looking up ${exactWorkOrderId}...`
+      : exactWorkOrderQuery.isError
+        ? `Could not look up ${exactWorkOrderId}. Please try again.`
+        : `No accessible work order found for ${exactWorkOrderId}.`
+    : "No work orders match your filters";
 
   const goToPage = (direction: "prev" | "next") => {
     setPagingDirection(direction);
@@ -272,7 +294,7 @@ export default function WorkOrderList(props: any) {
     );
   };
 
-  const renderPaginationControls = () => totalRows > 0 && (
+  const renderPaginationControls = () => !exactWorkOrderId && totalRows > 0 && (
     <div
       className="work-order-pagination"
       style={{
@@ -426,6 +448,25 @@ export default function WorkOrderList(props: any) {
             )}
           </div>
 
+          {exactWorkOrderId && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                margin: "-8px 0 14px",
+                padding: "9px 12px",
+                borderRadius: 8,
+                border: `1px solid ${T.accentRing}`,
+                background: T.accentSoft,
+                color: T.inkSoft,
+                fontSize: 12,
+              }}
+            >
+              Exact lookup for <strong>{exactWorkOrderId}</strong>. Other filters and “Hide closed calls” are temporarily ignored.
+              {!exactWorkOrderId.includes("-") && " Authorized reassignment copies are included."}
+            </div>
+          )}
+
           <WorkOrderStatusLegend />
 
           <div className="desktop-only-table">
@@ -508,6 +549,13 @@ export default function WorkOrderList(props: any) {
                       </tr>
                     );
                   })}
+                  {paginatedWOs.length === 0 && (
+                    <tr>
+                      <td colSpan={tableColumns.length} style={{ padding: "36px 20px", textAlign: "center", color: T.subtle, fontSize: 13 }}>
+                        {emptyStateMessage}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -593,8 +641,8 @@ export default function WorkOrderList(props: any) {
               );
             })}
             {paginatedWOs.length === 0 && (
-              <div className="responsive-grid-empty" style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
-                No work orders match your filters
+              <div aria-live="polite" className="responsive-grid-empty" style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
+                {emptyStateMessage}
               </div>
             )}
           </div>
