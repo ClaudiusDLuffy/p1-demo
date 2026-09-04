@@ -23,6 +23,15 @@ test("invoice and billing detours return to the originating work order", () => {
   assert.match(detail, /Back to all work orders/);
 });
 
+test("work-order identity uses readable, prominent typography", () => {
+  assert.match(shell, /\.work-order-page-title,/);
+  assert.match(shell, /\.work-order-location-heading \{ font-family: var\(--font-inter\)/);
+  assert.match(shell, /\.work-order-reference \{ font-size: 16px; font-weight: 800/);
+  assert.match(shell, /isWorkOrderPageTitle \? " work-order-page-title"/);
+  assert.match(detail, /className="mono work-order-reference" style=\{\{ color: T\.danger \}\}/);
+  assert.match(detail, /<h1 className="work-order-location-heading"/);
+});
+
 test("saving a P1 invoice opens its exact billing detail instead of restoring the work order", () => {
   const createdStart = shell.indexOf("onCreated={(invoice: any) => {");
   const createdEnd = shell.indexOf("fire={fire}", createdStart);

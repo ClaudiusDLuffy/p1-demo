@@ -338,6 +338,9 @@ const CSS = `
 html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .display { font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; letter-spacing: -0.5px; }
 .mono { font-family: var(--font-jetbrains-mono), ui-monospace, monospace; }
+.work-order-page-title,
+.work-order-location-heading { font-family: var(--font-inter), system-ui, sans-serif; font-weight: 700; }
+.work-order-reference { font-size: 16px; font-weight: 800; line-height: 1.25; }
 .app-root { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .main-wrap { flex: 0 0 calc(100% - 232px) !important; min-width: 0; width: calc(100% - 232px); max-width: calc(100% - 232px); overflow-x: hidden; }
 .content-pad { min-width: 0; overflow-x: hidden; box-sizing: border-box; }
@@ -2656,6 +2659,11 @@ export default function PortalShell() {
   //  APP SHELL
   // ===============================================================
   const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: isManager ? "History" : "Closed jobs" };
+  const isWorkOrderPageTitle = Boolean(
+    selectedWO
+    && woData?.id
+    && (page === "work_orders" || page === "wo_detail"),
+  );
 
   // =====  // ===============================================================
   //  LAYOUT
@@ -3002,7 +3010,7 @@ export default function PortalShell() {
         <div className="topbar-shell" style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
           <div className="desktop-only-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
             <div>
-              <div className="display topbar-title" style={{ fontSize: 28, color: T.ink, letterSpacing: -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
+              <div className={`display topbar-title${isWorkOrderPageTitle ? " work-order-page-title" : ""}`} style={{ fontSize: 28, color: T.ink, letterSpacing: isWorkOrderPageTitle ? -0.2 : -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
               <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -3056,7 +3064,7 @@ export default function PortalShell() {
                 </svg>
               </button>
               <div className="mobile-header-title">
-                <div className="display" style={{ fontSize: 22, color: T.ink, letterSpacing: -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
+                <div className={`display${isWorkOrderPageTitle ? " work-order-page-title" : ""}`} style={{ fontSize: 22, color: T.ink, letterSpacing: isWorkOrderPageTitle ? -0.1 : -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
