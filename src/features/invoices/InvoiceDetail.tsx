@@ -20,7 +20,7 @@ import { useMemo, useState } from "react";
 import { useBillingInvoicePageQuery } from "../billing/queries";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold, pdfBusy, fmt, loadingStates = {} } = props;
   const controller = isInvoiceController(currentUser);
   const canReview = isManager && !controller;
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -111,10 +111,6 @@ export default function InvoiceDetail(props: any) {
                     <button onClick={() => doDownloadInvoice(inv)} disabled={pdfBusy} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>
                       <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
                       {pdfBusy ? "Preparing…" : "Download PDF"}
-                    </button>
-                    <button onClick={() => doDownloadInvoiceCsv(inv)} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
-                      Download CSV
                     </button>
                     {canCorrectTotal && doCorrectInvoiceTotal && (
                       <button
@@ -211,8 +207,8 @@ export default function InvoiceDetail(props: any) {
                   >
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
                       {paymentHoldAction === "hold"
-                        ? "This removes the invoice from the QuickBooks handoff queue. Any pending batch containing it will be cancelled automatically."
-                        : "This returns the invoice to the QuickBooks handoff queue. Only an authorized accounting handoff owner can release it."}
+                        ? "This removes the contractor bill from the payables handoff queue. Any pending batch containing it will be cancelled automatically."
+                        : "This returns the contractor bill to the payables handoff queue. Only an authorized payables handoff owner can release it."}
                     </div>
                     <label style={{ display: "block" }}>
                       <span style={{ display: "block", marginBottom: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: T.subtle }}>
@@ -274,7 +270,7 @@ export default function InvoiceDetail(props: any) {
                 {confirmApprove && (
                   <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} title={`Approve invoice #${inv.num}`} width={440}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                      Approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This updates only this invoice. The work order advances only when all live invoices are approved or sent to QuickBooks.
+                      Approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This updates only this invoice. The work order advances only when all live invoices are approved or entered in QuickBooks.
                     </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                       <button onClick={() => setConfirmApprove(false)} disabled={approving} className="btn-soft">Cancel</button>
@@ -325,7 +321,7 @@ export default function InvoiceDetail(props: any) {
                 {rejecting && (
                   <Modal onClose={() => { setRejecting(false); setRejectReason(""); }} title={`Reject invoice #${inv.num}`} width={460}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
-                      The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or sent to QuickBooks.
+                      The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or entered in QuickBooks.
                     </div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
                     <textarea rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
@@ -561,7 +557,7 @@ export default function InvoiceDetail(props: any) {
                                 {line.description || line.desc}
                               </div>
                             </div>
-                            <div style={{
+                            <div className="numeric-readable" style={{
                               fontSize: 14,
                               fontWeight: 700,
                               color: T.ink,
@@ -572,7 +568,7 @@ export default function InvoiceDetail(props: any) {
                               {fmt(Math.round(((line.qty || 1) * (line.rate || 0)) * 100) / 100)}
                             </div>
                           </div>
-                          <div style={{
+                          <div className="numeric-readable" style={{
                             display: "flex",
                             gap: 16,
                             fontSize: 11,
@@ -600,7 +596,7 @@ export default function InvoiceDetail(props: any) {
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0 0" }}>
                         <span style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Total</span>
-                        <span className="display" style={{ fontSize: 26, color: T.ink, letterSpacing: -0.5 }}>{fmt(Math.round(inv.total * 100) / 100)}</span>
+                        <span className="numeric-readable" style={{ fontSize: 26, color: T.ink, fontWeight: 750 }}>{fmt(Math.round(inv.total * 100) / 100)}</span>
                       </div>
                     </div>
                   </div>

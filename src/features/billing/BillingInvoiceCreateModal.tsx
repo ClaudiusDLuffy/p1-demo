@@ -1430,7 +1430,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
                   <label>
                     <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.subtle, marginBottom: 4 }}>Parts markup %</span>
-                    <input type="number" min="0" max="999" step="0.1" value={partsMarkup} onChange={(e: any) => setPartsMarkup(e.target.value)} style={{ width: 92, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12 }} />
+                    <input className="numeric-readable" type="number" min="0" max="999" step="0.1" value={partsMarkup} onChange={(e: any) => setPartsMarkup(e.target.value)} style={{ width: 92, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12 }} />
                   </label>
                   <button type="button" disabled={pullingLines} onClick={() => void pullSourceLines()} className="btn-primary" style={{ padding: "8px 12px", fontSize: 11, opacity: pullingLines ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
                     {pullingLines ? <><BtnSpinner />Pulling...</> : "Pull lines + calculate"}
@@ -1634,6 +1634,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36 }}
                 />
                 <input
+                  className="numeric-readable"
                   type="number"
                   min={quantityConstraints.min}
                   step={quantityConstraints.step}
@@ -1644,6 +1645,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
                 />
                 <input
+                  className="numeric-readable"
                   type="number"
                   step="any"
                   {...rateRegistration}
@@ -1664,6 +1666,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 ) : (
                   <label style={{ position: "relative" }}>
                     <input
+                      className="numeric-readable"
                       type="number"
                       min="0"
                       max="999"
@@ -1807,6 +1810,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Tax rate (%)</span>
                 <div style={{ position: "relative", width: 120 }}>
                   <input
+                    className="numeric-readable"
                     type="number"
                     min="0"
                     max="100"
@@ -1879,6 +1883,7 @@ export default function BillingInvoiceCreateModal(props: any) {
               <label style={{ position: "relative", width: 112 }}>
                 <span aria-hidden="true" style={{ position: "absolute", left: 9, top: 7, color: T.subtle }}>$</span>
                 <input
+                  className="numeric-readable"
                   type="number"
                   min="0"
                   step="0.01"
@@ -1919,7 +1924,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 {actualMargin == null ? "-" : `${actualMargin.toFixed(1)}%`}
               </span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: `1px solid ${T.border}` }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="display" style={{ fontSize: 22, color: T.ink }}>{fmt(Math.round(total * 100) / 100)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: `1px solid ${T.border}` }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="numeric-readable" style={{ fontSize: 22, color: T.ink, fontWeight: 750 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
           </div>
         </div>
           </div>

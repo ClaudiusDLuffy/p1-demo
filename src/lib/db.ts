@@ -27,7 +27,10 @@ import type {
   EditableContractorEstimateLine,
 } from "./contractorEstimate";
 import { workOrderCanEnterSevenElevenQueue } from "./workOrderView";
-import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
+import {
+  canonicalSevenElevenWorkOrderId,
+  normalizeExactPortalWorkOrderId,
+} from "./workOrderIdentity";
 
 // ── PROFILE / AUTH ──────────────────────────────────────────────────────────
 
@@ -434,6 +437,37 @@ export async function loadWorkOrderById(workOrderId: string): Promise<WorkOrder 
   });
   if (error) throw error;
   return data ? mapWorkOrderListRow(data) : null;
+}
+
+export async function loadWorkOrderFamily(workOrderId: string): Promise<WorkOrder[]> {
+  const reference = normalizeExactPortalWorkOrderId(workOrderId);
+  if (!reference) return [];
+
+  const sb = supabase();
+  let candidatesQuery = sb
+    .from("work_orders")
+    .select("id, duplicate_sequence")
+    .is("deleted_at", null);
+
+  // Canonical 7-Eleven references can own one or more clean portal copies.
+  // The value has already passed the strict WOT regex, so it is safe to use in
+  // PostgREST's OR expression. RLS still scopes every candidate to the caller.
+  const isRoot = !reference.includes("-");
+  candidatesQuery = isRoot
+    ? candidatesQuery.or(
+        `id.eq.${reference},duplicate_root_work_order_id.eq.${reference}`,
+      )
+    : candidatesQuery.eq("id", reference);
+
+  const { data, error } = await candidatesQuery
+    .order("duplicate_sequence", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false });
+  if (error) throw error;
+
+  const hydrated = await Promise.all(
+    (data || []).map(candidate => loadWorkOrderById(candidate.id)),
+  );
+  return hydrated.filter((workOrder): workOrder is WorkOrder => Boolean(workOrder));
 }
 
 export async function loadWorkOrders(): Promise<WorkOrder[]> {

@@ -90,10 +90,12 @@ export default function BillingInvoiceDetail(props: any) {
               Edit invoice
             </button>
           )}
-          <button onClick={onDownloadCsv} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
-            Download CSV
-          </button>
+          {!capitalHandoff && (
+            <button onClick={onDownloadCsv} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
+              Download SaasAnt CSV
+            </button>
+          )}
           {canDelete && <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>}
         </div>
       </div>
@@ -279,7 +281,7 @@ export default function BillingInvoiceDetail(props: any) {
                   </div>
                   <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(Math.round(line.amount * 100) / 100)}</div>
                 </div>
-                <div style={{ display: "flex", gap: 16, fontSize: 11, color: T.muted, marginTop: 6 }}>
+                <div className="numeric-readable" style={{ display: "flex", gap: 16, fontSize: 11, color: T.muted, marginTop: 6 }}>
                   <span>Qty: {line.qty}</span>
                   <span>Rate: {fmt(line.rate)}</span>
                 </div>

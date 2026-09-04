@@ -286,7 +286,7 @@ test("outbound systems use the canonical WOT while portal records keep the suffi
   assert.match(invoiceCsv, /invoice\.externalWorkOrderId/);
   assert.match(
     controllerExports,
-    /select\("id,duplicate_root_work_order_id"\)/,
+    /select\("id,duplicate_root_work_order_id(?:,[^"]+)?"\)/,
   );
   assert.match(controllerExports, /externalWorkOrderIdById/);
   assert.match(controllerExports, /externalWorkOrderIdFor\(invoice\.work_order_id\)/);

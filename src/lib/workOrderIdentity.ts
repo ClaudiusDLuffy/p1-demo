@@ -5,6 +5,21 @@ type WorkOrderIdentityInput = {
 };
 
 const DUPLICATE_WOT_REFERENCE = /^(WOT\d{6,12})-\d+$/i;
+const EXACT_PORTAL_WOT_REFERENCE = /^WOT\d{6,12}(?:-[1-9]\d*)?$/i;
+
+/**
+ * Recognizes a complete portal work-order reference entered into search.
+ * Partial WOTs remain ordinary filtered searches; complete references can use
+ * the exact, RLS-scoped lookup without inheriting presentation filters.
+ */
+export const normalizeExactPortalWorkOrderId = (
+  value: string | null | undefined,
+): string | null => {
+  const reference = String(value || "").trim();
+  return EXACT_PORTAL_WOT_REFERENCE.test(reference)
+    ? reference.toUpperCase()
+    : null;
+};
 
 /**
  * Returns the real 7-Eleven work-order number for external communication.

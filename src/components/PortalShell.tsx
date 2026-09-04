@@ -337,9 +337,20 @@ const CSS = `
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.85 } }
 html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .display { font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; letter-spacing: -0.5px; }
-.mono { font-family: var(--font-jetbrains-mono), ui-monospace, monospace; }
+.mono,
+.numeric-readable {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  letter-spacing: 0.01em;
+}
 .work-order-page-title,
-.work-order-location-heading { font-family: var(--font-inter), system-ui, sans-serif; font-weight: 700; }
+.work-order-location-heading {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
 .work-order-reference { font-size: 16px; font-weight: 800; line-height: 1.25; }
 .app-root { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .main-wrap { flex: 0 0 calc(100% - 232px) !important; min-width: 0; width: calc(100% - 232px); max-width: calc(100% - 232px); overflow-x: hidden; }
@@ -1421,7 +1432,7 @@ export default function PortalShell() {
     nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
-    doDownloadInvoice, doDownloadInvoiceCsv, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
+    doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
     lineAmount, invSubtotal,
   } = useInvoices({ currentUser, profiles: USERS, fire });
   const selectedInvoiceInBootstrap = selectedInvoice
@@ -2150,6 +2161,9 @@ export default function PortalShell() {
   const doDownloadBillingInvoiceCsv = async (invoice: any) => {
     try {
       const exportInvoice = await loadBillingInvoiceForExport(invoice);
+      if (exportInvoice.documentKind === "capital_quote") {
+        throw new Error("Capital quotes cannot use the SaasAnt customer-invoice format");
+      }
       const { downloadStaffInvoiceCsv } = await import("../lib/invoiceCsv");
       downloadStaffInvoiceCsv({
         ...exportInvoice,
@@ -2159,7 +2173,7 @@ export default function PortalShell() {
             || exportInvoice.workOrderId,
         ),
       });
-      fire(`Invoice ${exportInvoice.num} CSV downloaded`);
+      fire(`Invoice ${exportInvoice.num} SaasAnt CSV downloaded`);
     } catch (e: any) {
       fire(`CSV download failed: ${e.message || e}`);
     }
@@ -2607,7 +2621,7 @@ export default function PortalShell() {
   const sideItems = useMemo(() => invoiceController
     ? [
       { id: "dashboard", label: "Controller", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
-      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8" },
+      { id: "invoices", label: "Contractor bills", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8" },
     ]
     : isManager
     ? [
@@ -2615,8 +2629,8 @@ export default function PortalShell() {
       { id: "staff_work", label: "My Work", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", badge: navigationSummary?.staffWorkCount || null },
       { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
       { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
-      { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
-      { id: "billing", label: "Billing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6M9 9h1" },
+      { id: "invoices", label: "Contractor bills", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
+      { id: "billing", label: "7-Eleven billing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6M9 9h1" },
       { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       { id: "contractor_preview", label: "Contractor view", icon: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" },
       { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
@@ -2658,7 +2672,7 @@ export default function PortalShell() {
   // ===============================================================
   //  APP SHELL
   // ===============================================================
-  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: "Invoices", billing: "Billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: isManager ? "History" : "Closed jobs" };
+  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: isManager ? "Contractor bills" : "Invoices", billing: "7-Eleven billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: isManager ? "History" : "Closed jobs" };
   const isWorkOrderPageTitle = Boolean(
     selectedWO
     && woData?.id
@@ -3249,7 +3263,6 @@ export default function PortalShell() {
             doApproveInvoice={doApproveInvoice}
             doMarkPaid={doMarkPaid}
             doDownloadInvoice={doDownloadInvoice}
-            doDownloadInvoiceCsv={doDownloadInvoiceCsv}
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}
             doRetractInvoiceRejection={doRetractInvoiceRejection}
@@ -3933,7 +3946,7 @@ export default function PortalShell() {
           <Modal onClose={() => setModal(null)} title="Close work order" width={460}>
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
               Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
-              <CopyWorkOrderButton value={woData.id} />? It moves to History after the 24h linger, and contractors can no longer add invoices.{notHandedOff > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{notHandedOff} invoice{notHandedOff === 1 ? " has" : "s have"} not been sent to QuickBooks.</strong> The work order can still close; invoice handoff remains available separately.</> : null}
+              <CopyWorkOrderButton value={woData.id} />? It moves to History after the 24h linger, and contractors can no longer add invoices.{notHandedOff > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{notHandedOff} contractor bill{notHandedOff === 1 ? " has" : "s have"} not been entered in QuickBooks.</strong> The work order can still close; payables handoff remains available separately.</> : null}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
@@ -4421,7 +4434,7 @@ export default function PortalShell() {
               Submitted to AFM for approval. You can find a copy in your Invoices tab anytime.
               {!isManager && currentUser?.canInvoice === true && (
                 <div style={{ marginTop: 8 }}>
-                  Once every invoice for this job is submitted, return to the work order and choose Complete work &amp; invoicing.
+                  Field completion and invoicing closeout are separate. Return to the work order to mark field work complete when finished; after every invoice is submitted, choose Done invoicing — close contractor job.
                 </div>
               )}
             </div>

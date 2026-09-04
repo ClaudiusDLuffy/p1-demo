@@ -37,6 +37,22 @@ const safeArchiveName = (name: string) => {
   return normalized || "file";
 };
 
+/** Exact byte length for archives produced by createZipArchive (stored ZIP32). */
+export function zipArchiveByteLength(entries: ZipArchiveEntry[]): number {
+  if (entries.length === 0) throw new Error("A ZIP archive needs at least one file");
+  if (entries.length > 65_535) throw new Error("ZIP entry limit exceeded");
+
+  let byteLength = 22;
+  for (const entry of entries) {
+    const nameLength = encoder.encode(safeArchiveName(entry.name)).byteLength;
+    if (nameLength > 65_535) throw new Error("ZIP entry name is too long");
+    if (entry.data.byteLength > 0xffffffff) throw new Error("ZIP entry is too large");
+    byteLength += 76 + (nameLength * 2) + entry.data.byteLength;
+    if (byteLength > 0xffffffff) throw new Error("ZIP archive exceeds ZIP32 limits");
+  }
+  return byteLength;
+}
+
 const dosDateTime = (date: Date) => {
   const year = Math.max(1980, Math.min(2107, date.getFullYear()));
   const dosTime = (date.getHours() << 11)
@@ -65,8 +81,7 @@ const concatBytes = (chunks: Uint8Array[]) => {
  * avoids a runtime dependency and preserves every source byte exactly.
  */
 export function createZipArchive(entries: ZipArchiveEntry[]): Uint8Array {
-  if (entries.length === 0) throw new Error("A ZIP archive needs at least one file");
-  if (entries.length > 65_535) throw new Error("ZIP entry limit exceeded");
+  zipArchiveByteLength(entries);
 
   const localChunks: Uint8Array[] = [];
   const centralChunks: Uint8Array[] = [];
@@ -132,4 +147,34 @@ export function createZipArchive(entries: ZipArchiveEntry[]): Uint8Array {
   endView.setUint16(20, 0, true);
 
   return concatBytes([...localChunks, centralDirectory, end]);
+}
+
+/**
+ * Reads only central-directory names from archives produced by this module.
+ * Payload bytes are intentionally ignored so a PDF mentioning a filename
+ * cannot be mistaken for an actual ZIP entry.
+ */
+export function zipArchiveHasEntry(archive: Uint8Array, expectedName: string): boolean {
+  if (archive.byteLength < 22) return false;
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  const endOffset = archive.byteLength - 22;
+  if (view.getUint32(endOffset, true) !== 0x06054b50) return false;
+
+  const entryCount = view.getUint16(endOffset + 10, true);
+  let offset = view.getUint32(endOffset + 16, true);
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > endOffset || view.getUint32(offset, true) !== 0x02014b50) {
+      return false;
+    }
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const nameStart = offset + 46;
+    const nextOffset = nameStart + nameLength + extraLength + commentLength;
+    if (nextOffset > endOffset) return false;
+    const name = new TextDecoder().decode(archive.subarray(nameStart, nameStart + nameLength));
+    if (name === expectedName) return true;
+    offset = nextOffset;
+  }
+  return false;
 }

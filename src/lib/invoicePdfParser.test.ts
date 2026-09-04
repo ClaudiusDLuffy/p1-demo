@@ -7,7 +7,7 @@ import {
   findInvoiceNumber,
 } from "./invoicePdfParser";
 import { parseInvoicePdf } from "./invoicePdfParserClient";
-import { generateInvoiceCsv } from "./invoiceCsv";
+import { generateStaffInvoiceCsv } from "./invoiceCsv";
 
 test("extracts an invoice number shown beside an explicit label", () => {
   assert.deepEqual(findInvoiceNumber("Invoice Number: ACME-1042"), {
@@ -97,7 +97,7 @@ test("extracts each item from a multi-line invoice PDF", async () => {
   );
 
   assert.equal(
-    generateInvoiceCsv({
+    generateStaffInvoiceCsv({
       num: parsed.invoiceNumber,
       wot: "WOT0909771",
       store: "23995",

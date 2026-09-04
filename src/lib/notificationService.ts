@@ -384,8 +384,8 @@ ${placed ? "Placed" : "Released"} by: ${input.actorName}
 Reason: ${input.reason}
 
 ${placed
-  ? "This invoice is excluded from the QuickBooks handoff queue until an authorized controller releases it."
-  : "This invoice is eligible for the QuickBooks handoff queue again."}
+  ? "This invoice is excluded from the payables handoff queue until an authorized payables handoff owner releases it."
+  : "This invoice is eligible for the payables handoff queue again."}
 
 Review it in the P1 Pros Portal:
 ${portalUrl()}`,
@@ -397,7 +397,7 @@ export async function sendInvoicePaymentHoldNotification(
 ) {
   const plan = createInvoicePaymentHoldNotificationPlan(input);
   if (plan.recipients.length === 0) {
-    throw new Error("No QuickBooks handoff recipients were found");
+    throw new Error("No payables handoff recipients were found");
   }
 
   const accessToken = await getAccessToken();

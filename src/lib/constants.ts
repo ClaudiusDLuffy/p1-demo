@@ -79,7 +79,7 @@ export const INV_STATE = {
   approved: { label: "Approved", color: T.success, bg: T.successSoft },
   rejected: { label: "Rejected", color: T.danger, bg: T.dangerSoft },
   revised: { label: "Revised", color: T.warn, bg: T.warnSoft },
-  paid: { label: "Sent to QuickBooks", color: T.success, bg: T.successSoft },
+  paid: { label: "Entered in QuickBooks", color: T.success, bg: T.successSoft },
 };
 
 export const STAFF_INV_STATE = {

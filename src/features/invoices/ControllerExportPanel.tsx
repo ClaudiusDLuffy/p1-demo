@@ -15,6 +15,7 @@ import {
   CONTROLLER_INVOICE_HOLDS_KEY,
   INVOICES_KEY,
 } from "./queries";
+import QuickBooksSandboxConnection from "./QuickBooksSandboxConnection";
 
 type ControllerInvoice = {
   id: string;
@@ -23,6 +24,14 @@ type ControllerInvoice = {
 };
 
 type ErrorPayload = { error?: string };
+
+type ArchiveDownloadPayload = {
+  batchId?: string;
+  downloadUrl?: string;
+  filename?: string;
+  format?: "reference_manifest_v2" | "legacy_saas_ant_v1";
+  error?: string;
+};
 
 type HandoffItem = {
   invoiceId: string;
@@ -92,6 +101,19 @@ const downloadResponse = async (response: Response, fallbackName: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1_000);
 };
 
+const downloadPrivateArchive = (payload: ArchiveDownloadPayload, fallbackName: string) => {
+  if (!payload.downloadUrl) throw new Error(payload.error || "The private archive link is unavailable");
+  const target = new URL(payload.downloadUrl, window.location.origin);
+  if (!/^https?:$/.test(target.protocol)) throw new Error("The private archive link is invalid");
+  const anchor = document.createElement("a");
+  anchor.href = target.toString();
+  anchor.download = payload.filename || fallbackName;
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+};
+
 const dateTime = (value: string | null) => value
   ? new Date(value).toLocaleString("en-US", {
       month: "short",
@@ -108,8 +130,8 @@ const money = (value: number) => new Intl.NumberFormat("en-US", {
 }).format(Number(value || 0));
 
 const batchStatus = {
-  pending: { label: "Awaiting QuickBooks confirmation", color: T.warn, bg: T.warnSoft },
-  confirmed: { label: "Confirmed in QuickBooks", color: T.success, bg: T.successSoft },
+  pending: { label: "Awaiting QuickBooks entry confirmation", color: T.warn, bg: T.warnSoft },
+  confirmed: { label: "Entered in QuickBooks", color: T.success, bg: T.successSoft },
   cancelled: { label: "Cancelled", color: T.danger, bg: T.dangerSoft },
 } as const;
 
@@ -246,21 +268,22 @@ export default function ControllerExportPanel({
       });
       if (!response.ok) {
         const payload = await response.json().catch((): ErrorPayload => ({}));
-        throw new Error(payload.error || "QuickBooks handoff failed");
+        throw new Error(payload.error || "Contractor bill handoff failed");
       }
-      const batchId = response.headers.get("x-controller-export-batch") || "";
-      await downloadResponse(
-        response,
-        `QuickBooks-Handoff-${new Date().toISOString().slice(0, 10)}.zip`,
+      const payload = await response.json().catch((): ArchiveDownloadPayload => ({}));
+      const batchId = payload.batchId || "";
+      downloadPrivateArchive(
+        payload,
+        `Contractor-Bills-${new Date().toISOString().slice(0, 10)}.zip`,
       );
-      setNotice(`Batch ${batchId.slice(0, 8)} staged. Invoices remain Approved until the QuickBooks import is confirmed.`);
+      setNotice(`Batch ${batchId.slice(0, 8)} staged. Contractor bills remain Approved until their QuickBooks entry is confirmed.`);
       onClearSelected?.();
       setShowHistory(true);
       await refresh();
     } catch (downloadError) {
       setError(downloadError instanceof Error
         ? downloadError.message
-        : "QuickBooks handoff failed");
+        : "Contractor bill handoff failed");
     } finally {
       setBusyAction("");
     }
@@ -271,7 +294,7 @@ export default function ControllerExportPanel({
     let reason = "";
     if (action === "cancel") {
       reason = window.prompt(
-        "Why is this handoff batch being cancelled? The reason is saved in the audit log.",
+        "Why is this contractor-bill batch being cancelled? The reason is saved in the audit log.",
       )?.trim() || "";
       if (!reason) return;
     }
@@ -286,8 +309,8 @@ export default function ControllerExportPanel({
       const payload = await response.json().catch((): ErrorPayload => ({}));
       if (!response.ok) throw new Error(payload.error || `Could not ${action} batch`);
       setNotice(action === "confirm"
-        ? `Batch ${batch.id.slice(0, 8)} confirmed in QuickBooks.`
-        : `Batch ${batch.id.slice(0, 8)} cancelled; its approved invoices are available for a new handoff.`);
+        ? `Batch ${batch.id.slice(0, 8)} confirmed as entered in QuickBooks.`
+        : `Batch ${batch.id.slice(0, 8)} cancelled; its approved contractor bills are available for a new handoff.`);
       await refresh();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : `Could not ${action} batch`);
@@ -299,17 +322,22 @@ export default function ControllerExportPanel({
   const downloadBatch = async (batch: HandoffBatch) => {
     setBusyAction(`download:${batch.id}`);
     setError(null);
+    setNotice(null);
     try {
       const response = await controllerExportRequest(
         `/api/controller-exports?batch=${encodeURIComponent(batch.id)}`,
       );
       if (!response.ok) {
         const payload = await response.json().catch((): ErrorPayload => ({}));
-        throw new Error(payload.error || "Stored handoff could not be downloaded");
+        throw new Error(payload.error || "Stored contractor-bill package could not be downloaded");
       }
-      await downloadResponse(response, `QuickBooks-Handoff-${batch.id.slice(0, 8)}.zip`);
+      const payload = await response.json().catch((): ArchiveDownloadPayload => ({}));
+      downloadPrivateArchive(payload, `Contractor-Bills-${batch.id.slice(0, 8)}.zip`);
+      if (payload.format === "legacy_saas_ant_v1") {
+        setNotice("Legacy package downloaded. It predates the corrected payables format and may contain a SaasAnt customer-invoice CSV; use its contractor PDFs only.");
+      }
     } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : "Stored handoff could not be downloaded");
+      setError(downloadError instanceof Error ? downloadError.message : "Stored contractor-bill package could not be downloaded");
     } finally {
       setBusyAction("");
     }
@@ -359,7 +387,7 @@ export default function ControllerExportPanel({
         const payload = await response.json().catch((): ErrorPayload => ({}));
         throw new Error(payload.error || "Audit CSV could not be downloaded");
       }
-      await downloadResponse(response, `QuickBooks-Handoff-Audit-${new Date().toISOString().slice(0, 10)}.csv`);
+      await downloadResponse(response, `Contractor-Bill-Handoff-Audit-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : "Audit CSV could not be downloaded");
     } finally {
@@ -369,7 +397,7 @@ export default function ControllerExportPanel({
 
   return (
     <section
-      aria-label="Accounting QuickBooks handoff"
+      aria-label="Accounting contractor bill handoff"
       className="card"
       style={{
         padding: compact ? 14 : 16,
@@ -381,18 +409,18 @@ export default function ControllerExportPanel({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: T.ink }}>
-            Accounting · QuickBooks handoff
+            Payables · Contractor bills
           </div>
           <div style={{ fontSize: 11, color: T.muted, marginTop: 4, lineHeight: 1.5 }}>
-            {approvedCount} approved invoice{approvedCount === 1 ? "" : "s"} waiting
+            {approvedCount} approved contractor bill{approvedCount === 1 ? "" : "s"} waiting
             {pendingCount > 0 ? ` · ${pendingCount} already staged` : ""}.
             {(holdsQuery.data?.holds.length || 0) > 0
-              ? ` ${holdsQuery.data?.holds.length} invoice${holdsQuery.data?.holds.length === 1 ? " is" : "s are"} on payment hold.`
+              ? ` ${holdsQuery.data?.holds.length} contractor bill${holdsQuery.data?.holds.length === 1 ? " is" : "s are"} on payment hold.`
               : ""}
             {canHandoff
-              ? " Downloading stages a batch; only confirmation marks it sent."
-              : " The queue is visible, but only the accounting handoff owner can stage or confirm it."}
-            {hasSelection ? ` ${selectedCount} approved invoice${selectedCount === 1 ? " is" : "s are"} selected.` : ""}
+              ? " Downloading stages a payables batch; only confirmation marks it entered in QuickBooks."
+              : " The queue is visible, but only the payables handoff owner can stage or confirm it."}
+            {hasSelection ? ` ${selectedCount} approved contractor bill${selectedCount === 1 ? " is" : "s are"} selected.` : ""}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -421,30 +449,31 @@ export default function ControllerExportPanel({
                 {busyAction === "stage"
                   ? <><BtnSpinner />Building package…</>
                   : hasSelection
-                    ? `Download selected ZIP (${selectedCount})`
-                    : "Download handoff ZIP"}
+                    ? `Download selected bills (${selectedCount})`
+                    : "Download contractor bills"}
               </button>
             </>
           )}
         </div>
       </div>
-      <div style={{ fontSize: 10, color: T.subtle, marginTop: 8 }}>
-        A ZIP download never marks invoices paid. Confirm the pending batch only after Emily verifies the QuickBooks import.
+      <div style={{ fontSize: 11, color: T.inkSoft, lineHeight: 1.5, marginTop: 8 }}>
+        The ZIP contains contractor invoice PDFs and a reference-only manifest; it is not a QuickBooks import file. Downloading never marks bills paid. Confirm only after Emily enters and attaches them in QuickBooks.
       </div>
+      <QuickBooksSandboxConnection visible={canHandoff} />
       {pendingCount > 0 && (
         <div role="alert" style={{ fontSize: 11, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "9px 11px", marginTop: 9 }}>
-          {pendingCount} staged invoice{pendingCount === 1 ? " is" : "s are"} still awaiting QuickBooks confirmation
+          {pendingCount} staged contractor bill{pendingCount === 1 ? " is" : "s are"} still awaiting QuickBooks entry confirmation
           {oldestPendingAt ? ` (oldest: ${dateTime(oldestPendingAt)})` : ""}. Resolve these before the Wednesday contractor-payment run.
         </div>
       )}
       {overLimit && !hasSelection && (
         <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
-          This queue exceeds the safe {exportLimit}-invoice archive limit. Open the Approved tab, select up to {exportLimit} invoices, then download the selected ZIP.
+          This queue exceeds the safe {exportLimit}-bill archive limit. Open the Approved tab, select up to {exportLimit} contractor bills, then download the selected package.
         </div>
       )}
       {selectedOverLimit && (
         <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
-          Select no more than {exportLimit} invoices for one handoff ZIP.
+          Select no more than {exportLimit} contractor bills for one package.
         </div>
       )}
       {notice && <div role="status" style={{ fontSize: 11, color: T.success, marginTop: 8 }}>{notice}</div>}
@@ -458,7 +487,7 @@ export default function ControllerExportPanel({
       {(holdsQuery.data?.holds.length || 0) > 0 && (
         <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: `1px solid ${T.danger}44`, background: T.dangerSoft }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: T.danger, marginBottom: 8 }}>
-            Held — do not pay or export
+            Held — do not pay or include
           </div>
           <div style={{ display: "grid", gap: 7 }}>
             {(holdsQuery.data?.holds || []).map(hold => (
@@ -525,10 +554,10 @@ export default function ControllerExportPanel({
             </button>
           </div>
 
-          {historyQuery.isLoading && <div role="status" style={{ color: T.muted, fontSize: 11 }}>Loading handoff history…</div>}
+          {historyQuery.isLoading && <div role="status" style={{ color: T.muted, fontSize: 11 }}>Loading contractor-bill history…</div>}
           {historyQuery.error && (
             <div role="alert" style={{ color: T.danger, fontSize: 11 }}>
-              {historyQuery.error instanceof Error ? historyQuery.error.message : "Could not load handoff history"}
+              {historyQuery.error instanceof Error ? historyQuery.error.message : "Could not load contractor-bill history"}
             </div>
           )}
           <div style={{ display: "grid", gap: 10 }}>
@@ -543,7 +572,7 @@ export default function ControllerExportPanel({
                         <span style={{ padding: "3px 7px", borderRadius: 999, background: status.bg, color: status.color, fontSize: 9, fontWeight: 800 }}>{status.label}</span>
                       </div>
                       <div style={{ color: T.muted, fontSize: 10, marginTop: 5 }}>
-                        Run by {batch.createdByName} · {dateTime(batch.createdAt)} · {batch.invoiceCount} invoice{batch.invoiceCount === 1 ? "" : "s"} · {money(batch.total)}
+                        Run by {batch.createdByName} · {dateTime(batch.createdAt)} · {batch.invoiceCount} contractor bill{batch.invoiceCount === 1 ? "" : "s"} · {money(batch.total)}
                       </div>
                       {batch.status === "confirmed" && (
                         <div style={{ color: T.success, fontSize: 10, marginTop: 3 }}>
@@ -566,7 +595,7 @@ export default function ControllerExportPanel({
                         <>
                           <button type="button" className="btn-soft" disabled={Boolean(busyAction)} onClick={() => void updateBatch(batch, "cancel")} style={{ color: T.danger }}>Cancel batch</button>
                           <button type="button" className="btn-primary" disabled={Boolean(busyAction)} onClick={() => void updateBatch(batch, "confirm")}>
-                            {busyAction === `confirm:${batch.id}` ? "Confirming…" : "Confirm imported"}
+                            {busyAction === `confirm:${batch.id}` ? "Confirming…" : "Confirm entered"}
                           </button>
                         </>
                       )}
@@ -586,9 +615,14 @@ export default function ControllerExportPanel({
               );
             })}
             {!historyQuery.isLoading && !historyQuery.error && (historyQuery.data?.history || []).length === 0 && (
-              <div style={{ color: T.subtle, fontSize: 11 }}>No QuickBooks handoff batches match these filters.</div>
+              <div style={{ color: T.subtle, fontSize: 11 }}>No contractor-bill handoff batches match these filters.</div>
             )}
           </div>
+          {(historyQuery.data?.history || []).length > 0 && (
+            <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>
+              Stored packages are identified when downloaded. Older packages are labeled Legacy and may contain the retired SaasAnt customer-invoice CSV; use only their contractor PDFs for payables.
+            </div>
+          )}
         </div>
       )}
     </section>

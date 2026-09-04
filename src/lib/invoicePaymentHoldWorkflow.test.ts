@@ -53,7 +53,7 @@ test("the portal exposes an unmistakable hold action and accounting queue", () =
   assert.match(invoiceDetail, /Hold \/ Do not pay/);
   assert.match(invoiceDetail, /Payment hold — do not export or pay/);
   assert.match(invoiceDetail, /canHandoffQuickBooks\(currentUser\)/);
-  assert.match(controllerPanel, /Held — do not pay or export/);
+  assert.match(controllerPanel, /Held — do not pay or include/);
   assert.match(controllerPanel, /contractor-invoice-holds/);
   assert.match(route, /sendInvoicePaymentHoldNotification/);
 });

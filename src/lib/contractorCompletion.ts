@@ -61,7 +61,7 @@ export const getContractorCompletionControl = ({
       visible: false,
       enabled: false,
       action: null,
-      label: "Complete work & invoicing",
+      label: "Mark work complete",
       blockedReason: null,
     };
   }

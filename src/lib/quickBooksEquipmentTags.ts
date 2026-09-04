@@ -39,7 +39,12 @@ type EquipmentTagWorkOrder = {
   description?: unknown;
 };
 
-const normalizedText = (workOrder: EquipmentTagWorkOrder | null | undefined) => [
+const normalizeValues = (values: unknown[]) => values
+  .map(value => String(value || "").trim().toLowerCase())
+  .filter(Boolean)
+  .join(" ");
+
+const normalizedText = (workOrder: EquipmentTagWorkOrder | null | undefined) => normalizeValues([
   workOrder?.lineOfService,
   workOrder?.line_of_service,
   workOrder?.businessService,
@@ -49,17 +54,21 @@ const normalizedText = (workOrder: EquipmentTagWorkOrder | null | undefined) => 
   workOrder?.sub_category,
   workOrder?.summary,
   workOrder?.description,
-]
-  .map(value => String(value || "").trim().toLowerCase())
-  .filter(Boolean)
-  .join(" ");
+]);
+
+const normalizedStructuredText = (workOrder: EquipmentTagWorkOrder | null | undefined) => normalizeValues([
+  workOrder?.lineOfService,
+  workOrder?.line_of_service,
+  workOrder?.businessService,
+  workOrder?.business_service,
+  workOrder?.category,
+  workOrder?.subCategory,
+  workOrder?.sub_category,
+]);
 
 const has = (text: string, pattern: RegExp) => pattern.test(text);
 
-export function resolveQuickBooksEquipmentTag(
-  workOrder: EquipmentTagWorkOrder | null | undefined,
-): QuickBooksEquipmentTag {
-  const text = normalizedText(workOrder);
+const equipmentTagFromText = (text: string): QuickBooksEquipmentTag | null => {
   if (has(text, /\bvault project\b/)) return "7-ELEVEN: Vault Project";
   if (has(text, /\bengineering drawing/)) return "7-ELEVEN: Engineering Drawings";
   if (has(text, /\blift station\b|\bseptic\b/)) return "7-ELEVEN: Lift Station";
@@ -70,20 +79,38 @@ export function resolveQuickBooksEquipmentTag(
   if (has(text, /cold beverage|fountain|beverage dispenser/)) return "7-ELEVEN: Fountain";
   if (has(text, /\bco2\b|carbon dioxide/)) return "7-ELEVEN: CO2";
   if (has(text, /ice merchandiser|ice machine|\bice\b/)) return "7-ELEVEN: Ice";
-  if (has(text, /oven/)) return "7-ELEVEN: Ovens";
-  if (has(text, /hot food|roller grill|foodservice/)) return "7-ELEVEN: Hot Food";
-  if (has(text, /coffee/)) return "7-ELEVEN: Coffee";
-  if (has(text, /walk[ -]?in|cooler|freezer|\bvault\b/)) return "7-ELEVEN: Vault";
+  if (has(text, /\boven/)) return "7-ELEVEN: Ovens";
+  if (has(text, /hot food|roller grill|food ?service/)) return "7-ELEVEN: Hot Food";
+  if (has(text, /\bcoffee\b/)) return "7-ELEVEN: Coffee";
   if (has(text, /refrigerat/)) return "7-ELEVEN: Refrigeration";
   if (has(text, /\bhvac\b/)) return "7-ELEVEN: HVAC";
   if (has(text, /air conditioning|\ba\/?c\b|\bac unit\b/)) return "7-ELEVEN: A/C";
+  if (has(text, /walk[ -]?in|cooler|freezer|\bvault\b/)) return "7-ELEVEN: Vault";
   if (has(text, /plumb|drain|water|toilet|sink/)) return "7-ELEVEN: Plumbing";
-  if (has(text, /roof/)) return "7-ELEVEN: Roof";
-  if (has(text, /floor/)) return "7-ELEVEN: Floors";
-  if (has(text, /ceiling/)) return "7-ELEVEN: Ceilings";
-  if (has(text, /emergency/)) return "7-ELEVEN: Emergency";
+  if (has(text, /\broof/)) return "7-ELEVEN: Roof";
+  if (has(text, /\bfloor/)) return "7-ELEVEN: Floors";
+  if (has(text, /\bceiling/)) return "7-ELEVEN: Ceilings";
+  if (has(text, /\bemergency\b/)) return "7-ELEVEN: Emergency";
   if (has(text, /general maintenance|handyman/)) return "7-ELEVEN: General Maintenance";
-  return "7-ELEVEN: Miscellaneous";
+  return null;
+};
+
+export function resolveQuickBooksEquipmentTag(
+  workOrder: EquipmentTagWorkOrder | null | undefined,
+): QuickBooksEquipmentTag {
+  const text = normalizedText(workOrder);
+  const structuredText = normalizedStructuredText(workOrder);
+  // The 7-Eleven classification fields are authoritative. Narrative notes can
+  // mention adjacent equipment (for example, a roof leak above a cooler), so
+  // use them only when the structured service fields do not identify a tag.
+  // Slurpee is the one supported refinement of the broader Frozen Beverage
+  // service: it preserves the existing, more-specific barrel classification.
+  const structuredTag = equipmentTagFromText(structuredText);
+  const combinedTag = equipmentTagFromText(text);
+  if (structuredTag === "7-ELEVEN: Frozen" && combinedTag === "7-ELEVEN: Slurpee") {
+    return combinedTag;
+  }
+  return structuredTag || combinedTag || "7-ELEVEN: Miscellaneous";
 }
 
 export function isQuickBooksEquipmentTag(

@@ -206,7 +206,8 @@ test("payment hold email tells accounting why an invoice is excluded", () => {
   assert.match(plan.body, /WOT1143877/);
   assert.match(plan.body, /Anderson Mechanical/);
   assert.match(plan.body, /\$155\.00/);
-  assert.match(plan.body, /excluded from the QuickBooks handoff queue/);
+  assert.match(plan.body, /excluded from the payables handoff queue/);
+  assert.match(plan.body, /authorized payables handoff owner/);
 });
 
 test("payment hold email uses the canonical WOT and labels a reassignment copy", () => {

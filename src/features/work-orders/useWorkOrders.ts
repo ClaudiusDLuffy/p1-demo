@@ -1027,7 +1027,7 @@ export default function useWorkOrders({
 
   // Multi-invoice rule:
   // - WO returns to pending_invoice only when every non-draft invoice is
-  //   approved or sent to QuickBooks. A rejection is unresolved review work.
+  //   approved or entered in QuickBooks. A rejection is unresolved review work.
   // - QuickBooks handoff NEVER closes the WO. Capital jobs run for weeks with
   //   the contractor sending more invoices as work continues; a person
   //   decides when the job is actually done (manual "Close work order"
@@ -1114,7 +1114,7 @@ export default function useWorkOrders({
   };
 
   // Per-invoice QuickBooks handoff. The internal 'paid' value is retained for
-  // database compatibility while the portal presents "Sent to QuickBooks".
+  // database compatibility while the portal presents "Entered in QuickBooks".
   // status. The WO is NEVER auto-closed here — capital jobs receive
   // additional invoices for weeks after payments start landing, so closing
   // is an explicit staff decision via doCloseWO below.
@@ -1142,10 +1142,10 @@ export default function useWorkOrders({
     setInvoices(nextInvoices);
     const localPatch: any = {};
     if (nextWoStatus) localPatch.status = nextWoStatus;
-    patchLocalWO(inv.wot, localPatch, localActivity(`Invoice #${inv.num} sent to QuickBooks by ${currentUser.name}.`, "system"));
+    patchLocalWO(inv.wot, localPatch, localActivity(`Contractor bill #${inv.num} entered in QuickBooks by ${currentUser.name}.`, "system"));
     const saved = await dbCall(async () => {
       await updateInvoiceState(inv.id, "paid", { paid_at: paidAt });
-      await insertActivity(inv.wot, currentUser.name, `Invoice #${inv.num} sent to QuickBooks by ${currentUser.name}.`, "system");
+      await insertActivity(inv.wot, currentUser.name, `Contractor bill #${inv.num} entered in QuickBooks by ${currentUser.name}.`, "system");
       if (nextWoStatus) {
         await updateWorkOrder(inv.wot, { status: nextWoStatus });
       }
@@ -1153,7 +1153,7 @@ export default function useWorkOrders({
       restoreWorkOrders(woSnapshot);
       restoreInvoices(invSnapshot);
     });
-    if (saved) fire(`Invoice #${inv.num} sent to QuickBooks`);
+    if (saved) fire(`Contractor bill #${inv.num} entered in QuickBooks`);
     return Boolean(saved);
     } catch (error: any) {
       fire(`QuickBooks handoff failed: ${error.message || error}`);
