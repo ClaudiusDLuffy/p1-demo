@@ -82,7 +82,8 @@ export default function CapitalProjects(props: any) {
                       </span>
                       <span style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
                         <CapitalWorkOrderBadge workOrder={wo} />
-                        {wo.capitalStatus && <Badge conf={{ label: wo.capitalStatus, color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
+                        {/* The quote workflow no longer stores "Pending approval" when flagged. */}
+                        {(wo.capitalStatus || wo.status === "capital") && <Badge conf={{ label: wo.capitalStatus || "Quote preparation", color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
                       </span>
                     </div>
                     {wo.status === "pending_capital_completion" && (

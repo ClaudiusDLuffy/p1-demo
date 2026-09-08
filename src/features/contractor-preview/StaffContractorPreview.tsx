@@ -31,9 +31,11 @@ const date = (value: string | null | undefined) => value
 export default function StaffContractorPreview({
   page,
   contractors,
+  onOpenWorkOrder,
 }: {
   page: string;
   contractors: ContractorOption[];
+  onOpenWorkOrder: (workOrderId: string) => void;
 }) {
   const [contractorId, setContractorId] = useState("");
   const [tab, setTab] = useState<"work_orders" | "invoices">("work_orders");
@@ -82,6 +84,9 @@ export default function StaffContractorPreview({
         <div style={{ color: T.ink, fontSize: 13, fontWeight: 850 }}>Read-only staff preview — no impersonation</div>
         <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.55, marginTop: 4 }}>
           This is the selected company&apos;s contractor-facing job and invoice projection. It cannot create, edit, approve, delete, dispatch, or submit anything. Internal P1 billing, margins, QuickBooks metadata, and staff-only notes are excluded.
+        </div>
+        <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.55, marginTop: 4 }}>
+          Selecting a work order opens its detail in your normal staff view, with your existing permissions.
         </div>
       </div>
 
@@ -164,13 +169,30 @@ export default function StaffContractorPreview({
           )}
 
           {!activeQuery.isLoading && !activeQuery.isError && tab === "work_orders" && (
-            <div style={{ display: "grid", gap: 9 }}>
+            <div aria-busy={workOrdersQuery.isPlaceholderData} style={{ display: "grid", gap: 9 }}>
               {(workOrdersQuery.data?.items || []).map(workOrder => (
-                <article key={workOrder.id} className="card" style={{ padding: "13px 15px" }}>
+                <article
+                  key={workOrder.id}
+                  className="card"
+                  onClick={workOrdersQuery.isPlaceholderData ? undefined : () => onOpenWorkOrder(workOrder.id)}
+                  style={{ padding: "13px 15px", cursor: workOrdersQuery.isPlaceholderData ? "default" : "pointer" }}
+                >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                     <div style={{ minWidth: 0, flex: "1 1 420px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                        <span className="mono" style={{ color: T.accent, fontWeight: 800 }}>{workOrder.id}</span>
+                        <button
+                          type="button"
+                          className="mono"
+                          aria-label={`Open work order ${workOrder.id} in staff view`}
+                          disabled={workOrdersQuery.isPlaceholderData}
+                          onClick={event => {
+                            event.stopPropagation();
+                            onOpenWorkOrder(workOrder.id);
+                          }}
+                          style={{ color: T.accent, fontWeight: 800, fontSize: "inherit", background: "transparent", border: "none", padding: 0, cursor: workOrdersQuery.isPlaceholderData ? "default" : "pointer" }}
+                        >
+                          {workOrder.id}
+                        </button>
                         <CopyWorkOrderButton value={workOrder.id} />
                         <Badge conf={PRIORITY[workOrder.priority as keyof typeof PRIORITY]} small />
                         <Badge conf={STATUS[workOrder.status as keyof typeof STATUS]} small />
