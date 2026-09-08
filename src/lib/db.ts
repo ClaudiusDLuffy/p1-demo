@@ -1528,14 +1528,59 @@ export async function completeCapitalWork(id: string): Promise<any> {
   return data;
 }
 
-export async function closeWorkOrderWithoutInvoice(id: string): Promise<Json> {
+export async function closeWorkOrderWithoutInvoice(
+  id: string,
+  expectedWorkflowCycle: number,
+  expectedContractorAssignmentVersion: number,
+  expectedUpdatedAt: string,
+): Promise<Json> {
   const sb = supabase();
   const { data, error } = await sb.rpc(
     "close_work_order_without_invoice",
-    { p_work_order_id: id },
+    {
+      p_work_order_id: id,
+      p_expected_workflow_cycle: expectedWorkflowCycle,
+      p_expected_contractor_assignment_version: expectedContractorAssignmentVersion,
+      p_expected_updated_at: expectedUpdatedAt,
+    },
   );
   if (error) throw error;
   return data;
+}
+
+export type CloseReopenedFollowUpResult = {
+  applied: boolean;
+  reason: "closed_without_additional_billing" | "already_closed" | string;
+  workOrderId: string;
+  workOrderStatus: string;
+  functionalStatus: string | null;
+  closedAt: string | null;
+  workflowCycle: number;
+  priorInvoiceCount?: number;
+  visitsClosed: number;
+};
+
+export async function closeReopenedWorkOrderWithoutAdditionalBilling(
+  id: string,
+  expectedWorkflowCycle: number,
+  expectedContractorAssignmentVersion: number,
+  expectedUpdatedAt: string,
+  reason: string,
+): Promise<CloseReopenedFollowUpResult> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "close_reopened_work_order_without_additional_billing",
+    {
+      p_work_order_id: id,
+      p_expected_workflow_cycle: expectedWorkflowCycle,
+      p_expected_contractor_assignment_version:
+        expectedContractorAssignmentVersion,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_reason: reason,
+    },
+  );
+  if (error) throw error;
+  return data as unknown as CloseReopenedFollowUpResult;
 }
 
 export type ReopenWorkOrderResult = {

@@ -10,6 +10,7 @@ import {
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
 import { computeSlaState, computeSlaBreaches } from "../lib/slaConfig";
+import { slaLabel, slaRemaining } from "../lib/slaDisplay";
 import { Modal } from "./ui/Modal";
 import { Input } from "./ui/Input";
 import { DatePickerField, TimePickerField } from "./ui/DateTimePicker";
@@ -28,6 +29,7 @@ import useWorkOrders from "../features/work-orders/useWorkOrders";
 import KanbanBoard from "../features/work-orders/KanbanBoard";
 import WorkOrderList from "../features/work-orders/WorkOrderList";
 import WorkOrderDetail from "../features/work-orders/WorkOrderDetail";
+import CloseReopenedFollowUpModal from "../features/work-orders/CloseReopenedFollowUpModal";
 import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
@@ -243,24 +245,6 @@ const timeNow = () => { const d = new Date(), h = d.getHours(), m = d.getMinutes
 const dateShort = (d = new Date()) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 const dateNow = () => `${dateShort()}, ${timeNow()}`;
 const dateLong = (d = new Date()) => `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-const hoursBetween = (aIso: string, bIso: string) => (new Date(bIso).getTime() - new Date(aIso).getTime()) / 3600000;
-const slaRemaining = (wo: any) => {
-  if (!wo.dispatchedAt || !PRIORITY[wo.priority]) return null;
-  const slaH = PRIORITY[wo.priority].slaHours;
-  if (!slaH || slaH <= 0) return null;
-  const elapsed = hoursBetween(wo.dispatchedAt, new Date().toISOString());
-  return { remainingHours: slaH - elapsed, elapsedHours: elapsed, slaHours: slaH, percent: Math.min(100, (elapsed / slaH) * 100) };
-};
-const slaLabel = (wo: any) => {
-  const s = slaRemaining(wo);
-  if (!s) return null;
-  if (s.remainingHours <= 0) return { text: `${Math.floor(-s.remainingHours)}h past SLA`, color: T.danger, bg: T.dangerSoft, severity: "breach" };
-  if (s.remainingHours < 1) return { text: `${Math.round(s.remainingHours * 60)}m to breach`, color: T.danger, bg: T.dangerSoft, severity: "critical" };
-  if (s.percent >= 75) return { text: `${Math.floor(s.remainingHours)}h left`, color: T.accent, bg: T.accentSoft, severity: "warn" };
-  if (s.percent >= 50) return { text: `${Math.floor(s.remainingHours)}h left`, color: T.warn, bg: T.warnSoft, severity: "ok" };
-  return { text: `${Math.floor(s.remainingHours)}h left`, color: T.success, bg: T.successSoft, severity: "safe" };
-};
-
 const isOpenState = (state: string) => !["completed", "pending_invoice", "pending_approval", "pending_capital_completion", "closed", "capital"].includes(state);
 const activeStatuses = ["unassigned", "assigned", "wip", "parts"];
 const closingStatuses = ["completed", "pending_invoice", "pending_approval", "pending_capital_completion", "closed"];
@@ -1390,7 +1374,8 @@ export default function PortalShell() {
     doRejectUnassignedWO, doDuplicateForReassignment, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
-    doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
+    doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
+    doCloseReopenedFollowUp, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,
@@ -3443,7 +3428,6 @@ export default function PortalShell() {
             doApproveInvoice={doApproveInvoice}
             onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
             doMarkPaid={doMarkPaid}
-            doCloseWO={doCloseWO}
             doCloseWithoutInvoice={doCloseWithoutInvoice}
             onRequestReopen={requestReopen}
             doDownloadInvoice={doDownloadInvoice}
@@ -3926,7 +3910,16 @@ export default function PortalShell() {
               onClick={async () => {
                 setModalLoading(true);
                 try {
-                  const closed = await doCloseWithoutInvoice(woData.id);
+                  if (!woData.updatedAt) {
+                    fire("Work-order version is missing. Refresh the page before closing this work order.");
+                    return;
+                  }
+                  const closed = await doCloseWithoutInvoice(
+                    woData.id,
+                    Number(woData.workflowCycle || 0),
+                    Number(woData.contractorAssignmentVersion || 0),
+                    woData.updatedAt,
+                  );
                   if (closed) setModal(null);
                 } finally {
                   setModalLoading(false);
@@ -3940,34 +3933,26 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "closeWO" && woData && (() => {
-        const notHandedOff = invoices.filter((i: any) => i.wot === woData.id && (i.state === "submitted" || i.state === "revised" || i.state === "approved")).length;
-        return (
-          <Modal onClose={() => setModal(null)} title="Close work order" width={460}>
-            <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-              Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
-              <CopyWorkOrderButton value={woData.id} />? It moves to History after the 24h linger, and contractors can no longer add invoices.{notHandedOff > 0 ? <><br /><br /><strong style={{ color: T.warn }}>{notHandedOff} contractor bill{notHandedOff === 1 ? " has" : "s have"} not been entered in QuickBooks.</strong> The work order can still close; payables handoff remains available separately.</> : null}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-              <button
-                onClick={async () => {
-                  setModalLoading(true);
-                  try {
-                    await doCloseWO(woData.id);
-                    setModal(null);
-                  } finally {
-                    setModalLoading(false);
-                  }
-                }}
-                disabled={modalLoading}
-                className="btn-primary"
-                style={modalActionStyle}
-              >{modalLoading ? <><BtnSpinner />Closing...</> : "Close work order"}</button>
-            </div>
-          </Modal>
-        );
-      })()}
+      {modal === "closeReopenedFollowUp" && woData && (
+        <CloseReopenedFollowUpModal
+          key={`${woData.id}:${woData.workflowCycle}:${woData.updatedAt}`}
+          workOrderId={woData.id}
+          onClose={() => setModal(null)}
+          onConfirm={async reason => {
+            if (!woData.updatedAt) {
+              fire("Work-order version is missing. Refresh the page before closing this follow-up.");
+              return false;
+            }
+            return doCloseReopenedFollowUp(
+              woData.id,
+              Number(woData.workflowCycle || 0),
+              Number(woData.contractorAssignmentVersion || 0),
+              woData.updatedAt,
+              reason,
+            );
+          }}
+        />
+      )}
 
       {modal === "reopen" && reopenTarget && (() => {
         const reopenOptions = workOrderReopenOptions(reopenTarget);

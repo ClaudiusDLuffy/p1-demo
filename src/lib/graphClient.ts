@@ -1,10 +1,11 @@
 import {
   getAllowedDispatchSenders,
-  isConfirmedInitialDispatchEmail,
+  isConfirmedWorkOrderIntakeEmail,
 } from "./emailParser";
 
 export type GraphEmail = {
   id: string;
+  internetMessageId?: string | null;
   subject: string;
   body: { content: string; contentType: string };
   from: { emailAddress: { address: string; name: string } };
@@ -27,6 +28,39 @@ const INTAKE_PAGE_SIZE = 50;
 const INTAKE_MAX_PAGES = 5;
 const DEFAULT_RECOVERY_LOOKBACK_HOURS = 24;
 const MAX_RECOVERY_LOOKBACK_HOURS = 168;
+
+const graphRetryAfterSeconds = (response: Response) => {
+  const raw = response.headers.get("retry-after");
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return null;
+  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
+};
+
+export class GraphHttpError extends Error {
+  readonly status: number;
+  readonly retryable: boolean;
+  readonly deliveryOutcomeUnknown: boolean;
+  readonly retryAfterSeconds: number | null;
+
+  constructor(operation: string, response: Response) {
+    super(`${operation} failed with HTTP ${response.status}`);
+    this.name = "GraphHttpError";
+    this.status = response.status;
+    // sendMail is not idempotent. Only retry when Graph explicitly rejected
+    // the request before accepting it; timeouts and 5xx responses may have
+    // delivered the message even though the caller did not receive success.
+    this.retryable = response.status === 429;
+    this.deliveryOutcomeUnknown = response.status === 408
+      || response.status >= 500;
+    this.retryAfterSeconds = graphRetryAfterSeconds(response);
+  }
+}
+
+export const isGraphHttpError = (error: unknown): error is GraphHttpError =>
+  error instanceof GraphHttpError;
 
 let tokenCache: TokenCache | null = null;
 
@@ -84,7 +118,7 @@ export const buildDispatchInboxFilter = (
   const filters = [
     `receivedDateTime ge ${since}`,
     `(${senderFilter})`,
-    "contains(subject,'dispatch')",
+    "(contains(subject,'WOT') or contains(subject,'FWKD'))",
   ];
   if (unreadOnly) filters.push("isRead eq false");
   return filters.join(" and ");
@@ -117,7 +151,7 @@ const fetchWithTimeout = async (
 
 const assertResponseOk = (res: Response, operation: string) => {
   if (!res.ok) {
-    throw new Error(`${operation} failed with HTTP ${res.status}`);
+    throw new GraphHttpError(operation, res);
   }
 };
 
@@ -204,7 +238,7 @@ const fetchDispatchInboxEmails = async (
 ): Promise<GraphEmail[]> => {
   const params = new URLSearchParams({
     "$filter": filter,
-    "$select": "id,subject,body,from,receivedDateTime,toRecipients",
+    "$select": "id,internetMessageId,subject,body,from,receivedDateTime,toRecipients",
     "$orderby": "receivedDateTime desc",
     "$top": String(INTAKE_PAGE_SIZE),
   });
@@ -230,7 +264,7 @@ const fetchDispatchInboxEmails = async (
       "@odata.nextLink"?: string;
     };
     for (const email of data.value || []) {
-      if (isConfirmedInitialDispatchEmail(email)) queue.push(email);
+      if (isConfirmedWorkOrderIntakeEmail(email)) queue.push(email);
       if (queue.length >= INTAKE_BATCH_SIZE) break;
     }
     nextUrl = data["@odata.nextLink"] || null;

@@ -1,4 +1,9 @@
 import { getAccessToken, sendEmail } from "./graphClient";
+import {
+  isWorkOrderPriority,
+  type WorkOrderPriority,
+  workOrderPriorityLabel,
+} from "./emailPriorityEscalation";
 import { canonicalSevenElevenWorkOrderId } from "./workOrderIdentity";
 
 type DispatchNotificationInput = {
@@ -56,15 +61,24 @@ type InvoicePaymentHoldNotificationInput = {
   reason: string;
 };
 
-const SERVICE_INBOX = "service@p1pros.com";
-
-const PRIORITY_LABELS: Record<string, string> = {
-  p1: "P1 Critical",
-  p2: "P2 Emergency",
-  p3: "P3 Rush",
-  p4: "P4 Routine",
-  p5: "P5 Preventative",
+export type WorkOrderPriorityEscalationNotificationInput = {
+  workOrder: {
+    id: string;
+    externalWorkOrderId?: string | null;
+    incidentId?: string | null;
+    storeNumber?: string | null;
+    city?: string | null;
+    state?: string | null;
+    address?: string | null;
+    summary?: string | null;
+  };
+  previousPriority: WorkOrderPriority;
+  newPriority: WorkOrderPriority;
+  contractorName?: string | null;
+  sourceReceivedAt: string;
 };
+
+const SERVICE_INBOX = "service@p1pros.com";
 
 const ownerEmails = () =>
   (process.env.NOTIFY_OWNER_EMAILS || "")
@@ -84,8 +98,12 @@ const isProOpsAssignment = (
 const portalUrl = () =>
   process.env.PORTAL_URL || "https://www.p1prosportal.com";
 
-const priorityLabel = (priority?: string | null) =>
-  priority ? (PRIORITY_LABELS[priority.toLowerCase()] || priority.toUpperCase()) : "Not set";
+const priorityLabel = (priority?: string | null) => {
+  const normalized = String(priority || "").toLowerCase();
+  return isWorkOrderPriority(normalized)
+    ? workOrderPriorityLabel(normalized)
+    : priority?.toUpperCase() || "Not set";
+};
 
 const storeLabel = (workOrder: DispatchNotificationInput["workOrder"]) =>
   workOrder.storeNumber || workOrder.store || "Not captured";
@@ -224,6 +242,53 @@ export async function sendDispatchNotification(input: DispatchNotificationInput)
       plan.ownerBody,
     );
   }
+}
+
+export function createWorkOrderPriorityEscalationNotificationPlan(
+  input: WorkOrderPriorityEscalationNotificationInput,
+  configuredOwnerEmails: string[] = ownerEmails(),
+) {
+  const recipients = [...new Set(
+    [...configuredOwnerEmails, SERVICE_INBOX]
+      .map(email => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const reference = dispatchWorkOrderReference(input.workOrder);
+  const previousLabel = priorityLabel(input.previousPriority);
+  const newLabel = priorityLabel(input.newPriority);
+
+  return {
+    recipients,
+    subject: `Priority escalated ${input.previousPriority.toUpperCase()} → ${input.newPriority.toUpperCase()} - ${reference.externalId}`,
+    body: `7-Eleven escalated this work order's priority. The portal priority was updated automatically.
+
+Work Order: ${reference.externalId}${reference.portalReferenceLine}
+Incident: ${input.workOrder.incidentId || "Not captured"}
+Store: #${storeLabel(input.workOrder)}
+Address: ${addressLabel(input.workOrder)}
+Previous Priority: ${previousLabel}
+New Priority: ${newLabel}
+Contractor at receipt: ${input.contractorName || "Unassigned"}
+Issue: ${issueLabel(input.workOrder)}
+7-Eleven update received: ${input.sourceReceivedAt}
+
+Where an operational SLA applies, deadlines use the existing SLA start time. An escalation does not restart the clock. Open the portal for the current assignment and billing status.
+
+Log in to view details:
+${portalUrl()}`,
+  };
+}
+
+export async function sendWorkOrderPriorityEscalationNotification(
+  input: WorkOrderPriorityEscalationNotificationInput,
+  existingAccessToken?: string,
+) {
+  const plan = createWorkOrderPriorityEscalationNotificationPlan(input);
+  const accessToken = existingAccessToken || await getAccessToken();
+  if (!accessToken) {
+    throw new Error("Missing Graph access token");
+  }
+  await sendEmail(accessToken, plan.recipients, plan.subject, plan.body);
 }
 
 export function createWorkOrderAssignmentRemovalNotificationPlan(

@@ -272,6 +272,124 @@ export type Database = {
           },
         ]
       }
+      email_priority_escalation_events: {
+        Row: {
+          assignment_removal_delivery_id: string | null
+          activity_id: string | null
+          address: string | null
+          city: string | null
+          claimed_at: string | null
+          completed_at: string | null
+          contractor_name: string | null
+          created_at: string
+          delivery_attempt_count: number
+          delivery_status: string
+          error_message: string | null
+          external_work_order_id: string
+          functional_status:
+            | Database["public"]["Enums"]["fsm_functional_status"]
+            | null
+          id: string
+          incident_id: string | null
+          next_attempt_at: string | null
+          outcome: string
+          previous_priority: Database["public"]["Enums"]["wo_priority"]
+          reported_priority: Database["public"]["Enums"]["wo_priority"]
+          source_message_id: string
+          source_received_at: string
+          source_subject: string
+          store_number: string | null
+          store_state: string | null
+          summary: string | null
+          work_order_id: string
+          work_order_status: Database["public"]["Enums"]["wo_status"]
+        }
+        Insert: {
+          assignment_removal_delivery_id?: string | null
+          activity_id?: string | null
+          address?: string | null
+          city?: string | null
+          claimed_at?: string | null
+          completed_at?: string | null
+          contractor_name?: string | null
+          created_at?: string
+          delivery_attempt_count?: number
+          delivery_status?: string
+          error_message?: string | null
+          external_work_order_id: string
+          functional_status?:
+            | Database["public"]["Enums"]["fsm_functional_status"]
+            | null
+          id?: string
+          incident_id?: string | null
+          next_attempt_at?: string | null
+          outcome: string
+          previous_priority: Database["public"]["Enums"]["wo_priority"]
+          reported_priority: Database["public"]["Enums"]["wo_priority"]
+          source_message_id: string
+          source_received_at: string
+          source_subject?: string
+          store_number?: string | null
+          store_state?: string | null
+          summary?: string | null
+          work_order_id: string
+          work_order_status: Database["public"]["Enums"]["wo_status"]
+        }
+        Update: {
+          assignment_removal_delivery_id?: string | null
+          activity_id?: string | null
+          address?: string | null
+          city?: string | null
+          claimed_at?: string | null
+          completed_at?: string | null
+          contractor_name?: string | null
+          created_at?: string
+          delivery_attempt_count?: number
+          delivery_status?: string
+          error_message?: string | null
+          external_work_order_id?: string
+          functional_status?:
+            | Database["public"]["Enums"]["fsm_functional_status"]
+            | null
+          id?: string
+          incident_id?: string | null
+          next_attempt_at?: string | null
+          outcome?: string
+          previous_priority?: Database["public"]["Enums"]["wo_priority"]
+          reported_priority?: Database["public"]["Enums"]["wo_priority"]
+          source_message_id?: string
+          source_received_at?: string
+          source_subject?: string
+          store_number?: string | null
+          store_state?: string | null
+          summary?: string | null
+          work_order_id?: string
+          work_order_status?: Database["public"]["Enums"]["wo_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_priority_escalation_assignment_removal_delivery_fkey"
+            columns: ["assignment_removal_delivery_id"]
+            isOneToOne: true
+            referencedRelation: "contractor_assignment_transition_deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_priority_escalation_activity_fkey"
+            columns: ["activity_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_priority_escalation_work_order_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       afms: {
         Row: {
           created_at: string | null
@@ -2780,6 +2898,8 @@ export type Database = {
           part_eta: string | null
           part_needed: string | null
           priority: Database["public"]["Enums"]["wo_priority"]
+          priority_source_message_id: string | null
+          priority_source_received_at: string | null
           repair_quote: number | null
           resolution_breach_at: string | null
           resolution_code: string | null
@@ -2860,6 +2980,8 @@ export type Database = {
           part_eta?: string | null
           part_needed?: string | null
           priority?: Database["public"]["Enums"]["wo_priority"]
+          priority_source_message_id?: string | null
+          priority_source_received_at?: string | null
           repair_quote?: number | null
           resolution_breach_at?: string | null
           resolution_code?: string | null
@@ -2940,6 +3062,8 @@ export type Database = {
           part_eta?: string | null
           part_needed?: string | null
           priority?: Database["public"]["Enums"]["wo_priority"]
+          priority_source_message_id?: string | null
+          priority_source_received_at?: string | null
           repair_quote?: number | null
           resolution_breach_at?: string | null
           resolution_code?: string | null
@@ -3052,6 +3176,38 @@ export type Database = {
         }
         Returns: Database["public"]["Tables"]["work_orders"]["Row"]
       }
+      claim_email_assignment_removal_delivery: {
+        Args: { p_delivery_id: string }
+        Returns: Json
+      }
+      refresh_email_work_order_dispatch: {
+        Args: {
+          p_work_order_id: string
+          p_reported_priority: string
+          p_source_message_id: string
+          p_source_received_at: string
+          p_source_subject: string
+          p_expected_sla_started_at: string | null
+          p_response_breach_at: string | null
+          p_resolution_breach_at: string | null
+          p_intake_patch: Json
+          p_afm_email: string | null
+        }
+        Returns: Json
+      }
+      apply_email_work_order_priority_escalation: {
+        Args: {
+          p_expected_sla_started_at: string | null
+          p_reported_priority: string
+          p_resolution_breach_at: string | null
+          p_response_breach_at: string | null
+          p_source_message_id: string
+          p_source_received_at: string
+          p_source_subject: string
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
       attach_contractor_invoice_pdf: {
         Args: { p_invoice_id: string; p_storage_path: string }
         Returns: undefined
@@ -3072,6 +3228,10 @@ export type Database = {
         }
         Returns: string
       }
+      claim_email_priority_escalation_delivery: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
       complete_contractor_activity_alert_delivery: {
         Args: {
           p_activity_id: string
@@ -3079,6 +3239,22 @@ export type Database = {
           p_status: string
         }
         Returns: undefined
+      }
+      complete_email_priority_escalation_delivery: {
+        Args: {
+          p_error_message?: string | null
+          p_event_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
+      retry_email_priority_escalation_delivery: {
+        Args: {
+          p_error_message: string
+          p_event_id: string
+          p_retry_after_seconds?: number
+        }
+        Returns: Json
       }
       complete_controller_invoice_export: {
         Args: {
@@ -3332,7 +3508,22 @@ export type Database = {
         Returns: boolean
       }
       close_work_order_without_invoice: {
-        Args: { p_work_order_id: string }
+        Args: {
+          p_work_order_id: string
+          p_expected_workflow_cycle: number
+          p_expected_contractor_assignment_version: number
+          p_expected_updated_at: string
+        }
+        Returns: Json
+      }
+      close_reopened_work_order_without_additional_billing: {
+        Args: {
+          p_expected_contractor_assignment_version: number
+          p_expected_updated_at: string
+          p_expected_workflow_cycle: number
+          p_reason: string
+          p_work_order_id: string
+        }
         Returns: Json
       }
       complete_capital_work: {
