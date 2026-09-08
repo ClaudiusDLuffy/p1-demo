@@ -3339,6 +3339,14 @@ export default function PortalShell() {
             <StaffContractorPreview
               page={page}
               contractors={assignableContractors}
+              onOpenWorkOrder={(workOrderId: string) => {
+                setWorkOrderReturnPage("contractor_preview");
+                setSelectedInvoice(null);
+                setSelectedBillingInvoice(null);
+                setSelectedWO(workOrderId);
+                setAiNote(null);
+                setPage("work_orders");
+              }}
             />
           )}
 
