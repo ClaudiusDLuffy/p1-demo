@@ -398,9 +398,8 @@ export default function ContractorEstimatePanel({
   };
 
   if (!isManager && currentUser?.canInvoice !== true) return null;
-  if (isManager && !estimatesQuery.isLoading && !estimatesQuery.isError && estimates.length === 0) {
-    return null;
-  }
+  // Approved form downloads are independent of whether this work order has
+  // estimates. Keep them visible to eligible staff on empty work orders too.
 
   return (
     <>
