@@ -97,7 +97,9 @@ export const resolveWorkOrderClosedBy = (
     const isBillingClose = activity?.eventKey === "staff_billing"
       && (action === "billed_to_7_eleven" || /work order closed\.?$/i.test(text));
     const isNoInvoiceClose = activity?.eventKey === "work_order_closed_without_invoice";
-    if (!isBillingClose && !isNoInvoiceClose) continue;
+    const isFollowUpClose = activity?.eventKey
+      === "work_order_follow_up_closed_without_additional_billing";
+    if (!isBillingClose && !isNoInvoiceClose && !isFollowUpClose) continue;
 
     const author = String(activity?.author || "").trim();
     if (author && author.toLowerCase() !== "system") return author;

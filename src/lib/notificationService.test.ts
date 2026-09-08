@@ -4,6 +4,7 @@ import {
   createDispatchNotificationPlan,
   createInvoicePaymentHoldNotificationPlan,
   createInvoiceReviewNotificationPlan,
+  createWorkOrderPriorityEscalationNotificationPlan,
   createWorkOrderAssignmentRemovalNotificationPlan,
 } from "./notificationService";
 
@@ -70,6 +71,36 @@ test("deduplicates repeated configured owner emails", () => {
     plan.internalRecipients.filter(email => email === "landryd@phospitality.com").length,
     1,
   );
+});
+
+test("priority escalation alerts remain internal and identify the operational change", () => {
+  const plan = createWorkOrderPriorityEscalationNotificationPlan(
+    {
+      workOrder: {
+        ...workOrder,
+        id: "WOT1266375-1",
+        externalWorkOrderId: "WOT1266375",
+      },
+      previousPriority: "p4",
+      newPriority: "p1",
+      contractorName: "Derek Starnes",
+      sourceReceivedAt: "2026-09-02T16:00:00.000Z",
+    },
+    ["Lynzy@p1pros.com", "lynzy@p1pros.com"],
+  );
+
+  assert.deepEqual(plan.recipients, [
+    "lynzy@p1pros.com",
+    "service@p1pros.com",
+  ]);
+  assert.equal(plan.subject, "Priority escalated P4 → P1 - WOT1266375");
+  assert.match(plan.body, /Previous Priority: P4 Minor/);
+  assert.match(plan.body, /New Priority: P1 Critical/);
+  assert.match(plan.body, /Contractor at receipt: Derek Starnes/);
+  assert.match(plan.body, /Portal reassignment reference: WOT1266375-1/);
+  assert.match(plan.body, /existing SLA start time/);
+  assert.match(plan.body, /does not restart the clock/);
+  assert.doesNotMatch(plan.recipients.join(","), /contractor/i);
 });
 
 test("reassignment dispatch keeps the canonical WOT and labels the portal copy", () => {

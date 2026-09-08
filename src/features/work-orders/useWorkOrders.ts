@@ -17,6 +17,7 @@ import {
   moveWorkOrderStraightToBilling,
   completeCapitalWork,
   closeWorkOrderWithoutInvoice,
+  closeReopenedWorkOrderWithoutAdditionalBilling,
   reopenWorkOrder,
   finishContractorInvoicing,
   assignContractorTechnician,
@@ -1116,8 +1117,8 @@ export default function useWorkOrders({
   // Per-invoice QuickBooks handoff. The internal 'paid' value is retained for
   // database compatibility while the portal presents "Entered in QuickBooks".
   // status. The WO is NEVER auto-closed here — capital jobs receive
-  // additional invoices for weeks after payments start landing, so closing
-  // is an explicit staff decision via doCloseWO below.
+  // additional invoices for weeks after payments start landing. Operational
+  // closure remains in the billing, capital, or guarded no-billing workflows.
   const doMarkPaid = async (invoiceId: string) => {
     setLoading("markPaid_" + invoiceId, true);
     try {
@@ -1163,30 +1164,15 @@ export default function useWorkOrders({
     }
   };
 
-  // Staff-only: explicit "this job is done" decision. Stamps closed_at and
-  // drops the WO into the 24h linger / History bucket.
-  const doCloseWO = async (woId: string) => {
-    setLoading("closeWO_" + woId, true);
-    try {
-    const closedAt = new Date().toISOString();
-    const text = `Work order closed by ${currentUser.name}.`;
-    const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, { status: "closed", closedAt }, localActivity(text, "system"));
-    fire("Work order closed");
-    await dbCall(async () => {
-      await closeWorkOrderVisit(woId, closedAt);
-      await updateWorkOrder(woId, { status: "closed", closedAt });
-      await insertActivity(woId, currentUser.name, text, "system");
-    }, "Close failed", () => restoreWorkOrders(woSnapshot));
-    } finally {
-      setLoading("closeWO_" + woId, false);
-    }
-  };
-
   // Staff-only no-billing terminal path. The database locks the work order,
   // confirms that no live contractor or P1 invoice exists, closes every open
   // visit, and writes the audit event in one transaction.
-  const doCloseWithoutInvoice = async (woId: string) => {
+  const doCloseWithoutInvoice = async (
+    woId: string,
+    expectedWorkflowCycle: number,
+    expectedContractorAssignmentVersion: number,
+    expectedUpdatedAt: string,
+  ) => {
     setLoading("closeWithoutInvoice_" + woId, true);
     const closedAt = new Date().toISOString();
     const text = `Work order closed without an invoice by ${currentUser.name}.`;
@@ -1205,7 +1191,12 @@ export default function useWorkOrders({
         ),
       );
       const ok = await dbCall(
-        () => closeWorkOrderWithoutInvoice(woId),
+        () => closeWorkOrderWithoutInvoice(
+          woId,
+          expectedWorkflowCycle,
+          expectedContractorAssignmentVersion,
+          expectedUpdatedAt,
+        ),
         "Close without invoice failed",
         () => restoreWorkOrders(snapshot),
       );
@@ -1213,6 +1204,78 @@ export default function useWorkOrders({
       return Boolean(ok);
     } finally {
       setLoading("closeWithoutInvoice_" + woId, false);
+    }
+  };
+
+  // Staff-only terminal path for an already-billed work order that was
+  // reopened for field follow-up. The RPC validates the expected reopen
+  // cycle, prior billing, current-cycle invoices, pending 7-Eleven updates,
+  // and closes the work order plus open visits atomically.
+  const doCloseReopenedFollowUp = async (
+    woId: string,
+    expectedWorkflowCycle: number,
+    expectedContractorAssignmentVersion: number,
+    expectedUpdatedAt: string,
+    reason: string,
+  ) => {
+    setLoading("closeReopenedFollowUp_" + woId, true);
+    try {
+      const result = await closeReopenedWorkOrderWithoutAdditionalBilling(
+        woId,
+        expectedWorkflowCycle,
+        expectedContractorAssignmentVersion,
+        expectedUpdatedAt,
+        reason,
+      );
+      if (!result.applied && result.reason === "already_closed") {
+        invalidateWorkOrders();
+        fire("Work order is already closed");
+        return true;
+      }
+      if (!result.applied) {
+        invalidateWorkOrders();
+        fire("The follow-up was not closed. Refresh the work order and try again.");
+        return false;
+      }
+
+      const text = `Reopened follow-up closed by ${currentUser.name} with no additional billing. Reason: ${reason.trim()}`;
+      patchLocalWO(
+        woId,
+        {
+          status: result.workOrderStatus,
+          functionalStatus: result.functionalStatus,
+          closedAt: result.closedAt,
+          workflowCycle: result.workflowCycle,
+        },
+        {
+          ...localActivity(
+            text,
+            "system",
+            false,
+            "work_order_follow_up_closed_without_additional_billing",
+            false,
+            true,
+            "internal_note",
+          ),
+          author: currentUser.name,
+          workflowCycle: result.workflowCycle,
+          eventData: {
+            action: "closed_without_additional_billing",
+            reason: reason.trim(),
+            workflowCycle: result.workflowCycle,
+            invoicesChanged: false,
+          },
+        },
+      );
+      invalidateWorkOrders();
+      fire("Follow-up closed with no additional billing");
+      return true;
+    } catch (error: unknown) {
+      invalidateWorkOrders();
+      fire(`Follow-up close failed: ${rpcErrorMessage(error)}`);
+      return false;
+    } finally {
+      setLoading("closeReopenedFollowUp_" + woId, false);
     }
   };
 
@@ -1804,7 +1867,8 @@ export default function useWorkOrders({
     doRejectUnassignedWO, doDuplicateForReassignment, doReassign,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
-    doApproveInvoice, doMarkPaid, doCloseWO, doCloseWithoutInvoice, doReopen,
+    doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
+    doCloseReopenedFollowUp, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto,

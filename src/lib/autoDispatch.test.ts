@@ -19,6 +19,7 @@ const parsed = (overrides: Partial<ParsedWorkOrder>): ParsedWorkOrder => ({
   summary: "Test dispatch",
   description: "Test dispatch",
   priority: "p2",
+  priorityConflict: false,
   afmName: null,
   afmEmail: null,
   city: "Dallas",

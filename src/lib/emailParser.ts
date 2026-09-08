@@ -2,6 +2,7 @@ import type { GraphEmail } from "./graphClient";
 
 export type EmailType =
   | "TYPE_DISPATCHED"
+  | "TYPE_PRIORITY_UPDATE"
   | "TYPE_NTE_APPROVED"
   | "TYPE_CAPITAL_PENDING"
   | "TYPE_STATE_UPDATE"
@@ -15,6 +16,7 @@ export type ParsedWorkOrder = {
   storeNumber: string | null;
   storeLocation: string | null;
   priority: "p1" | "p2" | "p3" | "p4" | "p5" | null;
+  priorityConflict: boolean;
   summary: string | null;
   description: string | null;
   lineOfService: string | null;
@@ -40,8 +42,11 @@ const THREAD_PREFIX_PATTERN = /^(?:(?:re|fw|fwd)\s*:\s*)+/i;
 const DISPATCH_PATTERN = /\bdispatch(?:ed)?\b/i;
 const NTE_EMAIL_PATTERN = /\bNTE\b|NTE\s*\/\s*Quote|Not\s+to\s+Exceed/i;
 const CAPITAL_EMAIL_PATTERN = /\bcapital\b/i;
+const PRIORITY_UPDATE_PATTERN =
+  /\b(?:priority|escalat(?:e|ed|ion)|upgrad(?:e|ed)|reprioriti[sz](?:e|ed|ation))\b/i;
+const PRIORITY_TOKEN_PATTERN = /\bP[1-5]\b/i;
 const STATUS_UPDATE_PATTERN =
-  /\b(?:approved|approval|projected|projection|accepted|assigned|work\s+in\s+progress|completed?|closed?|cancelled|canceled|rejected|revised|updated?|status|state|breach|invoice|mentioned)\b/i;
+  /\b(?:approved|approval|projected|projection|accepted|assigned|changed?|escalat(?:e|ed|ion)|work\s+in\s+progress|completed?|closed?|cancelled|canceled|rejected|revised|updated?|status|state|breach|invoice|mentioned)\b/i;
 const WORK_ORDER_REFERENCE_PATTERN = /\b(?:WOT|FWKD)\d{6,12}\b/i;
 const DEFAULT_DISPATCH_SENDERS = ["7elevenna@service-now.com"] as const;
 
@@ -73,11 +78,46 @@ export function isConfirmedInitialDispatchEmail(
   return allowedSenders.has(sender) && isConfirmedInitialDispatchSubject(email.subject || "");
 }
 
+export function isConfirmedPriorityUpdateSubject(subject: string): boolean {
+  const normalized = (subject || "").trim();
+  if (!normalized || THREAD_PREFIX_PATTERN.test(normalized)) return false;
+  if (!WORK_ORDER_REFERENCE_PATTERN.test(normalized)) return false;
+  if (!PRIORITY_UPDATE_PATTERN.test(normalized)) return false;
+  return PRIORITY_TOKEN_PATTERN.test(normalized);
+}
+
+export function isConfirmedPriorityUpdateEmail(
+  email: Pick<GraphEmail, "subject" | "from"> &
+    Partial<Pick<GraphEmail, "body">>,
+  allowedSenders = getAllowedDispatchSenders(),
+): boolean {
+  const sender = String(email.from?.emailAddress?.address || "").trim().toLowerCase();
+  const subject = String(email.subject || "").trim();
+  if (!allowedSenders.has(sender)) return false;
+  if (!subject || THREAD_PREFIX_PATTERN.test(subject)) return false;
+  if (!WORK_ORDER_REFERENCE_PATTERN.test(subject)) return false;
+  if (isConfirmedPriorityUpdateSubject(subject)) return true;
+
+  const body = htmlToText(String(email.body?.content || ""));
+  return STATUS_UPDATE_PATTERN.test(subject)
+    && /\bPriority\s*:\s*P[1-5]\b/i.test(body);
+}
+
+export function isConfirmedWorkOrderIntakeEmail(
+  email: Pick<GraphEmail, "subject" | "from"> &
+    Partial<Pick<GraphEmail, "body">>,
+  allowedSenders = getAllowedDispatchSenders(),
+): boolean {
+  return isConfirmedInitialDispatchEmail(email, allowedSenders)
+    || isConfirmedPriorityUpdateEmail(email, allowedSenders);
+}
+
 export function detectEmailType(subject: string): EmailType {
   const normalized = (subject || "").trim();
   if (NTE_EMAIL_PATTERN.test(normalized)) return "TYPE_NTE_APPROVED";
   if (CAPITAL_EMAIL_PATTERN.test(normalized)) return "TYPE_CAPITAL_PENDING";
   if (isConfirmedInitialDispatchSubject(normalized)) return "TYPE_DISPATCHED";
+  if (isConfirmedPriorityUpdateSubject(normalized)) return "TYPE_PRIORITY_UPDATE";
   if (
     THREAD_PREFIX_PATTERN.test(normalized) ||
     STATUS_UPDATE_PATTERN.test(normalized) ||
@@ -129,6 +169,15 @@ const normalizePriority = (value: string | null): ParsedWorkOrder["priority"] =>
   return null;
 };
 
+const extractSubjectPriorityTarget = (subject: string) => firstMatch(subject, [
+  // When both old and new priorities are present, the value after `to` is
+  // authoritative. Keep this ahead of single-priority subject forms.
+  /\bto\s+(P[1-5])\b/i,
+  /\b(P[1-5])\s+Priority\s+(?:Escalation|Update|Change|Upgrade)\b/i,
+  /\bPriority\s*(?:is|has\s+been)?\s*(?:escalated|updated|changed|upgraded|reprioriti[sz]ed)\s*(?:to|:|-)\s*(P[1-5])\b/i,
+  /\bPriority\s*[:\-]?\s*(P[1-5])\b/i,
+]);
+
 const parseAddressParts = (address: string | null) => {
   if (!address) return { city: null, state: null };
   const parts = address.split(",").map(part => part.trim()).filter(Boolean);
@@ -142,7 +191,7 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
   const rawSubject = email.subject || "";
   const rawBody = email.body?.content || "";
   const body = email.body?.contentType?.toLowerCase() === "html" ? htmlToText(rawBody) : htmlToText(rawBody);
-  const emailType = detectEmailType(rawSubject);
+  const detectedEmailType = detectEmailType(rawSubject);
 
   const subjectAndBody = `${rawSubject}\n${body}`;
   const wotId = firstMatch(subjectAndBody, [
@@ -162,7 +211,19 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
   ]);
   const address = firstMatch(body, [/^Store Address:\s*(.+?)(?=\r?\n)/m]);
   const addressParts = parseAddressParts(address);
-  const priorityRaw = firstMatch(body, [/^Priority:\s*(P[1-5])\s*-/m]);
+  const bodyPriorityRaw = firstMatch(body, [
+    /^Priority\s*:\s*(P[1-5])(?:\s*[-:\u2013\u2014]|\s*$)/im,
+  ]);
+  const subjectPriorityRaw = extractSubjectPriorityTarget(rawSubject);
+  const bodyPriority = normalizePriority(bodyPriorityRaw);
+  const subjectPriority = normalizePriority(subjectPriorityRaw);
+  const priorityConflict = Boolean(
+    bodyPriority && subjectPriority && bodyPriority !== subjectPriority,
+  );
+  const priority = priorityConflict ? null : bodyPriority || subjectPriority;
+  const emailType = detectedEmailType === "TYPE_STATE_UPDATE" && priority
+    ? "TYPE_PRIORITY_UPDATE"
+    : detectedEmailType;
   const functionalState = firstMatch(body, [/^State:\s*(.+?)(?=\r?\n)/m]);
   const lineOfService = firstMatch(body, [/^Line of Service:\s*(.+?)(?=\r?\n)/m]);
   const businessService = firstMatch(body, [/^Business Service:\s*(.+?)(?=\r?\n)/m]);
@@ -187,7 +248,8 @@ export function parseDispatchEmail(email: GraphEmail): ParsedWorkOrder {
     incidentId,
     storeNumber,
     storeLocation,
-    priority: normalizePriority(priorityRaw),
+    priority,
+    priorityConflict,
     summary,
     description,
     lineOfService,

@@ -25,6 +25,7 @@ import { computeSlaState } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
 import { getContractorCompletionControl } from "../../lib/contractorCompletion";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
+import { canCloseReopenedFollowUpWithoutBilling } from "../../lib/reopenedFollowUpClose";
 import {
   canAssignWorkOrder,
   canChangeWorkOrderAssignment,
@@ -87,7 +88,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onBackToAllWorkOrders, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWO, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onBackToAllWorkOrders, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -307,6 +308,16 @@ export default function WorkOrderDetail(props: any) {
     canonicalSevenElevenWorkOrderId(workOrderId) !== sevenElevenWorkOrderId
   );
   const invoiceController = isInvoiceController(currentUser);
+  const canCloseReopenedFollowUp = canCloseReopenedFollowUpWithoutBilling({
+    workOrder: woData,
+    contractorInvoices: woAllInvoices,
+    staffInvoices: woBillingInvoices,
+    isOperationalStaff: isManager,
+    isInvoiceController: invoiceController,
+    hasCompleteEvidence: contractorInvoiceQuery.data?.hasMore === false
+      && billingInvoiceQuery.data?.hasMore === false
+      && woData?.activityPage?.hasMore === false,
+  });
   const canReviewInvoices = isManager && !invoiceController;
   const assignmentEligibility = {
     isOperationalStaff: isManager,
@@ -816,6 +827,19 @@ export default function WorkOrderDetail(props: any) {
                       {/* Staff retain only the explicit no-invoice exception.
                           Invoice-backed work orders close from Billing when staff
                           records Billed to 7-Eleven. */}
+                      {canCloseReopenedFollowUp && (
+                        <button
+                          type="button"
+                          onClick={() => setModal("closeReopenedFollowUp")}
+                          disabled={isLoading("closeReopenedFollowUp_" + woData.id)}
+                          className="btn-primary"
+                          style={loadingStyle("closeReopenedFollowUp_" + woData.id)}
+                        >
+                          {isLoading("closeReopenedFollowUp_" + woData.id)
+                            ? <><BtnSpinnerDark />Closing...</>
+                            : "Close follow-up — no additional billing"}
+                        </button>
+                      )}
                       {isManager && woData.status !== "closed" && !hasAnyLiveInvoice && (
                         <button onClick={() => setModal("closeWithoutInvoice")} disabled={isLoading("closeWithoutInvoice_" + woData.id)} className="btn-primary" style={loadingStyle("closeWithoutInvoice_" + woData.id)}>
                           {isLoading("closeWithoutInvoice_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close — no invoice"}

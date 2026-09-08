@@ -7,7 +7,7 @@ import {
   moveEmailToFolder,
 } from "./graphClient";
 import {
-  isConfirmedInitialDispatchEmail,
+  isConfirmedWorkOrderIntakeEmail,
   parseDispatchEmail,
   type ParsedWorkOrder,
 } from "./emailParser";
@@ -31,6 +31,16 @@ import {
   billingOnlyIntakeFields,
 } from "./emailIntakeWorkflow";
 import type { Database } from "./supabase/database.types";
+import {
+  emailPrioritySourceMessageId,
+  priorityIntakeCutoverDecision,
+  priorityEscalationSlaFields,
+} from "./emailPriorityEscalation";
+import {
+  applyEmailPriorityEscalation,
+  drainPendingPriorityEscalationNotifications,
+} from "./emailPriorityEscalationProcessor";
+import { drainEmailAssignmentRemovals } from "./emailAssignmentRemovalProcessor";
 
 type WorkOrderInsert = Database["public"]["Tables"]["work_orders"]["Insert"];
 type WorkOrderUpdate = Database["public"]["Tables"]["work_orders"]["Update"];
@@ -72,13 +82,18 @@ const stateActivationDecision = (
   );
 };
 
+const priorityCutoverDecision = (receivedAt: string) =>
+  priorityIntakeCutoverDecision(
+    receivedAt,
+    process.env.EMAIL_PRIORITY_INTAKE_START_AT,
+  );
+
 const compactPatch = (parsed: ParsedWorkOrder) => {
   const patch: WorkOrderUpdate = {};
   if (parsed.incidentId) patch.incident_id = parsed.incidentId;
   if (parsed.storeNumber) patch.store_number = parsed.storeNumber;
   if (parsed.summary) patch.summary = parsed.summary;
   if (parsed.description) patch.description = parsed.description;
-  if (parsed.priority) patch.priority = parsed.priority;
   if (parsed.afmName) patch.afm_name = parsed.afmName;
   if (parsed.city) patch.city = parsed.city;
   if (parsed.address) patch.address = parsed.address;
@@ -215,6 +230,33 @@ const finishEmail = async (email: GraphEmail, folderId: string) => {
   await moveEmailToFolder(accessToken, email.id, folderId);
 };
 
+const finalizeEmailProcessing = async (
+  email: GraphEmail,
+  folderId: string,
+  result: IntakeResult,
+  shouldFinishEmail: boolean,
+): Promise<IntakeResult> => {
+  let finalizedResult = result;
+  if (shouldFinishEmail) {
+    try {
+      await finishEmail(email, folderId);
+    } catch (err) {
+      const finishReason = intakeErrorMessage(
+        err,
+        "unknown mailbox finalization error",
+      );
+      console.error("Email intake mailbox finalization failed", finishReason);
+      finalizedResult = {
+        ...finalizedResult,
+        reason: `${finalizedResult.reason}; mailbox finalization failed: ${finishReason}`,
+      };
+    }
+  }
+
+  await insertLog(email, finalizedResult);
+  return finalizedResult;
+};
+
 export async function processEmail(
   email: GraphEmail,
   folderId: string,
@@ -234,10 +276,10 @@ export async function processEmail(
 
   let shouldFinishEmail = true;
 
-  if (!isConfirmedInitialDispatchEmail(email)) {
+  if (!isConfirmedWorkOrderIntakeEmail(email)) {
     result = skippedResult(
       result,
-      "not a confirmed direct 7-Eleven dispatch; mailbox left unchanged",
+      "not a confirmed direct 7-Eleven dispatch or priority update; mailbox left unchanged",
     );
     await insertLog(email, result);
     return result;
@@ -253,6 +295,13 @@ export async function processEmail(
     } else if (parsed.emailType === "TYPE_DISPATCHED") {
       if (!parsed.wotId) {
         result = skippedResult(result, "initial dispatch is missing a WOT number");
+      } else if (parsed.priorityConflict) {
+        shouldFinishEmail = false;
+        result = {
+          ...result,
+          action: "failed",
+          reason: "initial dispatch contains conflicting subject and body priorities; mailbox left unchanged",
+        };
       } else if (parsed.parseConfidence !== "high") {
         shouldFinishEmail = false;
         result = {
@@ -288,47 +337,99 @@ export async function processEmail(
               match.id,
             );
           } else if (match) {
+            if (!parsed.priority) {
+              shouldFinishEmail = false;
+              result = {
+                ...result,
+                action: "failed",
+                workOrderId: match.id,
+                reason: "repeat dispatch is missing a valid priority; mailbox left unchanged",
+              };
+              return await finalizeEmailProcessing(email, folderId, result, shouldFinishEmail);
+            }
+            const cutover = priorityCutoverDecision(email.receivedDateTime);
+            if (cutover.action === "hold") {
+              shouldFinishEmail = false;
+              result = {
+                ...result,
+                action: "failed",
+                workOrderId: match.id,
+                reason: cutover.reason,
+              };
+              return await finalizeEmailProcessing(
+                email,
+                folderId,
+                result,
+                shouldFinishEmail,
+              );
+            }
+            if (cutover.action === "skip") {
+              result = skippedResult(result, cutover.reason, match.id);
+              return await finalizeEmailProcessing(
+                email,
+                folderId,
+                result,
+                shouldFinishEmail,
+              );
+            }
+
             const patch: WorkOrderUpdate = {
               ...compactPatch(parsed),
               ...(parsed.doNotDispatch
                 ? billingOnlyIntakeFields(email.receivedDateTime || processedAt)
                 : {}),
             };
-            const { error } = await sb
-              .from("work_orders")
-              .update(patch)
-              .eq("id", match.id)
-              .is("deleted_at", null);
-
-            if (error) throw error;
-            await saveAfmContact(match.id, parsed.afmEmail);
-            if (parsed.doNotDispatch) {
-              await addSystemActivity(match.id, BILLING_ONLY_ACTIVITY, {
-                eventKey: "straight_to_billing",
-                staffOnly: true,
-              });
+            const priorityUpdate = await applyEmailPriorityEscalation(
+              match.id,
+              parsed,
+              email,
+              patch,
+            );
+            if (!priorityUpdate) {
+              throw new Error("Repeat dispatch priority could not be validated");
+            }
+            const resolvedWorkOrderId = priorityUpdate.workOrderId;
+            if (priorityUpdate.replayed || ["stale", "non_operational"].includes(priorityUpdate.outcome)) {
+              result = skippedResult(
+                result,
+                priorityUpdate.replayed
+                  ? "repeat dispatch was already processed; current metadata preserved"
+                  : "repeat dispatch is stale or no longer operational; current metadata preserved",
+                resolvedWorkOrderId,
+              );
+              return await finalizeEmailProcessing(email, folderId, result, shouldFinishEmail);
             }
             result = {
               ...result,
               action: "updated",
-              workOrderId: match.id,
+              workOrderId: resolvedWorkOrderId,
               reason: parsed.doNotDispatch
                 ? "existing active work order refreshed and routed to billing without contractor dispatch"
-                : "existing active work order refreshed from initial dispatch",
+                : priorityUpdate?.outcome === "escalated"
+                  ? `existing active work order refreshed; priority escalated ${priorityUpdate.previousPriority.toUpperCase()} to ${priorityUpdate.reportedPriority.toUpperCase()} and staff notification ${priorityUpdate.notificationStatus}`
+                  : "existing active work order refreshed from initial dispatch",
             };
           } else {
             const billingOnly = parsed.doNotDispatch;
             const contractor = billingOnly ? null : await resolveContractor(parsed);
             const workOrderId = parsed.wotId;
+            const priority = parsed.priority || "p2";
+            const receivedAt = new Date(email.receivedDateTime || processedAt);
+            if (!Number.isFinite(receivedAt.getTime())) {
+              throw new Error("Initial dispatch email has an invalid received time");
+            }
+            const receivedAtIso = receivedAt.toISOString();
             const billingOnlyFields = billingOnly
-              ? billingOnlyIntakeFields(email.receivedDateTime || processedAt)
+              ? billingOnlyIntakeFields(receivedAtIso)
               : {};
+            const slaStartedAt = billingOnly ? null : receivedAtIso;
+            const sla = priorityEscalationSlaFields(priority, slaStartedAt);
             const row: WorkOrderInsert = {
               id: workOrderId,
               store_number: parsed.storeNumber,
               summary: parsed.summary,
               description: parsed.description,
-              priority: parsed.priority || "p2",
+              priority,
               status: contractor?.contractorId ? "assigned" : "unassigned",
               functional_status: "New",
               contractor_id: contractor?.contractorId || null,
@@ -345,8 +446,16 @@ export async function processEmail(
               sub_category: parsed.subCategory,
               incident_id: parsed.incidentId,
               source: "email_intake",
-              dispatched_at: email.receivedDateTime || processedAt,
-              sla_started_at: email.receivedDateTime || processedAt,
+              dispatched_at: receivedAtIso,
+              sla_started_at: slaStartedAt,
+              response_breach_at: sla.responseBreachAt,
+              resolution_breach_at: sla.resolutionBreachAt,
+              ...(parsed.priority
+                ? {
+                    priority_source_message_id: emailPrioritySourceMessageId(email),
+                    priority_source_received_at: receivedAtIso,
+                  }
+                : {}),
               created_at: processedAt,
               ...billingOnlyFields,
             };
@@ -369,7 +478,7 @@ export async function processEmail(
                   city: parsed.city,
                   state: parsed.state,
                   address: parsed.address,
-                  priority: parsed.priority || "p2",
+                  priority,
                   summary: parsed.summary,
                   description: parsed.description,
                 },
@@ -389,6 +498,88 @@ export async function processEmail(
               contractorAssigned: contractor?.contractorId || null,
             };
           }
+        }
+      }
+    } else if (parsed.emailType === "TYPE_PRIORITY_UPDATE") {
+      if (!parsed.wotId && !parsed.fwkdId) {
+        result = skippedResult(result, "priority update is missing a work order number");
+      } else if (!parsed.priority) {
+        shouldFinishEmail = false;
+        result = {
+          ...result,
+          action: "failed",
+          reason: parsed.priorityConflict
+            ? "priority update contains conflicting subject and body priorities; mailbox left unchanged"
+            : "priority update did not contain a valid P1-P5 priority; mailbox left unchanged",
+        };
+      } else {
+        const cutover = priorityCutoverDecision(email.receivedDateTime);
+        if (cutover.action === "hold") {
+          shouldFinishEmail = false;
+          result = {
+            ...result,
+            action: "failed",
+            reason: cutover.reason,
+          };
+          return await finalizeEmailProcessing(
+            email,
+            folderId,
+            result,
+            shouldFinishEmail,
+          );
+        }
+        if (cutover.action === "skip") {
+          result = skippedResult(result, cutover.reason);
+          return await finalizeEmailProcessing(
+            email,
+            folderId,
+            result,
+            shouldFinishEmail,
+          );
+        }
+
+        const match = await findWorkOrderMatch(parsed);
+
+        if (match?.archived) {
+          result = skippedResult(
+            result,
+            "priority update matched an archived work order; archived row was not updated",
+            match.id,
+          );
+        } else if (!match) {
+          result = skippedResult(
+            result,
+            "priority update did not match an active work order; no work order was created",
+          );
+        } else {
+          const priorityUpdate = await applyEmailPriorityEscalation(
+            match.id,
+            parsed,
+            email,
+          );
+
+          if (!priorityUpdate) {
+            throw new Error("Priority update could not be validated");
+          }
+
+          result = priorityUpdate.outcome === "escalated"
+            ? {
+                ...result,
+                action: "updated",
+                workOrderId: priorityUpdate.workOrderId,
+                reason: `priority escalated ${priorityUpdate.previousPriority.toUpperCase()} to ${priorityUpdate.reportedPriority.toUpperCase()}; staff notification ${priorityUpdate.notificationStatus}`,
+              }
+            : skippedResult(
+                result,
+                priorityUpdate.outcome === "stale"
+                  ? "stale priority update ignored"
+                  : priorityUpdate.outcome === "non_operational"
+                    ? "priority update matched a completed, cancelled, or billing-stage work order; operational state was not changed"
+                  : priorityUpdate.outcome === "not_escalation"
+                    ? "lower-urgency priority update recorded but not applied automatically"
+                    : "priority update matched the current priority",
+                priorityUpdate.workOrderId,
+              );
         }
       }
     } else if (
@@ -450,21 +641,7 @@ export async function processEmail(
     };
   }
 
-  if (shouldFinishEmail) {
-    try {
-      await finishEmail(email, folderId);
-    } catch (err) {
-      const finishReason = intakeErrorMessage(err, "unknown mailbox finalization error");
-      console.error("Email intake mailbox finalization failed", finishReason);
-      result = {
-        ...result,
-        reason: `${result.reason}; mailbox finalization failed: ${finishReason}`,
-      };
-    }
-  }
-
-  await insertLog(email, result);
-  return result;
+  return finalizeEmailProcessing(email, folderId, result, shouldFinishEmail);
 }
 
 export async function runIntakeCycle(): Promise<IntakeResult[]> {
@@ -475,5 +652,13 @@ export async function runIntakeCycle(): Promise<IntakeResult[]> {
   for (const email of emails) {
     results.push(await processEmail(email, folderId));
   }
+  await Promise.all([
+    drainPendingPriorityEscalationNotifications(accessToken).catch(error => {
+      console.error("Priority escalation outbox drain failed", error);
+    }),
+    drainEmailAssignmentRemovals(accessToken).catch(error => {
+      console.error("Email assignment-removal outbox drain failed", error);
+    }),
+  ]);
   return results;
 }

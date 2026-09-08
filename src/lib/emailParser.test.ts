@@ -4,6 +4,9 @@ import {
   getAllowedDispatchSenders,
   isConfirmedInitialDispatchEmail,
   isConfirmedInitialDispatchSubject,
+  isConfirmedPriorityUpdateEmail,
+  isConfirmedPriorityUpdateSubject,
+  isConfirmedWorkOrderIntakeEmail,
   parseDispatchEmail,
 } from "./emailParser";
 
@@ -79,6 +82,104 @@ test("supports an explicit sender allowlist without broadening the default", () 
     true,
   );
   assert.equal(isConfirmedInitialDispatchEmail(envelope(dispatchSubject), senders), false);
+});
+
+test("accepts only direct priority updates from the approved sender", () => {
+  const subject = "Work Order WOT1266375 priority escalated from P4 to P1";
+
+  assert.equal(isConfirmedPriorityUpdateSubject(subject), true);
+  assert.equal(isConfirmedPriorityUpdateEmail(envelope(subject)), true);
+  assert.equal(isConfirmedWorkOrderIntakeEmail(envelope(subject)), true);
+  assert.equal(isConfirmedPriorityUpdateEmail(envelope(`Re: ${subject}`)), false);
+  assert.equal(isConfirmedPriorityUpdateEmail(envelope(`Fwd: ${subject}`)), false);
+  assert.equal(
+    isConfirmedPriorityUpdateEmail(envelope(subject, "service@p1pros.com")),
+    false,
+  );
+  assert.equal(
+    isConfirmedPriorityUpdateEmail(envelope("WOT1266375 priority was updated")),
+    false,
+  );
+});
+
+test("parses an escalated priority from the direct subject when the body is partial", () => {
+  const subject = "Work Order WOT1266375 priority escalated from P4 to P1";
+  const parsed = parseDispatchEmail({
+    ...envelope(subject),
+    id: "priority-update",
+    internetMessageId: "<priority-update@service-now.com>",
+    body: {
+      contentType: "text",
+      content: "State: Work in Progress",
+    },
+    receivedDateTime: "2026-09-02T16:00:00.000Z",
+    toRecipients: [],
+  });
+
+  assert.equal(parsed.emailType, "TYPE_PRIORITY_UPDATE");
+  assert.equal(parsed.wotId, "WOT1266375");
+  assert.equal(parsed.priority, "p1");
+  assert.equal(parsed.parseConfidence, "medium");
+});
+
+test("extracts the destination from common priority-transition subjects", () => {
+  for (const subject of [
+    "Work Order WOT1266375 Priority update from P4 to P1",
+    "Work Order WOT1266375 Priority has been escalated from P4 to P1",
+    "P1 Priority Escalation - Work Order WOT1266375",
+  ]) {
+    const parsed = parseDispatchEmail({
+      ...envelope(subject),
+      id: subject,
+      body: { contentType: "text", content: "State: Dispatched" },
+      receivedDateTime: "2026-09-02T16:00:00.000Z",
+      toRecipients: [],
+    });
+
+    assert.equal(isConfirmedPriorityUpdateEmail(envelope(subject)), true);
+    assert.equal(parsed.emailType, "TYPE_PRIORITY_UPDATE");
+    assert.equal(parsed.priority, "p1");
+  }
+});
+
+test("parses flexible priority body lines without requiring a hyphen", () => {
+  const email = {
+    ...envelope("Work Order WOT1266375 has been updated"),
+    id: "priority-body-update",
+    body: {
+      contentType: "html",
+      content: "<p><strong>Priority:</strong> p1</p><p>State: Assigned</p>",
+    },
+    receivedDateTime: "2026-09-02T16:00:00.000Z",
+    toRecipients: [],
+  };
+  const parsed = parseDispatchEmail(email);
+
+  assert.equal(isConfirmedPriorityUpdateEmail(email), true);
+  assert.equal(parsed.emailType, "TYPE_PRIORITY_UPDATE");
+  assert.equal(parsed.priority, "p1");
+});
+
+test("fails closed when the subject and body report different priorities", () => {
+  const parsed = parseDispatchEmail({
+    ...envelope("7-Eleven Priority P1 - Critical Work Order WOT1266375 has been dispatched"),
+    id: "conflicting-priority",
+    internetMessageId: "<conflicting-priority@service-now.com>",
+    body: {
+      contentType: "text",
+      content: [
+        "Store Location: STORE - 38523",
+        "Store Address: 2075 S Buckner Blvd, Dallas, TX, US, 75217",
+        "Priority: P4 - Routine",
+      ].join("\n"),
+    },
+    receivedDateTime: "2026-09-02T16:00:00.000Z",
+    toRecipients: [],
+  });
+
+  assert.equal(parsed.emailType, "TYPE_DISPATCHED");
+  assert.equal(parsed.priorityConflict, true);
+  assert.equal(parsed.priority, null);
 });
 
 test("parses store numbers from nonstandard Texas store labels", () => {

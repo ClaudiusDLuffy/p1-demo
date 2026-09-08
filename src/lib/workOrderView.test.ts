@@ -207,6 +207,13 @@ test("closed-by attribution supports atomic no-invoice and billing closures", ()
     eventData: { action: "billed_to_7_eleven" },
     text: "P1 invoice #714 billed to 7-Eleven. Work order closed.",
   }]), "Emily Barnhart");
+
+  assert.equal(resolveWorkOrderClosedBy([{
+    author: "Lynzy Nicole",
+    eventKey: "work_order_follow_up_closed_without_additional_billing",
+    eventData: { action: "closed_without_additional_billing" },
+    text: "Reopened follow-up closed by Lynzy Nicole with no additional billing.",
+  }]), "Lynzy Nicole");
 });
 
 test("closed-by attribution does not guess from unrelated system activity", () => {

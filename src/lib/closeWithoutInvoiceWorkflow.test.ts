@@ -42,9 +42,10 @@ test("staff only get the no-invoice exception on work orders", () => {
   assert.match(detail, /Close — no invoice/);
   assert.doesNotMatch(detail, /setModal\("closeWO"\)/);
   assert.match(shell, /modal === "closeWithoutInvoice"/);
-  assert.match(shell, /await doCloseWithoutInvoice\(woData\.id\)/);
-  assert.match(hook, /closeWorkOrderWithoutInvoice\(woId\)/);
-  assert.match(hook, /doCloseWO, doCloseWithoutInvoice, doReopen/);
+  assert.match(shell, /await doCloseWithoutInvoice\(\s*woData\.id,[\s\S]*woData\.updatedAt/);
+  assert.match(hook, /closeWorkOrderWithoutInvoice\(\s*woId,\s*expectedWorkflowCycle,\s*expectedContractorAssignmentVersion,\s*expectedUpdatedAt/);
+  assert.match(hook, /doCloseWithoutInvoice,[\s\S]*doCloseReopenedFollowUp, doReopen/);
+  assert.doesNotMatch(hook, /const doCloseWO/);
 });
 
 test("the existing capital quote handoff still parks work in pending capital completion", () => {
