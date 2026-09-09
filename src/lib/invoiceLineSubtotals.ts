@@ -25,6 +25,7 @@ const CATEGORY_ORDER: InvoiceSubtotalCategory[] = [
   "Travel",
   "Parts/Hardware",
   "Shipping",
+  "Warranty",
   "Other",
 ];
 
@@ -34,6 +35,7 @@ const CATEGORY_LABEL: Record<InvoiceSubtotalCategory, string> = {
   Travel: "Travel",
   "Parts/Hardware": "Parts",
   Shipping: "Shipping",
+  Warranty: "Warranty",
   Other: "Other",
 };
 

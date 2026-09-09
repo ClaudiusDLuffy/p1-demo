@@ -28,6 +28,8 @@ import {
   isStaffBillingPartsLine,
   normalizeImportedStaffBillingLineType,
   normalizeStaffBillingLineType,
+  isStaffBillingWarrantyLine,
+  isValidStaffBillingRate,
   staffBillingDescriptionPlaceholder,
   staffBillingMarkupPercent,
   STAFF_BILLING_LINE_TYPES,
@@ -73,8 +75,8 @@ import {
 const BillingLineSchema = z.object({
   type: z.string().min(1),
   desc: z.string(),
-  qty: z.number().positive("Qty must be greater than 0"),
-  rate: z.number().positive("Rate must be greater than 0"),
+  qty: z.number().finite().positive("Qty must be greater than 0"),
+  rate: z.number().finite(),
   isTaxable: z.boolean().default(false),
   // UI-only. The persistence boundary ignores this flag; it prevents a later
   // rule refresh from overwriting an explicit staff checkbox choice.
@@ -84,6 +86,15 @@ const BillingLineSchema = z.object({
   sourceUnitCost: z.number().nonnegative().optional().nullable(),
   markupPercent: z.number().min(0).max(999).optional().nullable(),
 }).superRefine((line, context) => {
+  if (!isValidStaffBillingRate(line.type, line.rate)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rate"],
+      message: isStaffBillingWarrantyLine(line.type)
+        ? "Warranty rate must be zero or greater"
+        : "Rate must be greater than 0",
+    });
+  }
   const descriptionOptional = /^(travel|truck charge)$/i.test(line.type.trim());
   if (!descriptionOptional && !line.desc.trim()) {
     context.addIssue({
@@ -160,6 +171,7 @@ const QUICK_ADD_LINES = [
   { label: "OT Labor", type: "OT Labor", desc: "", rate: 165 },
   { label: "Parts", type: "Parts/Hardware", desc: "", rate: undefined },
   { label: "Travel", type: "Travel", desc: "", rate: 110 },
+  { label: "Warranty", type: "Warranty", desc: "Warranty repair — no charge", rate: 0 },
   { label: "Refrigerant", type: "Parts/Hardware", desc: "Refrigerant", rate: 35 },
 ] as const;
 
@@ -1605,7 +1617,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                         shouldDirty: true,
                       });
                     }
-                    if (["Labor", "OT Labor", "Travel"].includes(nextType)) {
+                    if (["Labor", "OT Labor", "Travel", "Warranty"].includes(nextType)) {
                       setValue(
                         `lines.${i}.rate` as const,
                         importedStaffBillingRate(nextType, sourceUnitCost),
@@ -1666,6 +1678,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                   className="numeric-readable"
                   type="number"
                   step="any"
+                  min="0"
                   {...rateRegistration}
                   readOnly={isP1PurchasedPart}
                   onChange={(event: any) => {
@@ -1762,7 +1775,8 @@ export default function BillingInvoiceCreateModal(props: any) {
             );
           })}
         </div>
-        {errors.lines && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a quantity and rate. Descriptions are optional only for travel.</div>}
+        <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>Warranty items may be billed at $0. Other line types require a positive rate.</div>
+        {errors.lines && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a positive quantity and a valid rate ($0 is allowed only for Warranty). Descriptions are optional only for travel.</div>}
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           {QUICK_ADD_LINES.map(item => (
             <button
