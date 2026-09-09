@@ -321,19 +321,20 @@ const CSS = `
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.08); opacity: 0.85 } }
 html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }
 .display { font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; letter-spacing: -0.5px; }
+/* Keep zeros open: the previous slashed-zero glyph looked like an 8 at UI sizes. */
 .mono,
 .numeric-readable {
-  font-family: var(--font-inter), system-ui, sans-serif;
-  font-variant-numeric: tabular-nums slashed-zero;
-  font-feature-settings: "tnum" 1, "zero" 1;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1, "zero" 0;
   letter-spacing: 0.01em;
 }
 .work-order-page-title,
 .work-order-location-heading {
-  font-family: var(--font-inter), system-ui, sans-serif;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
   font-weight: 700;
-  font-variant-numeric: tabular-nums slashed-zero;
-  font-feature-settings: "tnum" 1, "zero" 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1, "zero" 0;
 }
 .work-order-reference { font-size: 16px; font-weight: 800; line-height: 1.25; }
 .app-root { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip; }

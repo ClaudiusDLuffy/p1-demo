@@ -25,7 +25,8 @@ test("invoice and billing detours return to the originating work order", () => {
 
 test("work-order identity uses readable, prominent typography", () => {
   assert.match(shell, /\.work-order-page-title,/);
-  assert.match(shell, /\.work-order-location-heading \{\s*font-family: var\(--font-inter\)/);
+  // Numeric headings now use plain-zero Arial; their prominence is unchanged.
+  assert.match(shell, /\.work-order-location-heading \{\s*font-family: Arial, "Helvetica Neue", Helvetica, sans-serif/);
   assert.match(shell, /\.work-order-reference \{ font-size: 16px; font-weight: 800/);
   assert.match(shell, /isWorkOrderPageTitle \? " work-order-page-title"/);
   assert.match(detail, /className="mono work-order-reference" style=\{\{ color: T\.danger \}\}/);

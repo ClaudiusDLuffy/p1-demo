@@ -46,6 +46,11 @@ import {
 } from "../../lib/billingDraftPersistence";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 import { isInvoiceController } from "../../lib/staffPermissions";
+import {
+  initialStaffBillingTerms,
+  nextStaffBillingDueDate,
+  STAFF_BILLING_TERMS_OPTIONS,
+} from "../../lib/staffBillingTerms";
 import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
 import {
   mapVerifiedLocationTaxRate,
@@ -137,12 +142,6 @@ const dateInputValue = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 const todayIso = () => dateInputValue(new Date());
-const addDays = (iso: string, days: number) => {
-  const date = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return "";
-  date.setDate(date.getDate() + days);
-  return dateInputValue(date);
-};
 
 const amount = (line: any) => (Number(line?.qty) || 0) * (Number(line?.rate) || 0);
 const money = (value: number) => Math.round(value * 100) / 100;
@@ -218,6 +217,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const initializedFor = useRef<string | null>(null);
   const previousInvoiceDate = useRef("");
+  const previousTerms = useRef("");
   const previousWorkOrderId = useRef("");
   const skipRestoredWorkOrderHydration = useRef<string | null>(null);
   const draftHydrated = useRef(false);
@@ -235,6 +235,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     [currentUser?.email, currentUser?.id, editingInvoice?.id],
   );
 
+  const initialToday = todayIso();
   const {
     register,
     handleSubmit,
@@ -250,15 +251,14 @@ export default function BillingInvoiceCreateModal(props: any) {
     resolver: zodResolver(BillingInvoiceSchema),
     defaultValues: {
       num: "",
-      invoiceDate: todayIso(),
+      invoiceDate: initialToday,
       serviceDate: "",
-      dueDate: addDays(todayIso(), 30),
+      ...initialStaffBillingTerms({ invoiceDate: initialToday }),
       workOrderId: "",
       territory: "",
       equipmentTag: "7-ELEVEN: Miscellaneous",
       storeNumber: "",
       storeAddress: "",
-      terms: "Net 30",
       cme: "",
       taxState: "",
       taxRateOverride: "",
@@ -277,6 +277,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const selectedWorkOrderId = watch("workOrderId");
   const territory = String(watch("territory") || "");
   const invoiceDate = watch("invoiceDate");
+  const terms = watch("terms");
   const serviceDate = watch("serviceDate");
   const taxState = String(watch("taxState") || "").toUpperCase();
   const storeAddress = String(watch("storeAddress") || "");
@@ -713,7 +714,12 @@ export default function BillingInvoiceCreateModal(props: any) {
       num: editingInvoice?.num || "",
       invoiceDate: initialInvoiceDate,
       serviceDate: editingInvoice?.serviceDateRaw || "",
-      dueDate: editingInvoice?.dueDateRaw || addDays(initialInvoiceDate, 30),
+      ...initialStaffBillingTerms({
+        invoiceDate: initialInvoiceDate,
+        editing: isEditing,
+        terms: editingInvoice?.terms,
+        dueDate: editingInvoice?.dueDateRaw,
+      }),
       workOrderId: resolvedInitialWorkOrderId,
       territory: editingInvoice?.territory
         || territoryFromState(
@@ -729,7 +735,6 @@ export default function BillingInvoiceCreateModal(props: any) {
         ),
       storeNumber: editingInvoice?.store || "",
       storeAddress: editingInvoice?.storeAddr || "",
-      terms: editingInvoice?.terms || "Net 30",
       cme: editingInvoice?.cme || "",
       taxState: editingInvoice?.taxState || "",
       taxRateOverride: editingInvoice?.taxRate == null
@@ -774,6 +779,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       : null;
     const formToLoad = restoredDraft?.form || initialForm;
     previousInvoiceDate.current = String(formToLoad.invoiceDate || initialInvoiceDate);
+    previousTerms.current = String(formToLoad.terms || "");
     previousWorkOrderId.current = String(formToLoad.workOrderId || resolvedInitialWorkOrderId);
     reset(formToLoad as any);
     setWoSearch("");
@@ -920,11 +926,23 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, [modal, persistBillingDraft, watch]);
 
   useEffect(() => {
-    if (!invoiceDate) return;
-    if (previousInvoiceDate.current === invoiceDate) return;
-    previousInvoiceDate.current = invoiceDate;
-    setValue("dueDate", addDays(invoiceDate, 30));
-  }, [invoiceDate, setValue]);
+    if (modal !== "createBillingInvoice" || !draftHydrated.current) return;
+    // reset() can run in an earlier effect of this same render. Read RHF's
+    // current values so pre-reset watched defaults cannot overwrite a draft.
+    const currentDate = getValues("invoiceDate");
+    const currentTerms = getValues("terms");
+    if (!currentDate) return;
+    const nextDueDate = nextStaffBillingDueDate({
+      invoiceDate: currentDate,
+      terms: currentTerms,
+      dueDate: getValues("dueDate"),
+      previousInvoiceDate: previousInvoiceDate.current,
+      previousTerms: previousTerms.current,
+    });
+    previousInvoiceDate.current = currentDate;
+    previousTerms.current = currentTerms;
+    if (nextDueDate !== null) setValue("dueDate", nextDueDate);
+  }, [getValues, invoiceDate, modal, setValue, terms]);
 
   useEffect(() => {
     if (!selectedWorkOrderId) return;
@@ -1019,6 +1037,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     draftHydrated.current = false;
     initializedFor.current = null;
     previousInvoiceDate.current = "";
+    previousTerms.current = "";
     previousWorkOrderId.current = "";
     skipRestoredWorkOrderHydration.current = null;
     p1PartsHydratedFor.current = null;
@@ -1026,13 +1045,12 @@ export default function BillingInvoiceCreateModal(props: any) {
       num: "",
       invoiceDate: today,
       serviceDate: "",
-      dueDate: addDays(today, 30),
+      ...initialStaffBillingTerms({ invoiceDate: today }),
       workOrderId: "",
       territory: "",
       equipmentTag: "7-ELEVEN: Miscellaneous",
       storeNumber: "",
       storeAddress: "",
-      terms: "Net 30",
       cme: "",
       taxState: "",
       taxRateOverride: "",
@@ -1480,7 +1498,7 @@ export default function BillingInvoiceCreateModal(props: any) {
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store address</span><input {...register("storeAddress")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} value={terms} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>{STAFF_BILLING_TERMS_OPTIONS.map(option => <option key={option}>{option}</option>)}{terms && !STAFF_BILLING_TERMS_OPTIONS.includes(terms) && <option value={terms}>{terms}</option>}</Sel></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Notes / CME</span><input {...register("cme")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
         </div>
 

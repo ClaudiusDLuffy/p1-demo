@@ -73,6 +73,25 @@ test("maps taxable receivable lines to the SaasAnt tax-rate column", () => {
   );
 });
 
+test("billing CSV preserves Net 60 and the saved due date without rewriting older terms", () => {
+  for (const terms of ["Net 60", "Net 30", "Net 15", "Due on receipt"]) {
+    const invoice = {
+      num: "SYNTH-100",
+      terms,
+      invoiceDateRaw: "2026-09-09",
+      // Intentionally manual: export must not recalculate this from the terms.
+      dueDateRaw: "2026-11-15",
+      lines: [{ type: "Labor", description: "Synthetic repair", qty: 1, rate: 100 }],
+    };
+    const [row] = staffInvoiceCsvRows(invoice);
+    assert.equal(row.terms, terms);
+    assert.equal(row.dueDate, "11/15/2026");
+    const cells = generateStaffInvoiceCsv(invoice).split("\r\n")[1].split(",");
+    assert.equal(cells[3], terms);
+    assert.equal(cells[6], "11/15/2026");
+  }
+});
+
 test("does not silently replace missing invoice items with one total row", () => {
   assert.throws(
     () => generateStaffInvoiceCsv({
