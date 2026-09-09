@@ -13,6 +13,7 @@ import {
   mapChunksWithConcurrency,
 } from "../../../lib/cursorPagination";
 import {
+  isValidStaffBillingRate,
   normalizeStaffBillingLineType,
   roundStaffBillingMarkupPercent,
 } from "../../../lib/staffBilling";
@@ -199,14 +200,20 @@ type ValidBillingLine = {
 const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
   lines
     .map(line => {
+      const type = normalizeStaffBillingLineType(line.type);
+      // Validate before roundInvoiceNumber: it deliberately maps non-finite
+      // input to zero, which must never become a free Warranty line.
+      if (!Number.isFinite(line.qty) || line.qty <= 0 || !isValidStaffBillingRate(type, line.rate)) {
+        throw invalidBillingInput("One or more invoice lines are invalid");
+      }
       const sourceUnitCost = line.sourceUnitCost == null
         ? null
         : Number(line.sourceUnitCost);
       const markupPercent = line.markupPercent == null
         ? null
         : Number(line.markupPercent);
-      return {
-        type: normalizeStaffBillingLineType(line.type),
+      const normalized = {
+        type,
         description: String(line.desc || line.description || "").trim(),
         qty: roundInvoiceNumber(line.qty),
         rate: roundInvoiceNumber(line.rate),
@@ -218,14 +225,17 @@ const normalizeBillingLines = (lines: BillingLineInput[]): ValidBillingLine[] =>
           : null,
         markupPercent: roundStaffBillingMarkupPercent(markupPercent),
       };
-    })
-    .filter(line =>
-      (line.description || /^(travel|truck charge)$/i.test(line.type))
-      && line.qty > 0
-      && line.rate > 0
-      && (line.sourceUnitCost == null || line.sourceUnitCost >= 0)
-      && (line.markupPercent == null || line.markupPercent >= 0),
-    );
+      if (!(normalized.description || /^(travel|truck charge)$/i.test(normalized.type))
+        || !Number.isFinite(normalized.qty) || normalized.qty <= 0
+        || !isValidStaffBillingRate(normalized.type, normalized.rate)
+        || (normalized.sourceUnitCost != null && normalized.sourceUnitCost < 0)
+        || (normalized.markupPercent != null && normalized.markupPercent < 0)) {
+        throw invalidBillingInput("One or more invoice lines are invalid");
+      }
+      // Reject the whole save instead of filtering out a zero-rate paid line
+      // or incomplete Warranty row while persisting the remaining invoice.
+      return normalized;
+    });
 
 const invalidBillingInput = (message: string) => {
   const error: Error & { code?: string } = new Error(message);
