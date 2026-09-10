@@ -592,6 +592,17 @@ export default function WorkOrderDetail(props: any) {
                         />
                         {woData.incidentId && <span style={{ color: T.subtle, fontSize: 12 }}>/</span>}
                         {woData.incidentId && <span className="mono" style={{ fontSize: 11, color: T.muted }}>{woData.incidentId}</span>}
+                        {isManager && (
+                          <button
+                            type="button"
+                            onClick={() => setModal("editWO")}
+                            disabled={isLoading("editWO_" + woData.id)}
+                            className="btn-soft"
+                            style={{ ...loadingStyle("editWO_" + woData.id), marginLeft: "auto" }}
+                          >
+                            {isLoading("editWO_" + woData.id) ? <><BtnSpinnerDark />Saving...</> : "Edit work order"}
+                          </button>
+                        )}
                       </div>
                       <h1 className="work-order-location-heading" style={{ margin: 0, fontSize: 28, color: T.ink, letterSpacing: -0.2, lineHeight: 1.1 }}>
                         {[woData.store ? `Store #${woData.store}` : null, woData.city || null].filter(Boolean).join(" · ") || woData.id}
@@ -1146,17 +1157,10 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    {/* Staff-only secondary actions, separated from primary
-                        action zone. Edit work order opens a header-fields form;
-                        Delete is the existing soft-delete. Contractors never see
-                        either. Lifecycle-driven fields (status, assignment,
-                        timestamps, WOT id, capital flags) are intentionally NOT
-                        editable here — they have their own dedicated actions. */}
+                    {/* Keep the staff-only soft-delete separate from the header's
+                        Edit work order action so it is not a primary control. */}
                     {isManager && (
                       <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}`, display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                        <button onClick={() => setModal("editWO")} disabled={isLoading("editWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.ink, fontSize: 12, fontWeight: 600, cursor: isLoading("editWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("editWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
-                          {isLoading("editWO_" + woData.id) ? <><BtnSpinnerDark />Saving...</> : "Edit work order"}
-                        </button>
                         <button onClick={() => setModal("deleteWO")} disabled={isLoading("deleteWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: isLoading("deleteWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("deleteWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
                           {isLoading("deleteWO_" + woData.id) ? <><BtnSpinnerDark />Deleting...</> : "Delete work order"}
                         </button>
