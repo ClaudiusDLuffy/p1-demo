@@ -19,6 +19,7 @@ import {
 } from "../../../lib/staffBilling";
 import { isQuickBooksEquipmentTag } from "../../../lib/quickBooksEquipmentTags";
 import { canonicalSevenElevenWorkOrderId } from "../../../lib/workOrderIdentity";
+import { staffBillingFinalizationFailure } from "../../../lib/staffBillingFinalizationError";
 import {
   isInvoiceControllerProfile,
   loadStaffPermissions,
@@ -1069,17 +1070,30 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ invoice, readiness });
     }
     if (body.action === "mark_billed") {
-      const { data: finalization, error: finalizationError } = await (auth.sb as any)
-        .rpc("mark_staff_invoice_billed", {
-          p_invoice_id: id,
-          p_actor_id: auth.user.id,
-        });
-      if (finalizationError) throw finalizationError;
+      let billingRecorded = false;
+      try {
+        const { data: finalization, error: finalizationError } = await auth.sb
+          .rpc("mark_staff_invoice_billed", {
+            p_invoice_id: id,
+            p_actor_id: auth.user.id,
+          });
+        if (finalizationError) throw finalizationError;
+        billingRecorded = true;
 
-      const invoice = await loadStaffInvoiceById(auth.sb, id);
-      if (!invoice) throw new Error("Billed invoice could not be reloaded");
+        const invoice = await loadStaffInvoiceById(auth.sb, id);
+        if (!invoice) throw new Error("Billed invoice could not be reloaded");
 
-      return NextResponse.json({ invoice, finalization });
+        return NextResponse.json({ invoice, finalization });
+      } catch (error: unknown) {
+        if (billingRecorded) {
+          return NextResponse.json({
+            error: "Billing was confirmed, but the updated invoice could not be loaded. Refresh the invoice to see its current status.",
+            code: "BILLING_REFRESH_REQUIRED",
+          }, { status: 500 });
+        }
+        const failure = staffBillingFinalizationFailure(error);
+        return NextResponse.json({ error: failure.error, code: failure.code }, { status: failure.status });
+      }
     }
 
     const targetState = body.state === "submitted" ? "submitted" : "draft";
