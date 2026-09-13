@@ -1,73 +1,40 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { Avatar } from "../../components/ui/Avatar";
 import { Modal } from "../../components/ui/Modal";
 import { T } from "../../lib/constants";
 import { supabase } from "../../lib/supabase/client";
-import {
-  CONTRACTOR_WORKLOAD_SUMMARY_KEY,
-  PROFILES_KEY,
-  TECHNICIANS_KEY,
-  WORK_ORDERS_KEY,
-  useContractorWorkloadSummaryQuery,
-} from "../work-orders/queries";
+import { isPortalVisible } from "../../lib/realtime/browserVisibility";
+import { DIRECTORY_KEY, directoryScopeKey, isDirectoryId, type DirectoryItem } from "../directory/contracts";
+import { useDirectoryActor, useDirectoryPage } from "../directory/queries";
+import { loadDirectorySelection } from "../directory/api";
+import { DirectoryError, DirectoryPageControls } from "../directory/DirectorySelect";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 
-type ContractorProfile = {
-  id: string;
-  name: string;
-  initials: string;
-  company?: string | null;
-  territory?: string | null;
-  trades?: string[] | null;
-  color: string;
-};
-
-type PortalProfile = {
-  id: string;
-  name?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  active?: boolean | null;
-  contractorAccessLevel?: string | null;
-};
-
-type ContractorTechnician = {
-  id: string;
-  contractorId: string;
-  profileId?: string | null;
-  name?: string | null;
-  isActive?: boolean | null;
-};
-
-type ContractorWorkOrder = {
-  contractor?: string | null;
-  status: string;
-};
+type ContractorProfile = DirectoryItem;
+type ContractorTechnician = DirectoryItem;
 
 type TechnicianRequestPayload = {
   emailDelivery?: "invitation" | "recovery" | "none";
   warning?: string | null;
+  profileId: string | null;
+  contractorId: string | null;
 };
 
 type ContractorListProps = {
   page: string;
   isManager: boolean;
-  contractorsOnly: ContractorProfile[];
-  technicians?: ContractorTechnician[];
-  users?: PortalProfile[];
-  workOrders?: ContractorWorkOrder[];
-  activeStatuses: readonly string[];
   nav: (page: string) => void;
   setFilterC: (contractorId: string) => void;
   fire?: (message: string) => void;
 };
 
-type DeactivateTarget = ContractorTechnician & {
-  profile?: PortalProfile | null;
-};
+type DeactivateTarget = ContractorTechnician;
 
 const objectPayload = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -82,7 +49,7 @@ async function technicianRequest(init: RequestInit): Promise<TechnicianRequestPa
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
   headers.set("Content-Type", "application/json");
-  const response = await fetch("/api/contractor-technicians/manage", {
+  const response = await apiFetch("/api/contractor-technicians/manage", {
     ...init,
     headers,
   });
@@ -94,7 +61,10 @@ async function technicianRequest(init: RequestInit): Promise<TechnicianRequestPa
         : "Technician request failed",
     );
   }
+  const technician = objectPayload(payload.technician);
   return {
+    profileId: isDirectoryId(technician.profileId) ? technician.profileId : null,
+    contractorId: isDirectoryId(technician.contractorId) ? technician.contractorId : null,
     emailDelivery: payload.emailDelivery === "invitation"
       || payload.emailDelivery === "recovery"
       || payload.emailDelivery === "none"
@@ -113,100 +83,125 @@ const emptyForm = {
   accessLevel: "report_only",
 };
 
+function ContractorTeam({ contractor, onEdit, onDeactivate, opening }: {
+  contractor: ContractorProfile;
+  onEdit: (contractor: ContractorProfile, technician: ContractorTechnician) => void;
+  onDeactivate: (technician: ContractorTechnician) => void;
+  opening: string;
+}) {
+  const directory = useDirectoryPage("technician_management", true, contractor.id);
+  return <section aria-label={`${contractor.name} technicians`}>
+    <input type="search" value={directory.search} onChange={event => directory.setSearch(event.target.value)}
+      aria-label={`Search ${contractor.name} technicians`} placeholder="Search technicians…" style={{ width: "100%", padding: 8, marginBottom: 8 }} />
+    <DirectoryError directory={directory} />
+    <div style={{ display: "grid", gap: 6 }}>
+      {!directory.isError && directory.items.map(technician => {
+        const isActive = technician.isActive && technician.profileActive !== false;
+        return <div key={technician.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 9px", borderRadius: 8, background: T.surfaceSoft, border: `1px solid ${T.borderSoft}` }}>
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", color: isActive ? T.ink : T.subtle, fontSize: 11, fontWeight: 700 }}>{technician.name}</span>
+            <span style={{ display: "block", color: T.subtle, fontSize: 9, marginTop: 2 }}>
+              {!technician.profileId ? "Legacy record" : `${technician.contractorAccessLevel === "invoice" ? "Invoice + field" : "Field reporting"}${isActive ? "" : " · Inactive"}`}
+            </span>
+          </span>
+          {technician.profileId && <span style={{ display: "flex", gap: 5 }}>
+            <button type="button" className="btn-soft" disabled={Boolean(opening)} onClick={() => onEdit(contractor, technician)}
+              style={{ minHeight: 28, padding: "4px 7px", fontSize: 9 }}>{opening === technician.id ? "Loading…" : isActive ? "Edit" : "Reactivate"}</button>
+            {isActive && <button type="button" className="btn-soft" onClick={() => onDeactivate(technician)}
+              style={{ minHeight: 28, padding: "4px 7px", color: T.danger, fontSize: 9 }}>Remove</button>}
+          </span>}
+        </div>;
+      })}
+      {!directory.waiting && !directory.isError && directory.items.length === 0 && <div role="status" style={{ color: T.subtle, fontSize: 10 }}>No matching technicians on this page.</div>}
+    </div>
+    <DirectoryPageControls directory={directory} />
+  </section>;
+}
+
 export default function ContractorList(props: ContractorListProps) {
   const {
     page,
     isManager,
-    contractorsOnly,
-    technicians = [],
-    users = [],
-    workOrders = [],
-    activeStatuses,
     nav,
     setFilterC,
     fire,
   } = props;
   const queryClient = useQueryClient();
+  const actorScope = directoryScopeKey(useDirectoryActor());
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [deactivateTarget, setDeactivateTarget] = useState<DeactivateTarget | null>(null);
   const [deactivating, setDeactivating] = useState(false);
-  const workloadQuery = useContractorWorkloadSummaryQuery(
-    page === "contractors" && isManager,
-  );
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [opening, setOpening] = useState("");
+  const [formBaseline, setFormBaseline] = useState(emptyForm);
+  const dismissal = useUnsavedChangesGuard({ enabled: Boolean(form.contractorId),
+    dirty: JSON.stringify(form) !== JSON.stringify(formBaseline), busy: saving,
+    onClose: () => { setForm(emptyForm); setError(""); } });
+  const detailAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => detailAbort.current?.abort(), []);
+  const directory = useDirectoryPage("contractor_directory", page === "contractors" && isManager);
 
-  const profilesById = useMemo<Map<string, PortalProfile>>(
-    () => new Map(users.map(profile => [profile.id, profile])),
-    [users],
-  );
-  const workOrdersByContractor = useMemo(() => {
-    const grouped: Record<string, ContractorWorkOrder[]> = {};
-    for (const workOrder of workOrders) {
-      if (!workOrder.contractor) continue;
-      (grouped[workOrder.contractor] ||= []).push(workOrder);
-    }
-    return grouped;
-  }, [workOrders]);
-  const techniciansByContractor = useMemo(() => {
-    const grouped: Record<string, ContractorTechnician[]> = {};
-    for (const technician of technicians) {
-      if (!technician.contractorId) continue;
-      (grouped[technician.contractorId] ||= []).push(technician);
-    }
-    for (const team of Object.values(grouped)) {
-      team.sort((left, right) =>
-        Number(right.isActive) - Number(left.isActive)
-        || String(left.name || "").localeCompare(String(right.name || "")),
-      );
-    }
-    return grouped;
-  }, [technicians]);
-  const fallbackContractorCounts = useMemo(() => {
-    const counts: Record<string, { active: number; capital: number }> = {};
-    for (const contractor of contractorsOnly) {
-      const contractorWorkOrders = workOrdersByContractor[contractor.id] || [];
-      counts[contractor.id] = {
-        active: contractorWorkOrders.filter(workOrder => activeStatuses.includes(workOrder.status)).length,
-        capital: contractorWorkOrders.filter(workOrder =>
-          ["capital", "pending_capital_completion"].includes(workOrder.status),
-        ).length,
-      };
-    }
-    return counts;
-  }, [activeStatuses, contractorsOnly, workOrdersByContractor]);
-  const contractorCounts = workloadQuery.data || fallbackContractorCounts;
-
-  const invalidate = async () => {
+  const invalidate = async (companyId: string, profileId: string | null) => {
+    const scope = JSON.stringify(actorScope);
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: PROFILES_KEY }),
-      queryClient.invalidateQueries({ queryKey: TECHNICIANS_KEY }),
-      queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-      queryClient.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY }),
+      queryClient.invalidateQueries({
+        queryKey: [...DIRECTORY_KEY, actorScope],
+        predicate: ({ queryKey }) => {
+          if (JSON.stringify(queryKey[1]) !== scope) return false;
+          const kind = queryKey[2];
+          const domain = queryKey[3];
+          if (kind === "page") {
+            // Renames, invitations and activation change contact/filter search
+            // membership; card counts change without loading another company.
+            if (["contractor_directory", "contacts", "contractor_filter"].includes(String(domain))) return true;
+            return ["company_technicians", "technician_management"].includes(String(domain)) && queryKey[4] === companyId;
+          }
+          if (kind === "selection") {
+            if (["company_technicians", "technician_management", "technician_detail", "technician_profile"].includes(String(domain))) {
+              return queryKey[4] === companyId;
+            }
+            if (domain === "contractor_directory" && queryKey[5] === companyId) return true;
+            return Boolean(profileId && queryKey[5] === profileId
+              && ["profile_labels", "contact_detail", "contacts", "contractor_filter"].includes(String(domain)));
+          }
+          return kind === "labels" && Boolean(profileId && Array.isArray(queryKey[3]) && queryKey[3].includes(profileId));
+        },
+        refetchType: isPortalVisible() ? "active" : "none",
+      }, { cancelRefetch: false }),
     ]);
   };
 
   const openAdd = (contractor: ContractorProfile) => {
+    detailAbort.current?.abort();
+    setOpening("");
     setError("");
-    setForm({ ...emptyForm, contractorId: contractor.id });
+    const nextForm = { ...emptyForm, contractorId: contractor.id };
+    setFormBaseline(nextForm);
+    setForm(nextForm);
   };
 
-  const openEdit = (
+  const openEdit = async (
     contractor: ContractorProfile,
     technician: ContractorTechnician,
   ) => {
-    const profile = technician.profileId
-      ? profilesById.get(technician.profileId)
-      : null;
+    detailAbort.current?.abort();
+    const controller = new AbortController();
+    detailAbort.current = controller;
+    setOpening(technician.id);
     setError("");
-    setForm({
-      contractorId: contractor.id,
-      profileId: technician.profileId || "",
-      name: profile?.name || technician.name || "",
-      email: profile?.email || "",
-      phone: profile?.phone || "",
-      accessLevel: profile?.contractorAccessLevel || "report_only",
-    });
+    try {
+      const profile = await loadDirectorySelection("technician_detail", technician.id, contractor.id,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]));
+      if (controller.signal.aborted) return;
+      if (!profile?.profileId) { setError("Technician access is no longer available. Refresh the directory."); return; }
+      const nextForm = { contractorId: contractor.id, profileId: profile.profileId, name: profile.name,
+        email: profile.email || "", phone: profile.phone || "", accessLevel: profile.contractorAccessLevel || "report_only" };
+      setFormBaseline(nextForm);
+      setForm(nextForm);
+    } catch (cause) { if (!controller.signal.aborted) setError(safeErrorMessage(cause)); }
+    finally { if (!controller.signal.aborted) setOpening(""); }
   };
 
   const saveTechnician = async (event: FormEvent) => {
@@ -218,7 +213,7 @@ export default function ContractorList(props: ContractorListProps) {
         method: "POST",
         body: JSON.stringify(form),
       });
-      await invalidate();
+      await invalidate(payload.contractorId || form.contractorId, payload.profileId || form.profileId || null);
       setForm(emptyForm);
       const delivery = payload.emailDelivery === "invitation"
         ? " Invitation sent."
@@ -227,7 +222,7 @@ export default function ContractorList(props: ContractorListProps) {
           : "";
       fire?.(`Technician access saved.${delivery}`);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save technician");
+      setError(safeErrorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -242,13 +237,11 @@ export default function ContractorList(props: ContractorListProps) {
         method: "DELETE",
         body: JSON.stringify({ profileId: deactivateTarget.profileId }),
       });
-      await invalidate();
+      await invalidate(payload.contractorId || deactivateTarget.contractorId || "", payload.profileId || deactivateTarget.profileId);
       setDeactivateTarget(null);
       fire?.(payload.warning || "Technician access deactivated; history was preserved.");
     } catch (deactivateError) {
-      setError(deactivateError instanceof Error
-        ? deactivateError.message
-        : "Could not deactivate technician");
+      setError(safeErrorMessage(deactivateError));
     } finally {
       setDeactivating(false);
     }
@@ -258,11 +251,12 @@ export default function ContractorList(props: ContractorListProps) {
 
   return (
     <>
+      <input type="search" value={directory.search} onChange={event => directory.setSearch(event.target.value)}
+        aria-label="Search contractors" placeholder="Search contractor or company…" style={{ width: "100%", padding: 10, marginBottom: 12 }} />
+      <DirectoryError directory={directory} />
+      {error && !form.contractorId && !deactivateTarget && <div role="alert" style={{ color: T.danger }}>{error}</div>}
       <div className="contractors-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, animation: "fadeUp 0.3s" }}>
-        {contractorsOnly.map((contractor, index) => {
-          const counts = contractorCounts[contractor.id] || { active: 0, capital: 0 };
-          const team = techniciansByContractor[contractor.id] || [];
-          const activeTeamCount = team.filter(technician => technician.isActive).length;
+        {!directory.isError && directory.items.map((contractor, index) => {
           return (
             <div key={contractor.id} className="card card-hover" style={{ overflow: "hidden", animation: `fadeUp 0.35s ${index * 0.04}s both` }}>
               <div style={{ padding: "20px 20px 15px", borderBottom: `1px solid ${T.borderSoft}` }}>
@@ -283,9 +277,9 @@ export default function ContractorList(props: ContractorListProps) {
 
               <div style={{ padding: "13px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, borderBottom: `1px solid ${T.borderSoft}` }}>
                 {[
-                  ["Active", counts.active, T.accent],
-                  ["Capital", counts.capital, T.violet],
-                  ["Team", activeTeamCount, T.success],
+                  ["Active", contractor.activeCount ?? 0, T.accent],
+                  ["Capital", contractor.capitalCount ?? 0, T.violet],
+                  ["Team", contractor.teamActiveCount ?? 0, T.success],
                 ].map(([label, value, color]) => (
                   <div key={String(label)}>
                     <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, marginBottom: 3 }}>{label}</div>
@@ -299,34 +293,11 @@ export default function ContractorList(props: ContractorListProps) {
                   <div style={{ fontSize: 10, fontWeight: 800, color: T.ink, textTransform: "uppercase", letterSpacing: 0.7 }}>Technicians</div>
                   <button type="button" className="btn-soft" onClick={() => openAdd(contractor)} style={{ minHeight: 30, padding: "5px 9px", fontSize: 10 }}>+ Add</button>
                 </div>
-                <div style={{ display: "grid", gap: 6 }}>
-                  {team.map(technician => {
-                    const profile = technician.profileId
-                      ? profilesById.get(technician.profileId)
-                      : null;
-                    const isActive = technician.isActive && profile?.active !== false;
-                    const access = profile?.contractorAccessLevel;
-                    return (
-                      <div key={technician.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 9px", borderRadius: 8, background: T.surfaceSoft, border: `1px solid ${T.borderSoft}` }}>
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ display: "block", color: isActive ? T.ink : T.subtle, fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>{profile?.name || technician.name}</span>
-                          <span style={{ display: "block", color: T.subtle, fontSize: 9, marginTop: 2 }}>
-                            {!technician.profileId
-                              ? "Legacy record"
-                              : `${access === "invoice" ? "Invoice + field" : "Field reporting"}${isActive ? "" : " · Inactive"}`}
-                          </span>
-                        </span>
-                        {technician.profileId && (
-                          <span style={{ display: "flex", gap: 5 }}>
-                            <button type="button" className="btn-soft" onClick={() => openEdit(contractor, technician)} style={{ minHeight: 28, padding: "4px 7px", fontSize: 9 }}>{isActive ? "Edit" : "Reactivate"}</button>
-                            {isActive && <button type="button" className="btn-soft" onClick={() => setDeactivateTarget({ ...technician, profile })} style={{ minHeight: 28, padding: "4px 7px", color: T.danger, fontSize: 9 }}>Remove</button>}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {team.length === 0 && <div style={{ color: T.subtle, fontSize: 10 }}>No individual technicians yet.</div>}
-                </div>
+                <button type="button" className="btn-soft" aria-expanded={expanded === contractor.id}
+                  onClick={() => setExpanded(current => current === contractor.id ? null : contractor.id)}>
+                  {expanded === contractor.id ? "Hide technicians" : "View technicians"}
+                </button>
+                {expanded === contractor.id && <ContractorTeam contractor={contractor} onEdit={openEdit} onDeactivate={setDeactivateTarget} opening={opening} />}
               </div>
 
               <div style={{ padding: "0 20px 18px" }}>
@@ -336,9 +307,11 @@ export default function ContractorList(props: ContractorListProps) {
           );
         })}
       </div>
+      {!directory.waiting && !directory.isError && directory.items.length === 0 && <div role="status">No matching contractors on this page.</div>}
+      <DirectoryPageControls directory={directory} />
 
       {form.contractorId && (
-        <Modal onClose={() => { if (!saving) setForm(emptyForm); }} title={form.profileId ? "Edit technician access" : "Invite technician"} width={500}>
+        <Modal onRequestClose={dismissal.requestClose} dismissDisabled={saving} title={form.profileId ? "Edit technician access" : "Invite technician"} width={500}>
           <form onSubmit={saveTechnician} style={{ display: "grid", gap: 12 }}>
             <label style={{ color: T.muted, fontSize: 10 }}>Name
               <input required value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} style={{ display: "block", width: "100%", minHeight: 42, marginTop: 5, padding: "9px 11px", border: `1px solid ${T.border}`, borderRadius: 8 }} />
@@ -358,7 +331,7 @@ export default function ContractorList(props: ContractorListProps) {
             {!form.profileId && <div style={{ color: T.subtle, fontSize: 10, lineHeight: 1.5 }}>Supabase will email an invitation. This account will belong only to the selected contractor company and will not be assignable as a separate contractor.</div>}
             {error && <div role="alert" style={{ color: T.danger, fontSize: 10 }}>{error}</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button type="button" className="btn-soft" disabled={saving} onClick={() => setForm(emptyForm)}>Cancel</button>
+              <button type="button" className="btn-soft" disabled={saving} onClick={() => dismissal.requestClose("cancel_button")}>Cancel</button>
               <button type="submit" className="btn-primary" disabled={saving} style={{ opacity: saving ? 0.65 : 1 }}>{saving ? "Saving…" : form.profileId ? "Save access" : "Send invitation"}</button>
             </div>
           </form>
@@ -366,9 +339,9 @@ export default function ContractorList(props: ContractorListProps) {
       )}
 
       {deactivateTarget && (
-        <Modal onClose={() => { if (!deactivating) setDeactivateTarget(null); }} title="Remove technician access" width={440}>
+        <Modal onClose={() => { if (!deactivating) setDeactivateTarget(null); }} dismissDisabled={deactivating} title="Remove technician access" width={440}>
           <div style={{ color: T.muted, fontSize: 12, lineHeight: 1.55 }}>
-            Deactivate <strong style={{ color: T.ink }}>{deactivateTarget.profile?.name || deactivateTarget.name}</strong>? Their login and current job access will be removed. Work-order, invoice, and assignment history will remain intact.
+            Deactivate <strong style={{ color: T.ink }}>{deactivateTarget.name}</strong>? Their login and current job access will be removed. Work-order, invoice, and assignment history will remain intact.
           </div>
           {error && <div role="alert" style={{ marginTop: 10, color: T.danger, fontSize: 10 }}>{error}</div>}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
@@ -377,6 +350,7 @@ export default function ContractorList(props: ContractorListProps) {
           </div>
         </Modal>
       )}
+      {dismissal.dialog}
     </>
   );
 }

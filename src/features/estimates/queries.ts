@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { useDirectoryActor } from "../directory/queries";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
 import {
   loadContractorEstimateTemplates,
   loadContractorEstimatesForWorkOrder,
@@ -7,21 +9,23 @@ import {
 export const CONTRACTOR_ESTIMATES_KEY = ["contractor-estimates"] as const;
 export const CONTRACTOR_ESTIMATE_TEMPLATES_KEY = ["contractor-estimate-templates"] as const;
 
-export const contractorEstimatesKey = (workOrderId: string) => [
+export const contractorEstimatesKey = (workOrderId: string, scope?: string) => [
   ...CONTRACTOR_ESTIMATES_KEY,
   workOrderId,
+  ...(scope === undefined ? [] : [scope]),
 ] as const;
 
 export function useContractorEstimatesQuery(
   workOrderId: string | null | undefined,
   enabled = true,
 ) {
+  const actor = useDirectoryActor();
   const id = String(workOrderId || "");
   return useQuery({
-    queryKey: contractorEstimatesKey(id),
+    queryKey: contractorEstimatesKey(id, directoryActorScope(actor)),
     queryFn: () => loadContractorEstimatesForWorkOrder(id),
     staleTime: 30_000,
-    enabled: enabled && id.length > 0,
+    enabled: enabled && actor?.active === true && id.length > 0,
   });
 }
 

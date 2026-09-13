@@ -6,7 +6,6 @@ import test from "node:test";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/0111_reject_unassigned_work_orders.sql");
 const audit = read("supabase/audits/0111_reject_unassigned_work_orders_verification.sql");
-const dataLayer = read("src/lib/db.ts");
 const hook = read("src/features/work-orders/useWorkOrders.ts");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const shell = read("src/components/PortalShell.tsx");
@@ -91,10 +90,10 @@ test("invoice attachment serializes with rejection and rejects archived parents"
   );
 });
 
-test("the portal confirms a reason and waits for the RPC before navigating", () => {
-  assert.match(dataLayer, /rpc\("reject_unassigned_work_order"/);
-  assert.match(hook, /await rejectUnassignedWorkOrder\(woId, normalizedReason\)/);
-  assert.match(hook, /await rejectUnassignedWorkOrder[\s\S]*setWorkOrders\(prev => prev\.filter/);
+test("the portal confirms a reason and waits for the RPC before navigating", async () => {
+  const { exerciseAssignmentFacade } = await import("./assignment-test-support/facade");
+  await exerciseAssignmentFacade("reject");
+  await exerciseAssignmentFacade("legacyDelete");
   assert.match(hook, /setPage\("dashboard"\)/);
   assert.match(detail, /canRejectUnassignedWorkOrder/);
   assert.match(detail, /setModal\("rejectUnassignedWO"\)/);

@@ -15,6 +15,7 @@ import { intakeErrorMessage } from "./intakeError";
 import { sendWorkOrderPriorityEscalationNotification } from "./notificationService";
 import { createServerClient } from "./supabase/server";
 import type { Json } from "./supabase/database.types";
+import { logIntakeOutcome } from "./server/logIntakeOutcome";
 
 const PRIORITY_DELIVERY_BATCH_SIZE = 10;
 
@@ -225,8 +226,8 @@ export const drainPendingPriorityEscalationNotifications = async (
   await Promise.all((data || []).map(async event => {
     try {
       await deliverPriorityEscalationNotification(event.id, accessToken);
-    } catch (deliveryError) {
-      console.error("Pending priority escalation delivery failed", deliveryError);
+    } catch {
+      logIntakeOutcome("intake_priority_delivery_failed", event.id);
     }
   }));
 };

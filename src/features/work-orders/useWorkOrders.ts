@@ -1,19 +1,23 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { reportClientFailure } from "../../lib/clientDiagnostics";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  updateWorkOrder, insertActivity, updateInvoiceState,
-  transitionWorkOrderContractor, declineCapitalWorkOrder,
+  updateWorkOrder, insertActivity,
+  transitionWorkOrderContractor, administrativelyCloseVisitAndTransfer, declineCapitalWorkOrder,
   deleteActivity, deleteWorkOrder,
   rejectUnassignedWorkOrder, duplicateWorkOrderForReassignment,
-  uploadPhotos, removePhoto,
+  removePhoto,
   insertWoPart, updateWoPart, deleteWoPart,
   requestP1PartOrder, setP1PartOrderStatusWithCost,
   markActivitySevenElevenSynced,
   markActivityContractorAttention, acknowledgeContractorAttention,
-  openWorkOrderVisit, closeWorkOrderVisit, completeWorkOrderOnce,
+  setWorkOrderEta, startWorkOrderVisit, pauseWorkOrderForParts, completeWorkOrderOnce,
+  flagWorkOrderCapital,
   moveWorkOrderStraightToBilling,
   completeCapitalWork,
   closeWorkOrderWithoutInvoice,
@@ -22,8 +26,7 @@ import {
   finishContractorInvoicing,
   assignContractorTechnician,
   reviewContractorInvoice,
-  loadInvoiceById,
-  loadInvoicesPage,
+  loadInvoiceSummaryById,
   loadWorkOrderById,
   loadWorkOrdersPage,
 } from "../../lib/db";
@@ -46,13 +49,13 @@ import {
   P1_PART_COSTS_KEY,
   BILLABLE_P1_PARTS_KEY,
   workOrderDetailsKey,
+  workOrderByIdKey,
 } from "./queries";
 import {
   INVOICE_BY_ID_KEY,
   INVOICE_PAGES_KEY,
   INVOICES_KEY,
 } from "../invoices/queries";
-import { contractorInvoiceWorkOrderStatus } from "../../lib/contractorInvoiceReview";
 import { acquireInvoiceMutationLocks } from "../../lib/invoiceMutationGuard";
 import {
   isRpcConflict,
@@ -68,6 +71,13 @@ import {
   type ContractorNotificationDelivery,
 } from "../../lib/activityNotificationPolicy";
 import { assignmentBoundaryPatch } from "../../lib/workOrderAssignmentBoundary";
+import { lifecycleContextFor, safeLifecycleError } from "../../lib/workOrderLifecycleCommands";
+import { createBillingReadyAttempt } from "../../lib/workOrderBillingCommands";
+import { createAssignmentAttempts, safeAssignmentError } from "../../lib/workOrderAssignmentCommands";
+import { createWorkOrderPhotoPorts } from "../../lib/privateObjectClient";
+import { createPhotoUploadController, PhotoUploadError, type PhotoUploadController, type PhotoUploadItem } from "../photos/photoUploadController";
+import { loadAutoAssignmentCandidate, loadDirectorySelection } from "../directory/api";
+import { directoryActorScope, workOrderCountKey, workOrderChildCountKey, invoiceCountKey } from "../../lib/counts/queryKeys";
 
 const PART_STATUS_LABEL: Record<string, string> = {
   ordered: "Ordered",
@@ -77,24 +87,54 @@ const PART_STATUS_LABEL: Record<string, string> = {
 };
 
 export default function useWorkOrders({
-  currentUser, USERS, workOrdersData, invoices, setInvoices, fire,
+  currentUser, workOrdersData, invoices, setInvoices, fire,
   selectedWorkOrderId, selectedWorkOrderDetails,
   startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
   setSelectedWO, setAiNote, setPage, isManager,
-  noteText, setNoteText, SERVICE_TO_TRADES, contractorFor,
-  getUser, dateNow, fmt,
+  noteText, setNoteText, SERVICE_TO_TRADES,
+  dateNow, fmt,
 }: any) {
   const qc = useQueryClient();
+  const readScope = directoryActorScope(currentUser);
   const [workOrders, setWorkOrders] = useState<any[]>(workOrdersData ?? []);
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
+  const lifecycleInFlight = useRef(new Set<string>());
+  const assignmentAttempts = useRef(createAssignmentAttempts());
+  const assignmentInFlight = useRef(new Set<string>());
+  const billingReadyAttempts = useRef(new Map<string, ReturnType<typeof createBillingReadyAttempt>>());
+  const photoControllers = useRef(new Map<string, { controller: PhotoUploadController; assignmentVersion: number; workflowCycle: number }>());
+  const photoUploadInFlight = useRef(new Set<string>());
+  const photoDeleteInFlight = useRef(new Set<string>());
+  const photoDeleteTargets = useRef(new Map<string, string>());
+  const photoSessionGeneration = useRef({ value: 0 });
+  const [photoUploadItems, setPhotoUploadItems] = useState<Record<string, readonly PhotoUploadItem[]>>({});
+  const [photoDeleteErrors, setPhotoDeleteErrors] = useState<Record<string, string>>({});
   const setLoading = (key: string, val: boolean) =>
     setLoadingStates(prev => ({ ...prev, [key]: val }));
+
+  useEffect(() => {
+    const session = photoSessionGeneration.current;
+    session.value++;
+    setPhotoUploadItems({});
+    setPhotoDeleteErrors({});
+    setLoadingStates(previous => Object.fromEntries(Object.entries(previous)
+      .filter(([key]) => !key.startsWith("addPhotos_") && !key.startsWith("removePhoto_"))));
+    const controllers = photoControllers.current;
+    const uploads = photoUploadInFlight.current;
+    const deletions = photoDeleteInFlight.current;
+    const targets = photoDeleteTargets.current;
+    return () => {
+      session.value++;
+      for (const { controller } of controllers.values()) controller.dispose();
+      controllers.clear(); uploads.clear(); deletions.clear(); targets.clear();
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!workOrdersData) return;
     setWorkOrders(current => {
       const currentById = new Map(current.map(workOrder => [workOrder.id, workOrder]));
-      return workOrdersData.map(baseWorkOrder => {
+      return workOrdersData.map((baseWorkOrder: { id: string; assignmentHistory?: unknown[] }) => {
         const existing = currentById.get(baseWorkOrder.id);
         if (!existing?.detailsLoaded) return baseWorkOrder;
         return {
@@ -128,7 +168,7 @@ export default function useWorkOrders({
     qc.setQueryData(WORK_ORDERS_KEY, snapshot);
     if (snapshot) {
       setWorkOrders((snapshot as any[]).map(workOrder => {
-        const cachedDetails = qc.getQueryData(workOrderDetailsKey(workOrder.id));
+        const cachedDetails = qc.getQueryData(workOrderDetailsKey(workOrder.id, readScope));
         return cachedDetails
           ? { ...workOrder, ...(cachedDetails as Record<string, unknown>) }
           : workOrder;
@@ -142,6 +182,8 @@ export default function useWorkOrders({
   const invalidateWorkOrders = () => {
     void qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
     void qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
+    void qc.invalidateQueries({ queryKey: workOrderCountKey(readScope) });
+    void qc.invalidateQueries({ queryKey: workOrderChildCountKey(readScope) });
     void qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY });
     void qc.invalidateQueries({ queryKey: WORK_ORDER_DETAILS_KEY });
     void qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY });
@@ -150,6 +192,7 @@ export default function useWorkOrders({
   const invalidateInvoices = () => {
     void qc.invalidateQueries({ queryKey: INVOICES_KEY });
     void qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY });
+    void qc.invalidateQueries({ queryKey: invoiceCountKey(readScope) });
     void qc.invalidateQueries({ queryKey: INVOICE_BY_ID_KEY });
   };
   const invalidateBoth = () => {
@@ -267,21 +310,18 @@ export default function useWorkOrders({
       const token = data.session?.access_token;
       if (!token) return;
 
-      const res = await fetch("/api/notifications/dispatch", {
+      await apiFetch("/api/notifications/dispatch", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ workOrderId, contractorId }),
+        signal: AbortSignal.timeout(5_000),
       });
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        console.error("Dispatch notification request failed", payload.error || res.statusText);
-      }
-    } catch (err) {
-      console.error("Dispatch notification request error", err);
+    } catch {
+      void reportClientFailure({ source: "dispatch_status", message: "WORKER_UNAVAILABLE" });
     }
   };
 
@@ -294,7 +334,7 @@ export default function useWorkOrders({
       const token = data.session?.access_token;
       if (!token) return "request_failed";
 
-      const response = await fetch("/api/notifications/assignment-removal", {
+      const response = await apiFetch("/api/notifications/assignment-removal", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -303,16 +343,9 @@ export default function useWorkOrders({
         body: JSON.stringify({ deliveryId }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        console.error(
-          "Outgoing contractor notification request failed",
-          payload.error || response.statusText,
-        );
-        return payload.delivery || "request_failed";
-      }
       return payload.delivery || (payload.success ? "sent" : "request_failed");
-    } catch (error) {
-      console.error("Outgoing contractor notification request error", error);
+    } catch {
+      void reportClientFailure({ source: "assignment_removal", message: "DELIVERY_UNKNOWN" });
       return "request_failed";
     }
   };
@@ -329,10 +362,14 @@ export default function useWorkOrders({
   };
 
   const doAssign = async (woId: string, contractorId: string) => {
-    const c = getUser(contractorId);
-    if (!c) { fire("Contractor not found"); return false; }
+    if (assignmentInFlight.current.has(woId)) return false;
+    assignmentInFlight.current.add(woId);
     setLoading("assign_" + woId, true);
     try {
+    // Selection is exact and independently authorized, not dependent on the
+    // currently visible search page. The write command revalidates eligibility.
+    const c = await loadDirectorySelection("assignable_contractors", contractorId);
+    if (!c) { fire("Contractor not found"); return false; }
     let wo = workOrders.find(workOrder => workOrder.id === woId) || null;
     if (!wo) {
       try {
@@ -344,13 +381,14 @@ export default function useWorkOrders({
     }
     if (!wo) { fire("Work order not found"); return false; }
     const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
-    let transition = null;
+    let transition: Awaited<ReturnType<typeof transitionWorkOrderContractor>> | undefined;
     const ok = await dbCall(async () => {
-      transition = await transitionWorkOrderContractor(
+      transition = await assignmentAttempts.current.run(wo, "transition", contractorId, context => transitionWorkOrderContractor(
         woId,
         contractorId,
-        Number(wo.contractorAssignmentVersion || 0),
-      );
+        context.expectedAssignmentVersion,
+        context,
+      ));
     }, "Dispatch failed");
     if (!ok || !transition) return false;
     patchLocalWO(
@@ -358,15 +396,21 @@ export default function useWorkOrders({
       assignmentBoundaryPatch(wo, transition),
       localActivity(text, "system", false, "work_order_assignment", false, true),
     );
-    fire(`Dispatched to ${c.name}`);
-    await notifyDispatch(woId, contractorId);
+    fire(`Assigned to ${c.name}. See Receiving dispatch for email delivery status.`);
+    void notifyDispatch(woId, contractorId);
     return true;
+    } catch (error: unknown) {
+      fire(`Dispatch failed: ${safeAssignmentError(error).message}`);
+      return false;
     } finally {
+      assignmentInFlight.current.delete(woId);
       setLoading("assign_" + woId, false);
     }
   };
 
   const doUnassign = async (woId: string) => {
+    if (assignmentInFlight.current.has(woId)) return false;
+    assignmentInFlight.current.add(woId);
     setLoading("unassign_" + woId, true);
     try {
     let wo = workOrders.find(workOrder => workOrder.id === woId) || null;
@@ -380,13 +424,14 @@ export default function useWorkOrders({
     }
     if (!wo) { fire("Work order not found"); return false; }
     const text = `Work order unassigned by ${currentUser.name}.`;
-    let transition = null;
+    let transition: Awaited<ReturnType<typeof transitionWorkOrderContractor>> | undefined;
     const ok = await dbCall(async () => {
-      transition = await transitionWorkOrderContractor(
+      transition = await assignmentAttempts.current.run(wo, "transition", null, context => transitionWorkOrderContractor(
         woId,
         null,
-        Number(wo.contractorAssignmentVersion || 0),
-      );
+        context.expectedAssignmentVersion,
+        context,
+      ));
     }, "Unassign failed");
     if (!ok || !transition) return false;
     patchLocalWO(
@@ -398,6 +443,7 @@ export default function useWorkOrders({
     fire(`Work order unassigned.${assignmentRemovalMessage(delivery)}`);
     return true;
     } finally {
+      assignmentInFlight.current.delete(woId);
       setLoading("unassign_" + woId, false);
     }
   };
@@ -411,7 +457,7 @@ export default function useWorkOrders({
       try {
         wo = await loadWorkOrderById(woId);
       } catch (error: any) {
-        fire(`Delete failed: ${error.message || error}`);
+        fire(`Delete failed: ${safeErrorMessage(error)}`);
         return false;
       }
     }
@@ -441,12 +487,16 @@ export default function useWorkOrders({
       return false;
     }
 
+    if (assignmentInFlight.current.has(woId)) return false;
+    assignmentInFlight.current.add(woId);
     setLoading("rejectUnassignedWO_" + woId, true);
     try {
-      await rejectUnassignedWorkOrder(woId, normalizedReason);
+      const wo = workOrders.find(workOrder => workOrder.id === woId) || await loadWorkOrderById(woId);
+      await assignmentAttempts.current.run(wo, "reject", normalizedReason,
+        context => rejectUnassignedWorkOrder(woId, normalizedReason, context));
       setWorkOrders(prev => prev.filter(workOrder => workOrder.id !== woId));
-      qc.removeQueries({ queryKey: [...WORK_ORDER_BY_ID_KEY, woId], exact: true });
-      qc.removeQueries({ queryKey: workOrderDetailsKey(woId), exact: true });
+      qc.removeQueries({ queryKey: workOrderByIdKey(woId, readScope), exact: true });
+      qc.removeQueries({ queryKey: workOrderDetailsKey(woId, readScope), exact: true });
       setSelectedWO(null);
       setAiNote(null);
       setPage("dashboard");
@@ -455,17 +505,22 @@ export default function useWorkOrders({
       return true;
     } catch (error: unknown) {
       invalidateWorkOrders();
-      fire(`Reject failed: ${rpcErrorMessage(error)}`);
+      fire(`Reject failed: ${safeAssignmentError(error).message}`);
       return false;
     } finally {
+      assignmentInFlight.current.delete(woId);
       setLoading("rejectUnassignedWO_" + woId, false);
     }
   };
 
   const doDuplicateForReassignment = async (woId: string) => {
+    if (assignmentInFlight.current.has(woId)) return null;
+    assignmentInFlight.current.add(woId);
     setLoading("duplicateForReassignment_" + woId, true);
     try {
-      const result = await duplicateWorkOrderForReassignment(woId);
+      const wo = workOrders.find(workOrder => workOrder.id === woId) || await loadWorkOrderById(woId);
+      const result = await assignmentAttempts.current.run(wo, "duplicate", null,
+        context => duplicateWorkOrderForReassignment(woId, context));
       invalidateWorkOrders();
       setAiNote(null);
       setSelectedWO(result.workOrderId);
@@ -475,9 +530,10 @@ export default function useWorkOrders({
       return result;
     } catch (error: unknown) {
       invalidateWorkOrders();
-      fire(`Duplicate failed: ${rpcErrorMessage(error)}`);
+      fire(`Duplicate failed: ${safeAssignmentError(error).message}`);
       return null;
     } finally {
+      assignmentInFlight.current.delete(woId);
       setLoading("duplicateForReassignment_" + woId, false);
     }
   };
@@ -488,25 +544,30 @@ export default function useWorkOrders({
       try {
         wo = await loadWorkOrderById(woId);
       } catch (error: any) {
-        fire(`Could not load work order: ${error.message || error}`);
+        fire(`Could not load work order: ${safeErrorMessage(error)}`);
         return false;
       }
     }
     if (!wo) { fire("Work order not found"); return false; }
-    const oldName = wo?.contractor ? (getUser(wo.contractor)?.name || "Unassigned") : "Unassigned";
-    const newC = getUser(newContractorId);
-    if (!newC) { fire("Contractor not found"); return false; }
     if (wo?.contractor === newContractorId) { fire("Already assigned to that contractor"); return false; }
+    if (assignmentInFlight.current.has(woId)) return false;
+    assignmentInFlight.current.add(woId);
     setLoading("reassign_" + woId, true);
     try {
+    const newC = await loadDirectorySelection("assignable_contractors", newContractorId);
+    if (!newC) { fire("Contractor not found"); return false; }
+    const previous = wo.contractor
+      ? await loadDirectorySelection("profile_labels", wo.contractor) : null;
+    const oldName = previous?.name || (wo.contractor ? "Previous contractor" : "Unassigned");
     const text = `Reassigned from ${oldName} to ${newC.name} by ${currentUser.name}.`;
-    let transition = null;
+    let transition: Awaited<ReturnType<typeof transitionWorkOrderContractor>> | undefined;
     const ok = await dbCall(async () => {
-      transition = await transitionWorkOrderContractor(
+      transition = await assignmentAttempts.current.run(wo, "transition", newContractorId, context => transitionWorkOrderContractor(
         woId,
         newContractorId,
-        Number(wo.contractorAssignmentVersion || 0),
-      );
+        context.expectedAssignmentVersion,
+        context,
+      ));
     }, "Reassign failed");
     if (!ok || !transition) return false;
     patchLocalWO(
@@ -518,10 +579,48 @@ export default function useWorkOrders({
       notifyAssignmentRemoval(transition.deliveryId),
       notifyDispatch(woId, newContractorId),
     ]);
-    fire(`Reassigned to ${newC.name}.${assignmentRemovalMessage(delivery)}`);
+    fire(`Reassigned to ${newC.name}. See Receiving dispatch for the receiving email status.${assignmentRemovalMessage(delivery)}`);
     return true;
+    } catch (error: unknown) {
+      fire(`Reassign failed: ${safeAssignmentError(error).message}`);
+      return false;
     } finally {
+      assignmentInFlight.current.delete(woId);
       setLoading("reassign_" + woId, false);
+    }
+  };
+
+  const doAdministrativeTransfer = async (woId: string, contractorId: string | null, reason: string, confirmed: boolean) => {
+    if (assignmentInFlight.current.has(woId)) return false;
+    assignmentInFlight.current.add(woId);
+    setLoading("administrativeTransfer_" + woId, true);
+    try {
+      const wo = workOrders.find(w => w.id === woId) || await loadWorkOrderById(woId);
+      if (!wo) { fire("Work order not found"); return false; }
+      let transition: Awaited<ReturnType<typeof administrativelyCloseVisitAndTransfer>> | undefined;
+      const ok = await dbCall(async () => {
+        transition = await assignmentAttempts.current.run(wo, "administrative_transfer",
+          { contractorId, reason: reason.trim(), confirmed },
+          context => administrativelyCloseVisitAndTransfer(context, contractorId, reason, confirmed));
+      }, "Administrative transfer failed");
+      if (!ok || !transition) return false;
+      patchLocalWO(woId, assignmentBoundaryPatch(wo, transition));
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: workOrderDetailsKey(woId) }),
+        qc.invalidateQueries({ queryKey: ["work-order-visits", "billing", woId] }),
+      ]);
+      const [delivery] = await Promise.all([
+        notifyAssignmentRemoval(transition.deliveryId),
+        contractorId ? notifyDispatch(woId, contractorId) : Promise.resolve(),
+      ]);
+      fire(`Visit administratively closed and ${contractorId ? "work transferred" : "contractor unassigned"}. Duration requires review; the receiving contractor must start a new visit.${assignmentRemovalMessage(delivery)}`);
+      return true;
+    } catch (error) {
+      fire(safeAssignmentError(error).message);
+      return false;
+    } finally {
+      assignmentInFlight.current.delete(woId);
+      setLoading("administrativeTransfer_" + woId, false);
     }
   };
 
@@ -554,6 +653,8 @@ export default function useWorkOrders({
   // `eta` arrives as an ISO timestamp (timestamptz column). Persist the ISO
   // value but render a human-friendly version into the activity log.
   const doSetEta = async (woId: string, eta: string) => {
+    if (lifecycleInFlight.current.has(woId)) return false;
+    lifecycleInFlight.current.add(woId);
     setLoading("setEta_" + woId, true);
     try {
     const d = new Date(eta);
@@ -564,11 +665,14 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, { eta }, localActivity(text, "system", isManager));
     fire("ETA set");
-    await dbCall(async () => {
-      await updateWorkOrder(woId, { eta });
-      await insertActivity(woId, currentUser.name, text, "system", workflowAuditFor(woId, "eta_updated", { eta }));
+    return await dbCall(async () => {
+      const result = await setWorkOrderEta({
+        ...lifecycleContextFor(workOrders.find(w => w.id === woId)), eta,
+      });
+      patchLocalWO(woId, { lifecycleVersion: result.lifecycleVersion });
     }, "ETA save failed", () => restoreWorkOrders(snapshot));
     } finally {
+      lifecycleInFlight.current.delete(woId);
       setLoading("setEta_" + woId, false);
     }
   };
@@ -608,11 +712,13 @@ export default function useWorkOrders({
   };
 
   const doStartWork = async (woId: string, notes: string) => {
+    if (lifecycleInFlight.current.has(woId)) return false;
+    lifecycleInFlight.current.add(woId);
     setLoading("startWork_" + woId, true);
     try {
     const existing = workOrders.find(w => w.id === woId);
     const timeZone = timezoneForWorkOrder(existing);
-    const requestedStartIso = startDateInput && startTimeInput
+    const requestedStartIso = !existing?.assignmentTransferPendingVisit && startDateInput && startTimeInput
       ? storeLocalDateTimeToIso(startDateInput, startTimeInput, timeZone)
       : new Date().toISOString();
     const firstStartIso = existing?.startTimeRaw || requestedStartIso;
@@ -624,7 +730,7 @@ export default function useWorkOrders({
       minute: "2-digit",
     });
     const text = `Checked in and started work at ${formattedStart}.${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
-    const patch: any = { status: "wip", functionalStatus: "Work in Progress" };
+    const patch: Record<string, unknown> = { status: "wip", functionalStatus: "Work in Progress" };
     if (!existing?.startTimeRaw) {
       patch.startTime = formattedStart;
       patch.startTimeRaw = firstStartIso;
@@ -632,26 +738,14 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "note", isManager, "check_in", true, false, "field_note"));
     fire("Work started · 7-Eleven update pending");
-    await dbCall(async () => {
-      const dbPatch: any = { status: "wip", functionalStatus: "Work in Progress" };
-      if (!existing?.startTimeRaw) dbPatch.startTime = firstStartIso;
-      await updateWorkOrder(woId, dbPatch);
-      await openWorkOrderVisit(woId, requestedStartIso);
-      await insertActivity(
-        woId,
-        currentUser.name,
-        text,
-        "note",
-        workflowAuditFor(
-          woId,
-          "check_in",
-          { checkedInAt: requestedStartIso, notes: notes.trim() || null },
-          "field_note",
-          true,
-        ),
-      );
+    return await dbCall(async () => {
+      const result = await startWorkOrderVisit({
+        ...lifecycleContextFor(existing), checkedInAt: requestedStartIso, notes: notes.trim(),
+      }, existing?.status === "parts" || existing?.assignmentTransferPendingVisit === true);
+      patchLocalWO(woId, { lifecycleVersion: result.lifecycleVersion, assignmentTransferPendingVisit: false });
     }, "Start work failed", () => restoreWorkOrders(snapshot));
     } finally {
+      lifecycleInFlight.current.delete(woId);
       setLoading("startWork_" + woId, false);
     }
   };
@@ -668,6 +762,8 @@ export default function useWorkOrders({
     notes: string,
     partsList?: { description: string; partNumber?: string; qty?: number; expectedReturnDate?: string }[]
   ) => {
+    if (lifecycleInFlight.current.has(woId)) return false;
+    lifecycleInFlight.current.add(woId);
     setLoading("pauseWork_" + woId, true);
     try {
     const existing = workOrders.find(w => w.id === woId);
@@ -701,53 +797,33 @@ export default function useWorkOrders({
       minute: "2-digit",
     });
     const text = `Work paused at ${formattedPause}: ${reason}.${partsSummary}${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
-    const updates: any = { status: "parts", functionalStatus: "Awaiting Parts" };
+    const updates: Record<string, unknown> = { status: "parts", functionalStatus: "Awaiting Parts" };
     if (partLabel) updates.partNeeded = partLabel;
     if (legacyEta) updates.partEta = legacyEta;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const partsSnapshot = qc.getQueryData(WO_PARTS_KEY);
     patchLocalWO(woId, updates, localActivity(text, "note", isManager, "job_paused", true, false, "field_note"));
     fire("Paused — awaiting parts · 7-Eleven update pending");
-    await dbCall(async () => {
-      await updateWorkOrder(woId, updates);
-      await closeWorkOrderVisit(woId, pauseIso);
-      await insertActivity(
-        woId,
-        currentUser.name,
-        text,
-        "note",
-        workflowAuditFor(
-          woId,
-          "job_paused",
-          { pausedAt: pauseIso, reason, notes: notes || null },
-          "field_note",
-          true,
-        ),
-      );
-      if (cleanParts.length) {
-        const inserted: any[] = [];
-        for (const p of cleanParts) {
-          const row = await insertWoPart({
-            workOrderId: woId,
-            description: p.description.trim(),
-            partNumber: (p.partNumber || "").trim(),
-            qty: p.qty || 1,
-            status: "ordered",
-            expectedReturnDate: p.expectedReturnDate || null,
-          });
-          inserted.push(row);
-        }
-        // Optimistic cache append so the parts panel shows them instantly.
-        qc.setQueryData(WO_PARTS_KEY, (prev: any) =>
-          prev ? [...prev, ...inserted] : inserted
-        );
-        qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
-      }
+    return await dbCall(async () => {
+      if (reason !== "Awaiting parts" && reason !== "Temporary fix") throw safeLifecycleError({ code: "22023" });
+      const result = await pauseWorkOrderForParts({
+        ...lifecycleContextFor(existing), checkedOutAt: pauseIso, reason, notes,
+        parts: cleanParts.map(part => ({
+          description: part.description.trim(), partNumber: (part.partNumber || "").trim(),
+          qty: part.qty ?? 1, expectedReturnDate: part.expectedReturnDate || null,
+        })),
+        legacyPartNeeded: partLabel, legacyPartEta: legacyEta || null,
+      });
+      patchLocalWO(woId, { lifecycleVersion: result.lifecycleVersion });
+      // Parts were committed with the transition. Refresh the authoritative
+      // rows without risking a second mutation or duplicate cache append.
+      void qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
     }, "Pause failed", () => {
       restoreWorkOrders(snapshot);
       if (partsSnapshot) qc.setQueryData(WO_PARTS_KEY, partsSnapshot);
     });
     } finally {
+      lifecycleInFlight.current.delete(woId);
       setLoading("pauseWork_" + woId, false);
     }
   };
@@ -839,6 +915,7 @@ export default function useWorkOrders({
         if (snapshot) qc.setQueryData(WO_PARTS_KEY, snapshot);
       }, invalidatePartsAndWorkOrders);
       if (ok && entries.length) fire("Part updated");
+      return ok;
     } finally {
       setLoading("updatePart_" + partId, false);
     }
@@ -874,7 +951,7 @@ export default function useWorkOrders({
       fire("Added to P1 purchasing");
       return true;
     } catch (error: any) {
-      fire(`P1 purchasing request failed: ${error.message || error}`);
+      fire(`P1 purchasing request failed: ${safeErrorMessage(error)}`);
       return false;
     } finally {
       setLoading("p1Part_" + partId, false);
@@ -897,7 +974,7 @@ export default function useWorkOrders({
       fire(`P1 purchasing marked ${status}`);
       return true;
     } catch (error: any) {
-      fire(`P1 purchasing update failed: ${error.message || error}`);
+      fire(`P1 purchasing update failed: ${safeErrorMessage(error)}`);
       return false;
     } finally {
       setLoading("p1Part_" + partId, false);
@@ -905,6 +982,8 @@ export default function useWorkOrders({
   };
 
   const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null, completedAt?: string, resolutionNotes?: string) => {
+    if (lifecycleInFlight.current.has(woId)) return false;
+    lifecycleInFlight.current.add(woId);
     setLoading("closeComplete_" + woId, true);
     try {
       const endIso = completedAt || new Date().toISOString();
@@ -919,7 +998,7 @@ export default function useWorkOrders({
       });
       const cleanNotes = (resolutionNotes || "").trim();
       const text = `Job completed and clocked out at ${formattedEnd}. Asset: ${[make, model].filter(Boolean).join(" ")} / ${serial}. Resolution: ${resolution || "Repaired"}.${cleanNotes ? ` Closing notes: ${cleanNotes}` : ""}`;
-      const patch: any = {
+      const patch: Record<string, unknown> = {
         status: workOrderStatusAfterFieldCompletion(existing?.status),
         functionalStatus: "Completed",
         assetMake: make,
@@ -938,7 +1017,7 @@ export default function useWorkOrders({
         applied: boolean;
         reason?: string;
         workOrderStatus?: string;
-      } | null = null;
+      } | undefined;
       const saved = await dbCall(async () => {
         completionResult = await completeWorkOrderOnce(woId, {
           completedAt: endIso,
@@ -949,6 +1028,7 @@ export default function useWorkOrders({
           resolutionCode: resolution || null,
           resolutionNotes: cleanNotes || null,
           activityText: text,
+          context: lifecycleContextFor(existing),
         });
       }, "Close failed", () => restoreWorkOrders(snapshot), invalidateWorkOrders);
       if (saved && completionResult?.applied === false) {
@@ -960,29 +1040,39 @@ export default function useWorkOrders({
       }
       return saved;
     } finally {
+      lifecycleInFlight.current.delete(woId);
       setLoading("closeComplete_" + woId, false);
     }
   };
 
   const doMoveToInvoice = async (woId: string) => {
+    if (lifecycleInFlight.current.has(woId)) return false;
+    lifecycleInFlight.current.add(woId);
     setLoading("moveToInvoice_" + woId, true);
-    try {
-    const text = "7-Eleven portal updated. Moved to Pending 7-Eleven Submission.";
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(
-      woId,
-      { status: "pending_invoice" },
-      localActivity(text, "system", false, "staff_billing", false, true),
-    );
-    fire("Moved to Pending 7-Eleven Submission");
-    await dbCall(async () => {
-      await updateWorkOrder(woId, { status: "pending_invoice" });
-      await insertActivity(woId, "System", text, "system", {
-        eventKey: "staff_billing",
-        staffOnly: true,
-      });
-    }, "Update failed", () => restoreWorkOrders(snapshot));
+    try {
+      let attempt = billingReadyAttempts.current.get(woId);
+      if (!attempt) {
+        attempt = createBillingReadyAttempt(workOrders.find(workOrder => workOrder.id === woId));
+        billingReadyAttempts.current.set(woId, attempt);
+      }
+      const result = await attempt((name, args) => supabase().rpc(name, args));
+      billingReadyAttempts.current.delete(woId);
+      patchLocalWO(woId, { status: result.workOrderStatus, lifecycleVersion: result.lifecycleVersion },
+        result.applied ? localActivity("7-Eleven portal updated. Moved to Pending 7-Eleven Submission.",
+          "system", false, "staff_billing", false, true) : undefined);
+      invalidateWorkOrders();
+      fire("Moved to Pending 7-Eleven Submission");
+      return true;
+    } catch (error) {
+      const safe = safeLifecycleError(error);
+      if (["PT409", "42501", "22023"].includes(safe.code)) billingReadyAttempts.current.delete(woId);
+      restoreWorkOrders(snapshot);
+      invalidateWorkOrders();
+      fire(`Update failed: ${safe.message}`);
+      return false;
     } finally {
+      lifecycleInFlight.current.delete(woId);
       setLoading("moveToInvoice_" + woId, false);
     }
   };
@@ -1026,37 +1116,7 @@ export default function useWorkOrders({
     }
   };
 
-  // Multi-invoice rule:
-  // - WO returns to pending_invoice only when every non-draft invoice is
-  //   approved or entered in QuickBooks. A rejection is unresolved review work.
-  // - QuickBooks handoff NEVER closes the WO. Capital jobs run for weeks with
-  //   the contractor sending more invoices as work continues; a person
-  //   decides when the job is actually done (manual "Close work order"
-  //   button below). This helper therefore never returns "closed".
-  // - When no live invoices exist, returns null so the WO is left alone.
-  const computeWoStatusFromInvoices = (woId: string, override?: any[]) => {
-    return contractorInvoiceWorkOrderStatus(override ?? invoices, woId);
-  };
-  const loadWorkOrderInvoicesForMutation = async (workOrderId: string) => {
-    const loaded: any[] = [];
-    let cursor: string | null = null;
-    do {
-      const page = await loadInvoicesPage({
-        state: "all",
-        workOrderId,
-        sort: "recent",
-        direction: "desc",
-        limit: 100,
-        cursor,
-      });
-      loaded.push(...page.items);
-      cursor = page.hasMore ? page.nextCursor : null;
-    } while (cursor);
-    return loaded;
-  };
-
-  // Per-invoice approval is one atomic database operation: validate the
-  // current state, approve, recompute the parent WO, and write one structured
+  // The guarded review command checks current state, approves, recomputes the parent WO, and writes one structured
   // activity entry. Rejected siblings keep the WO in pending_approval.
   const doApproveInvoice = async (invoiceId: string) => {
     const releaseInvoiceLock = acquireInvoiceMutationLocks([invoiceId]);
@@ -1067,7 +1127,7 @@ export default function useWorkOrders({
     setLoading("approveInvoice_" + invoiceId, true);
     try {
     const inv = invoices.find((i: any) => i.id === invoiceId)
-      || await loadInvoiceById(invoiceId);
+      || await loadInvoiceSummaryById(invoiceId);
     if (!inv) { fire("Invoice not found"); return false; }
     const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const invSnapshot = qc.getQueryData(INVOICES_KEY);
@@ -1106,7 +1166,7 @@ export default function useWorkOrders({
     }
     return Boolean(ok);
     } catch (error: any) {
-      fire(`Approval failed: ${error.message || error}`);
+      fire(`Approval failed: ${safeErrorMessage(error)}`);
       return false;
     } finally {
       setLoading("approveInvoice_" + invoiceId, false);
@@ -1122,48 +1182,14 @@ export default function useWorkOrders({
   const doMarkPaid = async (invoiceId: string) => {
     setLoading("markPaid_" + invoiceId, true);
     try {
-    const inv = invoices.find((i: any) => i.id === invoiceId)
-      || await loadInvoiceById(invoiceId);
-    if (!inv) { fire("Invoice not found"); return; }
-    const paidAt = new Date().toISOString();
-    const workOrderInvoices = await loadWorkOrderInvoicesForMutation(inv.wot);
-    const nextWorkOrderInvoices = workOrderInvoices.map((item: any) =>
-      item.id === invoiceId ? { ...item, state: "paid" } : item,
-    );
-    const nextInvoices = invoices.some((item: any) => item.id === invoiceId)
-      ? invoices.map((item: any) => item.id === invoiceId ? { ...item, state: "paid" } : item)
-      : [...invoices, { ...inv, state: "paid" }];
-    const workOrder = workOrders.find((item: any) => item.id === inv.wot)
-      || await loadWorkOrderById(inv.wot);
-    const nextWoStatus = workOrder?.status === "closed"
-      ? null
-      : computeWoStatusFromInvoices(inv.wot, nextWorkOrderInvoices);
-    const woSnapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    const invSnapshot = qc.getQueryData(INVOICES_KEY);
-    setInvoices(nextInvoices);
-    const localPatch: any = {};
-    if (nextWoStatus) localPatch.status = nextWoStatus;
-    patchLocalWO(inv.wot, localPatch, localActivity(`Contractor bill #${inv.num} entered in QuickBooks by ${currentUser.name}.`, "system"));
-    const saved = await dbCall(async () => {
-      await updateInvoiceState(inv.id, "paid", { paid_at: paidAt });
-      await insertActivity(inv.wot, currentUser.name, `Contractor bill #${inv.num} entered in QuickBooks by ${currentUser.name}.`, "system");
-      if (nextWoStatus) {
-        await updateWorkOrder(inv.wot, { status: nextWoStatus });
-      }
-    }, "QuickBooks handoff failed", () => {
-      restoreWorkOrders(woSnapshot);
-      restoreInvoices(invSnapshot);
-    });
-    if (saved) fire(`Contractor bill #${inv.num} entered in QuickBooks`);
-    return Boolean(saved);
-    } catch (error: any) {
-      fire(`QuickBooks handoff failed: ${error.message || error}`);
+      // Retained compatibility callback; no current UI invokes this legacy
+      // shortcut. The revision-bound payables package owns handoff evidence.
+      fire("Use the contractor-bill payables package workflow to confirm QuickBooks entry.");
       return false;
     } finally {
       setLoading("markPaid_" + invoiceId, false);
     }
   };
-
   // Staff-only no-billing terminal path. The database locks the work order,
   // confirms that no live contractor or P1 invoice exists, closes every open
   // visit, and writes the audit event in one transaction.
@@ -1326,7 +1352,7 @@ export default function useWorkOrders({
       // A network interruption can hide a committed response. Refetch the
       // authoritative server state before the user retries.
       invalidateWorkOrders();
-      fire(`Reopen failed: ${error.message || error}`);
+      fire(`Reopen failed: ${safeErrorMessage(error)}`);
       return false;
     } finally {
       setLoading("reopen_" + woId, false);
@@ -1385,8 +1411,7 @@ export default function useWorkOrders({
     patchLocalWO(woId, patch, localActivity(text, "system"));
     fire("Flagged for capital");
     await dbCall(async () => {
-      await updateWorkOrder(woId, patch);
-      await insertActivity(woId, "System", text, "system");
+      await flagWorkOrderCapital(lifecycleContextFor(workOrders.find(w => w.id === woId)));
     }, "Capital flag failed", () => restoreWorkOrders(snapshot));
     } finally {
       setLoading("capitalFlag_" + woId, false);
@@ -1465,7 +1490,7 @@ export default function useWorkOrders({
       if (completed) fire("Capital completed — ready for final billing");
       return completed;
     } catch (error: any) {
-      fire(`Capital completion failed: ${error.message || error}`);
+      fire(`Capital completion failed: ${safeErrorMessage(error)}`);
       return false;
     } finally {
       setLoading("capitalComplete_" + woId, false);
@@ -1489,7 +1514,7 @@ export default function useWorkOrders({
         cursor = page.hasMore ? page.nextCursor : null;
       } while (cursor);
     } catch (error: any) {
-      fire(`Auto-dispatch could not load the unassigned queue: ${error?.message || error}`);
+      fire(`Auto-dispatch could not load the unassigned queue: ${safeErrorMessage(error)}`);
       return;
     }
     if (unassigned.length === 0) { fire("No unassigned calls"); return; }
@@ -1503,22 +1528,19 @@ export default function useWorkOrders({
       for (const w of chunk) {
         if (["TX", "FL"].includes(stateCodeFromWorkOrder(w))) continue;
         const trades = SERVICE_TO_TRADES(w.businessService || "", w.category || "");
-        const matched = contractorFor(
-          w.city,
-          trades,
-          USERS.filter((user: any) =>
-            user.role !== "contractor" || user.isAssignable !== false,
-          ),
-        );
-        if (!matched) { skipped++; continue; }
-        const c = getUser(matched);
-        const text = `Dispatched to ${c?.name || matched}${c?.company ? ` (${c.company})` : ""}.`;
         try {
-          const transition = await transitionWorkOrderContractor(
+          // The database ranks the whole authorized candidate set and returns
+          // only its best match; a loaded directory page is never the universe.
+          const c = await loadAutoAssignmentCandidate(w.city || "", trades);
+          if (!c) { skipped++; continue; }
+          const matched = c.id;
+          const text = `Dispatched to ${c.name}${c.company ? ` (${c.company})` : ""}.`;
+          const transition = await assignmentAttempts.current.run(w, "transition", matched, context => transitionWorkOrderContractor(
             w.id,
             matched,
-            Number(w.contractorAssignmentVersion || 0),
-          );
+            context.expectedAssignmentVersion,
+            context,
+          ));
           patchLocalWO(
             w.id,
             assignmentBoundaryPatch(w, transition),
@@ -1528,7 +1550,7 @@ export default function useWorkOrders({
           count++;
         } catch (e: any) {
           hadError = true;
-          fire(`${w.id}: ${e.message || e}`);
+          fire(`${w.id}: ${safeErrorMessage(e)}`);
         }
       }
     }, 3);
@@ -1589,40 +1611,114 @@ export default function useWorkOrders({
   };
 
 
+  const refreshPhotoDetails = (woId: string) => {
+    void qc.invalidateQueries({ queryKey: workOrderDetailsKey(woId) });
+    void qc.invalidateQueries({ queryKey: workOrderByIdKey(woId) });
+    void qc.invalidateQueries({ queryKey: workOrderChildCountKey(readScope, woId, "photos") });
+  };
+  const patchConfirmedPhotos = (woId: string, paths: readonly string[]) => {
+    if (!paths.length) return;
+    const merge = (current: readonly string[] = []) => [...new Set([...current, ...paths])];
+    qc.setQueryData<{ id: string; photos?: string[] }[]>(WORK_ORDERS_KEY, old => old?.map(workOrder =>
+      workOrder.id === woId ? { ...workOrder, photos: merge(workOrder.photos) } : workOrder));
+    qc.setQueryData<{ photos?: string[] }>(workOrderDetailsKey(woId, readScope), old => old ? { ...old, photos: merge(old.photos) } : old);
+    setWorkOrders(previous => previous.map(workOrder => workOrder.id === woId
+      ? { ...workOrder, photos: merge(workOrder.photos) } : workOrder));
+  };
+  const photoSummary = (items: readonly PhotoUploadItem[]) => {
+    const confirmed = items.filter(item => item.status === "confirmed").length;
+    const unfinished = items.filter(item => item.status === "failed" || item.status === "cleanup_required").length;
+    fire(unfinished ? `${confirmed} photo${confirmed === 1 ? "" : "s"} uploaded; ${unfinished} need attention. Retry or cancel the affected photos.`
+      : confirmed ? `${confirmed} photo${confirmed === 1 ? "" : "s"} uploaded` : "Photo upload cancelled");
+  };
   const doAddPhotos = async (woId: string, files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (!files?.length || photoUploadInFlight.current.has(woId)) return;
+    photoUploadInFlight.current.add(woId);
+    const generation = photoSessionGeneration.current.value;
     setLoading("addPhotos_" + woId, true);
-    const limited = Array.from(files).slice(0, 8);
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    fire(`Uploading ${limited.length} photo${limited.length > 1 ? "s" : ""}...`);
     try {
-      const paths = await uploadPhotos(woId, limited, currentUser.name, workflowAuditFor(woId, "photo_added", { count: limited.length }));
-      const text = `Added ${paths.length} photo${paths.length > 1 ? "s" : ""}.`;
-      qc.setQueryData(WORK_ORDERS_KEY, (old: any[]) =>
-        old?.map(w => w.id === woId
-          ? { ...w, photos: [...(w.photos || []), ...paths] }
-          : w)
-      );
-      setWorkOrders(prev => prev.map(w => w.id === woId ? {
-        ...w,
-        photos: [...(w.photos || []), ...paths],
-        activities: [{ author: currentUser.name, time: dateNow(), text, type: "note", enteredByRole: currentUser?.role || "system", isStaffOverride: !!isManager }, ...(w.activities || [])],
-      } : w));
-      fire(`${paths.length} photo${paths.length > 1 ? "s" : ""} uploaded`);
-    } catch (e: any) {
-      restoreWorkOrders(snapshot);
-      fire(`Photo upload failed: ${e.message || e}`);
+      const existing = photoControllers.current.get(woId);
+      let controller = existing?.controller;
+      if (!controller || controller.snapshot().every(item => item.status === "confirmed" || item.status === "cancelled")) {
+        const workOrder = workOrders.find(row => row.id === woId) ?? await loadWorkOrderById(woId);
+        if (generation !== photoSessionGeneration.current.value) return;
+        const assignmentVersion: unknown = workOrder?.contractorAssignmentVersion;
+        const workflowCycle: unknown = workOrder?.workflowCycle;
+        if (!workOrder || typeof assignmentVersion !== "number" || !Number.isSafeInteger(assignmentVersion) || assignmentVersion < 0
+          || typeof workflowCycle !== "number" || !Number.isSafeInteger(workflowCycle) || workflowCycle < 0) {
+          throw new PhotoUploadError("Refresh the work order before adding photos.", false);
+        }
+        if (!existing || existing.assignmentVersion !== assignmentVersion || existing.workflowCycle !== workflowCycle) {
+          const displayedPaths = new Set<string>();
+          controller = createPhotoUploadController(createWorkOrderPhotoPorts(woId, assignmentVersion, workflowCycle), {
+            onChange: items => {
+              if (generation !== photoSessionGeneration.current.value) return;
+              setPhotoUploadItems(previous => ({ ...previous, [woId]: items }));
+              const newlyConfirmed: string[] = [];
+              for (const item of items) {
+                if (item.status === "confirmed" && item.storagePath && !displayedPaths.has(item.storagePath)) {
+                  displayedPaths.add(item.storagePath); newlyConfirmed.push(item.storagePath);
+                }
+              }
+              patchConfirmedPhotos(woId, newlyConfirmed);
+            },
+          });
+          photoControllers.current.set(woId, { controller, assignmentVersion, workflowCycle });
+        }
+      }
+      if (!controller) throw new PhotoUploadError("Refresh the work order before adding photos.", false);
+      if (controller.busy) throw new PhotoUploadError("Wait for the current photo operation to finish before choosing another batch.", false);
+      fire(`Uploading ${files.length} photo${files.length > 1 ? "s" : ""}...`);
+      const items = await controller.start(Array.from(files));
+      if (generation === photoSessionGeneration.current.value) photoSummary(items);
+    } catch (error: unknown) {
+      if (generation === photoSessionGeneration.current.value) fire(error instanceof PhotoUploadError ? error.message : "Photo upload could not be confirmed. Check the per-photo status before retrying.");
     } finally {
-      invalidateBoth();
-      setLoading("addPhotos_" + woId, false);
+      if (generation === photoSessionGeneration.current.value) {
+        refreshPhotoDetails(woId);
+        setLoading("addPhotos_" + woId, false);
+        photoUploadInFlight.current.delete(woId);
+      }
+    }
+  };
+  const retryPhotoUploads = async (woId: string, operationIds?: readonly string[]) => {
+    const controller = photoControllers.current.get(woId)?.controller;
+    if (!controller || photoUploadInFlight.current.has(woId)) return;
+    photoUploadInFlight.current.add(woId);
+    const generation = photoSessionGeneration.current.value;
+    setLoading("addPhotos_" + woId, true);
+    try {
+      const items = await controller.retry(operationIds);
+      if (generation === photoSessionGeneration.current.value) photoSummary(items);
+    }
+    finally {
+      if (generation === photoSessionGeneration.current.value) {
+        refreshPhotoDetails(woId);
+        setLoading("addPhotos_" + woId, false);
+        photoUploadInFlight.current.delete(woId);
+      }
+    }
+  };
+  const cancelPhotoUploads = async (woId: string, operationIds?: readonly string[]) => {
+    const controller = photoControllers.current.get(woId)?.controller;
+    if (!controller) return;
+    const generation = photoSessionGeneration.current.value;
+    setLoading("addPhotos_" + woId, true);
+    try { await controller.cancel(operationIds); }
+    finally {
+      if (generation === photoSessionGeneration.current.value) { refreshPhotoDetails(woId); setLoading("addPhotos_" + woId, false); }
     }
   };
 
   const doRemovePhoto = async (woId: string, photo: number | string) => {
+    if (photoDeleteInFlight.current.has(woId)) return;
+    photoDeleteInFlight.current.add(woId);
+    const generation = photoSessionGeneration.current.value;
     setLoading("removePhoto_" + woId, true);
+    setPhotoDeleteErrors(previous => ({ ...previous, [woId]: "" }));
     try {
     const wo = workOrders.find(w => w.id === woId);
-    const path = typeof photo === "number" ? wo?.photos?.[photo] : photo;
+    const path: string | undefined = typeof photo === "number" ? wo?.photos?.[photo] : photo;
     let storagePath: string | null = null;
     if (path && !path.startsWith("data:") && !path.startsWith("http")) {
       storagePath = path;
@@ -1635,26 +1731,41 @@ export default function useWorkOrders({
       fire("Photo cleanup failed: storage path could not be resolved");
       return;
     }
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
+    photoDeleteTargets.current.set(woId, storagePath);
     const result = await removePhoto(woId, storagePath);
+    if (generation !== photoSessionGeneration.current.value) return;
     if (!result.success) {
-      restoreWorkOrders(snapshot);
-      invalidateBoth();
-      fire(`Photo cleanup failed: ${(result.error as any)?.message || result.error}`);
+      const message = "Photo removal is not confirmed. Retry removing this photo to check cleanup; do not upload a replacement yet.";
+      setPhotoDeleteErrors(previous => ({ ...previous, [woId]: message }));
+      fire(message);
       return;
     }
-    qc.setQueryData(WORK_ORDERS_KEY, (old: any[]) =>
+    qc.setQueryData<{ id: string; photos?: string[] }[]>(WORK_ORDERS_KEY, old =>
       old?.map(w => w.id === woId
-        ? { ...w, photos: (w.photos || []).filter((p: string, i: number) => typeof photo === "number" ? i !== photo : p !== photo) }
+          ? { ...w, photos: (w.photos || []).filter(p => p !== path && p !== storagePath) }
         : w)
     );
-    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((p: string, i: number) => typeof photo === "number" ? i !== photo : p !== photo) } : w));
-    await insertActivity(woId, currentUser.name, "Photo removed.", "note", workflowAuditFor(woId, "photo_removed"));
-    invalidateBoth();
+    setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, photos: (w.photos || []).filter((p: string) => p !== path && p !== storagePath) } : w));
+    qc.setQueryData<{ photos?: string[] }>(workOrderDetailsKey(woId, readScope), old => old
+      ? { ...old, photos: (old.photos || []).filter(candidate => candidate !== path && candidate !== storagePath) } : old);
+    photoDeleteTargets.current.delete(woId);
     fire("Photo removed");
+    } catch {
+      if (generation !== photoSessionGeneration.current.value) return;
+      const message = "Photo removal is not confirmed. Retry removing this photo to check cleanup.";
+      setPhotoDeleteErrors(previous => ({ ...previous, [woId]: message }));
+      fire(message);
     } finally {
-      setLoading("removePhoto_" + woId, false);
+      if (generation === photoSessionGeneration.current.value) {
+        refreshPhotoDetails(woId);
+        setLoading("removePhoto_" + woId, false);
+        photoDeleteInFlight.current.delete(woId);
+      }
     }
+  };
+  const retryPhotoDeletion = async (woId: string) => {
+    const storagePath = photoDeleteTargets.current.get(woId);
+    if (storagePath) await doRemovePhoto(woId, storagePath);
   };
 
   const doStraightToBilling = async (woId: string) => {
@@ -1663,7 +1774,7 @@ export default function useWorkOrders({
       try {
         workOrder = await loadWorkOrderById(woId);
       } catch (error: any) {
-        fire(`Could not load work order: ${error.message || error}`);
+        fire(`Could not load work order: ${safeErrorMessage(error)}`);
         return false;
       }
     }
@@ -1740,7 +1851,7 @@ export default function useWorkOrders({
       invalidateWorkOrders();
       fire(synced ? "Marked updated in 7-Eleven" : "7-Eleven update reopened");
     } catch (e: any) {
-      fire(`7-Eleven sync update failed: ${e.message || e}`);
+      fire(`7-Eleven sync update failed: ${safeErrorMessage(e)}`);
     } finally {
       setLoading("sync711_" + activityId, false);
     }
@@ -1755,7 +1866,7 @@ export default function useWorkOrders({
     const token = data.session?.access_token;
     if (!token) throw new Error("Authentication session is unavailable");
 
-    const res = await fetch("/api/notifications/contractor-attention", {
+    const res = await apiFetch("/api/notifications/contractor-attention", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1829,7 +1940,7 @@ export default function useWorkOrders({
         fire("Contractor attention cleared");
       }
     } catch (e: any) {
-      fire(`Contractor attention update failed: ${e.message || e}`);
+      fire(`Contractor attention update failed: ${safeErrorMessage(e)}`);
     } finally {
       setLoading("contractorAttention_" + activityId, false);
     }
@@ -1851,7 +1962,7 @@ export default function useWorkOrders({
       invalidateWorkOrders();
       fire(acknowledged ? "Marked reviewed" : "Attention item reopened");
     } catch (e: any) {
-      fire(`Attention acknowledgement failed: ${e.message || e}`);
+      fire(`Attention acknowledgement failed: ${safeErrorMessage(e)}`);
     } finally {
       setLoading("contractorAck_" + activityId, false);
     }
@@ -1864,14 +1975,14 @@ export default function useWorkOrders({
     loadingStates,
     patchLocalWO, localActivity, dbCall,
     doAssign, doStraightToBilling, doUnassign, doDeleteWO,
-    doRejectUnassignedWO, doDuplicateForReassignment, doReassign,
+    doRejectUnassignedWO, doDuplicateForReassignment, doReassign, doAdministrativeTransfer,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
     doCloseReopenedFollowUp, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
-    doAddPhotos, doRemovePhoto,
+    doAddPhotos, doRemovePhoto, photoUploadItems, retryPhotoUploads, cancelPhotoUploads, photoDeleteErrors, retryPhotoDeletion,
     doAddPart, doUpdatePart, doDeletePart,
     doRequestP1PartOrder, doSetP1PartOrderStatus,
     doMarkSevenElevenSynced,

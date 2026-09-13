@@ -7,6 +7,7 @@ import { Field } from "../../components/ui/Field";
 import { Modal } from "../../components/ui/Modal";
 import { TA } from "../../components/ui/TA";
 import { T } from "../../lib/constants";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import {
   FOLLOW_UP_CLOSE_REASON_MAX_LENGTH,
   normalizeFollowUpCloseReason,
@@ -27,6 +28,7 @@ export default function CloseReopenedFollowUpModal({
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const dismissal = useUnsavedChangesGuard({ dirty: reason !== "", busy: submitting, onClose });
 
   const submit = async () => {
     const validationError = validateFollowUpCloseReason(reason);
@@ -52,8 +54,9 @@ export default function CloseReopenedFollowUpModal({
   };
 
   return (
-    <Modal
-      onClose={() => { if (!submitting) onClose(); }}
+    <><Modal
+      onRequestClose={dismissal.requestClose}
+      dismissDisabled={submitting}
       closeOnBackdrop={!submitting}
       title="Close reopened follow-up"
       width={500}
@@ -67,7 +70,7 @@ export default function CloseReopenedFollowUpModal({
         Use this only when the reopened field work is finished and the prior 7-Eleven invoice already covers it. Existing contractor and P1 invoices will remain unchanged. Any open visit will be closed, and unresolved 7-Eleven or contractor-attention updates will block the action.
       </div>
 
-      <Field label="Reason for no additional billing *">
+      <Field label="Reason for no additional billing" required error={error}>
         <TA
           autoFocus
           rows={3}
@@ -86,14 +89,8 @@ export default function CloseReopenedFollowUpModal({
         {reason.length}/{FOLLOW_UP_CLOSE_REASON_MAX_LENGTH}
       </div>
 
-      {error && (
-        <div role="alert" style={{ color: T.danger, background: T.dangerSoft, borderRadius: 9, padding: "9px 11px", fontSize: 11, marginBottom: 14 }}>
-          {error}
-        </div>
-      )}
-
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-        <button type="button" onClick={onClose} disabled={submitting} className="btn-soft">
+        <button type="button" onClick={() => dismissal.requestClose("cancel_button")} disabled={submitting} className="btn-soft">
           Cancel
         </button>
         <button
@@ -108,6 +105,6 @@ export default function CloseReopenedFollowUpModal({
             : "Close follow-up — no additional billing"}
         </button>
       </div>
-    </Modal>
+    </Modal>{dismissal.dialog}</>
   );
 }

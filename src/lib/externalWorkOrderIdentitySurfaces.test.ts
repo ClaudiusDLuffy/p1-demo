@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { generateInvoicePDF, invoiceFilename } from "./invoicePdf";
+import { billingRouteHarness, financialTestIds } from "./billingFinancialRouteTestHarness";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const dashboardBuckets = read("src/features/dashboard/DashboardWorkBuckets.tsx");
-const billingRoute = read("src/app/api/billing-invoices/route.ts");
 const billingList = read("src/features/billing/BillingInvoiceList.tsx");
 const billingDetail = read("src/features/billing/BillingInvoiceDetail.tsx");
 const invoiceReviewRoute = read("src/app/api/notifications/invoice-review/route.ts");
@@ -16,6 +16,8 @@ const contractorInvoiceCreate = read("src/features/invoices/InvoiceCreateModal.t
 const contractorInvoiceList = read("src/features/invoices/InvoiceList.tsx");
 const contractorInvoiceDetail = read("src/features/invoices/InvoiceDetail.tsx");
 const contractorInvoiceHook = read("src/features/invoices/useInvoices.ts");
+const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+const notificationWorker = read("src/lib/server/financialNotificationWorker.ts");
 
 test("the 7-Eleven dashboard queue copies the canonical work-order root", () => {
   assert.match(
@@ -28,13 +30,14 @@ test("the 7-Eleven dashboard queue copies the canonical work-order root", () => 
   );
 });
 
-test("the P1 billing API maps an external work-order identity from provenance", () => {
-  assert.match(
-    billingRoute,
-    /\.select\("id, duplicate_root_work_order_id"\)/,
-  );
-  assert.match(billingRoute, /externalWorkOrderId,/);
-  assert.match(billingRoute, /externalWorkOrderIdForInvoice/);
+test("the P1 billing API maps an external work-order identity from provenance", async () => {
+  const h = billingRouteHarness({ externalRoot: "WOT1215047" });
+  const response = await h.handlers.GET(h.request("GET", undefined, `?invoiceId=${financialTestIds.invoice}`));
+  assert.equal(response.status, 200);
+  const { invoice } = await response.json();
+  assert.equal(invoice.externalWorkOrderId, "WOT1215047");
+  assert.equal(invoice.workOrderId, "WOTSYNTHETIC");
+  assert.equal(invoice.assignmentVersion, 0);
 });
 
 test("P1 billing list and detail copy the external work-order identity", () => {
@@ -59,10 +62,12 @@ test("P1 billing list and detail copy the external work-order identity", () => {
 });
 
 test("invoice review and payment-hold surfaces preserve both work-order identities", () => {
-  assert.match(invoiceReviewRoute, /\.select\("id,duplicate_root_work_order_id"\)/);
-  assert.match(invoiceReviewRoute, /externalWorkOrderId:/);
-  assert.match(invoiceHoldsRoute, /externalWorkOrderIdById/);
-  assert.match(invoiceHoldsRoute, /externalWorkOrderId:/);
+  assert.match(invoiceReviewRoute, /get_financial_notification_review_compatibility_v1/);
+  assert.match(notificationBoundary, /'workOrderId',i\.work_order_id,'externalWorkOrderId',coalesce\(w\.duplicate_root_work_order_id,w\.id\)/);
+  assert.match(notificationWorker, /createInvoiceReviewNotificationPlan\(\{ recipients, invoice: \{ \.\.\.message\.invoice, workOrderId: message\.invoice\.workOrderId/);
+  assert.match(invoiceHoldsRoute, /list_contractor_invoice_payment_holds_page_v1/);
+  const holdPage = read("supabase/migrations/0142_bounded_payment_hold_history.sql");
+  assert.match(holdPage, /'externalWorkOrderId', coalesce\(nullif\(w\.duplicate_root_work_order_id, ''\), nullif\(w\.id, ''\), p\.work_order_id\)/);
   assert.match(controllerExportPanel, /hold\.externalWorkOrderId \|\| hold\.workOrderId/);
   assert.match(controllerExportPanel, /P1 portal reassignment:/);
 });
@@ -107,7 +112,7 @@ test("generated contractor PDFs use the canonical WOT without rewriting uploads"
     "downloadInvoicePdfBlob(inv.pdfStoragePath)",
   );
   const generatedDownloadAt = contractorInvoiceHook.indexOf(
-    "generateInvoicePDFBlob(inv, null, contractorPdfOptions(inv))",
+    "[inv, null, pdfOptions], generateInvoicePDFBlob)",
   );
   assert.ok(originalDownloadAt >= 0 && generatedDownloadAt > originalDownloadAt);
   assert.match(

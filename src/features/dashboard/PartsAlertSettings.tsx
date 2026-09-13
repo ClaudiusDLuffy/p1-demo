@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { useEffect, useState } from "react";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import type { DirectoryItem } from "../directory/contracts";
 
 import { T } from "../../lib/constants";
 import { supabase } from "../../lib/supabase/client";
+import { PARTS_RECIPIENT_LIMIT, partsSettingsResponseSchema } from "../parts-sms/settingsContract";
 
 type Recipient = {
   profileId: string;
@@ -11,13 +16,6 @@ type Recipient = {
   name?: string;
   email?: string | null;
   active?: boolean;
-};
-
-type StaffProfile = {
-  id: string;
-  name: string;
-  email?: string | null;
-  active?: boolean | null;
 };
 
 async function settingsRequest(path: string, init: RequestInit = {}) {
@@ -28,13 +26,18 @@ async function settingsRequest(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
   if (init.body) headers.set("Content-Type", "application/json");
-  const response = await fetch(path, { ...init, headers });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Parts alert request failed");
-  return payload;
+  const response = await apiFetch(path, { ...init, headers });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(response.status === 401 ? "Your session expired. Sign in again."
+    : response.status === 403 ? "Operational staff access is required."
+      : response.status === 400 ? "Check the recipients, timezone, cutoff and enabled setting."
+        : "The settings result could not be confirmed. Refresh before trying again.");
+  const parsed = partsSettingsResponseSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("The settings result could not be confirmed. Refresh before trying again.");
+  return parsed.data;
 }
 
-export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfiles: StaffProfile[] }) {
+export default function PartsAlertSettings() {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -45,19 +48,8 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
   const [cutoffTime, setCutoffTime] = useState("");
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [selectedProfile, setSelectedProfile] = useState<DirectoryItem | null>(null);
   const [phone, setPhone] = useState("");
-
-  const staffById = useMemo(
-    () => new Map(staffProfiles.map(profile => [profile.id, profile])),
-    [staffProfiles],
-  );
-  const availableStaff = useMemo(
-    () => staffProfiles.filter(profile =>
-      profile.active !== false
-      && !recipients.some(recipient => recipient.profileId === profile.id),
-    ),
-    [recipients, staffProfiles],
-  );
 
   useEffect(() => {
     if (!expanded) return;
@@ -67,13 +59,16 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
     void settingsRequest("/api/parts-order-settings")
       .then(payload => {
         if (cancelled) return;
-        setEnabled(Boolean(payload.enabled));
+        setEnabled(payload.enabled);
         setTimezone(payload.timezone || "America/New_York");
         setCutoffTime(payload.cutoffTime || "");
-        setRecipients(payload.recipients || []);
+        // Runtime validation above requires these strings; explicitly project
+        // them because this legacy repository also compiles with strict=false.
+        setRecipients(payload.recipients.map(recipient => ({ ...recipient,
+          profileId: String(recipient.profileId), phoneE164: String(recipient.phoneE164) })));
       })
-      .catch(fetchError => {
-        if (!cancelled) setError(fetchError.message || "Could not load settings");
+      .catch((fetchError: unknown) => {
+        if (!cancelled) setError(safeErrorMessage(fetchError));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -84,7 +79,11 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
   }, [expanded]);
 
   const addRecipient = () => {
-    const profile = staffById.get(selectedProfileId);
+    if (recipients.length >= PARTS_RECIPIENT_LIMIT) {
+      setError("A maximum of 25 staff recipients is supported.");
+      return;
+    }
+    const profile = selectedProfile;
     const normalizedPhone = phone.replace(/[\s()-]/g, "");
     if (!profile) {
       setError("Choose a staff member");
@@ -98,10 +97,10 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
       profileId: profile.id,
       phoneE164: normalizedPhone,
       name: profile.name,
-      email: profile.email,
       active: true,
     }]);
     setSelectedProfileId("");
+    setSelectedProfile(null);
     setPhone("");
     setError("");
     setSaved(false);
@@ -114,15 +113,18 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
     try {
       const payload = await settingsRequest("/api/parts-order-settings", {
         method: "PATCH",
-        body: JSON.stringify({ enabled, timezone, cutoffTime: cutoffTime || null, recipients }),
+        body: JSON.stringify({ enabled, timezone, cutoffTime: cutoffTime || null,
+          recipients: recipients.map(recipient => ({ profileId: recipient.profileId,
+            phoneE164: recipient.phoneE164, active: recipient.active === true })) }),
       });
-      setEnabled(Boolean(payload.enabled));
+      setEnabled(payload.enabled);
       setTimezone(payload.timezone || timezone);
       setCutoffTime(payload.cutoffTime || "");
-      setRecipients(payload.recipients || []);
+      setRecipients(payload.recipients.map(recipient => ({ ...recipient,
+        profileId: String(recipient.profileId), phoneE164: String(recipient.phoneE164) })));
       setSaved(true);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save settings");
+      setError(safeErrorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -171,7 +173,7 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
                 {recipients.map(recipient => (
                   <div key={recipient.profileId} style={{ padding: "9px 10px", border: `1px solid ${T.borderSoft}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ minWidth: 0 }}>
-                      <strong style={{ color: T.ink, fontSize: 11 }}>{recipient.name || staffById.get(recipient.profileId)?.name || "Staff member"}</strong>
+                      <strong style={{ color: T.ink, fontSize: 11 }}>{recipient.name || "Staff member"}</strong>
                       <span className="mono" style={{ marginLeft: 8, color: T.muted, fontSize: 10 }}>{recipient.phoneE164}</span>
                     </span>
                     <button type="button" className="btn-soft" onClick={() => { setRecipients(current => current.filter(item => item.profileId !== recipient.profileId)); setSaved(false); }} style={{ minHeight: 32, padding: "5px 9px", color: T.danger, fontSize: 10 }}>Remove</button>
@@ -183,10 +185,9 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
               <div className="parts-alert-settings-grid" style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(180px, 1fr) auto", gap: 8, alignItems: "end", marginTop: 11 }}>
                 <label style={{ color: T.muted, fontSize: 10 }}>
                   Staff member
-                  <select value={selectedProfileId} onChange={event => setSelectedProfileId(event.target.value)} style={{ display: "block", width: "100%", minHeight: 40, marginTop: 5, padding: "8px 10px", border: `1px solid ${T.border}`, borderRadius: 8, background: T.surface, color: T.ink }}>
-                    <option value="">Choose staff…</option>
-                    {availableStaff.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-                  </select>
+                  <DirectorySelect domain="staff_choices" value={selectedProfileId} emptyLabel="Choose staff…"
+                    excludedIds={recipients.map(recipient => recipient.profileId)}
+                    onChange={(event, item) => { setSelectedProfileId(event.target.value); setSelectedProfile(item); }} />
                 </label>
                 <label style={{ color: T.muted, fontSize: 10 }}>
                   Mobile number (E.164)
@@ -197,7 +198,7 @@ export default function PartsAlertSettings({ staffProfiles = [] }: { staffProfil
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
                 <div style={{ color: T.subtle, fontSize: 10, lineHeight: 1.45 }}>
-                  The endpoint is wired but no scheduler is installed until Jeremy confirms the cutoff. SMS stays off unless Enabled is checked.
+                  The scheduled worker checks the configured local cutoff. SMS stays off unless Enabled is checked. Review worker health and unresolved delivery below; provider acceptance is not handset delivery.
                 </div>
                 <button type="button" className="btn-primary" onClick={save} disabled={saving} style={{ opacity: saving ? 0.6 : 1 }}>
                   {saving ? "Saving…" : "Save alert settings"}

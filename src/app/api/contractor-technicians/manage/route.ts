@@ -1,20 +1,37 @@
+import { createApiMethodBoundary } from "../../../../lib/server/apiMethodBoundary";
+
+const apiMethodBoundary = createApiMethodBoundary("/api/contractor-technicians/manage", ["POST", "DELETE"]);
+export const GET = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const HEAD = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { safeErrorMessage } from "../../../../lib/errors/normalizeUnknown";
+import { runRequestOperation } from "../../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../../lib/errors/httpBoundary";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireStaffRequest } from "../../../../lib/server/staffAuthorization";
+import { getPortalOrigin } from "../../../../lib/config/server/appEnvironment";
+import { ConfigurationError } from "../../../../lib/config/shared";
 
 const ACCESS_LEVELS = new Set(["invoice", "report_only"]);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const clean = (value: unknown) => String(value ?? "").trim();
 
-function redirectUrl(request: NextRequest) {
-  const configured = clean(process.env.NEXT_PUBLIC_APP_URL).replace(/\/$/, "");
-  return configured || request.nextUrl.origin;
-}
+const redirectUrl = getPortalOrigin;
 
 export async function POST(request: NextRequest) {
+  const context = createRequestContext(request, "/api/contractor-technicians/manage");
+  try {
+    return await runRequestOperation(context, async () => {
   const auth = await requireStaffRequest(request);
-  if ("error" in auth) return auth.error;
+  if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
+  // Validate links before the invitation can be accepted by Auth.
+  const invitationOrigin = redirectUrl();
 
   try {
     const body = await request.json();
@@ -25,19 +42,19 @@ export async function POST(request: NextRequest) {
     const accessLevel = clean(body.accessLevel);
 
     if (!contractorId || !name || !email) {
-      return NextResponse.json(
+      return await finalizeApiResponse(await NextResponse.json(
         { error: "Contractor, technician name, and email are required" },
         { status: 400 },
-      );
+      ), context);
     }
     if (!EMAIL_PATTERN.test(email)) {
-      return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+      return await finalizeApiResponse(await NextResponse.json({ error: "Enter a valid email address" }, { status: 400 }), context);
     }
     if (!ACCESS_LEVELS.has(accessLevel)) {
-      return NextResponse.json(
+      return await finalizeApiResponse(await NextResponse.json(
         { error: "Access must be invoice or report only" },
         { status: 400 },
-      );
+      ), context);
     }
 
     const [{ data: contractor, error: contractorError }, { data: existingProfile, error: profileError }] = await Promise.all([
@@ -55,41 +72,41 @@ export async function POST(request: NextRequest) {
     if (contractorError) throw contractorError;
     if (profileError) throw profileError;
     if (!contractor || contractor.role !== "contractor" || contractor.active !== true) {
-      return NextResponse.json({ error: "Active contractor company not found" }, { status: 404 });
+      return await finalizeApiResponse(await NextResponse.json({ error: "Active contractor company not found" }, { status: 404 }), context);
     }
 
     if (existingProfile) {
       if (existingProfile.role !== "contractor") {
-        return NextResponse.json(
+        return await finalizeApiResponse(await NextResponse.json(
           { error: "That email belongs to a P1 staff account" },
           { status: 409 },
-        );
+        ), context);
       }
       if (existingProfile.contractor_access_level === "company_admin") {
-        return NextResponse.json(
+        return await finalizeApiResponse(await NextResponse.json(
           { error: "A contractor company administrator cannot be converted to a technician" },
           { status: 409 },
-        );
+        ), context);
       }
       if (
         existingProfile.contractor_organization_id
         && contractor.contractor_organization_id
         && existingProfile.contractor_organization_id !== contractor.contractor_organization_id
       ) {
-        return NextResponse.json(
+        return await finalizeApiResponse(await NextResponse.json(
           { error: "That account already belongs to another contractor company" },
           { status: 409 },
-        );
+        ), context);
       }
       if (
         existingProfile.active === true
         && existingProfile.is_assignable !== false
         && existingProfile.id !== contractorId
       ) {
-        return NextResponse.json(
+        return await finalizeApiResponse(await NextResponse.json(
           { error: "That email is an assignable contractor account and cannot be converted to a technician" },
           { status: 409 },
-        );
+        ), context);
       }
     }
 
@@ -100,10 +117,10 @@ export async function POST(request: NextRequest) {
     if (!profileId) {
       const { data, error } = await auth.sb.auth.admin.inviteUserByEmail(email, {
         data: { name, role: "contractor" },
-        redirectTo: redirectUrl(request),
+        redirectTo: invitationOrigin,
       });
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 409 });
+        return await finalizeApiResponse(await NextResponse.json({ error: error.message }, { status: 409 }), context);
       }
       if (!data.user?.id) throw new Error("Supabase did not return the invited user");
       profileId = data.user.id;
@@ -116,7 +133,7 @@ export async function POST(request: NextRequest) {
       });
       if (updateError) throw updateError;
       const { error: recoveryError } = await auth.sb.auth.resetPasswordForEmail(email, {
-        redirectTo: redirectUrl(request),
+        redirectTo: invitationOrigin,
       });
       if (recoveryError) throw recoveryError;
       emailDelivery = "recovery";
@@ -141,24 +158,31 @@ export async function POST(request: NextRequest) {
       throw configureError;
     }
 
-    return NextResponse.json({ technician: result, emailDelivery });
+    return await finalizeApiResponse(await NextResponse.json({ technician: result, emailDelivery }), context);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not configure technician" },
+    if (error instanceof ConfigurationError) throw error;
+    return await finalizeApiResponse(await NextResponse.json(
+      { error: safeErrorMessage(error) },
       { status: 500 },
-    );
+    ), context);
   }
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }
 
 export async function DELETE(request: NextRequest) {
+  const context = createRequestContext(request, "/api/contractor-technicians/manage");
+  try {
+    return await runRequestOperation(context, async () => {
   const auth = await requireStaffRequest(request);
-  if ("error" in auth) return auth.error;
+  if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
 
   try {
     const body = await request.json();
     const profileId = clean(body.profileId);
     if (!profileId) {
-      return NextResponse.json({ error: "Technician profile is required" }, { status: 400 });
+      return await finalizeApiResponse(await NextResponse.json({ error: "Technician profile is required" }, { status: 400 }), context);
     }
 
     const { data: result, error } = await auth.sb.rpc(
@@ -174,17 +198,20 @@ export async function DELETE(request: NextRequest) {
       ban_duration: "876000h",
     });
 
-    return NextResponse.json({
+    return await finalizeApiResponse(await NextResponse.json({
       technician: result,
       authDisabled: !banError,
       warning: banError
         ? "Portal access is blocked by the profile wall, but Supabase Auth could not be banned automatically."
         : null,
-    });
+    }), context);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not deactivate technician" },
+    return await finalizeApiResponse(await NextResponse.json(
+      { error: safeErrorMessage(error) },
       { status: 500 },
-    );
+    ), context);
   }
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

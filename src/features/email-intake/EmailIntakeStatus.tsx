@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase/client";
 import { T } from "../../lib/constants";
@@ -54,12 +56,12 @@ export default function EmailIntakeStatus() {
     setRunning(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/email-intake", { method: "POST" });
+      const res = await apiFetch("/api/email-intake", { method: "POST" });
       const data = await res.json();
       setMessage(data.message || (data.success ? `Processed ${data.processed} emails` : data.error || "Intake failed"));
       await loadRows();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Intake failed");
+      setMessage(safeErrorMessage(err));
     } finally {
       setRunning(false);
     }

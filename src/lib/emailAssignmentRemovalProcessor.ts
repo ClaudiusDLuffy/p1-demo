@@ -2,6 +2,8 @@ import { sendEmail } from "./graphClient";
 import { intakeErrorMessage } from "./intakeError";
 import { createWorkOrderAssignmentRemovalNotificationPlan } from "./notificationService";
 import { createServerClient } from "./supabase/server";
+import { requireLegacyGraphDeliveryConfiguration } from "./config/server/graph";
+import { logIntakeOutcome } from "./server/logIntakeOutcome";
 
 const EMAIL_ASSIGNMENT_REMOVAL_BATCH_SIZE = 10;
 const UUID_PATTERN =
@@ -63,6 +65,10 @@ export async function deliverEmailAssignmentRemoval(
   requireAccessToken(accessToken);
 
   const sb = createServerClient();
+  const existingDelivery = await sb.from("contractor_assignment_transition_deliveries")
+    .select("status").eq("id", id).maybeSingle();
+  if (existingDelivery.error) throw existingDelivery.error;
+  requireLegacyGraphDeliveryConfiguration(existingDelivery.data?.status);
   const { data, error: claimError } = await sb.rpc(
     "claim_email_assignment_removal_delivery",
     { p_delivery_id: id },
@@ -178,11 +184,8 @@ export async function drainEmailAssignmentRemovals(
     if (!id) return null;
     try {
       return await deliverEmailAssignmentRemoval(id, accessToken);
-    } catch (deliveryError) {
-      console.error(
-        `Pending email assignment-removal delivery ${id} failed`,
-        deliveryError,
-      );
+    } catch {
+      logIntakeOutcome("intake_removal_delivery_failed", id);
       return null;
     }
   }));

@@ -1,0 +1,10 @@
+import { existsSync, readFileSync } from "node:fs";
+const read = path => readFileSync(path, "utf8");
+const save = read("src/server/billing-invoices/saveBillingInvoice.ts");
+const source = read("src/server/billing-invoices/billingSourceRepository.ts");
+const financial = read("src/server/billing-invoices/billingFinancialInputRepository.ts");
+if (existsSync("src/server/billing-invoices/billingPostRepositories.ts")) throw new Error("combined POST repository remains");
+if (/billingPostRepositories|\.from\s*\(|\.rpc\s*\(|NextRequest|NextResponse/.test(save)) throw new Error("save use case retains broad input ownership");
+if (/select\s*\(\s*["']\*["']/.test(source) || /select\s*\(\s*["']\*["']/.test(financial)) throw new Error("select-star projection remains");
+if (!source.includes("BillingSourceRepository") || !financial.includes("BillingFinancialInputRepository")) throw new Error("focused repository interfaces missing");
+console.log("billing POST focused input repositories verified");

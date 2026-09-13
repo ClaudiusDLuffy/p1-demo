@@ -10,14 +10,13 @@ import {
   isQuickBooksRealmId,
   parseQuickBooksTokenResponse,
   QUICKBOOKS_ACCOUNTING_SCOPE,
-  resolveQuickBooksConfig,
-  resolveQuickBooksEnvironment,
-  resolveQuickBooksTokenKeyMaterial,
   type QuickBooksConfig,
   type QuickBooksEnvironment,
   type QuickBooksRevocationOutcome,
   type QuickBooksTokenResponse,
 } from "./quickBooksOnlineCore";
+import { getQuickBooksConfiguration, getQuickBooksEnvironment, getQuickBooksTokenKeyMaterial } from "../config/server/quickbooks";
+import { ConfigurationError, requireConfigured } from "../config/shared";
 
 export {
   buildQuickBooksAuthorizationUrl,
@@ -47,10 +46,7 @@ export const getQuickBooksConfig = (
   requestedEnvironment?: QuickBooksEnvironment,
   requestedTokenKeyVersion?: number,
 ): QuickBooksConfig => {
-  const currentConfig = resolveQuickBooksConfig(
-    process.env,
-    requestedEnvironment,
-  );
+  const currentConfig = requireConfigured(getQuickBooksConfiguration(process.env, requestedEnvironment));
   if (
     requestedTokenKeyVersion === undefined
     || requestedTokenKeyVersion === currentConfig.tokenKeyVersion
@@ -59,26 +55,19 @@ export const getQuickBooksConfig = (
   }
   return {
     ...currentConfig,
-    ...resolveQuickBooksTokenKeyMaterial(
-      process.env,
-      requestedTokenKeyVersion,
-    ),
+    ...getQuickBooksTokenKeyMaterial(requestedTokenKeyVersion),
   };
 };
 
 export const getQuickBooksConfigurationStatus = () => {
   let environment: QuickBooksEnvironment = "sandbox";
   try {
-    environment = resolveQuickBooksEnvironment(
-      process.env.QUICKBOOKS_ENVIRONMENT,
-    );
-  } catch (error) {
+    environment = getQuickBooksEnvironment();
+  } catch {
     return {
       environment,
       configured: false,
-      error: error instanceof Error
-        ? error.message
-        : "QuickBooks configuration is invalid",
+      error: new ConfigurationError("CONFIG_INVALID", "quickbooks", ["QUICKBOOKS_ENVIRONMENT"]).message,
     };
   }
 

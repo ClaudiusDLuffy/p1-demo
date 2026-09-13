@@ -1,84 +1,94 @@
 import { useQuery } from "@tanstack/react-query";
-import { billingApiFetch } from "../../lib/billingApi";
+import { AppError } from "../../lib/errors/AppError";
+import { countReadPolicy, useCountQueryVisibility } from "../../lib/counts/countQueryPolicy";
+import { directoryActorScope, invoiceByIdKey } from "../../lib/counts/queryKeys";
+import { useDirectoryActor } from "../directory/queries";
+import type { DirectoryActor } from "../directory/contracts";
+import { billingInvoiceByIdKey, billingInvoiceCountKey, billingInvoicePageKey } from "./billingQueryKeys";
+import { billingCountFilters, type BillingCountFilters, type BillingInvoicePageParams } from "./billingReadContracts";
+import { readBillingCount, readBillingInvoice, readBillingRows } from "./billingReads";
 import {
   mapBillingTaxRule,
   type BillingTaxRule,
   type BillingTaxRuleRow,
 } from "../../lib/billingTaxRules";
 import { supabase } from "../../lib/supabase/client";
+import { canonicalBillingReadUuid } from "./billingReadUuid";
 
 export const BILLING_INVOICES_KEY = ["billing-invoices"] as const;
-export const BILLING_INVOICE_PAGES_KEY = ["billing-invoice-pages"] as const;
-export const BILLING_INVOICE_BY_ID_KEY = ["billing-invoice-by-id"] as const;
+export { BILLING_INVOICE_PAGES_KEY, BILLING_INVOICE_BY_ID_KEY, BILLING_INVOICE_COUNT_KEY } from "./billingQueryKeys";
 export const BILLING_TAX_RULES_KEY = ["billing-tax-rules"] as const;
 
-export type BillingInvoicePageParams = {
-  queue: "active" | "all" | "draft" | "submitted" | "sent" | "work_order";
-  search?: string;
-  sort?: "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
-  direction?: "asc" | "desc";
-  limit?: number;
-  cursor?: string | null;
-  workOrderId?: string | null;
-};
+export type { BillingInvoicePageParams } from "./billingReadContracts";
 
-const pageUrl = (params: BillingInvoicePageParams) => {
-  const search = new URLSearchParams({
-    queue: params.queue,
-    sort: params.sort || "invoice",
-    direction: params.direction || "desc",
-    limit: String(params.limit || 25),
+export function useBillingInvoiceCountQuery(params: BillingCountFilters, enabled = true, actorOverride?: DirectoryActor | null) {
+  const contextActor = useDirectoryActor();
+  const actor = actorOverride === undefined ? contextActor : actorOverride;
+  const allowed = useCountQueryVisibility(Boolean(enabled && actor?.id && actor.active === true));
+  const filters = billingCountFilters(params);
+  return useQuery({
+    queryKey: billingInvoiceCountKey(directoryActorScope(actor), filters),
+    queryFn: ({ signal }) => {
+      if (!allowed) throw new AppError("FORBIDDEN");
+      return readBillingCount(filters, signal);
+    },
+    ...countReadPolicy, enabled: allowed,
   });
-  if (params.search?.trim()) search.set("search", params.search.trim());
-  if (params.cursor) search.set("cursor", params.cursor);
-  if (params.workOrderId) search.set("workOrderId", params.workOrderId);
-  return `/api/billing-invoices?${search.toString()}`;
-};
+}
 
 export function useBillingInvoicePageQuery(
   params: BillingInvoicePageParams,
   enabled = true,
+  actorOverride?: DirectoryActor | null,
 ) {
+  const contextActor = useDirectoryActor();
+  const actor = actorOverride === undefined ? contextActor : actorOverride;
+  const allowed = Boolean(enabled && actor?.id && actor.active === true);
   return useQuery({
-    queryKey: [...BILLING_INVOICE_PAGES_KEY, params],
-    queryFn: async () => {
-      const payload = await billingApiFetch(pageUrl(params));
-      return {
-        items: payload.items || payload.invoices || [],
-        nextCursor: payload.nextCursor || null,
-        hasMore: Boolean(payload.hasMore),
-        totalCount: Number(payload.totalCount || 0),
-      };
+    queryKey: billingInvoicePageKey(directoryActorScope(actor), params),
+    queryFn: ({ signal }) => {
+      if (!allowed) throw new AppError("FORBIDDEN");
+      return readBillingRows(params, signal);
     },
     staleTime: 30_000,
-    placeholderData: previous => previous,
-    enabled,
+    enabled: allowed,
   });
 }
 
 export function useBillingInvoiceByIdQuery(
   invoiceId: string | null | undefined,
   enabled = true,
+  actorOverride?: DirectoryActor | null,
 ) {
-  const id = String(invoiceId || "");
+  const contextActor = useDirectoryActor();
+  const actor = actorOverride === undefined ? contextActor : actorOverride;
+  const id = canonicalBillingReadUuid(invoiceId) ?? String(invoiceId || "");
+  const allowed = Boolean(enabled && id && actor?.id && actor.active === true);
   return useQuery({
-    queryKey: [...BILLING_INVOICE_BY_ID_KEY, id],
-    queryFn: async () => {
-      const payload = await billingApiFetch(
-        `/api/billing-invoices?invoiceId=${encodeURIComponent(id)}`,
-      );
-      return payload.invoice || null;
+    queryKey: billingInvoiceByIdKey(id, directoryActorScope(actor)),
+    queryFn: ({ signal }) => {
+      if (!allowed) throw new AppError("FORBIDDEN");
+      return readBillingInvoice(id, signal);
     },
     staleTime: 30_000,
-    enabled: enabled && Boolean(id),
+    enabled: allowed,
   });
+}
+
+/** Staff-authorized source transport, contractor-domain invalidation identity. */
+export function useBillingSourceInvoiceByIdQuery(invoiceId: string | null, enabled = true) {
+  const actor = useDirectoryActor();
+  const id = canonicalBillingReadUuid(invoiceId) ?? (invoiceId || "");
+  return useQuery({ queryKey: [...invoiceByIdKey(id, directoryActorScope(actor)), "staff-source-summary-v1"],
+    queryFn: ({ signal }) => readBillingInvoice(id, signal), staleTime: 30_000,
+    enabled: enabled && Boolean(id) && actor?.active === true });
 }
 
 export function useBillingTaxRulesQuery(enabled = true) {
   return useQuery<BillingTaxRule[]>({
     queryKey: BILLING_TAX_RULES_KEY,
     queryFn: async () => {
-      const { data, error } = await (supabase() as any)
+      const { data, error } = await supabase()
         .from("billing_tax_rules")
         .select("id, rule_key, name, priority, equipment_keywords, line_types, description_keywords, taxable, is_active, created_at, updated_at")
         .order("priority", { ascending: true })

@@ -15,6 +15,8 @@ const invoiceList = read("src/features/invoices/InvoiceList.tsx");
 const workOrderDetail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const portalShell = read("src/components/PortalShell.tsx");
 const notificationRoute = read("src/app/api/notifications/invoice-review/route.ts");
+const notificationAuthorization = read("src/lib/server/financialNotificationHttp.ts");
+const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
 
 test("migration installs an atomic, guarded contractor invoice lifecycle", () => {
   assert.match(migration, /^begin;/m);
@@ -36,7 +38,10 @@ test("review is per invoice and rejected siblings remain unresolved", () => {
   assert.match(migration, /activity_key := 'invoice_rejected'/);
   assert.match(migration, /'invoiceNum', invoice\.num/);
   assert.match(migration, /Invoice belongs to a prior contractor assignment and cannot be reviewed/);
-  assert.match(workOrderHook, /contractorInvoiceWorkOrderStatus/);
+  // The browser no longer derives a second parent financial status. Review
+  // stays per-invoice through the existing authoritative review command.
+  assert.match(workOrderHook, /await reviewContractorInvoice\(inv\.id, "approve"\)/);
+  assert.doesNotMatch(workOrderHook, /computeWoStatusFromInvoices|contractorInvoiceWorkOrderStatus/);
   assert.doesNotMatch(workOrderHook, /All contractor invoices approved/);
 });
 
@@ -79,38 +84,35 @@ test("contractor UI exposes correction only for rejected invoices", () => {
   assert.match(invoiceModal, /!isRejectedResubmission/);
   assert.match(invoiceModal, /Resubmit invoice/);
   assert.match(invoiceHook, /resubmitRejectedContractorInvoice/);
-  assert.match(portalShell, /i\.state === "rejected"/);
+  // The badge now consumes its exact authorized count; it no longer counts a
+  // partial selected-invoice cache. Rejection edit authority remains above.
+  assert.ok(/navigationSummary\?\.contractorInvoiceCount/.test(portalShell));
 });
 
-test("rejection notification endpoint authenticates staff and scopes company recipients", () => {
-  const authCheck = notificationRoute.indexOf("await requireStaff(request)");
-  const serviceUse = notificationRoute.indexOf("auth.sb");
-  assert.ok(authCheck >= 0 && serviceUse > authCheck);
-  assert.match(notificationRoute, /STAFF_ROLES/);
-  assert.match(notificationRoute, /loadStaffPermissions/);
-  assert.match(notificationRoute, /isInvoiceControllerProfile/);
+test("rejection compatibility endpoint authenticates before reading its scoped durable event", () => {
+  const authCheck = notificationRoute.indexOf("await authorizeFinancialRequest(request, false)");
+  const bodyRead = notificationRoute.indexOf("await readFinancialRequest(request)");
+  assert.ok(authCheck >= 0 && bodyRead > authCheck);
+  assert.match(notificationAuthorization, /caller\.auth\.getUser\(token\)/);
+  assert.match(notificationAuthorization, /!profile\.active/);
+  assert.match(notificationAuthorization, /!allowController && grants\.includes\("invoice_controller"\)/);
   assert.doesNotMatch(notificationRoute, /INVOICE_CONTROLLER_EMAIL/);
-  assert.match(notificationRoute, /\.eq\("active", true\)/);
-  assert.match(notificationRoute, /\.from\("organizations"\)/);
-  assert.match(notificationRoute, /canonical_contractor_id/);
-  assert.match(
-    notificationRoute,
-    /organization\.canonical_contractor_id !== contractor\.id/,
-  );
-  assert.match(notificationRoute, /\.from\("contractor_technicians"\)/);
-  assert.match(notificationRoute, /\.eq\("profile_id", creator\.id\)/);
-  assert.match(notificationRoute, /\.eq\("contractor_id", canonicalContractorId\)/);
-  assert.match(notificationRoute, /\.eq\("is_active", true\)/);
-  assert.match(
-    notificationRoute,
-    /creatorCanInvoice = creator\.contractor_access_level === "company_admin"/,
-  );
-  assert.match(notificationRoute, /belongsToInvoiceCompany/);
-  assert.doesNotMatch(notificationRoute, /const \{ data: companyMembers/);
-  assert.match(notificationRoute, /invoice\.created_by/);
-  assert.match(notificationRoute, /revision: invoice\.review_revision/);
-  assert.doesNotMatch(notificationRoute, /report_only/);
-  assert.match(invoiceHook, /notifyInvoiceReview\(inv\.id, "rejected"\)/);
+  assert.match(notificationRoute, /get_financial_notification_review_compatibility_v1/);
+  // Recipient selection moved to the transaction-owned source and is repeated
+  // immediately before provider send; it is no longer browser-route authority.
+  const recipients = notificationBoundary.slice(notificationBoundary.indexOf("create function public.financial_notification_recipients("),
+    notificationBoundary.indexOf("create function public.financial_notification_recipient_valid("));
+  assert.match(recipients, /p\.role='contractor' and p\.active/);
+  assert.match(recipients, /public\.contractor_account_id_for_profile\(p\.id\)=p\.id/);
+  assert.match(recipients, /p\.id=p_event\.creator_id/);
+  assert.match(recipients, /p\.contractor_organization_id=p_event\.contractor_company_id/);
+  assert.match(recipients, /p\.contractor_access_level='company_admin'/);
+  assert.match(recipients, /p\.contractor_access_level='invoice'[\s\S]*t\.profile_id=p\.id and t\.contractor_id=c\.id and t\.is_active/);
+  assert.doesNotMatch(recipients, /report_only/);
+  assert.match(notificationBoundary, /i\.review_revision=p_event\.review_revision/);
+  assert.match(notificationBoundary, /a\.event_data->>'revision'=p_event\.review_revision::text/);
+  assert.doesNotMatch(notificationRoute, /sendInvoiceReviewNotification|sendEmail/);
+  assert.doesNotMatch(invoiceHook, /notifyInvoiceReview/);
 });
 
 test("invoice activity remains behind the contractor invoicing permission ceiling", () => {

@@ -6,7 +6,8 @@ import {
   extractInvoiceDataFromPdf,
   findInvoiceNumber,
 } from "./invoicePdfParser";
-import { parseInvoicePdf } from "./invoicePdfParserClient";
+import "./pdf/test-fixtures/prepareInvoicePdfRuntime";
+import { createNodeBrowserPdfParity } from "./pdf/test-fixtures/browserPdfHarness";
 import { generateStaffInvoiceCsv } from "./invoiceCsv";
 
 test("extracts an invoice number shown beside an explicit label", () => {
@@ -174,7 +175,9 @@ test("parses an uploaded invoice without calling the protected parser API", asyn
   }) as typeof fetch;
 
   try {
-    const parsed = await parseInvoicePdf(file);
+    // Exercise the actual File facade/modern loader through an explicit
+    // Node-only worker fixture; no production fake-worker fallback exists.
+    const parsed = await (await createNodeBrowserPdfParity()).client.parse(file);
     assert.equal(parsed.invoiceNumber, "INV-300");
     assert.equal(parsed.total, 236);
     assert.deepEqual(parsed.lines.map(line => line.desc), ["Travel"]);

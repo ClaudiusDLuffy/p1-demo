@@ -13,6 +13,8 @@ const invoiceList = read("src/features/invoices/InvoiceList.tsx");
 const invoiceHook = read("src/features/invoices/useInvoices.ts");
 const database = read("src/lib/db.ts");
 const portalShell = read("src/components/PortalShell.tsx");
+const notificationCommands = read("src/lib/financialNotificationCommands.ts");
+const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
 
 test("batch review is transactional and delegates every row to the guarded lifecycle", () => {
   assert.match(migration, /^begin;/m);
@@ -56,11 +58,15 @@ test("invoice list provides desktop and mobile selection with explicit confirmat
   assert.match(invoiceList, /entire batch is rolled back/);
 });
 
-test("client uses one batch RPC and notifies every rejected invoice after commit", () => {
+test("client uses one versioned batch RPC whose transaction owns rejected-invoice intent", () => {
   assert.match(database, /export async function reviewContractorInvoices/);
-  assert.match(database, /"review_contractor_invoices"/);
+  assert.match(database, /return reviewInvoicesWithNotification\(/);
+  assert.match(notificationCommands, /rpc\("review_contractor_invoices_with_notification_v1"/);
+  assert.match(notificationCommands, /p_operation_id: operationId, p_expected_revisions: context\.revisions/);
   assert.match(invoiceHook, /await reviewContractorInvoices\(/);
-  assert.match(invoiceHook, /Promise\.allSettled\(/);
-  assert.match(invoiceHook, /notifyInvoiceReview\(invoiceId, "rejected"\)/);
+  assert.match(notificationBoundary, /foreach v_id in array v_ids loop[\s\S]*review_contractor_invoice_with_notification_v1/);
+  assert.match(notificationBoundary, /financial_notification_review_source after insert on public\.activities/);
+  assert.match(invoiceHook, /notifications queued/);
+  assert.doesNotMatch(invoiceHook, /notifyInvoiceReview|notifications\/invoice-review/);
   assert.match(portalShell, /doBatchReviewInvoices=\{doBatchReviewInvoices\}/);
 });

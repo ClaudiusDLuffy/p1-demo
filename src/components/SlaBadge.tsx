@@ -1,6 +1,6 @@
 "use client";
-// @ts-nocheck
 import { computeSlaState, formatRemaining } from "../lib/slaConfig";
+import { evaluateSla } from "../lib/sla/evaluation";
 
 // Colors copied from Portal.tsx theme so this component doesn't need to
 // import the whole T object. Keep in sync if the palette changes.
@@ -27,7 +27,17 @@ type Props = {
 
 export function SlaBadge({ responseBreachAt, resolutionBreachAt, responseMetAt = null, size = "sm" }: Props) {
   const state = computeSlaState(responseBreachAt, resolutionBreachAt, responseMetAt);
-  if (!state) return null;
+  if (!state) {
+    const partial = evaluateSla({ responseBreachAt, resolutionBreachAt, startTimeRaw: responseMetAt });
+    if (partial.responseTime === null && partial.resolutionTime === null) return null;
+    const completedResponse = partial.responseMet && partial.resolutionTime === null;
+    const label = completedResponse ? "Responded · Resolution deadline not set"
+      : `${partial.headline === "response" ? "Response" : "Resolution"} ${partial.breached ? "breached" : "in"} ${formatRemaining(partial.remainingHours ?? 0)}`;
+    const color = partial.breached ? C.danger : completedResponse ? C.success : C.ink;
+    return <span aria-label={`SLA: ${label}`} style={{ display: "inline-flex", fontSize: size === "sm" ? 10 : 12, fontWeight: 700, padding: "2px 8px", borderRadius: 10, color, background: partial.breached ? C.dangerSoft : C.successSoft }}>
+      {label}
+    </span>;
+  }
 
   // Color logic per spec:
   //  - both green → green
@@ -59,14 +69,15 @@ export function SlaBadge({ responseBreachAt, resolutionBreachAt, responseMetAt =
   } else if (state.responseBreached) {
     color = C.danger; bg = C.dangerSoft;
     label = "Response Breached";
-  } else if (state.responseRemainingHours < 1) {
-    color = C.danger; bg = C.dangerSoft;
-    label = `Response in ${formatRemaining(state.responseRemainingHours)}`;
-  } else if (state.responseRemainingHours < 2) {
-    color = C.warn; bg = C.warnSoft;
-    label = `Response in ${formatRemaining(state.responseRemainingHours)}`;
   } else {
     const headlineLabel = state.headline === "response" ? "Response" : "Resolution";
+    const criticalHours = state.headline === "response" ? 1 : 2;
+    const warningHours = state.headline === "response" ? 2 : 4;
+    if (state.headlineRemainingHours < criticalHours) {
+      color = C.danger; bg = C.dangerSoft;
+    } else if (state.headlineRemainingHours < warningHours) {
+      color = C.warn; bg = C.warnSoft;
+    }
     label = `${headlineLabel} in ${formatRemaining(state.headlineRemainingHours)}`;
   }
 

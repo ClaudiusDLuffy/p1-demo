@@ -16,6 +16,7 @@ const profileSecurityMigration = read(
 const notificationRoute = read(
   "src/app/api/notifications/invoice-review/route.ts",
 );
+const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
 
 test("company admins are company-wide only behind the exact contractor wall", () => {
   assert.match(
@@ -111,18 +112,15 @@ test("the approved SCRC role map is guarded and repaired idempotently", () => {
 });
 
 test("additional company admins can receive their own invoice review notifications", () => {
-  assert.match(
-    notificationRoute,
-    /belongsToInvoiceCompany[\s\S]*creatorCanInvoice = creator\.contractor_access_level === "company_admin"/,
-  );
-  assert.doesNotMatch(
-    notificationRoute,
-    /creator\.id === canonicalContractorId[\s\S]*creator\.contractor_access_level === "company_admin"/,
-  );
-  assert.match(
-    notificationRoute,
-    /creatorCanInvoice[\s\S]*belongsToInvoiceCompany/,
-  );
+  assert.match(notificationRoute, /get_financial_notification_review_compatibility_v1/);
+  const recipients = notificationBoundary.slice(notificationBoundary.indexOf("create function public.financial_notification_recipients("),
+    notificationBoundary.indexOf("create function public.financial_notification_recipient_valid("));
+  assert.match(recipients, /p\.id=p_event\.creator_id and p\.id<>p_event\.contractor_id/);
+  assert.match(recipients, /p\.contractor_organization_id=p_event\.contractor_company_id/);
+  assert.match(recipients, /p\.contractor_access_level='company_admin'/);
+  assert.match(recipients, /p\.role='contractor' and p\.active/);
+  assert.doesNotMatch(recipients, /report_only/);
+  assert.doesNotMatch(notificationRoute, /sendInvoiceReviewNotification/);
 });
 
 test("the production audit verifies structural isolation and the exact SCRC roster", () => {

@@ -2,6 +2,8 @@
 // @ts-nocheck
 
 import { useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
+import { DirectorySelect } from "../directory/DirectorySelect";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateWorkOrderSchema, CreateWorkOrderForm } from "../../lib/schemas";
@@ -15,7 +17,7 @@ import { T, PRIORITY } from "../../lib/constants";
 
 export default function WorkOrderCreateForm(props: any) {
   const {
-    onClose, doCreateWO, contractorsOnly,
+    onClose, doCreateWO,
     setSelectedWO, setPage, setAiNote, isManager,
   } = props;
   const [createErr, setCreateErr] = useState<{ msg: string; openWoId?: string } | null>(null);
@@ -24,7 +26,7 @@ export default function WorkOrderCreateForm(props: any) {
     register,
     handleSubmit,
     reset,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<CreateWorkOrderForm>({
     resolver: zodResolver(CreateWorkOrderSchema),
     defaultValues: {
@@ -56,22 +58,19 @@ export default function WorkOrderCreateForm(props: any) {
     setCreateErr(null);
     onClose();
   };
+  const dismissal = useUnsavedChangesGuard({ dirty: isDirty, busy: submitting, onClose: discardAndClose });
 
   return (
-    <Modal onClose={discardAndClose} title="Create Work Order" width={520} closeOnBackdrop={false}>
+    <Modal onRequestClose={dismissal.requestClose} dismissDisabled={submitting} title="Create Work Order" width={520} closeOnBackdrop={false}>
+      {dismissal.dialog}
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>
           Only the WOT number is required - fill in what you have; the rest takes sensible defaults.
         </div>
         <div style={{ display: "grid", gap: 14 }}>
           <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="WOT Number *">
+            <Field label="WOT Number *" required error={errors.wot?.message}>
               <Input {...register("wot")} placeholder="e.g. FWKD11400123" />
-              {errors.wot && (
-                <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>
-                  {errors.wot.message}
-                </span>
-              )}
             </Field>
             <Field label="Incident ID"><Input {...register("incidentId")} placeholder="e.g. INC24890517" /></Field>
           </div>
@@ -82,13 +81,8 @@ export default function WorkOrderCreateForm(props: any) {
           <Field label="Store Address"><Input {...register("addr")} placeholder="street address" /></Field>
           <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="AFM Name"><Input {...register("afm")} placeholder="" /></Field>
-            <Field label="AFM Email">
+            <Field label="AFM Email" error={errors.afmEmail?.message}>
               <Input {...register("afmEmail")} placeholder="" />
-              {errors.afmEmail && (
-                <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>
-                  {errors.afmEmail.message}
-                </span>
-              )}
             </Field>
           </div>
           <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -106,10 +100,7 @@ export default function WorkOrderCreateForm(props: any) {
             <option value="">P4 Minor (default)</option>
             {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
           </Sel></Field>
-          <Field label="Assign to contractor"><Sel {...register("assign")}>
-            <option value="">Leave unassigned</option>
-            {contractorsOnly.map(u => <option key={u.id} value={u.id} data-sub={u.company || ""} data-search={`${u.name || ""} ${u.company || ""}`}>{u.name}</option>)}
-          </Sel></Field>
+          <Field label="Assign to contractor"><DirectorySelect domain="assignable_contractors" emptyLabel="Leave unassigned" {...register("assign")} /></Field>
           <Field label="Short Description"><Input {...register("summary")} placeholder="one-line summary" /></Field>
           <Field label="Description"><TA rows={3} {...register("description")} placeholder="full description" /></Field>
         </div>
@@ -126,7 +117,7 @@ export default function WorkOrderCreateForm(props: any) {
           </div>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-          <button type="button" onClick={discardAndClose} className="btn-soft">Cancel</button>
+          <button type="button" disabled={submitting} onClick={() => dismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
           <button
             type="submit"
             disabled={submitting}

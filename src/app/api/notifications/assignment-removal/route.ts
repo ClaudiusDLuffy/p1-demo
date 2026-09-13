@@ -1,7 +1,23 @@
+import { createApiMethodBoundary } from "../../../../lib/server/apiMethodBoundary";
+
+const apiMethodBoundary = createApiMethodBoundary("/api/notifications/assignment-removal", ["POST"]);
+export const GET = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const DELETE = apiMethodBoundary.methodNotAllowed;
+export const HEAD = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { legacyErrorResponse } from "../../../../lib/errors/legacyResponse";
+import { AppError } from "../../../../lib/errors/AppError";
+import { runRequestOperation } from "../../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../../lib/errors/httpBoundary";
 import { NextRequest, NextResponse } from "next/server";
 
 import { sendWorkOrderAssignmentRemovalNotification } from "../../../../lib/notificationService";
 import { requireStaffRequest } from "../../../../lib/server/staffAuthorization";
+import { requireLegacyGraphDeliveryConfiguration } from "../../../../lib/config/server/graph";
 
 export const runtime = "nodejs";
 
@@ -28,8 +44,7 @@ const TRANSITION_TYPES = new Set<AssignmentTransitionType>([
   "duplicated_for_reassignment",
 ]);
 
-const jsonError = (message: string, status: number) =>
-  NextResponse.json({ error: message }, { status });
+const jsonError = legacyErrorResponse;
 
 const parseClaim = (value: unknown): AssignmentDeliveryClaim | null => {
   let parsed = value;
@@ -45,20 +60,28 @@ const parseClaim = (value: unknown): AssignmentDeliveryClaim | null => {
 };
 
 export async function POST(request: NextRequest) {
+  const context = createRequestContext(request, "/api/notifications/assignment-removal");
+  try {
+    return await runRequestOperation(context, async () => {
   const auth = await requireStaffRequest(request);
-  if ("error" in auth) return auth.error;
+  if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
 
   let body: Record<string, unknown>;
   try {
     body = await request.json() as Record<string, unknown>;
   } catch {
-    return jsonError("Invalid JSON body", 400);
+    return await finalizeApiResponse(await jsonError("Invalid JSON body", 400), context);
   }
 
   const deliveryId = String(body.deliveryId || "").trim();
   if (!UUID_PATTERN.test(deliveryId)) {
-    return jsonError("A valid deliveryId is required", 400);
+    return await finalizeApiResponse(await jsonError("A valid deliveryId is required", 400), context);
   }
+
+  const existingDelivery = await auth.sb.from("contractor_assignment_transition_deliveries")
+    .select("status").eq("id", deliveryId).maybeSingle();
+  if (existingDelivery.error) throw existingDelivery.error;
+  requireLegacyGraphDeliveryConfiguration(existingDelivery.data?.status);
 
   const { data, error: claimError } = await auth.sb.rpc(
     "claim_contractor_assignment_transition_delivery",
@@ -67,29 +90,29 @@ export async function POST(request: NextRequest) {
       p_actor_id: auth.profile.id,
     },
   );
-  if (claimError) return jsonError(claimError.message, 409);
+  if (claimError) return await finalizeApiResponse(await jsonError(claimError, 409), context);
 
   const claim = parseClaim(data);
   if (!claim?.claimStatus) {
-    return jsonError("Assignment-removal notification claim returned an invalid result", 500);
+    return await finalizeApiResponse(await jsonError("Assignment-removal notification claim returned an invalid result", 500), context);
   }
   if (claim.claimStatus === "already_sent") {
-    return NextResponse.json({ success: true, delivery: "already_sent" });
+    return await finalizeApiResponse(await NextResponse.json({ success: true, delivery: "already_sent" }), context);
   }
   if (claim.claimStatus === "not_deliverable") {
-    return NextResponse.json({ success: true, delivery: "not_deliverable" });
+    return await finalizeApiResponse(await NextResponse.json({ success: true, delivery: "not_deliverable" }), context);
   }
   if (
     claim.claimStatus === "pending_or_unknown"
     || claim.claimStatus === "delivery_unknown"
   ) {
-    return NextResponse.json(
+    return await finalizeApiResponse(await NextResponse.json(
       { success: false, delivery: claim.claimStatus },
       { status: 202 },
-    );
+    ), context);
   }
   if (claim.claimStatus !== "new_claim") {
-    return jsonError("Assignment-removal notification claim returned an invalid state", 500);
+    return await finalizeApiResponse(await jsonError("Assignment-removal notification claim returned an invalid state", 500), context);
   }
 
   const claimedDeliveryId = String(claim.deliveryId || "").trim();
@@ -114,12 +137,7 @@ export async function POST(request: NextRequest) {
   ) {
     const message = "Assignment-removal delivery snapshot is incomplete";
     const { error: completionError } = await complete("unknown", message);
-    return jsonError(
-      completionError
-        ? `${message}; audit confirmation also failed: ${completionError.message}`
-        : message,
-      500,
-    );
+    return errorResponse(new AppError("RESULT_UNCONFIRMED", { cause: completionError, status: 500 }), context);
   }
 
   try {
@@ -132,25 +150,17 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : "Assignment-removal notification send failed";
-    const { error: completionError } = await complete("unknown", message);
-    return jsonError(
-      completionError
-        ? `${message}; delivery outcome and audit confirmation are unknown: ${completionError.message}`
-        : `Outgoing contractor email delivery could not be confirmed: ${message}`,
-      502,
-    );
+    await complete("unknown", "DELIVERY_UNKNOWN");
+    return errorResponse(new AppError("DELIVERY_UNKNOWN", { cause: error, status: 502 }), context);
   }
 
   const { error: completionError } = await complete("sent", null);
   if (completionError) {
-    return jsonError(
-      `Outgoing contractor email sent, but delivery confirmation failed: ${completionError.message}`,
-      500,
-    );
+    return errorResponse(new AppError("DELIVERY_UNKNOWN", { cause: completionError, status: 500 }), context);
   }
 
-  return NextResponse.json({ success: true, delivery: "sent" });
+  return await finalizeApiResponse(await NextResponse.json({ success: true, delivery: "sent" }), context);
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

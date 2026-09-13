@@ -17,6 +17,12 @@ test("contractor active queues default to newest received calls", () => {
   assert.equal(CONTRACTOR_ACTIVE_WORK_ORDER_SORT, "newest");
 });
 
+test("nullable priorities retain their last-place fallback and stable ties", () => {
+  const rows = [{ id: "null", priority: null }, { id: "missing" }, { id: "p1", priority: "p1" }, { id: "p4", priority: "p4" }];
+  assert.deepEqual(sortWorkOrders(rows, "priority").map(row => row.id), ["p1", "p4", "null", "missing"]);
+  assert.equal(rows[0].id, "null", "sorting does not mutate caller data");
+});
+
 test("capital review can start from every open non-capital status", () => {
   for (const status of [
     "assigned",

@@ -1,6 +1,9 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { useDeferredValue, useState } from "react";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import { useDirectorySelection } from "../directory/queries";
 
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
@@ -12,14 +15,6 @@ import {
   useStaffContractorPreviewWorkOrdersQuery,
 } from "./queries";
 
-type ContractorOption = {
-  id: string;
-  name?: string | null;
-  company?: string | null;
-  active?: boolean | null;
-  isAssignable?: boolean | null;
-};
-
 const money = (value: number | null | undefined) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
     .format(Number(value || 0));
@@ -30,10 +25,8 @@ const date = (value: string | null | undefined) => value
 
 export default function StaffContractorPreview({
   page,
-  contractors,
 }: {
   page: string;
-  contractors: ContractorOption[];
 }) {
   const [contractorId, setContractorId] = useState("");
   const [tab, setTab] = useState<"work_orders" | "invoices">("work_orders");
@@ -41,14 +34,7 @@ export default function StaffContractorPreview({
   const [workOrderScope, setWorkOrderScope] = useState<"active" | "history" | "all">("active");
   const [invoiceState, setInvoiceState] = useState<"all" | "draft" | "submitted" | "revised" | "rejected" | "approved" | "paid">("all");
   const deferredSearch = useDeferredValue(search.trim());
-  const options = useMemo(
-    () => [...contractors]
-      .filter(contractor => contractor.active !== false && contractor.isAssignable !== false)
-      .sort((left, right) => String(left.company || left.name || "")
-        .localeCompare(String(right.company || right.name || ""))),
-    [contractors],
-  );
-  const selected = options.find(contractor => contractor.id === contractorId) || null;
+  const selected = useDirectorySelection("assignable_contractors", contractorId, null, page === "contractor_preview").data;
   const signature = JSON.stringify([
     contractorId,
     tab,
@@ -89,21 +75,14 @@ export default function StaffContractorPreview({
         <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
           <label style={{ flex: "1 1 280px" }}>
             <span style={{ display: "block", marginBottom: 5, color: T.muted, fontSize: 10, fontWeight: 750 }}>Contractor company</span>
-            <select
+            <DirectorySelect domain="assignable_contractors" companyLabel emptyLabel="Choose a contractor…"
               value={contractorId}
               onChange={event => {
                 setContractorId(event.target.value);
                 setSearch("");
               }}
               style={{ width: "100%", minHeight: 40, padding: "8px 10px", borderRadius: 9, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit" }}
-            >
-              <option value="">Choose a contractor…</option>
-              {options.map(contractor => (
-                <option key={contractor.id} value={contractor.id}>
-                  {contractor.company || contractor.name || contractor.id}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label style={{ flex: "1 1 240px" }}>
             <span style={{ display: "block", marginBottom: 5, color: T.muted, fontSize: 10, fontWeight: 750 }}>Search this company</span>
@@ -159,7 +138,7 @@ export default function StaffContractorPreview({
           )}
           {activeQuery.isError && (
             <div className="card" role="alert" style={{ padding: 18, color: T.danger, background: T.dangerSoft }}>
-              Could not load the contractor preview. {activeQuery.error instanceof Error ? activeQuery.error.message : "Please retry."}
+              Could not load the contractor preview. {safeErrorMessage(activeQuery.error)}
             </div>
           )}
 

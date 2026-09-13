@@ -1,6 +1,9 @@
 "use client";
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
 
 import { useMemo } from "react";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import { useDirectoryLabels } from "../directory/queries";
 
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
@@ -10,7 +13,6 @@ import { useWorkOrdersPageQuery } from "../work-orders/queries";
 import type {
   StaffNotificationRead,
   StaffWorkFilter,
-  StaffWorkProfile,
   StaffWorkRow,
   StaffWorkTodo,
 } from "./workQueue";
@@ -41,7 +43,6 @@ export default function StaffWorkHub({
   rows,
   filter,
   setFilter,
-  staffProfiles,
   busyWorkOrderId,
   onOpenWorkOrder,
   onAddTodo,
@@ -57,7 +58,6 @@ export default function StaffWorkHub({
   rows: StaffWorkRow[];
   filter: StaffWorkFilter;
   setFilter: (filter: StaffWorkFilter) => void;
-  staffProfiles: StaffWorkProfile[];
   busyWorkOrderId: string | null;
   onOpenWorkOrder: (row: StaffWorkRow) => void;
   onAddTodo: (workOrderId: string) => void;
@@ -92,6 +92,8 @@ export default function StaffWorkHub({
     limit: 25,
     cursor: position.cursor,
   }, page === "staff_work");
+  const ownerLabels = useDirectoryLabels((workPageQuery.data?.items || [])
+    .map(workOrder => (workOrder as typeof workOrder & { staffTodo?: StaffWorkTodo }).staffTodo?.ownerId), page === "staff_work");
   const pageRows = useMemo(
     () => {
       const pageWorkOrders = workPageQuery.data?.items || [];
@@ -110,7 +112,7 @@ export default function StaffWorkHub({
         workOrders: pageWorkOrders,
         todos: pageTodos.length ? pageTodos : todos,
         reads: pageReads.length ? pageReads : reads,
-        profiles: staffProfiles,
+        profiles: ownerLabels.items,
         readyWorkOrderIds: new Set(
           pageWorkOrders
             .filter(workOrder => ["pending_invoice", "pending_payment"].includes(workOrder.status))
@@ -119,7 +121,7 @@ export default function StaffWorkHub({
         currentUserId,
       });
     },
-    [currentUserId, reads, staffProfiles, todos, workPageQuery.data?.items],
+    [currentUserId, reads, ownerLabels.items, todos, workPageQuery.data?.items],
   );
   const visibleRows = useMemo(
     () => workPageQuery.data
@@ -127,11 +129,13 @@ export default function StaffWorkHub({
       : filterStaffWorkRows(rows, filter),
     [filter, pageRows, rows, workPageQuery.data],
   );
-  const myTodoCount = summaryCounts?.todo ?? rows.filter(row => row.isMyTodo).length;
-  const unreadCount = summaryCounts?.unread ?? rows.filter(row => row.isUnread).length;
-  const readyCount = summaryCounts?.ready ?? rows.filter(row => row.isReadyToBill).length;
-  const filterCounts: Record<StaffWorkFilter, number> = {
-    all: summaryCounts?.all ?? rows.length,
+  const myTodoCount = summaryCounts?.todo ?? null;
+  const unreadCount = summaryCounts?.unread ?? null;
+  const readyCount = summaryCounts?.ready ?? null;
+  const todoUnavailable = myTodoCount === null;
+  const todoFull = myTodoCount !== null && myTodoCount >= 5;
+  const filterCounts: Record<StaffWorkFilter, number | null> = {
+    all: summaryCounts?.all ?? null,
     unread: unreadCount,
     todo: myTodoCount,
     ready: readyCount,
@@ -163,7 +167,7 @@ export default function StaffWorkHub({
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ color: T.ink, fontSize: 14, fontWeight: 800 }}>{myTodoCount} / 5</div>
+          <div style={{ color: T.ink, fontSize: 14, fontWeight: 800 }}>{myTodoCount ?? "—"} / 5</div>
           <div style={{ color: T.subtle, fontSize: 10 }}>personal to-do slots used</div>
         </div>
       </div>
@@ -196,7 +200,7 @@ export default function StaffWorkHub({
                 cursor: "pointer",
               }}
             >
-              {item.label} · {filterCounts[item.value]}
+              {item.label} · {filterCounts[item.value] ?? "—"}
             </button>
           );
         })}
@@ -246,17 +250,13 @@ export default function StaffWorkHub({
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", flex: "1 1 300px" }}>
                   {row.todo ? (
                     <>
-                      <select
+                      <DirectorySelect domain="staff_choices" emptyLabel="Choose owner…"
                         aria-label={`To-do owner for ${workOrder.id}`}
                         value={row.todo.ownerId}
                         disabled={busy}
-                        onChange={event => onTransferTodo(workOrder.id, event.target.value)}
+                        onChange={event => { if (event.target.value) onTransferTodo(workOrder.id, event.target.value); }}
                         style={{ minHeight: 36, maxWidth: 180, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 11 }}
-                      >
-                        {staffProfiles.map(profile => (
-                          <option key={profile.id} value={profile.id}>{profile.name}</option>
-                        ))}
-                      </select>
+                      />
                       {row.isMyTodo && (
                         <button
                           type="button"
@@ -272,11 +272,11 @@ export default function StaffWorkHub({
                   ) : (
                     <button
                       type="button"
-                      disabled={busy || myTodoCount >= 5}
+                      disabled={busy || todoUnavailable || todoFull}
                       onClick={() => onAddTodo(workOrder.id)}
                       className="btn-soft"
-                      title={myTodoCount >= 5 ? "Complete or transfer an item before adding another" : undefined}
-                      style={{ minHeight: 36, padding: "8px 11px", fontSize: 11, opacity: myTodoCount >= 5 ? 0.5 : 1 }}
+                      title={todoUnavailable ? "Refresh to load your current to-do count" : todoFull ? "Complete or transfer an item before adding another" : undefined}
+                      style={{ minHeight: 36, padding: "8px 11px", fontSize: 11, opacity: todoUnavailable || todoFull ? 0.5 : 1 }}
                     >
                       Add to my to-do
                     </button>
@@ -312,10 +312,10 @@ export default function StaffWorkHub({
         )}
       </div>
       <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <span style={{ color: T.muted, fontSize: 11 }}>
+        <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ color: T.muted, fontSize: 11 }}>
           {workPageQuery.isFetching
             ? "Loading work…"
-            : `${workPageQuery.data?.totalCount || 0} items · page ${position.page}`}
+            : `${workPageQuery.data?.totalCount ?? "—"} items · page ${position.page}`}
         </span>
         <span style={{ display: "flex", gap: 8 }}>
           <button type="button" className="btn-soft" disabled={position.page <= 1 || workPageQuery.isFetching} onClick={previousPage}>Previous</button>

@@ -1,7 +1,10 @@
 "use client";
 // @ts-nocheck
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { billingWorkOrderVisitsKey, directoryActorScope } from "../../lib/counts/queryKeys";
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -34,17 +37,21 @@ import {
 } from "../../lib/staffBilling";
 import { billingWorkOrderOptions } from "../../lib/billingWorkOrderOptions";
 import { isCapitalWorkOrder } from "../../lib/workOrderView";
+import { requiresVisitDurationReview, VISIT_DURATION_REVIEW_MESSAGE } from "../../lib/visitDurationReview";
 import { supabase } from "../../lib/supabase/client";
 import BillingWorkOrderActivityPanel from "./BillingWorkOrderActivityPanel";
 import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
 import {
-  billingDraftStorageKey,
+  BILLING_DRAFT_MAX_AGE_MS,
   createBillingDraftPayload,
-  readBillingDraft,
-  removeBillingDraft,
-  writeBillingDraft,
+  validateBillingDraft,
+  type BillingDraftPayload,
 } from "../../lib/billingDraftPersistence";
+import { browserDraftSession } from "../../lib/drafts/browserDraftSession";
+import type { DraftLease } from "../../lib/drafts/draftSession";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
+import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt, type StaffInvoiceSnapshot } from "../../lib/staffFinancialClient";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
 import {
@@ -60,6 +67,9 @@ import {
 import { useInvoiceByIdQuery, useInvoicesPageQuery } from "../invoices/queries";
 import { useBillingInvoicePageQuery, useBillingTaxRulesQuery } from "./queries";
 import { loadAllWorkOrderVisits } from "../../lib/db";
+import { useInvoiceDocumentAction } from "../invoices/useInvoiceDocumentAction";
+import { MAX_COMPLETE_INVOICE_BYTES } from "../invoices/invoiceDocumentRead";
+import { AppError } from "../../lib/errors/AppError";
 import {
   QUICKBOOKS_EQUIPMENT_TAGS,
   resolveQuickBooksEquipmentTag,
@@ -69,7 +79,8 @@ const BillingLineSchema = z.object({
   type: z.string().min(1),
   desc: z.string(),
   qty: z.number().positive("Qty must be greater than 0"),
-  rate: z.number().positive("Rate must be greater than 0"),
+  rate: z.number().positive("Rate must be greater than 0").optional()
+    .refine(value => value !== undefined, "Rate is required"),
   isTaxable: z.boolean().default(false),
   // UI-only. The persistence boundary ignores this flag; it prevents a later
   // rule refresh from overwriting an explicit staff checkbox choice.
@@ -201,10 +212,15 @@ export default function BillingInvoiceCreateModal(props: any) {
     fire,
     fmt,
   } = props;
+  const readCompleteDocument = useInvoiceDocumentAction(currentUser, modal || "closed");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [pullingLines, setPullingLines] = useState(false);
   const [woSearch, setWoSearch] = useState("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const sourceReadIdentity = JSON.stringify([directoryActorScope(currentUser), modal, selectedSourceIds]);
+  const latestSourceReadIdentity = useRef(sourceReadIdentity);
+  latestSourceReadIdentity.current = sourceReadIdentity;
   const [partsMarkup, setPartsMarkup] = useState("25");
   const [customTerritory, setCustomTerritory] = useState(false);
   const [draggingLine, setDraggingLine] = useState<number | null>(null);
@@ -214,26 +230,40 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [taxRateLoadError, setTaxRateLoadError] = useState("");
   const [numberEdited, setNumberEdited] = useState(false);
   const [numberPreviewError, setNumberPreviewError] = useState("");
-  const [draftState, setDraftState] = useState<"idle" | "restored" | "saved" | "error">("idle");
+  const [draftState, setDraftState] = useState<"idle" | "restored" | "saved" | "saving" | "error">("idle");
+  const formId = useId();
+  const editorScope = JSON.stringify([directoryActorScope(currentUser), modal, editingInvoice?.id || "new", initialWorkOrderId, initialSourceInvoiceId]);
+  const editorSession = useRef({ scope: editorScope, generation: 0 });
+  if (editorSession.current.scope !== editorScope) {
+    editorSession.current = { scope: editorScope, generation: editorSession.current.generation + 1 };
+    submittingRef.current = false;
+  }
+  useEffect(() => { if (editorSession.current.generation > 0) setSubmitting(false); }, [editorScope]);
+  const draftLease = useRef<DraftLease<BillingDraftPayload> | null>(null);
+  const externalDraftBaseline = useRef("");
+  const restoredDirty = useRef(false);
+  const latestDirty = useRef(false);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const initializedFor = useRef<string | null>(null);
+  const financialAttempt = useRef(createStaffFinancialAttempt());
+  const financialSnapshot = useRef<{ key: string; value: StaffInvoiceSnapshot } | null>(null);
+  const editingVersionSnapshot = useRef<unknown>(null);
   const previousInvoiceDate = useRef("");
   const previousWorkOrderId = useRef("");
   const skipRestoredWorkOrderHydration = useRef<string | null>(null);
   const draftHydrated = useRef(false);
+  useEffect(() => () => {
+    editorSession.current = { ...editorSession.current, generation: editorSession.current.generation + 1 };
+    draftLease.current?.close(); draftLease.current = null; draftHydrated.current = false;
+    initializedFor.current = null;
+  }, []);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const numberEditedRef = useRef(false);
   const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
   const p1PartsHydratedFor = useRef<string | null>(null);
   const isEditing = !!editingInvoice?.id;
   const controller = isInvoiceController(currentUser);
-  const draftStorageKey = useMemo(
-    () => billingDraftStorageKey({
-      userId: currentUser?.id || currentUser?.email || "staff",
-      editingInvoiceId: editingInvoice?.id || null,
-    }),
-    [currentUser?.email, currentUser?.id, editingInvoice?.id],
-  );
+  const draftStorageKey = `${currentUser?.id || "disabled"}:${editingInvoice?.id || `new:${initialWorkOrderId || initialSourceInvoiceId || "standalone"}`}`;
 
   const {
     register,
@@ -245,7 +275,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     getValues,
     clearErrors,
     trigger,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm({
     resolver: zodResolver(BillingInvoiceSchema),
     defaultValues: {
@@ -269,7 +299,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   });
 
   const { fields, append, remove, replace, move } = useFieldArray({ control, name: "lines" });
-  const lines = watch("lines") || [];
+  const watchedLines = watch("lines");
+  const lines = useMemo(() => watchedLines || [], [watchedLines]);
   const allLinesTaxable = lines.length > 0
     && lines.every((line: any) => Boolean(line?.isTaxable));
   const someLinesTaxable = lines.some((line: any) => Boolean(line?.isTaxable));
@@ -294,7 +325,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     search: deferredWoSearch,
     sort: "newest",
     limit: 30,
-  }, modal === "createBillingInvoice");
+  }, modal === "createBillingInvoice", undefined, { countEnabled: false });
   const { data: exactWorkOrder } = useWorkOrderByIdQuery(
     requestedWorkOrderId,
     modal === "createBillingInvoice" && Boolean(requestedWorkOrderId),
@@ -305,7 +336,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   );
   const initialSourceWorkOrderId = String(
     (initialSourceInvoice as { wot?: string | null } | null | undefined)?.wot
-      || initialSourceInvoice?.work_order_id
+      || initialSourceInvoice?.workOrderId
       || "",
   );
   const sourceInvoiceQuery = useInvoicesPageQuery({
@@ -315,7 +346,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     limit: 100,
   }, modal === "createBillingInvoice" && Boolean(
     selectedWorkOrderId || initialSourceWorkOrderId,
-  ));
+  ), undefined, { countEnabled: false });
   const staffInvoiceQuery = useBillingInvoicePageQuery({
     queue: "work_order",
     workOrderId: selectedWorkOrderId || editingInvoice?.wot || initialWorkOrderId || null,
@@ -370,11 +401,13 @@ export default function BillingInvoiceCreateModal(props: any) {
   const { data: selectedWorkOrderDetails } = useWorkOrderDetailsQuery(
     selectedWorkOrderBase,
     modal === "createBillingInvoice" && Boolean(selectedWorkOrderId),
+    undefined,
+    { countEnabled: false },
   );
   const completeVisitsQuery = useQuery({
-    queryKey: ["work-order-visits", "billing", selectedWorkOrderId],
-    queryFn: () => loadAllWorkOrderVisits(String(selectedWorkOrderId)),
-    enabled: modal === "createBillingInvoice" && Boolean(selectedWorkOrderId),
+    queryKey: billingWorkOrderVisitsKey(selectedWorkOrderId, directoryActorScope(currentUser)),
+    queryFn: ({ signal }) => loadAllWorkOrderVisits(String(selectedWorkOrderId), signal),
+    enabled: modal === "createBillingInvoice" && Boolean(selectedWorkOrderId) && currentUser?.active === true,
     staleTime: 30_000,
   });
   const selectedWorkOrder = useMemo(
@@ -389,7 +422,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     },
     [completeVisitsQuery.data, selectedWorkOrderBase, selectedWorkOrderDetails],
   );
-  const billingTaxRules = billingTaxRulesQuery.data || [];
+  const billingTaxRules = useMemo(() => billingTaxRulesQuery.data || [], [billingTaxRulesQuery.data]);
   const taxabilityForLine = useCallback((type: unknown, description: unknown) =>
     resolveBillingLineTaxability(
       billingTaxRules,
@@ -452,6 +485,8 @@ export default function BillingInvoiceCreateModal(props: any) {
         id: visit.id,
         checkInAt: visit.checkInAt,
         checkOutAt: visit.checkOutAt || null,
+        closureKind: visit.closureKind || null,
+        durationReviewRequired: visit.durationReviewRequired === true,
       }));
     if (visits.length > 0) return calculateTrips(visits, selectedTimeZone);
     if (!selectedWorkOrder?.startTimeRaw) return [];
@@ -536,8 +571,13 @@ export default function BillingInvoiceCreateModal(props: any) {
         owners.set(sourceId, { id: invoice.id, num: invoice.num });
       }
     }
+    for (const invoice of contractorInvoices || []) {
+      if (invoice.sourceStaffInvoiceId && !owners.has(invoice.id)) {
+        owners.set(invoice.id, { id: invoice.sourceStaffInvoiceId, num: "another billing invoice" });
+      }
+    }
     return owners;
-  }, [billingInvoices]);
+  }, [billingInvoices, contractorInvoices]);
 
   const availableSourceInvoices = useMemo(
     () => (contractorInvoices || []).filter((invoice: any) =>
@@ -594,11 +634,13 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, [allLinesTaxable, someLinesTaxable]);
 
   const persistBillingDraft = useCallback(() => {
+    if (!latestDirty.current) { setDraftState("idle"); return false; }
     if (
       modal !== "createBillingInvoice"
       || !draftHydrated.current
+      || !latestDirty.current
       || typeof window === "undefined"
-    ) return;
+    ) return false;
     try {
       const payload = createBillingDraftPayload({
         form: getValues(),
@@ -607,16 +649,19 @@ export default function BillingInvoiceCreateModal(props: any) {
         partsMarkup,
         customTerritory,
         numberEdited,
+        financialSnapshot: financialSnapshot.current,
       });
-      writeBillingDraft(window.localStorage, draftStorageKey, payload);
-      setDraftSavedAt(payload.savedAt);
+      const result = draftLease.current?.save(payload);
+      if (result?.status !== "persisted") { setDraftState("error"); return false; }
+      setDraftSavedAt(result.savedAt);
       setDraftState("saved");
+      return true;
     } catch {
       setDraftState("error");
+      return false;
     }
   }, [
     customTerritory,
-    draftStorageKey,
     getValues,
     modal,
     numberEdited,
@@ -658,7 +703,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         const { data: sessionData } = await sb.auth.getSession();
         const token = sessionData.session?.access_token;
         if (!token) throw new Error("Your session expired. Sign in again.");
-        const response = await fetch("/api/billing-invoices?nextNumber=1", {
+        const response = await apiFetch("/api/billing-invoices?nextNumber=1", {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         });
@@ -675,7 +720,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         }
       } catch (error) {
         if (cancelled) return;
-        setNumberPreviewError(error instanceof Error ? error.message : "Invoice number is unavailable");
+        setNumberPreviewError(safeErrorMessage(error));
       }
     })();
     return () => {
@@ -686,18 +731,24 @@ export default function BillingInvoiceCreateModal(props: any) {
   useEffect(() => {
     if (modal !== "createBillingInvoice") {
       initializedFor.current = null;
+      financialSnapshot.current = null;
+      editingVersionSnapshot.current = null;
       draftHydrated.current = false;
+      draftLease.current?.close();
+      draftLease.current = null;
       return;
     }
     // A direct "create from contractor invoice" route resolves its source
     // asynchronously. Do not claim the initialization key until that exact
     // invoice is available or the form would remain permanently unhydrated.
     if (initialSourceInvoiceId && !initialSourceInvoice) return;
-    const initializationKey = editingInvoice?.id
+    const initializationKey = draftStorageKey + (editingInvoice?.id
       ? `edit:${editingInvoice.id}`
-      : `create:${initialSourceInvoiceId || ""}:${initialWorkOrderId || ""}`;
+      : `create:${initialSourceInvoiceId || ""}:${initialWorkOrderId || ""}`);
     if (initializedFor.current === initializationKey) return;
     initializedFor.current = initializationKey;
+    editingVersionSnapshot.current = editingInvoice || null;
+    financialSnapshot.current = null;
     draftHydrated.current = false;
 
     const today = todayIso();
@@ -758,20 +809,24 @@ export default function BillingInvoiceCreateModal(props: any) {
           }))
         : [],
     };
-    let storedDraft: ReturnType<typeof readBillingDraft> = null;
-    if (typeof window !== "undefined") {
-      try {
-        storedDraft = readBillingDraft(window.localStorage, draftStorageKey);
-      } catch {
-        storedDraft = null;
-      }
-    }
+    draftLease.current?.close();
+    draftLease.current = currentUser?.active === false ? null : browserDraftSession()?.open(
+      "staff-billing", editingInvoice?.id ? `edit:${editingInvoice.id}` : `new:${initialWorkOrderId || initialSourceInvoiceId || "standalone"}`,
+      validateBillingDraft, BILLING_DRAFT_MAX_AGE_MS,
+    ) ?? null;
+    const storedDraft = draftLease.current?.read() ?? null;
     const storedWorkOrderId = String(storedDraft?.form?.workOrderId || "");
     const requestedWorkOrderMatches = !resolvedInitialWorkOrderId
       || storedWorkOrderId === resolvedInitialWorkOrderId;
-    const restoredDraft = storedDraft && requestedWorkOrderMatches
+    const restoredDraft = storedDraft && requestedWorkOrderMatches && storedDraft.financialSnapshot
       ? storedDraft
       : null;
+    // Retain the original expected versions with restored values. Never combine an old draft with fresh write authority.
+    const restoredSnapshot = restoredDraft?.financialSnapshot;
+    financialSnapshot.current = restoredSnapshot ? { key: restoredSnapshot.key,
+      value: { workOrderId: restoredSnapshot.value.workOrderId ?? null, expectedInvoiceVersion: restoredSnapshot.value.expectedInvoiceVersion ?? null,
+        expectedAssignmentVersion: restoredSnapshot.value.expectedAssignmentVersion ?? null, expectedWorkflowCycle: restoredSnapshot.value.expectedWorkflowCycle ?? null } } : null;
+    restoredDirty.current = !!restoredDraft;
     const formToLoad = restoredDraft?.form || initialForm;
     previousInvoiceDate.current = String(formToLoad.invoiceDate || initialInvoiceDate);
     previousWorkOrderId.current = String(formToLoad.workOrderId || resolvedInitialWorkOrderId);
@@ -792,6 +847,9 @@ export default function BillingInvoiceCreateModal(props: any) {
     const restoredNumberEdited = restoredDraft?.numberEdited ?? isEditing;
     numberEditedRef.current = restoredNumberEdited;
     setNumberEdited(restoredNumberEdited);
+    externalDraftBaseline.current = JSON.stringify([restoredDraft?.selectedSourceIds || editingInvoice?.sourceInvoiceIds
+      || (resolvedInitialSourceInvoice?.id ? [resolvedInitialSourceInvoice.id] : []), restoredDraft?.partsMarkup || "25",
+      restoredDraft?.customTerritory ?? (!!editingInvoice?.territory && !KNOWN_TERRITORIES.includes(editingInvoice.territory)), restoredNumberEdited]);
     setDraftSavedAt(restoredDraft?.savedAt || null);
     setDraftState(restoredDraft ? "restored" : "idle");
     skipRestoredWorkOrderHydration.current = restoredDraft
@@ -812,6 +870,22 @@ export default function BillingInvoiceCreateModal(props: any) {
     reset,
     draftStorageKey,
   ]);
+
+  useEffect(() => {
+    if (modal !== "createBillingInvoice") return;
+    const key = `${editingInvoice?.id || "new"}:${selectedWorkOrderId || "standalone"}`;
+    if (financialSnapshot.current?.key === key) return;
+    if (selectedWorkOrderId && selectedWorkOrder?.id !== selectedWorkOrderId) return;
+    try {
+      financialSnapshot.current = { key, value: captureStaffInvoiceSnapshot(
+        editingVersionSnapshot.current, selectedWorkOrderId ? selectedWorkOrder : null,
+      ) };
+    } catch {
+      // Submission gives the recovery message; never fetch a fresh version at
+      // save time and silently overwrite the version the editor was opened on.
+      financialSnapshot.current = null;
+    }
+  }, [editingInvoice?.id, modal, selectedWorkOrder, selectedWorkOrderId]);
 
   useEffect(() => {
     if (
@@ -905,6 +979,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     if (modal !== "createBillingInvoice" || !draftHydrated.current) return;
     const scheduleSave = () => {
       if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+      if (!latestDirty.current) { setDraftState("idle"); return; }
+      setDraftState("saving");
       draftSaveTimer.current = setTimeout(persistBillingDraft, 450);
     };
     const subscription = watch(scheduleSave);
@@ -915,7 +991,6 @@ export default function BillingInvoiceCreateModal(props: any) {
       if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
       draftSaveTimer.current = null;
       window.removeEventListener("beforeunload", persistBillingDraft);
-      persistBillingDraft();
     };
   }, [modal, persistBillingDraft, watch]);
 
@@ -1002,19 +1077,15 @@ export default function BillingInvoiceCreateModal(props: any) {
     taxabilityForLine,
   ]);
 
-  const closeKeepingDraft = () => {
-    persistBillingDraft();
-    onClose?.();
-  };
-
-  const resetAfterSaveOrDiscard = () => {
-    if (typeof window !== "undefined") {
-      try {
-        removeBillingDraft(window.localStorage, draftStorageKey);
-      } catch {
-        // The form still closes even when browser storage is unavailable.
-      }
-    }
+  const resetAfterSaveOrDiscard = (requireRemoval = false) => {
+    draftHydrated.current = false;
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = null;
+    const removed = draftLease.current?.discard() ?? true;
+    if (!removed && requireRemoval) { setDraftState("error"); return false; }
+    draftLease.current = null;
+    financialAttempt.current.confirmed();
+    financialSnapshot.current = null;
     const today = todayIso();
     draftHydrated.current = false;
     initializedFor.current = null;
@@ -1051,14 +1122,29 @@ export default function BillingInvoiceCreateModal(props: any) {
     setDraftState("idle");
     setDraftSavedAt(null);
     setDraggingLine(null);
+    return removed;
   };
 
-  const discardAndClose = () => {
-    resetAfterSaveOrDiscard();
-    onClose?.();
-  };
+  const dirty = isDirty || restoredDirty.current || JSON.stringify([selectedSourceIds, partsMarkup, customTerritory, numberEdited]) !== externalDraftBaseline.current;
+  latestDirty.current = dirty;
+  const dismissal = useUnsavedChangesGuard({ scopeKey: `${editorScope}:${editorSession.current.generation}`, dirty, enabled: modal === "createBillingInvoice" && currentUser?.active !== false,
+    busy: submitting || pullingLines, persistence: draftState === "saving" ? "dirty_persisting" : draftState === "error" ? "persist_failed"
+      : (draftState === "saved" || draftState === "restored") && draftLease.current?.isPersisted() ? "dirty_persisted" : "dirty_not_persisted",
+    onClose: () => { draftLease.current?.close(); draftLease.current = null; onClose?.(); },
+    onDiscard: () => resetAfterSaveOrDiscard(true),
+    onKeepDraft: () => persistBillingDraft() && (draftLease.current?.isPersisted() ?? false),
+  });
+  const closeKeepingDraft = () => dismissal.requestClose("close_button");
+  const discardAndClose = () => dismissal.requestClose("cancel_button");
+  type HeaderField = "num" | "invoiceDate" | "serviceDate" | "dueDate" | "storeNumber" | "territory" | "equipmentTag" | "workOrderId" | "storeAddress" | "terms" | "cme";
+  const fieldAria = (name: HeaderField) => ({ "aria-invalid": errors[name] ? true : undefined,
+    "aria-describedby": errors[name] ? `${formId}-${name}-error` : undefined });
+  const headerError = (name: HeaderField) => errors[name] ? <span id={`${formId}-${name}-error`} role="alert" style={{ display: "block", fontSize: 11, color: T.danger }}>{String(errors[name]?.message || "Review this field.")}</span> : null;
 
   if (modal !== "createBillingInvoice") return null;
+  if (editingInvoice?.projection && editingInvoice.projection !== "complete_document") return <Modal title="Invoice not ready to edit" onClose={onClose} width={420}>
+    <p role="alert">The complete invoice has not been loaded. Close and reopen Edit before making changes.</p>
+  </Modal>;
 
   const toggleSourceInvoice = (invoiceId: string) => {
     const owner = sourceOwnerById.get(invoiceId);
@@ -1080,24 +1166,22 @@ export default function BillingInvoiceCreateModal(props: any) {
     }
     setPullingLines(true);
     try {
-      const sb = supabase();
-      const { data: sessionData } = await sb.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Missing session");
-
-      const params = new URLSearchParams({
-        sourceInvoiceIds: selectedSourceIds.join(","),
-      });
-      const response = await fetch(`/api/billing-invoices?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Contractor invoice lines could not be loaded");
+      const summaries = await readCompleteDocument.sourceSummaries(selectedSourceIds);
+      if (latestSourceReadIdentity.current !== sourceReadIdentity) throw new AppError("STALE_VERSION");
+      const preservedPartCount = (getValues("lines") || []).filter(line => Boolean(line?.sourceWorkOrderPartId)).length;
+      let remainingLines = 1000 - preservedPartCount;
+      if (summaries.reduce((sum, invoice) => sum + Math.max(1, invoice.lineCount), 0) > remainingLines) throw new AppError("PAYLOAD_TOO_LARGE");
+      const freshInvoices: Awaited<ReturnType<typeof readCompleteDocument>>[] = [];
+      let completeBytes = 0;
+      for (const summary of summaries) {
+        const document = await readCompleteDocument(summary.id, "source_import", true, remainingLines);
+        if (document.invoiceVersion !== summary.invoiceVersion) throw new AppError("STALE_VERSION");
+        completeBytes += new TextEncoder().encode(JSON.stringify(document)).byteLength;
+        if (completeBytes > MAX_COMPLETE_INVOICE_BYTES) throw new AppError("PAYLOAD_TOO_LARGE");
+        remainingLines -= Math.max(1, document.lines.length);
+        freshInvoices.push(document);
       }
-
-      const freshInvoices = payload.invoices || [];
+      if (latestSourceReadIdentity.current !== sourceReadIdentity) throw new AppError("STALE_VERSION");
       setSourceSnapshots(current => ({
         ...current,
         ...Object.fromEntries(
@@ -1146,43 +1230,54 @@ export default function BillingInvoiceCreateModal(props: any) {
       const p1PartLines = (getValues("lines") || []).filter(
         (line: any) => Boolean(line?.sourceWorkOrderPartId),
       );
+      if (p1PartLines.length + imported.length > 1000) throw new AppError("PAYLOAD_TOO_LARGE");
       replace([...p1PartLines, ...imported]);
       clearErrors("lines");
       setTimeout(() => void trigger("lines"), 0);
       fire?.(`Pulled ${imported.length} line item${imported.length === 1 ? "" : "s"}`);
     } catch (error: any) {
-      fire?.(`Pull lines failed: ${error.message || error}`);
+      fire?.(`Pull lines failed: ${safeErrorMessage(error)}`);
     } finally {
       setPullingLines(false);
     }
   };
 
-  const submit = async (data: any, state: "draft" | "submitted") => {
+  const submit = async (data: z.output<typeof BillingInvoiceSchema>, state: "draft" | "submitted") => {
+    if (submittingRef.current) return;
     const taxableAmount = (data.lines || []).reduce(
       (sum: number, line: any) => sum + (line.isTaxable ? amount(line) : 0),
       0,
     );
-    const hasManualTax = data.salesTaxOverride !== ""
-      && data.salesTaxOverride != null
-      && Number.isFinite(Number(data.salesTaxOverride))
-      && Number(data.salesTaxOverride) >= 0;
-    const hasManualTaxRate = data.taxRateOverride !== ""
-      && data.taxRateOverride != null
-      && Number.isFinite(Number(data.taxRateOverride))
-      && Number(data.taxRateOverride) >= 0
-      && Number(data.taxRateOverride) <= 100;
+    const hasManualTax = data.salesTaxOverride != null;
+    const hasManualTaxRate = data.taxRateOverride != null;
     if (taxableAmount > 0 && !activeTaxRate && !hasManualTax && !hasManualTaxRate) {
       fire?.(`No configured sales-tax rate for ${data.taxState || "this store state"}`);
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
+    const issuedSession = editorSession.current;
+    const currentAttempt = () => editorSession.current === issuedSession;
     try {
+      const snapshot = financialSnapshot.current?.value;
+      if (!snapshot || (snapshot.workOrderId || "") !== (data.workOrderId || "")) {
+        throw new Error("Refresh and reopen the invoice form. Its financial or assignment version is unavailable.");
+      }
+      const command = financialAttempt.current.save({
+        ...data, ...snapshot, state,
+        taxState: (data.taxState || "").toUpperCase(),
+        taxRateOverride: !hasManualTax && !hasManualTaxRate && verifiedLocationTaxRate
+          ? Number((verifiedLocationTaxRate.rate * 100).toFixed(6)) : data.taxRateOverride,
+        sourceInvoiceIds: selectedSourceIds, userTypedNum: numberEdited,
+      });
       const sb = supabase();
       const { data: sessionData } = await sb.auth.getSession();
+      if (!currentAttempt()) return;
       const token = sessionData.session?.access_token;
       if (!token) throw new Error("Missing session");
+      if (sessionData.session?.user?.id !== currentUser?.id) throw new AppError("AUTH_REQUIRED");
 
-      const res = await fetch(
+      const res = await apiFetch(
         isEditing
           ? `/api/billing-invoices?id=${encodeURIComponent(editingInvoice.id)}`
           : "/api/billing-invoices",
@@ -1192,36 +1287,28 @@ export default function BillingInvoiceCreateModal(props: any) {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          ...data,
-          state,
-          taxState: String(data.taxState || "").toUpperCase(),
-          // The API independently validates and persists tax. Pass an exact,
-          // verified location rate through its existing override boundary so
-          // Texas never silently falls back to the state-only 6.25% rate.
-          taxRateOverride: !hasManualTax
-            && !hasManualTaxRate
-            && verifiedLocationTaxRate
-            ? verifiedLocationTaxRate.rate * 100
-            : data.taxRateOverride,
-          sourceInvoiceIds: selectedSourceIds,
-          userTypedNum: numberEdited,
-        }),
+        body: JSON.stringify(command),
       });
 
       const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || "Billing invoice save failed");
+      // The server may have accepted the old request. Do not let that result reset or populate another form/session.
+      if (!currentAttempt()) return;
+      if (!res.ok) {
+        financialAttempt.current.rejected(res.status);
+        throw new Error(payload.error || "Billing invoice save failed");
+      }
       const documentLabel = isCapitalQuote ? "Capital quote" : "Invoice";
       fire?.(`${documentLabel} #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
-      onCreated?.(payload.invoice);
       // A successful save has its own parent handoff to the exact invoice
       // detail. Do not run the cancel/close callback, which intentionally
       // restores the originating work order.
       resetAfterSaveOrDiscard();
+      onCreated?.(payload.invoice);
     } catch (err: any) {
-      fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${err.message || err}`);
+      if (!currentAttempt()) return;
+      fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${safeErrorMessage(err)}`);
     } finally {
-      setSubmitting(false);
+      if (currentAttempt()) { submittingRef.current = false; setSubmitting(false); }
     }
   };
 
@@ -1229,6 +1316,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     <>
       <Modal
         onClose={closeKeepingDraft}
+        onRequestClose={dismissal.requestClose}
+        dismissDisabled={submitting || pullingLines}
         title={isEditing
           ? `Edit ${isCapitalQuote ? "capital quote" : "invoice"} #${editingInvoice.num}`
           : isCapitalQuote
@@ -1238,6 +1327,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         closeOnBackdrop={false}
       >
       <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
+        <fieldset disabled={submitting || pullingLines} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
           {isCapitalQuote
             ? "This capital quote is separate from the final invoice. Submitting it will move the work order into Pending Capital Completion."
@@ -1253,7 +1343,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             ? `Restored your unsaved draft${draftSavedAt ? ` from ${new Date(draftSavedAt).toLocaleString()}` : ""}.`
             : draftState === "saved"
               ? `Draft autosaved on this device${draftSavedAt ? ` at ${new Date(draftSavedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}.`
-              : draftState === "error"
+              : draftState === "saving" ? "Saving draft recovery…" : draftState === "error"
                 ? "Draft autosave is unavailable in this browser. Use Save as Draft before leaving."
                 : "Changes autosave on this device as you work."}
         </div>
@@ -1274,16 +1364,16 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => { numberEditedRef.current = true; setNumberEdited(true); } })} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...fieldAria("num")} aria-required="true" {...register("num", { onChange: () => { numberEditedRef.current = true; setNumberEdited(true); } })} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span id={`${formId}-num-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input {...fieldAria("invoiceDate")} aria-required="true" type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("invoiceDate")}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input {...fieldAria("serviceDate")} type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("serviceDate")}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input {...fieldAria("dueDate")} type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("dueDate")}</label>
         </div>
 
         <div className="billing-form-grid billing-work-order-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(120px, 150px) minmax(160px, 190px)", gap: 10, marginBottom: 16 }}>
           <div className="billing-work-order-search" style={{ minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Search work order</span>
-            <input value={woSearch} onChange={(e: any) => setWoSearch(e.target.value)} placeholder="WO number, store, city, keyword" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13, marginBottom: 8 }} />
+            <input aria-label="Search work order" value={woSearch} onChange={(e: any) => setWoSearch(e.target.value)} placeholder="WO number, store, city, keyword" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13, marginBottom: 8 }} />
             {woSearch.trim() && (
               <div role="listbox" aria-label="Matching work orders" style={{ display: "grid", gap: 4, padding: 5, marginBottom: 8, maxHeight: 210, overflowY: "auto", border: `1px solid ${T.borderSoft}`, borderRadius: 9, background: T.surface }}>
                 {workOrderOptions.length === 0 ? (
@@ -1308,14 +1398,15 @@ export default function BillingInvoiceCreateModal(props: any) {
                 ))}
               </div>
             )}
-            <Sel {...register("workOrderId")} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
+            <Sel aria-label="Invoice work order" {...fieldAria("workOrderId")} {...register("workOrderId")} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
               <option value="">Standalone invoice</option>
               {workOrderOptions.map((wo: any) => (
                 <option key={wo.id} value={wo.id}>{wo.id} - Store #{wo.store || "-"} - {wo.summary || "No summary"}{isCapitalWorkOrder(wo) ? " · Capital" : ""}</option>
               ))}
             </Sel>
+            {headerError("workOrderId")}
           </div>
-          <label style={{ minWidth: 0 }}><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6, whiteSpace: "nowrap" }}>Store number</span><input {...register("storeNumber")} placeholder="Required" style={{ width: "100%", minWidth: 0, padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.storeNumber ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13, boxSizing: "border-box" }} />{errors.storeNumber && <span style={{ fontSize: 11, color: T.danger }}>{errors.storeNumber.message}</span>}</label>
+          <label style={{ minWidth: 0 }}><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6, whiteSpace: "nowrap" }}>Store number</span><input {...fieldAria("storeNumber")} aria-required="true" {...register("storeNumber")} placeholder="Required" style={{ width: "100%", minWidth: 0, padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.storeNumber ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13, boxSizing: "border-box" }} />{errors.storeNumber && <span id={`${formId}-storeNumber-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.storeNumber.message}</span>}</label>
           <label style={{ minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Territory</span>
             <Sel
@@ -1333,6 +1424,8 @@ export default function BillingInvoiceCreateModal(props: any) {
                 });
               }}
               aria-label="Invoice territory"
+              aria-required="true"
+              {...fieldAria("territory")}
               style={{ width: "100%", minWidth: 0, padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
             >
               <option value="">Select territory</option>
@@ -1342,6 +1435,8 @@ export default function BillingInvoiceCreateModal(props: any) {
             {customTerritory ? (
               <input
                 {...register("territory")}
+                aria-label="Custom invoice territory"
+                {...fieldAria("territory")}
                 autoFocus
                 placeholder="Territory name"
                 style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 12 }}
@@ -1349,7 +1444,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             ) : (
               <input type="hidden" {...register("territory")} />
             )}
-            {errors.territory && <span style={{ display: "block", fontSize: 11, color: T.danger, marginTop: 4 }}>{String(errors.territory.message)}</span>}
+            {headerError("territory")}
           </label>
         </div>
 
@@ -1358,10 +1453,12 @@ export default function BillingInvoiceCreateModal(props: any) {
           <Sel
             {...register("equipmentTag")}
             aria-label="QuickBooks equipment tag"
+            {...fieldAria("equipmentTag")}
             style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.equipmentTag ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
           >
             {QUICKBOOKS_EQUIPMENT_TAGS.map(tag => <option key={tag} value={tag}>{tag}</option>)}
           </Sel>
+          {headerError("equipmentTag")}
           <span style={{ display: "block", fontSize: 10, color: T.subtle, marginTop: 5 }}>Auto-filled from the work order and editable before export.</span>
         </label>
 
@@ -1372,6 +1469,9 @@ export default function BillingInvoiceCreateModal(props: any) {
           </div>
         )}
 
+        {(selectedWorkOrder?.visits || []).some(requiresVisitDurationReview) && (
+          <div role="note" style={{ padding: 12, marginBottom: 14, color: T.warn }}>{VISIT_DURATION_REVIEW_MESSAGE} This time is excluded from automatic trip totals.</div>
+        )}
         {selectedWorkOrder?.priority === "p1" && (
           <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, padding: 14, marginBottom: 16, background: T.surface }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: selectedTrips.length ? 10 : 0 }}>
@@ -1396,7 +1496,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 Complete visit history could not be loaded. Refresh before calculating trip or overtime charges.
               </div>
             ) : selectedTrips.length === 0 ? (
-              <div style={{ fontSize: 12, color: T.subtle }}>No check-in/clock-out trips have been recorded.</div>
+              <div style={{ fontSize: 12, color: T.subtle }}>No verified check-in/clock-out trips are available for automatic totals.</div>
             ) : (
               <div style={{ display: "grid", gap: 7 }}>
                 {selectedTrips.map((trip: any, index: number) => (
@@ -1479,9 +1579,9 @@ export default function BillingInvoiceCreateModal(props: any) {
         )}
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store address</span><input {...register("storeAddress")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Notes / CME</span><input {...register("cme")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Store address</span><input {...fieldAria("storeAddress")} {...register("storeAddress")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("storeAddress")}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel aria-label="Invoice payment terms" {...fieldAria("terms")} {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel>{headerError("terms")}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Notes / CME</span><input {...fieldAria("cme")} {...register("cme")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("cme")}</label>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
@@ -1568,6 +1668,9 @@ export default function BillingInvoiceCreateModal(props: any) {
                 </button>
                 <Sel
                   {...typeRegistration}
+                  aria-label={`Line ${i + 1} type`}
+                  aria-invalid={errors.lines?.[i]?.type ? true : undefined}
+                  aria-describedby={errors.lines?.[i]?.type ? `${formId}-lines-error` : undefined}
                   aria-disabled={isP1PurchasedPart}
                   value={line.type}
                   onChange={(event: any) => {
@@ -1620,6 +1723,9 @@ export default function BillingInvoiceCreateModal(props: any) {
                 </Sel>
                 <textarea
                   {...descriptionRegistration}
+                  aria-label={`Line ${i + 1} description`}
+                  aria-invalid={errors.lines?.[i]?.desc ? true : undefined}
+                  aria-describedby={errors.lines?.[i]?.desc ? `${formId}-lines-error` : undefined}
                   readOnly={isP1PurchasedPart}
                   onBlur={(event: any) => {
                     void descriptionRegistration.onBlur(event);
@@ -1641,6 +1747,9 @@ export default function BillingInvoiceCreateModal(props: any) {
                   inputMode="decimal"
                   title="Labor may be billed in quarter-hour increments (1.25 = 1 hour 15 minutes)."
                   {...register(`lines.${i}.qty` as const, { valueAsNumber: true })}
+                  aria-label={`Line ${i + 1} quantity`}
+                  aria-invalid={errors.lines?.[i]?.qty ? true : undefined}
+                  aria-describedby={errors.lines?.[i]?.qty ? `${formId}-lines-error` : undefined}
                   readOnly={isP1PurchasedPart}
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.lines?.[i]?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right" }}
                 />
@@ -1649,6 +1758,9 @@ export default function BillingInvoiceCreateModal(props: any) {
                   type="number"
                   step="any"
                   {...rateRegistration}
+                  aria-label={`Line ${i + 1} rate`}
+                  aria-invalid={errors.lines?.[i]?.rate ? true : undefined}
+                  aria-describedby={errors.lines?.[i]?.rate ? `${formId}-lines-error` : undefined}
                   readOnly={isP1PurchasedPart}
                   onChange={(event: any) => {
                     void rateRegistration.onChange(event);
@@ -1744,7 +1856,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             );
           })}
         </div>
-        {errors.lines && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a quantity and rate. Descriptions are optional only for travel.</div>}
+        {errors.lines && <div id={`${formId}-lines-error`} role="alert" style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a quantity and rate. Descriptions are optional only for travel.</div>}
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           {QUICK_ADD_LINES.map(item => (
             <button
@@ -1854,7 +1966,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                     ? "No verified exact-address Texas rate is loaded. ZIP alone is not sufficient; enter the official total rate manually."
                   : taxRateLoadError
                     ? `${taxRateLoadError} Enter a tax rate or amount manually to continue.`
-                    : activeTaxRate
+                    : activeTaxRate && configuredTaxRate !== null
                       ? `${(configuredTaxRate * 100).toFixed(3)}% configured for ${taxState}. Edit the percentage when a local rate differs.`
                       : taxableSubtotal > 0
                         ? `No active tax rate configured for ${taxState || "this state"}. Enter a tax rate or amount manually.`
@@ -1953,8 +2065,10 @@ export default function BillingInvoiceCreateModal(props: any) {
                 : isCapitalQuote ? "Prepare Quote" : "Submit Invoice"}
           </button>
         </div>
+        </fieldset>
         </form>
       </Modal>
+      {dismissal.dialog}
       <SourceContractorInvoiceDrawer
         invoiceId={sourcePreviewId}
         onClose={() => setSourcePreviewId(null)}

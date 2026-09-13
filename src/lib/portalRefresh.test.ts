@@ -51,7 +51,7 @@ test("all automatic and manual refresh triggers share one in-flight lock", () =>
   assert.match(shell, /busy: refreshInFlightRef\.current/);
   assert.ok(
     shell.indexOf("refreshInFlightRef.current = true")
-      < shell.indexOf('await qc.invalidateQueries({ refetchType: "active" })'),
+      < shell.indexOf('await refreshVisiblePortal()'),
   );
   assert.match(shell, /finally \{[\s\S]*refreshInFlightRef\.current = false/);
 });

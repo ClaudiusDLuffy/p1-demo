@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { billingRouteHarness, validBillingRequest } from "./billingFinancialRouteTestHarness";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/0092_p1_part_costs_and_billing.sql");
 const equipmentTagMigration = read("supabase/migrations/0097_quickbooks_equipment_tags.sql");
-const route = read("src/app/api/billing-invoices/route.ts");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const editor = read("src/features/billing/BillingInvoiceCreateModal.tsx");
 
@@ -37,14 +37,18 @@ test("ordered P1 parts require a positive cost and are billed once at exactly 25
   assert.match(migration, /before changing this billed P1 part/);
 });
 
-test("server canonicalizes and injects every eligible P1 part before tax and atomic save", () => {
-  const canonicalizeAt = route.indexOf("async function canonicalizeP1PartLines");
-  const resolveTaxAt = route.indexOf("async function resolveTax");
-  assert.ok(canonicalizeAt >= 0 && resolveTaxAt > canonicalizeAt);
-  assert.match(route, /rpc\("list_billable_p1_parts"/);
-  assert.match(route, /for \(const part of billableParts \|\| \[\]\)/);
-  assert.match(route, /markupPercent: 25/);
-  assert.match(route, /save_staff_billing_invoice_v3/);
+test("route delegates canonical parts and tax together to the financial transaction", async () => {
+  const harness = billingRouteHarness();
+  const response = await harness.handlers.POST(harness.request("POST", validBillingRequest()));
+  assert.equal(response.status, 200);
+  assert.deepEqual(harness.calls.filter(call => call.name.startsWith("rpc:")).map(call => call.name),
+    ["rpc:save_staff_billing_invoice_v4", "rpc:get_invoice_summary_v1"]);
+  // One authoritative financial transaction, followed by one bounded summary
+  // read. Parts/tax calculation stays in SQL; no full-line refresh is allowed.
+  assert.ok(!harness.calls.some(call => call.name === "from:invoice_lines"));
+  assert.ok(!harness.calls.some(call => /^(insert|update|delete):/.test(call.name)));
+  // Historical policy protections remain; executable canonicalization/markup
+  // parity is exercised in scripts/verify-invoice-integrity.mjs, not this mock.
   assert.match(equipmentTagMigration, /public\.save_staff_billing_invoice_v2\(/);
   assert.match(migration, /auth\.role\(\) <> 'service_role'/);
   assert.match(migration, /public\.save_staff_billing_invoice\(/);

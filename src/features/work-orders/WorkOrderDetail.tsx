@@ -1,7 +1,13 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import { DirectoryProfileName } from "../directory/DirectoryProfileName";
+import { useDirectoryLabels, useDirectorySelection } from "../directory/queries";
+import WorkOrderTechnicianPicker from "./WorkOrderTechnicianPicker";
 import dynamic from "next/dynamic";
 import { Modal } from "../../components/ui/Modal";
 import { Input } from "../../components/ui/Input";
@@ -41,6 +47,7 @@ import {
   resolveWorkOrderClosedBy,
 } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
+import ReceivingDispatchStatus from "../receiving-dispatch/ReceivingDispatchStatus";
 import { useBillingInvoicePageQuery } from "../billing/queries";
 import { useInvoicesPageQuery } from "../invoices/queries";
 import {
@@ -55,6 +62,7 @@ import {
 import StoreWorkOrderHistory from "./StoreWorkOrderHistory";
 import VisitTimeline from "./VisitTimeline";
 import WorkOrderActivityPanels from "./WorkOrderActivityPanels";
+import { useInvoicePartHints } from "./useInvoicePartHints";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -88,18 +96,24 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], technicians, USERS = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onBackToAllWorkOrders, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, getUser, contractorsOnly, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffProfiles = [], staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { photoUploadItems = [], retryPhotoUploads, cancelPhotoUploads, photoDeleteError = "", retryPhotoDeletion } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onBackToAllWorkOrders, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
     && ["work_orders", "wo_detail", "history"].includes(page),
   );
+  const staffTodoCapacityUnknown = typeof props.staffMyTodoCount !== "number"
+    || !Number.isSafeInteger(props.staffMyTodoCount) || props.staffMyTodoCount < 0;
+  const { getUser } = useDirectoryLabels([woData?.contractor], detailEnabled);
+  const contractorContact = useDirectorySelection("contact_detail", woData?.contractor, null, detailEnabled).data;
+  const contractorCard = contractorContact || getUser(woData?.contractor);
   const contractorInvoiceQuery = useInvoicesPageQuery({
     state: "all",
     workOrderId: selectedWO,
     sort: "recent",
     limit: 100,
-  }, detailEnabled);
+  }, detailEnabled, currentUser, { countEnabled: false });
   const billingInvoiceQuery = useBillingInvoicePageQuery({
     queue: "work_order",
     workOrderId: selectedWO,
@@ -112,7 +126,7 @@ export default function WorkOrderDetail(props: any) {
     storeNumber: woData?.store || null,
     sort: "newest",
     limit: 25,
-  }, detailEnabled && Boolean(woData?.store));
+  }, detailEnabled && Boolean(woData?.store), currentUser, { countEnabled: isManager });
   const partsQuery = useWorkOrderPartsQuery(selectedWO, detailEnabled);
   const p1PartCostsQuery = useP1PartCostsQuery(
     selectedWO,
@@ -136,6 +150,7 @@ export default function WorkOrderDetail(props: any) {
   // Multi-invoice approvals happen per row in the invoice group below.
   const [rejectingInv, setRejectingInv] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const rejectFieldId = useId();
   const [deletingInvId, setDeletingInvId] = useState<string | null>(null);
   const [retractingInvId, setRetractingInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
@@ -220,27 +235,11 @@ export default function WorkOrderDetail(props: any) {
       : [],
     [woParts, woData]
   );
-  // "Billed" hint: any non-rejected invoice line whose description loosely
-  // matches a part's description tags it as already billed so the contractor
-  // doesn't double-bill. Match is description-substring (case-insensitive).
-  const billedDescriptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const inv of woInvoices) {
-      if (inv.state === "rejected") continue;
-      for (const line of (inv.lines || [])) {
-        if (line?.desc) set.add(String(line.desc).toLowerCase());
-      }
-    }
-    return set;
-  }, [woInvoices]);
-  const isPartBilled = (desc: string) => {
-    if (!desc) return false;
-    const d = desc.toLowerCase();
-    for (const b of billedDescriptions) {
-      if (b.includes(d) || d.includes(b)) return true;
-    }
-    return false;
-  };
+  // Preserve the informational loose-description match without loading every
+  // invoice document into this ordinary work-order detail view.
+  const invoicePartHints = useInvoicePartHints(selectedWO, myParts, detailEnabled);
+  const billedPartIds = useMemo(() => new Set(invoicePartHints.data || []), [invoicePartHints.data]);
+  const isPartBilled = (partId: string) => billedPartIds.has(partId);
   // All invoices on this WO (incl. drafts) for the per-WO group panel — drafts
   // get a "Resume" affordance, everything else gets state badges + actions.
   const woAllInvoices = useMemo(
@@ -320,6 +319,7 @@ export default function WorkOrderDetail(props: any) {
   });
   const canReviewInvoices = isManager && !invoiceController;
   const assignmentEligibility = {
+    assignmentTransferPendingVisit: woData?.assignmentTransferPendingVisit,
     isOperationalStaff: isManager,
     isInvoiceController: invoiceController,
     status: woData?.status,
@@ -364,6 +364,11 @@ export default function WorkOrderDetail(props: any) {
     alignItems: "center",
     gap: 6,
   });
+  const rejectingBusy = Boolean(rejectingInv
+    && (busyInvId === rejectingInv.id || isLoading("rejectInvoice_" + rejectingInv.id)));
+  const rejectionDismissal = useUnsavedChangesGuard({ dirty: rejectReason.length > 0,
+    busy: rejectingBusy, enabled: detailEnabled && Boolean(rejectingInv),
+    onClose: () => { setRejectingInv(null); setRejectReason(""); } });
   return (
     <>
           {/* ═════ WO DETAIL ═════ */}
@@ -376,6 +381,11 @@ export default function WorkOrderDetail(props: any) {
             const aging = getSlaAgingStyle(woData);
             return (
               <div style={{ animation: "fadeUp 0.25s" }}>
+                {props.paginationError && (
+                  <div role="alert" style={{ color: T.danger, marginBottom: 12, fontSize: 12 }}>
+                    Could not load more history. {safeErrorMessage(props.paginationError)} Use Load more to retry, or refresh the work order.
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
                   <button onClick={() => onBackFromWorkOrder?.()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> Back to previous view</button>
                   {isManager && (
@@ -436,23 +446,15 @@ export default function WorkOrderDetail(props: any) {
                       <div style={{ color: T.subtle, fontSize: 10, marginTop: 3 }}>
                         {staffTodo
                           ? "The owner keeps this work order until it is completed or transferred."
-                          : `${staffMyTodoCount} of your 5 personal slots are in use.`}
+                          : `${staffTodoCapacityUnknown ? "—" : staffMyTodoCount} of your 5 personal slots are in use.`}
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       {staffTodo ? (
                         <>
-                          <Sel
-                            aria-label="To-do owner"
-                            value={staffTodo.ownerId}
-                            disabled={staffTodoBusy}
-                            onChange={(event: any) => onTransferStaffTodo(woData.id, event.target.value)}
-                            style={{ minWidth: 150 }}
-                          >
-                            {staffProfiles.map((profile: any) => (
-                              <option key={profile.id} value={profile.id}>{profile.name}</option>
-                            ))}
-                          </Sel>
+                          <DirectorySelect domain="staff_choices" aria-label="To-do owner" value={staffTodo.ownerId}
+                            disabled={staffTodoBusy} emptyLabel="Choose owner…" selectedLabel={staffTodoOwner?.name}
+                            onChange={event => { if (event.target.value) onTransferStaffTodo(woData.id, event.target.value); }} style={{ minWidth: 150 }} />
                           {staffTodo.ownerId === currentUser?.id && (
                             <button
                               type="button"
@@ -468,10 +470,10 @@ export default function WorkOrderDetail(props: any) {
                         <button
                           type="button"
                           className="btn-soft"
-                          disabled={staffTodoBusy || staffMyTodoCount >= 5}
-                          title={staffMyTodoCount >= 5 ? "Complete or transfer an item before adding another" : undefined}
+                          disabled={staffTodoBusy || staffTodoCapacityUnknown || staffMyTodoCount >= 5}
+                          title={staffTodoCapacityUnknown ? "Your current to-do count is unavailable. Refresh and try again." : staffMyTodoCount >= 5 ? "Complete or transfer an item before adding another" : undefined}
                           onClick={() => onAddStaffTodo(woData.id)}
-                          style={{ opacity: staffMyTodoCount >= 5 ? 0.5 : 1 }}
+                          style={{ opacity: staffTodoCapacityUnknown || staffMyTodoCount >= 5 ? 0.5 : 1 }}
                         >
                           Add to my to-do
                         </button>
@@ -552,12 +554,12 @@ export default function WorkOrderDetail(props: any) {
                     </div>
                   </div>
                 )}
-                {/* Legacy single-deadline alert — only when the new fields are missing */}
+                {/* A stored partial deadline or the legacy no-deadline fallback. */}
                 {!sla2 && sla?.severity === "breach" && (
                   <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}44`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 22 }}>🚨</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>SLA breach — {Math.floor(-slaR.remainingHours)}h past {PRIORITY[woData.priority].slaHours}h limit</div>
+                      <div style={{ fontWeight: 700, color: T.danger, fontSize: 13 }}>SLA breach — {Math.floor(-slaR.remainingHours)}h past the {woData.responseBreachAt || woData.resolutionBreachAt ? "stored deadline" : "legacy compatibility deadline"}</div>
                       <div style={{ fontSize: 11, color: "#8B2C20", marginTop: 2 }}>Functional status is "{woData.functionalStatus || "—"}" — update immediately to close the gap with 7-Eleven.</div>
                     </div>
                   </div>
@@ -575,7 +577,7 @@ export default function WorkOrderDetail(props: any) {
                   <div className="card" style={{ background: T.warnSoft, border: `1px solid ${T.warn}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ fontSize: 20 }}>🔁</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: T.warn, fontSize: 12 }}>Repeat visit — Store #{woData.store} has {repeatCount} other work order{repeatCount !== 1 ? "s" : ""}{sameCategory > 0 ? ` (${sameCategory} same category)` : ""}</div>
+                      <div style={{ fontWeight: 700, color: T.warn, fontSize: 12 }}>Repeat visit — {repeatCount} other Store #{woData.store} work order{repeatCount !== 1 ? "s" : ""} in the loaded history{sameCategory > 0 ? ` (${sameCategory} same category in this page)` : ""}</div>
                       <div style={{ fontSize: 11, color: "#73560C", marginTop: 2 }}>{sameCategory >= 2 ? "Consider flagging for capital replacement — chronic equipment issue." : "Cross-reference previous repairs before dispatch."}</div>
                     </div>
                   </div>
@@ -635,7 +637,7 @@ export default function WorkOrderDetail(props: any) {
                         {[
                           { l: "Line of Service", v: woData.lineOfService || "Not set" },
                           { l: "ETA", v: formatEta(woData.eta, woData) || "Not set" },
-                          ...(isManager ? [{ l: "Assigned to", v: woData.contractor ? getUser(woData.contractor)?.name : "Unassigned" }] : []),
+                          ...(isManager ? [{ l: "Assigned to", v: woData.contractor ? contractorCard?.name : "Unassigned" }] : []),
                           { l: "Start time", v: woData.startTime || "Not started" },
                           // Contractors may see the AFM name, but contact details remain staff-only.
                           { l: "AFM", v: woData.afm || "—" },
@@ -670,6 +672,9 @@ export default function WorkOrderDetail(props: any) {
                       />
                     )}
 
+                    {!woData.billingOnly && <ReceivingDispatchStatus key={`${woData.id}:${woData.contractorAssignmentVersion}`} profile={currentUser}
+                      workOrderId={woData.id} assignmentVersion={woData.contractorAssignmentVersion} />}
+
                     {/* Actions */}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
                       {woData.status === "unassigned" && isManager && !invoiceController && (
@@ -699,13 +704,10 @@ export default function WorkOrderDetail(props: any) {
                               : "Create P1 to 7-Eleven invoice"}
                         </button>
                       )}
-                      {/* Quick-assign shows the FULL contractor list (same source as
-                          the Create WO dropdown) so no contractor is unreachable. */}
-                      {canAssignCurrentWorkOrder && contractorsOnly.map(c => (
-                        <button key={c.id} onClick={() => doAssign(woData.id, c.id)} disabled={isLoading("assign_" + woData.id)} className="btn-soft" style={loadingStyle("assign_" + woData.id)}>
-                          {isLoading("assign_" + woData.id) ? <><BtnSpinnerDark />Assigning...</> : <>Assign to {c.name.split(" ")[0]}</>}
-                        </button>
-                      ))}
+                      {canAssignCurrentWorkOrder && <DirectorySelect domain="assignable_contractors" value=""
+                        emptyLabel={isLoading("assign_" + woData.id) ? "Assigning…" : "Assign to contractor…"}
+                        disabled={isLoading("assign_" + woData.id)} style={{ width: 240 }}
+                        onChange={event => { if (event.target.value) void doAssign(woData.id, event.target.value); }} />}
                       {canRejectDuringDispatch && (
                         <button
                           type="button"
@@ -759,7 +761,7 @@ export default function WorkOrderDetail(props: any) {
                       {/* Field completion is independent of invoice permission.
                           Invoice-capable technicians retain the separate invoice
                           workflow after marking the field work complete. */}
-                      {!contractorHistoryReadOnly && !isManager && jobOpen && !["assigned", "parts"].includes(woData.status) && (
+                      {!contractorHistoryReadOnly && !isManager && jobOpen && !woData.assignmentTransferPendingVisit && !["assigned", "parts"].includes(woData.status) && (
                         <>
                           {woData.functionalStatus === "Work in Progress" && (
                             <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
@@ -786,6 +788,7 @@ export default function WorkOrderDetail(props: any) {
                         </>
                       )}
                       {isManager
+                        && !woData.assignmentTransferPendingVisit
                         && woData.functionalStatus === "Work in Progress"
                         && ["wip", "pending_invoice", "pending_approval"].includes(woData.status) && (
                         <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
@@ -807,9 +810,9 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
                         </button>
                       )}
-                      {!contractorHistoryReadOnly && woData.status === "parts" && (
+                      {!contractorHistoryReadOnly && (woData.status === "parts" || (woData.assignmentTransferPendingVisit && woData.contractor && woData.status === "wip")) && (
                         <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
-                          {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : "Resume work"}
+                          {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : woData.assignmentTransferPendingVisit ? "Start new visit after transfer" : "Resume work"}
                         </button>
                       )}
                       {woData.status === "completed" && isManager && (
@@ -1064,22 +1067,28 @@ export default function WorkOrderDetail(props: any) {
 
                     {/* Reject-invoice confirmation modal — staff-only, reason required. */}
                     {rejectingInv && (
-                      <Modal onClose={() => { setRejectingInv(null); setRejectReason(""); }} title={`Reject invoice #${rejectingInv.num}`} width={460}>
-                        <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
+                      <Modal onRequestClose={rejectionDismissal.requestClose} dismissDisabled={rejectingBusy} title={`Reject invoice #${rejectingInv.num}`} width={460}>
+                        <div id={`${rejectFieldId}-help`} style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
                           The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or entered in QuickBooks.
                         </div>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
-                        <TA rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" />
+                        <label htmlFor={rejectFieldId} style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
+                        <TA id={rejectFieldId} required disabled={rejectingBusy} aria-describedby={`${rejectFieldId}-help`} rows={3} value={rejectReason} onChange={event => setRejectReason(event.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" />
                         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                          <button onClick={() => { setRejectingInv(null); setRejectReason(""); }} className="btn-soft">Cancel</button>
+                          <button onClick={() => rejectionDismissal.requestClose("cancel_button")} disabled={rejectingBusy} className="btn-soft">Cancel</button>
                           <button
                             onClick={async () => {
-                              const ok = await doRejectInvoice(rejectingInv, rejectReason);
-                              if (ok) { setRejectingInv(null); setRejectReason(""); }
+                              if (rejectingBusy) return;
+                              setBusyInvId(rejectingInv.id);
+                              try {
+                                const ok = await doRejectInvoice(rejectingInv, rejectReason);
+                                if (ok) { setRejectingInv(null); setRejectReason(""); }
+                              } finally {
+                                setBusyInvId(null);
+                              }
                             }}
-                            disabled={!rejectReason.trim()}
+                            disabled={rejectingBusy || !rejectReason.trim()}
                             style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: rejectReason.trim() ? "pointer" : "default", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: rejectReason.trim() ? 1 : 0.5 }}
-                          >Reject</button>
+                          >{rejectingBusy ? "Rejecting…" : "Reject"}</button>
                         </div>
                       </Modal>
                     )}
@@ -1089,7 +1098,7 @@ export default function WorkOrderDetail(props: any) {
                       if (!inv) return null;
                       const isBusy = busyInvId === inv.id;
                       return (
-                        <Modal onClose={() => { if (!isBusy) setRetractingInvId(null); }} title={`Undo rejection for #${inv.num}`} width={460}>
+                        <Modal onClose={() => { if (!isBusy) setRetractingInvId(null); }} dismissDisabled={isBusy} title={`Undo rejection for #${inv.num}`} width={460}>
                           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
                             Withdraw the rejection and approve this invoice? This succeeds only if the contractor has not resubmitted it, and the correction will be recorded in the activity log.
                           </div>
@@ -1122,7 +1131,7 @@ export default function WorkOrderDetail(props: any) {
                       if (!inv) return null;
                       const isBusy = busyInvId === inv.id || isLoading("deleteInvoice_" + inv.id);
                       return (
-                        <Modal onClose={() => { if (!isBusy) setDeletingInvId(null); }} title="Delete invoice" width={420}>
+                        <Modal onClose={() => { if (!isBusy) setDeletingInvId(null); }} dismissDisabled={isBusy} title="Delete invoice" width={420}>
                           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
                             Delete invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This cannot be undone from the portal.
                           </div>
@@ -1176,10 +1185,6 @@ export default function WorkOrderDetail(props: any) {
                         </div>
                         {(woData.assignmentHistory || []).map((assignment: any) => {
                           const snapshot = assignment.workflowSnapshot || {};
-                          const priorContractor = getUser(assignment.contractorId);
-                          const nextContractor = assignment.nextContractorId
-                            ? getUser(assignment.nextContractorId)
-                            : null;
                           const details = [
                             ["ETA", snapshot.eta],
                             ["Started", snapshot.startTime],
@@ -1199,8 +1204,8 @@ export default function WorkOrderDetail(props: any) {
                           return (
                             <details key={assignment.id} style={{ borderTop: `1px solid ${T.borderSoft}`, padding: "12px 0" }}>
                               <summary style={{ cursor: "pointer", color: T.ink, fontSize: 12, fontWeight: 700 }}>
-                                {priorContractor?.company || priorContractor?.name || "Former contractor"}
-                                {nextContractor ? ` to ${nextContractor.company || nextContractor.name}` : " to Unassigned"}
+                                <DirectoryProfileName id={assignment.contractorId} company fallback="Former contractor" />
+                                {" to "}{assignment.nextContractorId ? <DirectoryProfileName id={assignment.nextContractorId} company /> : "Unassigned"}
                                 <span style={{ color: T.subtle, fontWeight: 500, marginLeft: 8 }}>
                                   {new Date(assignment.assignmentEndedAt).toLocaleString("en-US", {
                                     month: "short",
@@ -1232,103 +1237,10 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                     )}
 
-                    {!contractorHistoryReadOnly && woData.status !== "closed" && (() => {
-                      const isDispatchTier = currentUser?.contractorTier === "mr_freeze";
-                      const isDirectTier = currentUser?.contractorTier === "direct" || currentUser?.contractorTier == null;
-                      const isContractedTier = currentUser?.contractorTier === "contracted";
-                      const canManagePortalTeam = currentUser?.canManageTeam === true;
-                      const isIndividualPortalTechnician = currentUser?.contractorAccessLevel === "report_only";
-                      const isReadOnlyCompanyMember = Boolean(
-                        currentUser?.contractorOrganizationId && !canManagePortalTeam,
-                      );
-                      const isOwnContractor = !isManager
-                        && woData.contractor === (currentUser?.contractorAccountId || currentUser?.id);
-                      const dispatchTechs = isDispatchTier
-                        ? USERS.filter((u: any) => u.dispatcherId === currentUser?.id)
-                        : [];
-                      const directTechs = technicians.filter((t: any) => t.contractorId === woData.contractor && t.isActive);
-                      const legacySelectedTechnician = directTechs.find(
-                        (technician: any) => !technician.profileId && technician.name === woData.technicianOnJob,
-                      );
-                      const selectedTechnicianValue = woData.assignedTechnicianProfileId
-                        || (legacySelectedTechnician ? `legacy:${legacySelectedTechnician.id}` : "");
-                      return (
-                        <div className="card" style={{ padding: 18, marginBottom: 16 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>Technician on Job</div>
-                          {isManager || isIndividualPortalTechnician || isReadOnlyCompanyMember ? (
-                            <div style={{ fontSize: 14, fontWeight: 500, color: woData.technicianOnJob ? T.ink : T.subtle }}>{woData.technicianOnJob || "(not set)"}</div>
-                          ) : canManagePortalTeam ? (
-                            directTechs.length > 0 ? (
-                              <Sel
-                                value={selectedTechnicianValue}
-                                onChange={async (e: any) => {
-                                  const value = e.target.value;
-                                  const selectedTechnician = directTechs.find(
-                                    (technician: any) => technician.profileId === value
-                                      || `legacy:${technician.id}` === value,
-                                  );
-                                  if (!value) {
-                                    if (woData.assignedTechnicianProfileId) {
-                                      await doAssignPortalTechnician(woData.id, null, null);
-                                    } else {
-                                      await doSetTechnician(woData.id, "");
-                                    }
-                                  } else if (selectedTechnician?.profileId) {
-                                    await doAssignPortalTechnician(
-                                      woData.id,
-                                      selectedTechnician.profileId,
-                                      selectedTechnician.name,
-                                    );
-                                  } else if (selectedTechnician) {
-                                    if (woData.assignedTechnicianProfileId) {
-                                      await doAssignPortalTechnician(woData.id, null, null);
-                                    }
-                                    await doSetTechnician(woData.id, selectedTechnician.name);
-                                  }
-                                }}
-                              >
-                                <option value="">— Not set —</option>
-                                {directTechs.map((technician: any) => (
-                                  <option
-                                    key={technician.id}
-                                    value={technician.profileId || `legacy:${technician.id}`}
-                                  >
-                                    {technician.name}
-                                    {!technician.profileId
-                                      ? " — record only (no portal login)"
-                                      : ""}
-                                  </option>
-                                ))}
-                              </Sel>
-                            ) : (
-                              <div style={{ fontSize: 13, color: T.subtle, padding: "10px 13px", borderRadius: 10, border: `1px dashed ${T.border}`, background: T.surfaceSoft }}>No technicians on file</div>
-                            )
-                          ) : isDispatchTier ? (
-                            dispatchTechs.length > 0 ? (
-                              <Sel value={woData.technicianOnJob || ""} onChange={(e: any) => doSetTechnician(woData.id, e.target.value)}>
-                                <option value="">- Not set -</option>
-                                {dispatchTechs.map((u: any) => <option key={u.id} value={u.name}>{u.name}</option>)}
-                              </Sel>
-                            ) : (
-                              <div style={{ fontSize: 13, color: T.subtle, padding: "10px 13px", borderRadius: 10, border: `1px dashed ${T.border}`, background: T.surfaceSoft }}>No technicians on file</div>
-                            )
-                          ) : isDirectTier && isOwnContractor ? (
-                            directTechs.length > 0 ? (
-                              <Sel value={woData.technicianOnJob || ""} onChange={(e: any) => doSetTechnician(woData.id, e.target.value)}>
-                                <option value="">— Not set —</option>
-                                {directTechs.map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
-                              </Sel>
-                            ) : (
-                              <div style={{ fontSize: 13, color: T.subtle, padding: "10px 13px", borderRadius: 10, border: `1px dashed ${T.border}`, background: T.surfaceSoft }}>No technicians on file</div>
-                            )
-                          ) : isContractedTier ? (
-                            <Input value={currentUser?.name || ""} readOnly />
-                          ) : (
-                            <div style={{ fontSize: 14, fontWeight: 500, color: woData.technicianOnJob ? T.ink : T.subtle }}>{woData.technicianOnJob || "(not set)"}</div>
-                          )}
-                        </div>
-                      );
-                    })()}
+                    {!contractorHistoryReadOnly && woData.status !== "closed" && <WorkOrderTechnicianPicker
+                      key={`${woData.id}:${woData.contractor || ""}`}
+                      workOrder={woData} actor={currentUser} isManager={isManager}
+                      doAssignPortalTechnician={doAssignPortalTechnician} doSetTechnician={doSetTechnician} />}
 
                     {/* Completion Record — the self-contained closure file. Shown
                         on completed/closed jobs; identical from the board and History
@@ -1394,6 +1306,11 @@ export default function WorkOrderDetail(props: any) {
                       setLightbox={setLightbox}
                       doAddPhotos={doAddPhotos}
                       doRemovePhoto={doRemovePhoto}
+                      uploadItems={photoUploadItems}
+                      retryUploads={retryPhotoUploads}
+                      cancelUploads={cancelPhotoUploads}
+                      deleteError={photoDeleteError}
+                      retryDeletion={retryPhotoDeletion}
                       fire={fire}
                       loadingStates={loadingStates}
                       readOnly={contractorHistoryReadOnly}
@@ -1472,21 +1389,21 @@ export default function WorkOrderDetail(props: any) {
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
                         <div className="display" style={{ fontSize: 28, color: slaR.remainingHours < 2 ? T.danger : slaR.percent > 50 ? T.warn : T.ink, lineHeight: 1 }}>{slaR.remainingHours > 0 ? `${Math.floor(slaR.remainingHours)}h ${Math.round((slaR.remainingHours % 1) * 60)}m` : `-${Math.floor(-slaR.remainingHours)}h`}</div>
-                        <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{PRIORITY[woData.priority].label} · {PRIORITY[woData.priority].slaHours}h SLA</div>
-                        <div className="sla-bar" style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{PRIORITY[woData.priority]?.label || woData.priority || "Priority not set"} · {woData.responseBreachAt || woData.resolutionBreachAt ? "Stored SLA deadline" : `${slaR.slaHours}h legacy compatibility SLA`}</div>
+                        {slaR.percent !== null && <div className="sla-bar" style={{ marginTop: 10 }}>
                           <div className="sla-fill" style={{ width: `${slaR.percent}%`, background: slaR.percent > 90 ? T.danger : slaR.percent > 75 ? T.accent : slaR.percent > 50 ? T.warn : T.success }} />
-                        </div>
+                        </div>}
                       </div>
                     )}
                     {woData.contractor && (
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>Contractor</div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <Avatar initials={getUser(woData.contractor)?.initials} color={getUser(woData.contractor)?.color} size={38} />
+                          <Avatar initials={contractorCard?.initials} color={contractorCard?.color} size={38} />
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 700 }}>{getUser(woData.contractor)?.name}</div>
-                            <div style={{ fontSize: 11, color: T.muted }}>{getUser(woData.contractor)?.company}</div>
-                            {getUser(woData.contractor)?.phone && <div className="mono" style={{ fontSize: 11, color: T.subtle, marginTop: 3 }}>{getUser(woData.contractor)?.phone}</div>}
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{contractorCard?.name}</div>
+                            <div style={{ fontSize: 11, color: T.muted }}>{contractorCard?.company}</div>
+                            {contractorCard?.phone && <div className="mono" style={{ fontSize: 11, color: T.subtle, marginTop: 3 }}>{contractorCard?.phone}</div>}
                           </div>
                         </div>
                       </div>
@@ -1539,6 +1456,7 @@ export default function WorkOrderDetail(props: any) {
                         doRequestP1PartOrder={doRequestP1PartOrder}
                         doSetP1PartOrderStatus={doSetP1PartOrderStatus}
                         isPartBilled={isPartBilled}
+                        billingHintState={invoicePartHints.isError ? "unavailable" : invoicePartHints.data ? "ready" : "loading"}
                         loadingStates={loadingStates}
                         T={T}
                         readOnly={contractorHistoryReadOnly}
@@ -1591,6 +1509,7 @@ export default function WorkOrderDetail(props: any) {
             />
           )}
 
+      {rejectionDismissal.dialog}
     </>
   );
 }
@@ -1613,32 +1532,46 @@ const P1_ORDER_STATUS_META: Record<string, { label: string; bg: string; fg: stri
   cancelled: { label: "P1 request cancelled", bg: "#F3F4F6", fg: "#4B5563" },
 };
 
-function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, isPartBilled, loadingStates, T, readOnly = false }: any) {
+function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, isPartBilled, billingHintState, loadingStates, T, readOnly = false }: any) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<any>({});
+  const [originalDraft, setOriginalDraft] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const editBusy = Boolean(editingId && loadingStates["updatePart_" + editingId]);
+  const editDismissal = useUnsavedChangesGuard({ dirty: JSON.stringify(draft) !== originalDraft,
+    busy: editBusy, enabled: Boolean(editingId) && !readOnly,
+    onClose: () => { setEditingId(null); setDraft({}); setEditError(null); } });
+  const costFieldId = useId();
   const [p1CostDrafts, setP1CostDrafts] = useState<Record<string, string>>({});
   const [p1CostErrors, setP1CostErrors] = useState<Record<string, string>>({});
   const startEdit = (p: any) => {
     if (readOnly) return;
     setEditingId(p.id);
-    setDraft({
+    setEditError(null);
+    const initial = {
       description: p.description,
       partNumber: p.partNumber || "",
       qty: p.qty || 1,
       trackingNumber: p.trackingNumber || "",
       expectedReturnDate: p.expectedReturnDate || "",
-    });
+    };
+    setOriginalDraft(JSON.stringify(initial));
+    setDraft(initial);
   };
   const saveEdit = async (p: any) => {
     if (readOnly) return;
-    await doUpdatePart(p.id, woId, {
-      description: draft.description,
-      partNumber: draft.partNumber,
-      qty: Number(draft.qty) || 1,
-      trackingNumber: draft.trackingNumber,
-      expectedReturnDate: draft.expectedReturnDate || null,
-    });
-    setEditingId(null);
+    setEditError(null);
+    try {
+      const saved = await doUpdatePart(p.id, woId, {
+        description: draft.description,
+        partNumber: draft.partNumber,
+        qty: Number(draft.qty) || 1,
+        trackingNumber: draft.trackingNumber,
+        expectedReturnDate: draft.expectedReturnDate || null,
+      });
+      if (saved === false) { setEditError("Part changes were not saved. Review the error and try again."); return; }
+      setEditingId(null);
+    } catch (cause) { setEditError(safeErrorMessage(cause)); }
   };
   const receivedCount = parts.filter((p: any) => p.status === "received").length;
   const p1CostValue = (part: any) => p1CostDrafts[part.id]
@@ -1689,11 +1622,14 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
           >+ Add part</button>
         )}
       </div>
+      {billingHintState !== "ready" && <div role="status" style={{ color: T.muted, fontSize: 11, marginBottom: 10 }}>
+        {billingHintState === "unavailable" ? "Invoice billing hints are unavailable. Check the invoice before billing a part." : "Checking invoice billing hints…"}
+      </div>}
       <div style={{ display: "grid", gap: 10 }}>
         {parts.map((p: any) => {
           const meta = PART_STATUS_META[p.status] || PART_STATUS_META.ordered;
           const isEditing = editingId === p.id;
-          const billed = isPartBilled ? isPartBilled(p.description) : false;
+          const billed = isPartBilled ? isPartBilled(p.id) : false;
           const updating = !!loadingStates["updatePart_" + p.id];
           const p1Updating = !!loadingStates["p1Part_" + p.id];
           const isP1Order = p.orderingResponsibility === "p1";
@@ -1705,16 +1641,17 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
               {isEditing && !readOnly ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.4fr 110px 70px", gap: 8 }}>
-                    <Field label="Description"><Input value={draft.description} onChange={(e: any) => setDraft((d: any) => ({ ...d, description: e.target.value }))} /></Field>
-                    <Field label="Part #"><Input value={draft.partNumber} onChange={(e: any) => setDraft((d: any) => ({ ...d, partNumber: e.target.value }))} /></Field>
-                    <Field label="Qty"><Input type="number" min="1" step="1" value={draft.qty} onChange={(e: any) => setDraft((d: any) => ({ ...d, qty: e.target.value }))} /></Field>
+                    <Field label="Description"><Input disabled={updating} value={draft.description} onChange={(e: any) => setDraft((d: any) => ({ ...d, description: e.target.value }))} /></Field>
+                    <Field label="Part #"><Input disabled={updating} value={draft.partNumber} onChange={(e: any) => setDraft((d: any) => ({ ...d, partNumber: e.target.value }))} /></Field>
+                    <Field label="Qty"><Input disabled={updating} type="number" min="1" step="1" value={draft.qty} onChange={(e: any) => setDraft((d: any) => ({ ...d, qty: e.target.value }))} /></Field>
                   </div>
                   <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <Field label="Tracking #"><Input value={draft.trackingNumber} onChange={(e: any) => setDraft((d: any) => ({ ...d, trackingNumber: e.target.value }))} placeholder="e.g. 1Z..." /></Field>
-                    <Field label="Expected return"><Input type="date" value={draft.expectedReturnDate} onChange={(e: any) => setDraft((d: any) => ({ ...d, expectedReturnDate: e.target.value }))} /></Field>
+                    <Field label="Tracking #"><Input disabled={updating} value={draft.trackingNumber} onChange={(e: any) => setDraft((d: any) => ({ ...d, trackingNumber: e.target.value }))} placeholder="e.g. 1Z..." /></Field>
+                    <Field label="Expected return"><Input disabled={updating} type="date" value={draft.expectedReturnDate} onChange={(e: any) => setDraft((d: any) => ({ ...d, expectedReturnDate: e.target.value }))} /></Field>
                   </div>
+                  {editError && <div role="alert" style={{ color: T.danger, fontSize: 12 }}>{editError}</div>}
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 4 }}>
-                    <button type="button" onClick={() => setEditingId(null)} className="btn-soft" style={{ padding: "5px 12px", fontSize: 11 }}>Cancel</button>
+                    <button type="button" onClick={() => editDismissal.requestClose("cancel_button")} disabled={updating} className="btn-soft" style={{ padding: "5px 12px", fontSize: 11 }}>Cancel</button>
                     <button type="button" onClick={() => saveEdit(p)} disabled={updating} className="btn-accent" style={{ padding: "5px 12px", fontSize: 11 }}>{updating ? "Saving..." : "Save"}</button>
                   </div>
                 </div>
@@ -1761,6 +1698,8 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                                   [p.id]: event.target.value,
                                 }))}
                                 aria-label={`P1 unit cost for ${p.description}`}
+                                aria-invalid={Boolean(p1CostErrors[p.id])}
+                                aria-describedby={p1CostErrors[p.id] ? `${costFieldId}-${p.id}-error` : undefined}
                                 placeholder="$0.00"
                                 style={{ padding: "5px 8px", fontSize: 11 }}
                               />
@@ -1791,7 +1730,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                             >Save P1 cost</button>
                           )}
                           {p1CostErrors[p.id] && (
-                            <span style={{ fontSize: 10, color: T.danger }}>{p1CostErrors[p.id]}</span>
+                            <span id={`${costFieldId}-${p.id}-error`} role="alert" style={{ fontSize: 10, color: T.danger }}>{p1CostErrors[p.id]}</span>
                           )}
                         </div>
                       ) : (
@@ -1821,7 +1760,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
                           {p1Updating ? "Requesting…" : "P1 to order"}
                         </button>
                       )}
-                      {!readOnly && <button type="button" onClick={() => startEdit(p)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit</button>}
+                      {!readOnly && <button type="button" onClick={() => startEdit(p)} disabled={Boolean(editingId)} title={editingId ? "Finish or cancel the current part edit first." : undefined} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11 }}>Edit</button>}
                       {!readOnly && isManager && doDeletePart && (
                         <button type="button" onClick={() => doDeletePart(p.id, woId)} className="btn-soft" style={{ padding: "5px 10px", fontSize: 11, color: T.danger }}>Remove</button>
                       )}
@@ -1833,6 +1772,7 @@ function PartsPanel({ woId, parts, isManager, doAddPart, doUpdatePart, doDeleteP
           );
         })}
       </div>
+      {editDismissal.dialog}
     </div>
   );
 }

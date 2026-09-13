@@ -3,7 +3,8 @@
 // which works correctly in a client-only Next.js setup.
 
 import { createClient as createSb } from "@supabase/supabase-js";
-import type { Database } from "./database.types";
+import type { PrivateObjectDatabase } from "../privateObjectContracts";
+import { getPublicSupabaseConfig } from "../config/public";
 
 const REMEMBER_ME_KEY = "p1_remember_me";
 const REMEMBERED_EMAIL_KEY = "p1_remembered_email";
@@ -49,9 +50,10 @@ export function getRememberedEmail() {
 }
 
 export function createClient() {
-  return createSb<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+  const config = getPublicSupabaseConfig();
+  return createSb<PrivateObjectDatabase>(
+    config.url,
+    config.publishableKey,
     {
       auth: {
         persistSession: true,

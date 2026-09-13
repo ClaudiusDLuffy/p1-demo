@@ -61,7 +61,7 @@ test("single and batch invoice actions share per-invoice guards and refresh conf
 
   assert.match(invoiceHook, /acquireInvoiceMutationLocks\(normalizedIds\)/);
   assert.match(invoiceHook, /acquireInvoiceMutationLocks\(\[inv\.id\]\)/);
-  assert.match(invoiceHook, /await invalidateWorkflowData\(\);[\s\S]*rpcConflictMessage/);
+  assert.match(invoiceHook, /await invalidateWorkflowData\(\)\.catch[\s\S]*safeFinancialNotificationCommandError/);
   assert.match(invoiceHook, /finally[\s\S]*releaseInvoiceLocks\(\)/);
 });
 

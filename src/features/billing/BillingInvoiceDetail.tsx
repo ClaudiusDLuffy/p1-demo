@@ -12,6 +12,8 @@ import { normalizeStaffBillingLineType } from "../../lib/staffBilling";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import InvoiceLineTypeSubtotals from "./InvoiceLineTypeSubtotals";
 import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
+import { useInvoiceLinePage } from "../invoices/invoiceLineQueries";
+import InvoiceLinePagination from "../invoices/InvoiceLinePagination";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -34,10 +36,11 @@ export default function BillingInvoiceDetail(props: any) {
   const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
   const [billing, setBilling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const lineQuery = useInvoiceLinePage({ ...invoice, staff: true });
 
   if (!invoice) return null;
 
-  const lines = invoice.lines || [];
+  const lines = invoice.projection === "summary" ? lineQuery.lines : invoice.lines || [];
   const sourceInvoices = invoice.sourceInvoices || [];
   const controller = isInvoiceController(currentUser);
   const canDelete = !controller
@@ -101,7 +104,7 @@ export default function BillingInvoiceDetail(props: any) {
       </div>
 
       {confirmDelete && (
-        <Modal onClose={() => { if (!deleting) setConfirmDelete(false); }} title="Delete billing invoice" width={420}>
+        <Modal onClose={() => { if (!deleting) setConfirmDelete(false); }} dismissDisabled={deleting} title="Delete billing invoice" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             Delete invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span>? This soft-deletes the billing invoice.
           </div>
@@ -124,7 +127,7 @@ export default function BillingInvoiceDetail(props: any) {
       )}
 
       {confirmBilled && (
-        <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} title={capitalHandoff ? "Confirm capital quote" : "Confirm 7-Eleven billing"} width={440}>
+        <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} dismissDisabled={billing} title={capitalHandoff ? "Confirm capital quote" : "Confirm 7-Eleven billing"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             {capitalHandoff ? (
               <>Submit quote <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> to 7-Eleven? The work order will remain open in Pending Capital Completion until the capital work is finished.</>
@@ -253,13 +256,14 @@ export default function BillingInvoiceDetail(props: any) {
         )}
 
         <div>
+          {invoice.projection === "summary" && <InvoiceLinePagination query={lineQuery} total={invoice.lineCount} />}
           <div className="desktop-only-table">
             <div style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", padding: "12px 32px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
               <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div>
             </div>
             {lines.map((line: any, i: number) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
-                <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
+                <div className="mono" style={{ color: T.subtle }}>{lineQuery.lineOffset + i + 1}</div>
                 <div style={{ color: T.inkSoft, fontWeight: 500 }}>{normalizeStaffBillingLineType(line.type)}</div>
                 <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>
                   {line.desc}
@@ -276,7 +280,7 @@ export default function BillingInvoiceDetail(props: any) {
               <div key={i} style={{ padding: "14px 0", borderBottom: `1px solid ${T.borderSoft}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: T.ink }}>{i + 1}. {normalizeStaffBillingLineType(line.type)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.ink }}>{lineQuery.lineOffset + i + 1}. {normalizeStaffBillingLineType(line.type)}</div>
                     <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>{line.desc}</div>
                   </div>
                   <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{fmt(Math.round(line.amount * 100) / 100)}</div>
@@ -293,6 +297,7 @@ export default function BillingInvoiceDetail(props: any) {
         <div className="invoice-totals-section" style={{ padding: "22px 32px", display: "flex", justifyContent: "flex-end" }}>
           <InvoiceLineTypeSubtotals
             lines={lines}
+            fullSummary={invoice.lineTypeSummary}
             salesTax={Number(invoice.salesTax || 0)}
             fmt={fmt}
           />

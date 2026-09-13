@@ -10,19 +10,30 @@ import {
 } from "../staffPermissions";
 import { createServerClient } from "../supabase/server";
 import type { Database } from "../supabase/database.types";
+import { getServerPublicSupabaseConfig } from "../config/server/supabase";
 
 export const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
 
 export async function loadStaffPermissions(
   supabase: SupabaseClient<Database>,
   profileId: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  const { data, error } = await supabase
+  signal?.throwIfAborted();
+  const query = supabase
     .from("staff_permission_grants")
     .select("permission")
     .eq("profile_id", profileId);
+  const { data, error } = await (signal ? query.abortSignal(signal) : query);
+  signal?.throwIfAborted();
   if (error) throw error;
-  return (data || []).map(grant => String(grant.permission));
+  if (!Array.isArray(data)) throw new Error("Staff permission result could not be verified");
+  return data.map(grant => {
+    if (!grant || typeof grant.permission !== "string" || grant.permission.length > 100) {
+      throw new Error("Staff permission result could not be verified");
+    }
+    return grant.permission;
+  });
 }
 
 export function isInvoiceControllerProfile(profile: {
@@ -54,9 +65,10 @@ export async function requireStaffRequest(
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
+  const configuration = getServerPublicSupabaseConfig();
   const auth = createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    configuration.url,
+    configuration.publishableKey,
     { auth: { autoRefreshToken: false, persistSession: false } },
   );
   const { data, error: authError } = await auth.auth.getUser(token);

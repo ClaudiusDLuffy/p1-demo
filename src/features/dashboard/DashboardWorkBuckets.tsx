@@ -1,6 +1,8 @@
 "use client";
 
 import { useDeferredValue, useState } from "react";
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
+import { useDirectoryLabels } from "../directory/queries";
 
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
@@ -12,7 +14,7 @@ import {
   type DashboardWorkOrder,
 } from "./workBuckets";
 import { useCursorBuckets } from "../../lib/useCursorPagination";
-import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import { useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "../work-orders/queries";
 
 type DashboardIdentityWorkOrder = DashboardWorkOrder & {
   externalWorkOrderId?: string | null;
@@ -42,7 +44,6 @@ const DASHBOARD_PAGE_KEYS = [
 export default function DashboardWorkBuckets({
   search,
   setSearch,
-  getUser,
   onOpenWorkOrder,
   onViewAll,
 }: {
@@ -64,13 +65,30 @@ export default function DashboardWorkBuckets({
     previous: previousBucketPage,
     next: nextBucketPage,
   } = useCursorBuckets(deferredSearch, DASHBOARD_PAGE_KEYS);
-  const unassignedQuery = useWorkOrdersPageQuery({ scope: "dashboard_unassigned", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.unassigned.cursor });
-  const submissionQuery = useWorkOrdersPageQuery({ scope: "dashboard_pending_submission", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.pending_submission.cursor });
-  const approvalQuery = useWorkOrdersPageQuery({ scope: "dashboard_pending_approval", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.pending_approval.cursor });
-  const partsQuery = useWorkOrdersPageQuery({ scope: "dashboard_awaiting_parts", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.awaiting_parts.cursor });
-  const sevenElevenQuery = useWorkOrdersPageQuery({ scope: "dashboard_seven_eleven_updates", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.seven_eleven_updates.cursor });
-  const p1PartsQuery = useWorkOrdersPageQuery({ scope: "dashboard_p1_parts_to_order", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.p1_parts_to_order.cursor });
-  const capitalQuery = useWorkOrdersPageQuery({ scope: "dashboard_pending_capital_completion", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.pending_capital_completion.cursor });
+  const unassignedQuery = useWorkOrdersPageQuery({ scope: "dashboard_unassigned", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.unassigned.cursor }, Boolean(expanded.unassigned), undefined, { countEnabled: false });
+  const unassignedCount = useWorkOrdersCountQuery({ scope: "dashboard_unassigned", search: deferredSearch });
+  const submissionQuery = useWorkOrdersPageQuery({ scope: "dashboard_pending_submission", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.pending_submission.cursor }, Boolean(expanded.pending_submission), undefined, { countEnabled: false });
+  const submissionCount = useWorkOrdersCountQuery({ scope: "dashboard_pending_submission", search: deferredSearch });
+  const approvalQuery = useWorkOrdersPageQuery({ scope: "dashboard_pending_approval", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.pending_approval.cursor }, Boolean(expanded.pending_approval), undefined, { countEnabled: false });
+  const approvalCount = useWorkOrdersCountQuery({ scope: "dashboard_pending_approval", search: deferredSearch });
+  const partsQuery = useWorkOrdersPageQuery({ scope: "dashboard_awaiting_parts", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.awaiting_parts.cursor }, Boolean(expanded.awaiting_parts), undefined, { countEnabled: false });
+  const partsCount = useWorkOrdersCountQuery({ scope: "dashboard_awaiting_parts", search: deferredSearch });
+  const sevenElevenQuery = useWorkOrdersPageQuery({ scope: "dashboard_seven_eleven_updates", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.seven_eleven_updates.cursor }, Boolean(expanded.seven_eleven_updates), undefined, { countEnabled: false });
+  const sevenElevenCount = useWorkOrdersCountQuery({ scope: "dashboard_seven_eleven_updates", search: deferredSearch });
+  const p1PartsQuery = useWorkOrdersPageQuery({ scope: "dashboard_p1_parts_to_order", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.p1_parts_to_order.cursor }, Boolean(expanded.p1_parts_to_order), undefined, { countEnabled: false });
+  const p1PartsCount = useWorkOrdersCountQuery({ scope: "dashboard_p1_parts_to_order", search: deferredSearch });
+  const capitalQuery = useWorkOrdersPageQuery({ scope: "dashboard_pending_capital_completion", search: deferredSearch, sort: "priority", limit: 25, cursor: positions.pending_capital_completion.cursor }, Boolean(expanded.pending_capital_completion), undefined, { countEnabled: false });
+  const capitalCount = useWorkOrdersCountQuery({ scope: "dashboard_pending_capital_completion", search: deferredSearch });
+  // Each expanded, visible 25-row bucket owns its own bounded exact label set.
+  const labels = {
+    unassigned: useDirectoryLabels((unassignedQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.unassigned)),
+    pending_submission: useDirectoryLabels((submissionQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.pending_submission)),
+    pending_approval: useDirectoryLabels((approvalQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.pending_approval)),
+    awaiting_parts: useDirectoryLabels((partsQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.awaiting_parts)),
+    seven_eleven_updates: useDirectoryLabels((sevenElevenQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.seven_eleven_updates)),
+    p1_parts_to_order: useDirectoryLabels((p1PartsQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.p1_parts_to_order)),
+    pending_capital_completion: useDirectoryLabels((capitalQuery.data?.items || []).map(row => (row as unknown as DashboardIdentityWorkOrder).contractor), Boolean(expanded.pending_capital_completion)),
+  };
   const buckets = [
     { id: "unassigned", label: "Unassigned", description: "New calls that still need a contractor assignment.", query: unassignedQuery },
     { id: "pending_submission", label: "Pending 7-Eleven submission", description: "Contractor review is complete; P1 billing still needs to be prepared or submitted.", query: submissionQuery },
@@ -80,6 +98,10 @@ export default function DashboardWorkBuckets({
     { id: "p1_parts_to_order", label: "Parts P1 needs to order", description: "Contractor requests waiting for P1 purchasing action.", query: p1PartsQuery },
     { id: "pending_capital_completion", label: "Pending capital completion", description: "Capital quotes sent to 7-Eleven with equipment work still in progress.", query: capitalQuery },
   ] as const;
+
+  const counts = { unassigned: unassignedCount, pending_submission: submissionCount, pending_approval: approvalCount,
+    awaiting_parts: partsCount, seven_eleven_updates: sevenElevenCount, p1_parts_to_order: p1PartsCount,
+    pending_capital_completion: capitalCount };
 
   return (
     <section aria-label="Operational work queues">
@@ -125,8 +147,8 @@ export default function DashboardWorkBuckets({
                     <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3, overflowWrap: "anywhere" }}>{bucket.description}</span>
                   </span>
                 </span>
-                <span style={{ flex: "0 0 auto", minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: `${color}18`, color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
-                  {bucket.query.data?.totalCount || 0}
+                <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ flex: "0 0 auto", minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: `${color}18`, color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
+                  {counts[bucket.id].data?.totalCount ?? "—"}
                 </span>
               </button>
 
@@ -135,7 +157,7 @@ export default function DashboardWorkBuckets({
                   {visibleRows.map((workOrder, index) => {
                     const priority = PRIORITY[workOrder.priority as keyof typeof PRIORITY];
                     const status = STATUS[workOrder.status as keyof typeof STATUS];
-                    const contractor = workOrder.contractor ? getUser?.(workOrder.contractor) : null;
+                    const contractor = workOrder.contractor ? labels[bucket.id].getUser(workOrder.contractor) : null;
                     const copiedWorkOrderId = bucket.id === "seven_eleven_updates"
                       ? workOrder.externalWorkOrderId
                         || workOrder.duplicateRootWorkOrderId

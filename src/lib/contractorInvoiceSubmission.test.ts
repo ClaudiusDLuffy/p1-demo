@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { PORTAL_REALTIME_TABLES } from "./realtimeInvalidation";
+import { measuredBatcher, routingEvent } from "./realtime/realtimeTestSupport";
 
 const migration = readFileSync(
   resolve(process.cwd(), "supabase/migrations/0054_atomic_contractor_invoice_submission.sql"),
@@ -51,16 +53,22 @@ test("submission verifies direct-contractor ownership of the current WO", () => 
 });
 
 test("the client reuses one submission key and blocks rapid duplicate clicks", () => {
-  assert.match(dbClient, /"submit_contractor_invoice_once"/);
+  // The deployed predecessor is characterized above; current callers use the
+  // versioned successor, exercised behaviorally in contractorInvoiceCommands.test.
+  assert.match(dbClient, /createContractorInvoiceCommands\(\(name, args\) => sb\.rpc\(name, args\)\)/);
   assert.match(modal, /submissionKeyRef = useRef\(""\)/);
   assert.match(modal, /if \(submitLockRef\.current\) return;/);
   assert.match(modal, /submissionKey: submissionKeyRef\.current/);
 });
 
-test("invoice lists refresh for submissions made in another session", () => {
+test("invoice lists refresh for submissions made in another session", async () => {
   assert.doesNotMatch(invoiceQuery, /refetchInterval/);
-  assert.match(
-    dbClient,
-    /table: "invoices" \}, handleChange\("invoices"\)/,
-  );
+  assert.ok(PORTAL_REALTIME_TABLES.includes("invoices"));
+  const fixture = measuredBatcher();
+  try {
+    fixture.batcher.add(routingEvent("invoices", "invoice-a"));
+    await fixture.batcher.flush();
+    const lists = [...fixture.calls].filter(([key]) => ["invoice-pages", "billing-invoice-pages"].includes(JSON.parse(key)[0]));
+    assert.equal(lists.length, 2); assert.ok(lists.every(([, count]) => count === 1));
+  } finally { fixture.close(); }
 });

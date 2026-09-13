@@ -126,7 +126,8 @@ export const CreateInvoiceLineSchema = z.object({
   // Rate fields start EMPTY (contractor enters their own number); an empty
   // number input arrives as NaN via valueAsNumber, which z.number() rejects
   // as an invalid type — surface that as a friendly "Enter a rate".
-  rate: z.number({ error: "Enter a rate" }).nonnegative("Must be 0 or greater"),
+  rate: z.number({ error: "Enter a rate" }).nonnegative("Must be 0 or greater")
+    .optional().refine(value => value !== undefined, "Enter a rate"),
 }).superRefine((line, context) => {
   const descriptionOptional = /^(travel|truck charge)$/i.test(line.type.trim());
   if (!descriptionOptional && !line.desc.trim()) {

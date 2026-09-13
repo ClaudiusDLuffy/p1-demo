@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { generateStaffInvoicePDFBlob } from "./invoicePdf";
 import { extractInvoiceDataFromPdf } from "./invoicePdfParser";
+import { billingRouteHarness, financialTestIds, validBillingRequest } from "./billingFinancialRouteTestHarness";
 
 const read = (path: string) =>
   readFileSync(resolve(process.cwd(), path), "utf8");
@@ -63,9 +64,16 @@ test("the transaction reconciles persisted lines before replacing source links",
   assert.match(migration, /v_existing\.state not in \('draft', 'submitted'\)/);
 });
 
-test("the API delegates both creates and edits to the atomic save function", () => {
-  assert.match(route, /async function saveStaffBillingInvoice/);
-  assert.match(route, /\.rpc\(\s*"save_staff_billing_invoice_v3"/);
+test("the API delegates both creates and edits to the atomic save function", async () => {
+  for (const method of ["POST", "PATCH"]) {
+    const h = billingRouteHarness();
+    const response = await h.handlers[method](h.request(method, {
+      ...validBillingRequest(), expectedInvoiceVersion: method === "PATCH" ? 1 : null,
+    }, method === "PATCH" ? `?id=${financialTestIds.invoice}` : ""));
+    assert.equal(response.status, 200);
+    assert.equal(h.calls.filter(call => call.name === "rpc:save_staff_billing_invoice_v4").length, 1);
+    assert.ok(!h.calls.some(call => /^(insert|update):/.test(call.name)));
+  }
   assert.match(
     equipmentTagMigration,
     /create or replace function public\.save_staff_billing_invoice_v3/,
@@ -94,10 +102,6 @@ test("the API delegates both creates and edits to the atomic save function", () 
     equipmentTagMigration,
     /grant execute on function public\.save_staff_billing_invoice_v3\([\s\S]+?to service_role;/,
   );
-  assert.equal(
-    route.match(/await saveStaffBillingInvoice\(auth\.sb,/g)?.length,
-    2,
-  );
   assert.doesNotMatch(
     route,
     /\.from\("invoice_lines"\)\s*\.delete\(\)\s*\.eq\("invoice_id", id\)/,
@@ -118,11 +122,11 @@ test("billing list pages headers and enriches only bounded page IDs", () => {
 test("PDF and CSV exports reload and reconcile the exact invoice first", () => {
   assert.match(
     shell,
-    /\/api\/billing-invoices\?invoiceId=\$\{encodeURIComponent\(invoice\.id\)\}/,
+    /await loadCompleteInvoice\(invoice\.id, purpose, true\)/,
   );
   assert.match(shell, /assertStaffInvoiceIntegrity\(exportInvoice\)/);
   assert.equal(
-    shell.match(/await loadBillingInvoiceForExport\(invoice\)/g)?.length,
+    shell.match(/await loadBillingInvoiceForExport\(invoice(?:, "csv")?\)/g)?.length,
     2,
   );
   assert.match(pdf, /body: inv\.lines\.map\(/);
