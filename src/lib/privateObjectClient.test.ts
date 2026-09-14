@@ -50,7 +50,8 @@ function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean
         if (request.kind !== "photo") throw new Error("Unexpected attachment");
         intent ??= uploadIntentSchema.parse({ intentId: ids.intent, operationId: request.operationId, batchId: request.batchId,
           purpose: "photo", workOrderId: request.workOrderId, parentId: null, bucket: "photos", objectPath: `wo/${request.workOrderId}/${ids.intent}`,
-          status: "pending", expiresAt: "2026-09-10T00:00:00Z", claimId: null, bindingId: null, photoId: null, attachmentId: null, file: request.file });
+          status: "pending", expiresAt: "2026-09-10T00:00:00Z", claimId: null, bindingId: null, storageObjectId: null,
+          photoId: null, attachmentId: null, file: request.file });
         return Response.json(intent);
       }
       assert.ok(intent);
@@ -59,7 +60,7 @@ function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean
         if (options.rejectFormat) return Response.json({ status: "cleanup_required", intentId: intent.intentId,
           code: "UNSUPPORTED_IMAGE_FORMAT", message: "Convert this photo. Existing uploaded photos are not affected." });
         if (intent.status !== "finalized") confirmations++;
-        intent = { ...intent, status: "finalized", photoId: ids.photo, bindingId: ids.photo };
+        intent = { ...intent, status: "finalized", storageObjectId: ids.photo, photoId: ids.photo, bindingId: ids.photo };
         return Response.json({ status: "confirmed", intent });
       }
       if (target.endsWith("cancel")) return Response.json({ ...intent, status: "cleaned" });

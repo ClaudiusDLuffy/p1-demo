@@ -49,9 +49,9 @@ test("bounded stream preserves the exact bytes at its ceiling and releases the r
   assert.equal(stream.locked, false);
 });
 
-test("Storage 404 means absent while 403/5xx remain errors, never false absence", async () => {
+test("Storage GET 404 means absent while 400/403/5xx remain errors, never false absence", async () => {
   assert.equal(await storage(async () => new Response(null, { status: 404 })).download(object, 10), null);
-  for (const status of [403, 500, 503]) {
+  for (const status of [400, 403, 500, 503]) {
     await assert.rejects(storage(async () => new Response("provider details", { status })).download(object, 10), error => safeFailure(error, "OBJECT_DOWNLOAD_FAILED"));
   }
 });
@@ -76,8 +76,8 @@ test("Storage streaming failure cancels the reader and returns a safe transport 
     && error instanceof Error && !error.message.includes("private"));
 });
 
-test("unknown HEAD outcome never sends DELETE, and exact missing object needs no DELETE", async () => {
-  for (const [status, expected] of [[403, "unknown"], [503, "unknown"], [404, "absent"]] as const) {
+test("unknown HEAD outcome never sends DELETE, and hosted missing-object responses need no DELETE", async () => {
+  for (const [status, expected] of [[403, "unknown"], [503, "unknown"], [400, "absent"], [404, "absent"]] as const) {
     const methods: string[] = [];
     const result = await storage(async (_url, init) => { methods.push(init.method ?? "GET"); return new Response(null, { status }); }).remove(object);
     assert.equal(result, expected); assert.deepEqual(methods, ["HEAD"]);
@@ -98,6 +98,14 @@ test("lost DELETE acknowledgement reconciles exact absence and reports deletion"
   assert.equal(typeof request.body, "string");
   assert.deepEqual(JSON.parse(String(request.body)), { prefixes: [object.objectPath] });
   assert.equal(requests[0].url, requests[2].url);
+});
+
+test("successful DELETE followed by hosted Storage HEAD 400 reports deletion", async () => {
+  let heads = 0;
+  const adapter = storage(async (_url, init) => new Response(null, {
+    status: init.method === "DELETE" ? 200 : ++heads === 1 ? 200 : 400,
+  }));
+  assert.equal(await adapter.remove(object), "deleted");
 });
 
 test("DELETE acceptance alone is not proof of removal; ambiguous HEAD stays pending", async () => {

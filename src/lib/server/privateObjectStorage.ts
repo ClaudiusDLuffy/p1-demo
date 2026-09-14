@@ -63,7 +63,10 @@ export function createPrivateObjectStorage(options: {
   const exists = async (object: BoundObject): Promise<boolean | null> => {
     try {
       const response = await fetcher(path(object), { method: "HEAD", headers, signal: timeout(), cache: "no-store" });
-      return response.ok ? true : response.status === 404 ? false : null;
+      // Hosted Storage has returned 400 for an exact validated path immediately
+      // after a successful deletion. Limit that compatibility behavior to HEAD;
+      // download still treats every non-404 failure as unavailable.
+      return response.ok ? true : response.status === 400 || response.status === 404 ? false : null;
     } catch { return null; }
   };
   return {
