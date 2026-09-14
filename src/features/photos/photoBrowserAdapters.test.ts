@@ -14,7 +14,8 @@ const intent = () => uploadIntentSchema.parse({
   intentId: "a8400000-0000-4000-8000-000000000001", operationId: "a8400000-0000-4000-8000-000000000002",
   batchId: "a8400000-0000-4000-8000-000000000003", purpose: "photo", workOrderId: "SYNTHETIC-PHOTO",
   parentId: null, bucket: "photos", objectPath: "wo/SYNTHETIC-PHOTO/a8400000-0000-4000-8000-000000000001",
-  status: "pending", expiresAt: "2026-09-14T12:00:00Z", claimId: null, bindingId: null, photoId: null, attachmentId: null,
+  status: "pending", expiresAt: "2026-09-14T12:00:00Z", claimId: null, bindingId: null, storageObjectId: null,
+  photoId: null, attachmentId: null,
   file: { name: "synthetic.heic", mimeType: "application/octet-stream", sizeBytes: 6, sha256: "a".repeat(64) },
 });
 function adapter(overrides: Partial<BrowserPhotoStorageDependencies> = {}) {

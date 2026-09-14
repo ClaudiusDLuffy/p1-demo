@@ -41,6 +41,13 @@ export function createPrivateObjectWorkflow(ports: PrivateObjectWorkflowPorts, s
       const claimed = current;
       if (!claimed.claimId) throw new PrivateObjectError("VALIDATION_PENDING");
       try {
+        // The claim reads storage.objects in the same database transaction. A
+        // null id is authoritative evidence that the reserved path has not
+        // been uploaded yet, so do not ask Storage to classify its missing
+        // object response (which can be 400 rather than 404).
+        if (!claimed.storageObjectId) {
+          return { status: "upload_required", intent: await ports.fail(intentId, claimed.claimId, "OBJECT_MISSING") };
+        }
         const bytes = await storage.download(claimed, (claimed.purpose === "estimate_attachment" ? 15 : claimed.purpose === "photo" ? 10 : 5) * 1024 * 1024, signal);
         if (bytes === null) {
           return { status: "upload_required", intent: await ports.fail(intentId, claimed.claimId, "OBJECT_MISSING") };
