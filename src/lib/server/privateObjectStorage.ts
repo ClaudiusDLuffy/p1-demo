@@ -46,7 +46,12 @@ export function createPrivateObjectStorage(options: {
 }): PrivateObjectStorage {
   const fetcher = options.fetch ?? fetch;
   const timeout = () => AbortSignal.timeout(options.timeoutMs ?? 10_000);
-  const headers = { apikey: options.secret, Authorization: `Bearer ${options.secret}` };
+  // Supabase's current sb_secret keys are opaque API keys, not JWTs, and must
+  // not be presented as Bearer tokens. Legacy service_role JWTs still require
+  // the Authorization header for Storage compatibility during migration.
+  const headers = options.secret.startsWith("sb_secret_")
+    ? { apikey: options.secret }
+    : { apikey: options.secret, Authorization: `Bearer ${options.secret}` };
   const path = (object: BoundObject) => {
     if (!["photos", "invoice-pdfs", "contractor-estimate-attachments"].includes(object.bucket)
       || !object.objectPath || /[\\%?#\u0000-\u001f]/u.test(object.objectPath)
