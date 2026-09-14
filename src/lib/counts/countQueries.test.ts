@@ -107,7 +107,10 @@ test("separate counts reject missing, fractional, negative, overflow and malform
 });
 test("count keys exclude cursor/size/sort but retain all authorization scope and filter inputs", () => {
   const params: WorkOrderPageParams = { scope: "history", search: "needle", state: "FL", tableSortColumn: "priority", tableSortDirection: "desc", cursor: "p2", limit: 25 };
+  assert.deepEqual(workOrderCountFilters(params), { scope: "history", search: "needle", state: "FL" });
   assert.deepEqual(workOrderCountFilters(params), workOrderCountFilters({ ...params, cursor: "p3", limit: 50, tableSortColumn: "created", tableSortDirection: "asc" }));
+  assert.deepEqual(workOrderCountFilters({ ...params, summaryFilter: "compressor", slaFilter: "overdue" }),
+    { scope: "history", search: "needle", state: "FL", summaryFilter: "compressor", slaFilter: "overdue" });
   assert.notDeepEqual(workOrderCountFilters(params), workOrderCountFilters({ ...params, search: "different" }));
   assert.deepEqual(invoiceCountFilters({ cursor: "a", limit: 5, sort: "total", state: "approved" }), invoiceCountFilters({ state: "approved" }));
   for (const other of [{ ...actor, id: "other" }, { ...actor, role: "contractor" }, { ...actor, active: false },

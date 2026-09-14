@@ -7,15 +7,44 @@ import { parseWorkOrderReadPage, parseWorkOrderReadRow } from "./workOrderReadVa
 
 export type { WorkOrderPageParams, WorkOrderTableSortColumn } from "./workOrderReadContracts";
 
+const tableOnlyScopes = new Set<WorkOrderPageParams["scope"]>([
+  // This queue has stricter part-readiness membership than the generic scope.
+  "dashboard_p1_parts_to_order",
+]);
+
+function hasTableOnlyFilters(params: WorkOrderPageParams): boolean {
+  return Boolean(
+    params.workOrderFilter?.trim()
+    || params.incidentFilter?.trim()
+    || params.storeFilter?.trim()
+    || params.summaryFilter?.trim()
+    || params.contractorFilter?.trim()
+    || params.createdDateFilter
+    || params.updatedDateFilter
+    || (params.slaFilter && params.slaFilter !== "all")
+  );
+}
+
+function tableSortMatchesGenericSort(params: WorkOrderPageParams): boolean {
+  if (!params.tableSortColumn) return true;
+  const direction = params.tableSortDirection
+    || (params.sort === "oldest" ? "asc" : params.sort === "priority" || params.sort === "sla_due" ? "asc" : "desc");
+  const genericSort = params.sort || "newest";
+  return (genericSort === "newest" && params.tableSortColumn === "created" && direction === "desc")
+    || (genericSort === "oldest" && params.tableSortColumn === "created" && direction === "asc")
+    || (genericSort === "priority" && params.tableSortColumn === "priority" && direction === "asc")
+    || (genericSort === "sla_due" && params.tableSortColumn === "sla" && direction === "asc");
+}
+
 /** Shared with the separately owned count read; these are the existing RPC arguments. */
 export function workOrderReadArgs(params: WorkOrderPageParams = {}) {
-  const tableMode = Boolean(params.tableSortColumn)
-    || params.scope === "dashboard_seven_eleven_updates"
-    || params.scope === "dashboard_pending_submission"
-    || params.scope === "dashboard_p1_parts_to_order"
-    || params.scope === "ready_to_bill"
-    || params.scope === "staff_work"
-    || params.scope === "staff_work_ready";
+  // Preset ordering is already part of the generic cursor contract. Sending
+  // those ordinary reads through table mode needlessly executes the broader
+  // column-sort/filter plan and has caused hosted statement timeouts. Reserve
+  // table mode for controls and queue scopes that actually require it.
+  const tableMode = tableOnlyScopes.has(params.scope)
+    || hasTableOnlyFilters(params)
+    || !tableSortMatchesGenericSort(params);
   const sharedArgs = {
     p_scope: params.scope || "active",
     p_search: params.search?.trim() || null,
