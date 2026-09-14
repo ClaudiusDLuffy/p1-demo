@@ -1,4 +1,5 @@
 import type { GraphEmail } from "./graphClient";
+import { getEmailIntakeSenderConfig } from "./config/server/emailIntake";
 
 export type EmailType =
   | "TYPE_DISPATCHED"
@@ -51,7 +52,7 @@ const WORK_ORDER_REFERENCE_PATTERN = /\b(?:WOT|FWKD)\d{6,12}\b/i;
 const DEFAULT_DISPATCH_SENDERS = ["7elevenna@service-now.com"] as const;
 
 export function getAllowedDispatchSenders(
-  raw = process.env.EMAIL_INTAKE_ALLOWED_SENDERS || "",
+  raw = getEmailIntakeSenderConfig(),
 ): ReadonlySet<string> {
   const configured = raw
     .split(",")

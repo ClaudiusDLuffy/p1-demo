@@ -1,7 +1,7 @@
 "use client";
-// @ts-nocheck
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateInvoiceSchema, CreateInvoiceForm } from "../../lib/schemas";
@@ -11,11 +11,47 @@ import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
 import { T, LINE_TYPES, P1_BUSINESS } from "../../lib/constants";
 import { parseInvoicePdf } from "../../lib/invoicePdfParserClient";
+import { InvoicePdfError } from "../../lib/pdf/invoicePdfBudget";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useWorkOrderPartsQuery } from "../work-orders/queries";
+import { contractorInvoiceSnapshotFor } from "../../lib/contractorInvoiceCommands";
+import type { ContractorInvoiceContext, ContractorInvoiceSnapshot } from "../../lib/contractorInvoiceCommandContracts";
 
-const amount = (l: any) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
+type InvoiceModalWorkOrder = {
+  id: string; store?: string | number | null; addr?: string | null;
+  contractorAssignmentVersion?: number; workflowCycle?: number;
+  duplicateRootWorkOrderId?: string | null; duplicate_root_work_order_id?: string | null;
+};
+type InvoiceDraftLine = { type: string; desc?: string | null; description?: string | null; qty?: number | string | null; rate?: number | string | null };
+type InvoiceModalDraft = {
+  projection?: "summary" | "complete_document";
+  id: string; state?: string; num?: string; invoiceVersion?: number; pdfStoragePath?: string | null; pdfIsOriginal?: boolean;
+  invoiceDateRaw?: string; invoiceDate?: string; serviceDateRaw?: string; serviceDate?: string; terms?: string;
+  salesTax?: number | null; cme?: string; total?: number; lines?: InvoiceDraftLine[];
+  rejectionReason?: string | null; reason?: string | null;
+};
+type InvoiceModalPayload = CreateInvoiceForm & {
+  userTypedNum: boolean; pdfFile: File | null; hasExistingPdf: boolean; hasExistingOriginalPdf?: boolean;
+  commandContext: ContractorInvoiceContext | null; submissionKey?: string; resubmittingRejected?: boolean;
+};
+type InvoiceModalProps = {
+  modal: string | null; woData?: InvoiceModalWorkOrder | null;
+  currentUser?: { id?: string; company?: string | null; name?: string | null } | null;
+  fmt(value: number): string; setModal(value: string | null): void; resetNewInv(): void;
+  doSubmitInvoice(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null): Promise<boolean | void>;
+  doSaveDraftInvoice?(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null): Promise<boolean | void>;
+  resumeDraft?: InvoiceModalDraft | null; nextInvNumFromDb?(): Promise<string>; woParts?: readonly unknown[];
+  // Existing shell compatibility props are not consumed by this form.
+  invSubtotal?: unknown; newInv?: unknown; lineAmount?: unknown; invoices?: unknown; setNewInv?: unknown;
+};
+type ReceivedPart = { workOrderId: string; status: "received"; description: string; partNumber?: string | null; qty?: number | string | null };
+const isReceivedPart = (part: unknown): part is ReceivedPart => typeof part === "object" && part !== null
+  && "workOrderId" in part && typeof part.workOrderId === "string" && "status" in part && part.status === "received"
+  && "description" in part && typeof part.description === "string"
+  && (!("partNumber" in part) || part.partNumber == null || typeof part.partNumber === "string")
+  && (!("qty" in part) || part.qty == null || typeof part.qty === "string" || typeof part.qty === "number");
+const amount = (l: Pick<CreateInvoiceForm["lines"][number], "qty" | "rate"> | undefined) => (Number(l?.qty) || 0) * (Number(l?.rate) || 0);
 const todayIso = () => {
   const date = new Date();
   const year = date.getFullYear();
@@ -36,21 +72,23 @@ const createSubmissionKey = () => {
 };
 
 // Contractors explicitly add only the line types needed for this invoice.
-const initialLines = () => [];
+const initialLines = (): CreateInvoiceForm["lines"] => [];
 
-export default function InvoiceCreateModal(props: any) {
+export default function InvoiceCreateModal(props: InvoiceModalProps) {
+  const formId = useId();
+  const pdfUploadInput = useRef<HTMLInputElement>(null);
   const { modal, woData, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts: suppliedWoParts = [] } = props;
   const partsQuery = useWorkOrderPartsQuery(
     woData?.id,
     modal === "createInvoice" && Boolean(woData?.id),
   );
-  const woParts = partsQuery.data || suppliedWoParts;
+  const woParts: readonly unknown[] = partsQuery.data || suppliedWoParts;
   // Parts on this WO that have been received (and so are billable) — feeds
   // the "Add from parts list" button below the line items grid. Description
   // + qty pre-fill only; the contractor types their own rate.
   const receivedPartsForWO = useMemo(() => {
     if (!woData) return [];
-    return woParts.filter((p: any) => p.workOrderId === woData.id && p.status === "received");
+    return woParts.filter(isReceivedPart).filter(p => p.workOrderId === woData.id);
   }, [woParts, woData]);
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -60,9 +98,16 @@ export default function InvoiceCreateModal(props: any) {
   const [pdfLineStatus, setPdfLineStatus] = useState<"idle" | "detected" | "none">("idle");
   const [pdfLinesReviewed, setPdfLinesReviewed] = useState(false);
   const pdfParseAttempt = useRef(0);
+  const pdfParseController = useRef<AbortController | null>(null);
+  const pdfParsingFile = useRef<File | null>(null);
   const numTouchedRef = useRef(false);
   const submitLockRef = useRef(false);
   const submissionKeyRef = useRef("");
+  const draftOperationKeyRef = useRef("");
+  const invoiceSnapshotRef = useRef<ContractorInvoiceSnapshot | null>(null);
+  const snapshotSessionRef = useRef<string | null>(null);
+  const hydratedFormSessionRef = useRef<string | null>(null);
+  const hydrationGenerationRef = useRef(0);
   const existingInvoiceId = resumeDraft?.id || null;
   const isRejectedResubmission = resumeDraft?.state === "rejected";
   // Tracks whether the user has touched the # field — if so we trust their
@@ -76,7 +121,7 @@ export default function InvoiceCreateModal(props: any) {
     watch,
     reset,
     setValue,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<CreateInvoiceForm>({
     resolver: zodResolver(CreateInvoiceSchema),
     defaultValues: {
@@ -96,17 +141,46 @@ export default function InvoiceCreateModal(props: any) {
   const watchedTax = watch("tax");
   const uploadOnly = !!watch("uploadOnly");
   const uploadedTotal = Number(watch("uploadedTotal") || 0);
-  const sub = watchedLines.reduce((s: number, l: any) => s + amount(l), 0);
+  const sub = watchedLines.reduce((s, l) => s + amount(l), 0);
   const tax = parseFloat(watchedTax || "") || 0;
   const total = uploadOnly ? uploadedTotal : sub + tax;
   const uploadedLineDifference = uploadOnly ? Math.abs(sub - uploadedTotal) : 0;
   const uploadedLinesMatchTotal = uploadedLineDifference <= Math.max(0.05, uploadedTotal * 0.01);
 
   useEffect(() => {
-    if (modal !== "createInvoice") return;
-    let cancelled = false;
+    if (modal !== "createInvoice") { snapshotSessionRef.current = null; invoiceSnapshotRef.current = null; return; }
+    if (!woData?.id) return;
+    const session = `${woData.id}:${resumeDraft?.id || "new"}`;
+    if (snapshotSessionRef.current === session) return;
+    snapshotSessionRef.current = session;
+    try { invoiceSnapshotRef.current = contractorInvoiceSnapshotFor(woData, resumeDraft); }
+    catch { invoiceSnapshotRef.current = null; } // Missing schema/version fails closed at the command boundary.
+  }, [modal, woData, resumeDraft]);
+
+  useEffect(() => () => {
+    hydratedFormSessionRef.current = null;
+    hydrationGenerationRef.current += 1;
     pdfParseAttempt.current += 1;
-    submissionKeyRef.current = resumeDraft ? "" : createSubmissionKey();
+    pdfParseController.current?.abort();
+    pdfParseController.current = null;
+    pdfParsingFile.current = null;
+  }, [modal, woData?.id, currentUser?.id]);
+
+  useEffect(() => {
+    if (modal !== "createInvoice") { hydratedFormSessionRef.current = null; return; }
+    const formSession = `${currentUser?.id || ""}:${woData?.id || ""}:${resumeDraft?.id || "new"}`;
+    if (hydratedFormSessionRef.current === formSession) return;
+    hydratedFormSessionRef.current = formSession;
+    const hydrationGeneration = ++hydrationGenerationRef.current;
+    submitLockRef.current = false;
+    setSubmitting(false);
+    setSavingDraft(false);
+    pdfParseController.current?.abort();
+    pdfParseController.current = null;
+    pdfParsingFile.current = null;
+    pdfParseAttempt.current += 1;
+    submissionKeyRef.current = createSubmissionKey();
+    draftOperationKeyRef.current = createSubmissionKey();
     numTouchedRef.current = false;
     setNumTouched(false);
     setPdfFile(null);
@@ -139,7 +213,7 @@ export default function InvoiceCreateModal(props: any) {
         uploadOnly: resumeUploadOnly,
         uploadedTotal: resumeUploadOnly ? String(resumeDraft.total || "") : "",
         lines: (resumeDraft.lines || []).length
-          ? resumeDraft.lines.map((l: any) => ({ type: l.type, desc: l.desc || l.description || "", qty: Number(l.qty) || 1, rate: Number(l.rate) }))
+          ? (resumeDraft.lines || []).map(l => ({ type: l.type, desc: l.desc || l.description || "", qty: l.qty == null ? 1 : Number(l.qty), rate: Number(l.rate) }))
           : resumeUploadOnly ? [] : initialLines(),
       });
     } else {
@@ -164,35 +238,24 @@ export default function InvoiceCreateModal(props: any) {
         (async () => {
           try {
             const suggested = await nextInvNumFromDb();
-            if (cancelled) return;
-            // setValue is part of RHF; pull it from the hook indirectly via reset.
-            // The simplest non-invasive approach: only set if user hasn't touched.
-            // (Closure check via ref-like flag.)
+            if (hydratedFormSessionRef.current !== formSession || hydrationGenerationRef.current !== hydrationGeneration) return;
             if (!numTouchedRef.current) {
-              // Use reset to write only `num`, preserving the rest.
-              reset((cur: any) => ({ ...cur, num: suggested }));
+              // Write only the suggestion; preserve all authored fields.
+              setValue("num", suggested, { shouldDirty: false });
             }
           } catch { /* keep blank — submit-side retry still saves us */ }
         })();
       }
     }
-    return () => {
-      cancelled = true;
-      pdfParseAttempt.current += 1;
-    };
-  }, [modal, reset, resumeDraft, nextInvNumFromDb]);
-
-  if (modal !== "createInvoice" || !woData) return null;
-
-  const externalWorkOrderId = canonicalSevenElevenWorkOrderId(woData);
-  const portalWorkOrderId = String(woData.id || "").trim();
-  const portalReassignmentReference = externalWorkOrderId !== portalWorkOrderId
-    ? portalWorkOrderId
-    : null;
+  }, [modal, reset, setValue, resumeDraft, nextInvNumFromDb, woData?.id, currentUser?.id]);
 
   const close = () => {
     const today = todayIso();
+    hydrationGenerationRef.current += 1;
     pdfParseAttempt.current += 1;
+    pdfParseController.current?.abort();
+    pdfParseController.current = null;
+    pdfParsingFile.current = null;
     numTouchedRef.current = false;
     setNumTouched(false);
     reset({
@@ -213,18 +276,36 @@ export default function InvoiceCreateModal(props: any) {
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
     submissionKeyRef.current = "";
+    draftOperationKeyRef.current = "";
+    invoiceSnapshotRef.current = null;
+    snapshotSessionRef.current = null;
     submitLockRef.current = false;
     setModal(null);
   };
+  const dismissal = useUnsavedChangesGuard({
+    scopeKey: `${currentUser?.id || ""}:${woData?.id || ""}:${resumeDraft?.id || "new"}`,
+    dirty: isDirty || Boolean(pdfFile), busy: submitting || savingDraft,
+    enabled: modal === "createInvoice" && Boolean(woData), onClose: close,
+  });
+  if (modal !== "createInvoice" || !woData) return null;
+  if (resumeDraft?.projection && resumeDraft.projection !== "complete_document") return <Modal title="Invoice not ready to edit" onClose={() => setModal(null)} width={420}>
+    <p role="alert">The complete invoice has not been loaded. Close and reopen Edit before making changes.</p>
+  </Modal>;
+  const externalWorkOrderId = canonicalSevenElevenWorkOrderId(woData);
+  const portalWorkOrderId = String(woData.id || "").trim();
+  const portalReassignmentReference = externalWorkOrderId !== portalWorkOrderId ? portalWorkOrderId : null;
   const clearPendingPdf = (error = "") => {
     pdfParseAttempt.current += 1;
+    pdfParseController.current?.abort();
+    pdfParseController.current = null;
+    pdfParsingFile.current = null;
     setPdfFile(null);
     setPdfError(error);
     setPdfParseStatus(resumeDraft?.pdfStoragePath ? "detected" : "idle");
     if (resumeDraft?.pdfStoragePath) {
       setValue("uploadOnly", true, { shouldDirty: true });
       setValue("uploadedTotal", String(resumeDraft.total || ""), { shouldDirty: true });
-      const existingLines = (resumeDraft.lines || []).map((line: any) => ({
+      const existingLines = (resumeDraft.lines || []).map(line => ({
         type: line.type || "Other",
         desc: line.desc || line.description || "",
         qty: Number(line.qty) || 1,
@@ -243,12 +324,14 @@ export default function InvoiceCreateModal(props: any) {
   };
   const onSubmit = async (data: CreateInvoiceForm) => {
     if (submitLockRef.current) return;
+    if (pdfParseController.current) return;
     if (data.uploadOnly && (data.lines || []).length > 0 && !pdfLinesReviewed) {
       setPdfError("Review the extracted line items and confirm them before submitting.");
       return;
     }
     submitLockRef.current = true;
     setSubmitting(true);
+    const submitGeneration = hydrationGenerationRef.current;
     try {
     const ok = await doSubmitInvoice(woData, {
       ...data,
@@ -258,22 +341,27 @@ export default function InvoiceCreateModal(props: any) {
       hasExistingOriginalPdf: !!resumeDraft?.pdfStoragePath
         && (!!resumeDraft?.pdfIsOriginal || (resumeDraft?.lines || []).length === 0),
       submissionKey: submissionKeyRef.current,
+      commandContext: invoiceSnapshotRef.current && { ...invoiceSnapshotRef.current, operationId: submissionKeyRef.current },
       resubmittingRejected: isRejectedResubmission,
     }, existingInvoiceId);
-    if (ok) reset();
+    if (ok && hydrationGenerationRef.current === submitGeneration) reset();
     } finally {
-      submitLockRef.current = false;
-      setSubmitting(false);
+      if (hydrationGenerationRef.current === submitGeneration) {
+        submitLockRef.current = false;
+        setSubmitting(false);
+      }
     }
   };
 
   return (
     <Modal
-      onClose={close}
+      onRequestClose={dismissal.requestClose}
+      dismissDisabled={submitting || savingDraft}
       title={isRejectedResubmission ? `Correct invoice #${resumeDraft.num}` : "Create invoice"}
       width={820}
       closeOnBackdrop={false}
     >
+      {dismissal.dialog}
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: isRejectedResubmission ? 12 : 20 }}>
           Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {externalWorkOrderId}
@@ -314,10 +402,10 @@ export default function InvoiceCreateModal(props: any) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } })} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input aria-invalid={Boolean(errors.num)} aria-describedby={errors.num ? `${formId}-number-error` : undefined} {...register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } })} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span id={`${formId}-number-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel aria-label="Terms" {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
@@ -375,8 +463,8 @@ export default function InvoiceCreateModal(props: any) {
             return (
               <div key={field.id} className="inv-line-row" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start" }}>
                 <div className="mono inv-num" style={{ fontSize: 12, color: T.subtle, paddingTop: 10 }}>{i + 1}</div>
-                <Sel {...register(`lines.${i}.type` as const)} defaultValue={field.type} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, outline: "none" }}>{LINE_TYPES.map(t => <option key={t}>{t}</option>)}</Sel>
-                <textarea {...register(`lines.${i}.desc` as const)} placeholder={line.type === "Labor" ? "What was done on site..." : line.type === "Parts/Hardware" ? "Part description" : /^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
+                <Sel aria-label={`Line ${i + 1} type`} {...register(`lines.${i}.type` as const)} defaultValue={field.type} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, outline: "none" }}>{LINE_TYPES.map(t => <option key={t}>{t}</option>)}</Sel>
+                <textarea aria-describedby={errors.lines ? `${formId}-lines-error` : undefined} aria-label={`Line ${i + 1} description`} aria-invalid={Boolean(lineErr?.desc)} {...register(`lines.${i}.desc` as const)} placeholder={line.type === "Labor" ? "What was done on site..." : line.type === "Parts/Hardware" ? "Part description" : /^(travel|truck charge)$/i.test(line.type || "") ? "Description (optional)" : "Description"} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.desc ? T.danger : T.border}`, background: T.surface, fontSize: 12, fontFamily: "inherit", color: T.ink, resize: "vertical", minHeight: 36, outline: "none" }} />
                 {/* Mobile-only field labels — hidden inline so the desktop grid
                     (direct-children columns) is untouched; CSS reveals them. */}
                 <span className="inv-mlabel" style={{ display: "none" }}>Qty</span>
@@ -385,6 +473,8 @@ export default function InvoiceCreateModal(props: any) {
                 <input
                   type="number"
                   min={quantityConstraints.min}
+                  aria-describedby={errors.lines ? `${formId}-lines-error` : undefined} aria-label={`Line ${i + 1} quantity`}
+                  aria-invalid={Boolean(lineErr?.qty)}
                   step={quantityConstraints.step}
                   inputMode="decimal"
                   title="Labor may be billed in quarter-hour increments (1.25 = 1 hour 15 minutes)."
@@ -392,15 +482,15 @@ export default function InvoiceCreateModal(props: any) {
                   className="numeric-readable"
                   style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.qty ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }}
                 />
-                <input className="numeric-readable" type="number" step="any" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }} />
+                <input aria-describedby={errors.lines ? `${formId}-lines-error` : undefined} aria-label={`Line ${i + 1} rate`} aria-invalid={Boolean(lineErr?.rate)} className="numeric-readable" type="number" step="any" placeholder="0.00" {...register(`lines.${i}.rate` as const, { valueAsNumber: true })} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${lineErr?.rate ? T.danger : T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }} />
                 <div className="mono inv-amount" style={{ fontSize: 12, fontWeight: 600, color: T.ink, textAlign: "right", paddingTop: 10 }}>{fmt(Math.round(amount(line) * 100) / 100)}</div>
-                <button type="button" className="inv-line-remove" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
+                <button type="button" aria-label={`Remove line ${i + 1}`} className="inv-line-remove" onClick={() => remove(i)} style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 16, padding: 0, paddingTop: 6 }}>x</button>
               </div>
             );
           })}
         </div>
         {errors.lines && (
-          <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
+          <div id={`${formId}-lines-error`} role="alert" style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
             Check the highlighted line items. Every line needs a quantity and rate; travel descriptions are optional.
           </div>
         )}
@@ -452,7 +542,7 @@ export default function InvoiceCreateModal(props: any) {
             {!uploadOnly && (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, fontSize: 13, gap: 10 }}>
                 <span style={{ color: T.muted }}>Sales tax</span>
-                <input className="numeric-readable" type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }} />
+                <input aria-label="Sales tax" className="numeric-readable" type="number" step="0.01" {...register("tax")} placeholder="0.00" style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, fontSize: 12, color: T.ink, textAlign: "right", outline: "none" }} />
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${T.border}`, fontSize: 14 }}><span style={{ fontWeight: 700, color: T.ink }}>Total</span><span className="numeric-readable" style={{ fontSize: 22, color: T.ink, fontWeight: 750 }}>{fmt(Math.round(total * 100) / 100)}</span></div>
@@ -476,11 +566,11 @@ export default function InvoiceCreateModal(props: any) {
                   min="0.01"
                   step="0.01"
                   placeholder="0.00"
-                  {...register("uploadedTotal")}
+                  aria-invalid={Boolean(errors.uploadedTotal)} aria-describedby={errors.uploadedTotal ? `${formId}-total-error` : undefined} {...register("uploadedTotal")}
                   className="numeric-readable"
                   style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.uploadedTotal ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
                 />
-                {errors.uploadedTotal && <span style={{ display: "block", marginTop: 5, fontSize: 11, color: T.danger }}>{errors.uploadedTotal.message}</span>}
+                {errors.uploadedTotal && <span id={`${formId}-total-error`} role="alert" style={{ display: "block", marginTop: 5, fontSize: 11, color: T.danger }}>{errors.uploadedTotal.message}</span>}
               </label>
               <div aria-live="polite" style={{ fontSize: 11, color: pdfParseStatus === "manual" ? T.warn : T.muted, lineHeight: 1.5 }}>
                 {pdfParseStatus === "reading"
@@ -515,6 +605,9 @@ export default function InvoiceCreateModal(props: any) {
         )}
 
         <div style={{ padding: "12px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${pdfError ? T.danger : T.accentRing}`, marginBottom: 4 }}>
+          <button type="button" className="btn-soft" onClick={() => pdfUploadInput.current?.click()}
+            aria-describedby={pdfError ? `${formId}-pdf-error` : undefined}
+            style={{ marginBottom: 8 }}>Choose invoice PDF</button>
           <label style={{ cursor: "pointer", display: "block" }}>
             <div style={{ border: `2px dashed ${pdfError ? T.danger : T.accent}`, borderRadius: 8, padding: 18, textAlign: "center" }}>
               <div style={{ fontSize: 13, color: pdfError ? T.danger : T.accent, fontWeight: 600 }}>
@@ -524,6 +617,7 @@ export default function InvoiceCreateModal(props: any) {
                 PDF only, up to 5 MB. Uploading a PDF makes detailed line items optional.
               </div>
               <input
+                ref={pdfUploadInput}
                 type="file"
                 accept="application/pdf,.pdf"
                 style={{ display: "none" }}
@@ -531,12 +625,21 @@ export default function InvoiceCreateModal(props: any) {
                   const file = event.target.files?.[0] || null;
                   event.target.value = "";
                   if (!file) return;
-                  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-                    clearPendingPdf("Choose a PDF file.");
+                  if (pdfParsingFile.current === file && pdfParseController.current) return;
+                  pdfParseController.current?.abort();
+                  pdfParseController.current = null;
+                  pdfParsingFile.current = null;
+                  pdfParseAttempt.current += 1;
+                  if (!file.name || file.name.length > 255 || file.type.length > 128) {
+                    clearPendingPdf("Choose a PDF with a shorter filename and supported file metadata.");
                     return;
                   }
                   if (file.size > 5 * 1024 * 1024) {
                     clearPendingPdf("PDF must be 5 MB or smaller.");
+                    return;
+                  }
+                  if (file.size === 0) {
+                    clearPendingPdf("PDF file is empty.");
                     return;
                   }
                   setPdfFile(file);
@@ -549,10 +652,13 @@ export default function InvoiceCreateModal(props: any) {
                   setPdfLinesReviewed(false);
                   const attempt = pdfParseAttempt.current + 1;
                   pdfParseAttempt.current = attempt;
+                  const controller = new AbortController();
+                  pdfParseController.current = controller;
+                  pdfParsingFile.current = file;
                   setPdfParseStatus("reading");
                   try {
-                    const parsed = await parseInvoicePdf(file);
-                    if (pdfParseAttempt.current !== attempt) return;
+                    const parsed = await parseInvoicePdf(file, { signal: controller.signal });
+                    if (controller.signal.aborted || pdfParseAttempt.current !== attempt) return;
                     if (parsed.invoiceNumber && !numTouchedRef.current) {
                       setValue("num", parsed.invoiceNumber, {
                         shouldDirty: true,
@@ -578,17 +684,28 @@ export default function InvoiceCreateModal(props: any) {
                     } else {
                       setPdfParseStatus("manual");
                     }
-                  } catch {
-                    if (pdfParseAttempt.current === attempt) {
+                  } catch (error: unknown) {
+                    if (!controller.signal.aborted && pdfParseAttempt.current === attempt) {
+                      if (error instanceof InvoicePdfError && ["PDF_INVALID_SIGNATURE", "PDF_MALFORMED"].includes(error.code)) {
+                        clearPendingPdf("This PDF could not be validated. Choose a valid PDF or enter the invoice manually.");
+                        return;
+                      }
                       setPdfParseStatus("manual");
                       setPdfLineStatus("none");
+                      const reason = error instanceof InvoicePdfError ? new InvoicePdfError(error.code).message : "The PDF could not be read reliably.";
+                      setPdfError(`${reason} Enter the total manually and review the invoice before submitting.`);
+                    }
+                  } finally {
+                    if (pdfParseAttempt.current === attempt) {
+                      pdfParseController.current = null;
+                      pdfParsingFile.current = null;
                     }
                   }
                 }}
               />
             </div>
           </label>
-          {pdfError && <div style={{ marginTop: 7, color: T.danger, fontSize: 11, fontWeight: 600 }}>{pdfError}</div>}
+          {pdfError && <div id={`${formId}-pdf-error`} role="alert" style={{ marginTop: 7, color: T.danger, fontSize: 11, fontWeight: 600 }}>{pdfError}</div>}
           {pdfFile && (
             <button type="button" onClick={() => {
               clearPendingPdf();
@@ -599,7 +716,7 @@ export default function InvoiceCreateModal(props: any) {
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button type="button" onClick={close} className="btn-soft">Cancel</button>
+          <button type="button" disabled={submitting || savingDraft} onClick={() => dismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
           {/* Save draft bypasses the lines-complete validation — a draft can
               be partially filled. Resumes by passing the existing invoice id
               so we update in place instead of inserting a duplicate. */}
@@ -608,9 +725,12 @@ export default function InvoiceCreateModal(props: any) {
               type="button"
               disabled={savingDraft || submitting || pdfParseStatus === "reading"}
               onClick={async () => {
+                if (!doSaveDraftInvoice || submitLockRef.current || pdfParseController.current) return;
+                submitLockRef.current = true;
                 setSavingDraft(true);
+                const saveGeneration = hydrationGenerationRef.current;
                 try {
-                  const data: any = {
+                  const data: InvoiceModalPayload = {
                     num: watch("num"),
                     invoiceDate: watch("invoiceDate"),
                     serviceDate: watch("serviceDate"),
@@ -623,10 +743,13 @@ export default function InvoiceCreateModal(props: any) {
                     userTypedNum: numTouched,
                     pdfFile,
                     hasExistingPdf: !!resumeDraft?.pdfStoragePath,
+                    commandContext: invoiceSnapshotRef.current && { ...invoiceSnapshotRef.current, operationId: draftOperationKeyRef.current },
                   };
                   const ok = await doSaveDraftInvoice(woData, data, existingInvoiceId);
-                  if (ok) { setModal(null); resetNewInv(); }
-                } finally { setSavingDraft(false); }
+                  if (ok && hydrationGenerationRef.current === saveGeneration) { setModal(null); resetNewInv(); }
+                } finally {
+                  if (hydrationGenerationRef.current === saveGeneration) { submitLockRef.current = false; setSavingDraft(false); }
+                }
               }}
               className="btn-soft"
               style={{ opacity: savingDraft || pdfParseStatus === "reading" ? 0.7 : 1, cursor: savingDraft || pdfParseStatus === "reading" ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}

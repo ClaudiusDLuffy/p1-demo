@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { useCallback, useEffect, useState } from "react";
 
 import { T } from "../../lib/constants";
@@ -27,7 +29,7 @@ const quickBooksRequest = async (path: string, init?: RequestInit) => {
   if (!token) throw new Error("Your session expired. Sign in again.");
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  return fetch(path, { ...init, headers });
+  return apiFetch(path, { ...init, headers });
 };
 
 const dateTime = (value: string | null) => value
@@ -58,7 +60,7 @@ export default function QuickBooksSandboxConnection({ visible }: { visible: bool
       setStatus(payload);
     } catch (loadError) {
       setStatus(null);
-      setError(loadError instanceof Error ? loadError.message : "Could not load QuickBooks status");
+      setError(safeErrorMessage(loadError));
     } finally {
       setLoading(false);
     }
@@ -101,7 +103,7 @@ export default function QuickBooksSandboxConnection({ visible }: { visible: bool
       }
       window.location.assign(payload.authorizationUrl);
     } catch (connectError) {
-      setError(connectError instanceof Error ? connectError.message : "QuickBooks authorization could not start");
+      setError(safeErrorMessage(connectError));
       setBusy("");
     }
   };
@@ -121,7 +123,7 @@ export default function QuickBooksSandboxConnection({ visible }: { visible: bool
       setNotice("QuickBooks sandbox disconnected. Stored credentials were erased.");
       await loadStatus();
     } catch (disconnectError) {
-      setError(disconnectError instanceof Error ? disconnectError.message : "QuickBooks could not be disconnected safely");
+      setError(safeErrorMessage(disconnectError));
     } finally {
       setBusy("");
     }

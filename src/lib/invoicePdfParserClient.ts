@@ -1,53 +1,88 @@
 import { supabase } from "./supabase/client";
+import { InvoicePdfBudget, InvoicePdfError } from "./pdf/invoicePdfBudget";
+import { hasInvoicePdfSignature } from "./pdf/invoicePdfContent";
+import type { InvoiceLineExtraction, InvoicePdfExtraction } from "./pdf/invoicePdfTypes";
 
-export type ParsedInvoiceLine = {
-  type: "Truck Charge" | "Labor" | "Parts/Hardware" | "Shipping" | "Other";
-  desc: string;
-  qty: number;
-  rate: number;
-  amount: number;
-  confidence: "high" | "medium";
-};
+export type ParsedInvoiceLine = InvoiceLineExtraction;
+export type ParsedInvoicePdf = InvoicePdfExtraction;
 
-export type ParsedInvoicePdf = {
-  total: number | null;
-  confidence: "high" | "medium" | "none";
-  matchedLabel: string | null;
-  invoiceNumber: string | null;
-  invoiceNumberConfidence: "high" | "medium" | "none";
-  matchedNumberLabel: string | null;
-  lines: ParsedInvoiceLine[];
-  lineConfidence: "high" | "medium" | "none";
-};
+export type InvoicePdfClientOptions = { signal?: AbortSignal };
 
-export async function parseInvoicePdf(file: File): Promise<ParsedInvoicePdf> {
-  if (file.size === 0) throw new Error("PDF file is empty");
-  if (file.size > 5 * 1024 * 1024) throw new Error("PDF must be 5 MB or smaller");
-  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-    throw new Error("File must be a PDF");
+async function readPdfBytes(stream: ReadableStream<unknown>, budget: InvoicePdfBudget): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  // One fixed allocation bounds retained memory even if a stream emits millions
+  // of tiny chunks. Never retain provider-owned chunk objects between reads.
+  const buffer = new Uint8Array(budget.limits.maxBytes);
+  let length = 0;
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  budget.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    for (;;) {
+      const next = await budget.wait(reader.read());
+      if (next.done) break;
+      if (!(next.value instanceof Uint8Array)) throw new InvoicePdfError("PDF_MALFORMED");
+      if (next.value.byteLength === 0) continue;
+      length += next.value.byteLength;
+      budget.checkBytes(length);
+      buffer.set(next.value, length - next.value.byteLength);
+    }
+    budget.checkBytes(length);
+    const data = buffer.slice(0, length);
+    if (!hasInvoicePdfSignature(data)) throw new InvoicePdfError("PDF_INVALID_SIGNATURE");
+    return data;
+  } finally {
+    cancel();
+    budget.signal?.removeEventListener("abort", cancel);
+    reader.releaseLock();
   }
-
-  const { extractInvoiceDataFromPdf } = await import("./invoicePdfParser");
-  return extractInvoiceDataFromPdf(new Uint8Array(await file.arrayBuffer()));
 }
 
-export async function parseStoredInvoicePdf(storagePath: string): Promise<ParsedInvoicePdf> {
-  const { data: pdf, error } = await supabase()
-    .storage
-    .from("invoice-pdfs")
-    .download(storagePath);
+async function parseBytes(data: Uint8Array, budget: InvoicePdfBudget): Promise<ParsedInvoicePdf> {
+  const { extractInvoiceDataFromPdf } = await budget.wait(import("./pdf/invoicePdfBrowser"));
+  budget.checkpoint();
+  return extractInvoiceDataFromPdf(data, { signal: budget.signal, budget });
+}
 
-  if (error) {
-    throw new Error(`Could not download the stored invoice PDF: ${error.message}`);
-  }
-  if (!pdf) {
-    throw new Error("The stored invoice PDF was empty");
+export async function parseInvoicePdf(file: File, options: InvoicePdfClientOptions = {}): Promise<ParsedInvoicePdf> {
+  const budget = new InvoicePdfBudget(options);
+  budget.checkpoint();
+  if (file.size === 0) throw new Error("PDF file is empty");
+  if (file.size > 5 * 1024 * 1024) throw new Error("PDF must be 5 MB or smaller");
+  if (!file.name || file.name.length > 255 || file.type.length > 128) {
+    throw new InvoicePdfError("PDF_PARSE_FAILED");
   }
 
-  const name = storagePath.split("/").pop() || "invoice.pdf";
-  return parseInvoicePdf(new File([pdf], name, {
-    type: pdf.type || "application/pdf",
-  }));
+  try { return await parseBytes(await readPdfBytes(file.stream(), budget), budget); }
+  catch (error: unknown) { throw error instanceof InvoicePdfError ? error : new InvoicePdfError("PDF_PARSE_FAILED", error); }
+}
+
+export async function parseStoredInvoicePdf(storagePath: string, options: InvoicePdfClientOptions = {}): Promise<ParsedInvoicePdf> {
+  const controller = new AbortController();
+  const budget = new InvoicePdfBudget({ signal: controller.signal });
+  let timedOut = false;
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) abort();
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, budget.remainingMs());
+  try {
+    budget.checkpoint();
+    // The installed SDK forwards the signal and exposes the response stream;
+    // do not materialize an unbounded legacy object with download().blob().
+    const { data, error } = await budget.wait(supabase().storage.from("invoice-pdfs")
+      .download(storagePath, {}, { signal: controller.signal }).asStream());
+    if (error || !data) throw new InvoicePdfError("PDF_PARSE_FAILED");
+    return await parseBytes(await readPdfBytes(data, budget), budget);
+  } catch (error: unknown) {
+    if (timedOut || error instanceof InvoicePdfError && error.code === "PDF_PARSE_TIMEOUT") {
+      controller.abort();
+      throw new InvoicePdfError("PDF_PARSE_TIMEOUT");
+    }
+    if (options.signal?.aborted) throw new InvoicePdfError("REQUEST_ABORTED");
+    throw error instanceof InvoicePdfError ? error : new InvoicePdfError("PDF_PARSE_FAILED", error);
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+  }
 }
 
 export const parseInvoicePdfTotal = parseInvoicePdf;

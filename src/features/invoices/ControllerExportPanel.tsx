@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { apiFetch } from "../../lib/errors/apiFetch";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
@@ -10,12 +12,19 @@ import {
   type StaffPermissionProfile,
 } from "../../lib/staffPermissions";
 import { supabase } from "../../lib/supabase/client";
-import { WORK_ORDERS_KEY } from "../work-orders/queries";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
+import { invalidatePortalPlan } from "../../lib/realtime/realtimeBatcher";
+import { isPortalVisible } from "../../lib/realtime/browserVisibility";
 import {
   CONTROLLER_INVOICE_HOLDS_KEY,
-  INVOICES_KEY,
 } from "./queries";
 import QuickBooksSandboxConnection from "./QuickBooksSandboxConnection";
+import { prepareInvoicePaymentHold, updateInvoicePaymentHold } from "../../lib/financialNotificationCommands";
+import { financialNotificationFeedback, safeFinancialNotificationCommandError } from "../../lib/financialNotificationCommandContracts";
+import { noticeOperator } from "../financial-notifications/contracts";
+import { invalidateFinancialNotices } from "../financial-notifications/queries";
+import { PAYMENT_HOLD_PAGE_SIZE, parsePaymentHoldPage, type PaymentHold } from "../../lib/paymentHoldPagination";
+import { useCursorPagination } from "../../lib/useCursorPagination";
 
 type ControllerInvoice = {
   id: string;
@@ -59,19 +68,6 @@ type HandoffBatch = {
 
 type HandoffActor = { id: string; name: string };
 
-type PaymentHold = {
-  invoiceId: string;
-  invoiceNumber: string;
-  workOrderId: string | null;
-  externalWorkOrderId: string | null;
-  contractorName: string;
-  total: number;
-  holdAt: string;
-  holdBy: string;
-  holdByName: string;
-  reason: string;
-};
-
 const MAX_CONTROLLER_EXPORT_INVOICES = 500;
 const CONTROLLER_EXPORT_QUEUE_KEY = ["controller-export-queue"] as const;
 const CONTROLLER_EXPORT_HISTORY_KEY = "controller-export-history";
@@ -84,7 +80,7 @@ async function controllerExportRequest(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
   if (init?.body) headers.set("Content-Type", "application/json");
-  return fetch(path, { ...init, headers });
+  return apiFetch(path, { ...init, headers });
 }
 
 const downloadResponse = async (response: Response, fallbackName: string) => {
@@ -149,6 +145,8 @@ export default function ControllerExportPanel({
   onClearSelected?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const scopedActor = currentUser ? { ...currentUser, staffPermissions: currentUser.staffPermissions ?? [] } : null;
+  const userScope = directoryActorScope(scopedActor);
   const [busyAction, setBusyAction] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -156,13 +154,21 @@ export default function ControllerExportPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [actor, setActor] = useState("");
+  const [holdRefresh, setHoldRefresh] = useState(0);
+  const holdOperator = noticeOperator(currentUser);
+  const holdScope = holdOperator
+    ? [holdOperator.id, holdOperator.role, ...holdOperator.staffPermissions.slice().sort()]
+    : ["unauthorized"];
+  const holdPagination = useCursorPagination(JSON.stringify([holdScope, PAYMENT_HOLD_PAGE_SIZE, holdRefresh]));
+  const releaseReasons = useRef(new Map<string, string>());
+  const releaseLock = useRef(false);
   const fallbackCount = invoices.filter(invoice =>
     (invoice.invoiceType || "contractor") === "contractor"
     && invoice.state === "approved",
   ).length;
 
   const queueQuery = useQuery({
-    queryKey: CONTROLLER_EXPORT_QUEUE_KEY,
+    queryKey: [...CONTROLLER_EXPORT_QUEUE_KEY, userScope],
     queryFn: async () => {
       const response = await controllerExportRequest("/api/controller-exports");
       const payload = await response.json().catch(() => ({})) as {
@@ -186,7 +192,7 @@ export default function ControllerExportPanel({
   });
 
   const historyQuery = useQuery({
-    queryKey: [CONTROLLER_EXPORT_HISTORY_KEY, fromDate, toDate, actor],
+    queryKey: [CONTROLLER_EXPORT_HISTORY_KEY, userScope, fromDate, toDate, actor],
     queryFn: async () => {
       const params = new URLSearchParams({ history: "1" });
       if (fromDate) params.set("from", fromDate);
@@ -209,22 +215,18 @@ export default function ControllerExportPanel({
   });
 
   const holdsQuery = useQuery({
-    queryKey: CONTROLLER_INVOICE_HOLDS_KEY,
-    queryFn: async () => {
-      const response = await controllerExportRequest("/api/contractor-invoice-holds");
-      const payload = await response.json().catch(() => ({})) as {
-        holds?: PaymentHold[];
-        canRelease?: boolean;
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error || "Could not load payment holds");
-      return {
-        holds: payload.holds || [],
-        canRelease: Boolean(payload.canRelease),
-      };
+    queryKey: [...CONTROLLER_INVOICE_HOLDS_KEY, holdScope, PAYMENT_HOLD_PAGE_SIZE, holdRefresh, holdPagination.position.cursor],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ limit: String(PAYMENT_HOLD_PAGE_SIZE) });
+      if (holdPagination.position.cursor) params.set("cursor", holdPagination.position.cursor);
+      const response = await controllerExportRequest(`/api/contractor-invoice-holds?${params}`, { signal });
+      return parsePaymentHoldPage(await response.json(), PAYMENT_HOLD_PAGE_SIZE);
     },
+    enabled: Boolean(holdOperator),
     staleTime: 15_000,
   });
+  // Never retain a previous actor/page or actionable stale rows after an error.
+  const visibleHolds = holdOperator && !holdsQuery.error ? holdsQuery.data?.holds || [] : [];
 
   const approvedCount = queueQuery.data?.count ?? fallbackCount;
   const exportLimit = queueQuery.data?.limit ?? MAX_CONTROLLER_EXPORT_INVOICES;
@@ -246,14 +248,12 @@ export default function ControllerExportPanel({
     || (!hasSelection && (approvedCount === 0 || overLimit));
   const actors = useMemo(() => historyQuery.data?.actors || [], [historyQuery.data?.actors]);
 
-  const refresh = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: INVOICES_KEY }),
-      queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-      queryClient.invalidateQueries({ queryKey: CONTROLLER_EXPORT_QUEUE_KEY }),
-      queryClient.invalidateQueries({ queryKey: [CONTROLLER_EXPORT_HISTORY_KEY] }),
-      queryClient.invalidateQueries({ queryKey: CONTROLLER_INVOICE_HOLDS_KEY }),
-    ]);
+  const refresh = async (invoiceId?: string) => {
+    if (!scopedActor) return;
+    await invalidatePortalPlan(queryClient, scopedActor, { refreshIdentity: false, targets: [
+      { family: "invoice_pages" }, { family: "invoice_counts" }, { family: "invoice_detail", id: invoiceId },
+      { family: "export_queue" }, { family: "holds" },
+    ] }, isPortalVisible());
   };
 
   const stageInvoices = async () => {
@@ -281,9 +281,7 @@ export default function ControllerExportPanel({
       setShowHistory(true);
       await refresh();
     } catch (downloadError) {
-      setError(downloadError instanceof Error
-        ? downloadError.message
-        : "Contractor bill handoff failed");
+      setError(safeErrorMessage(downloadError));
     } finally {
       setBusyAction("");
     }
@@ -313,7 +311,7 @@ export default function ControllerExportPanel({
         : `Batch ${batch.id.slice(0, 8)} cancelled; its approved contractor bills are available for a new handoff.`);
       await refresh();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : `Could not ${action} batch`);
+      setError(safeErrorMessage(actionError));
     } finally {
       setBusyAction("");
     }
@@ -337,39 +335,41 @@ export default function ControllerExportPanel({
         setNotice("Legacy package downloaded. It predates the corrected payables format and may contain a SaasAnt customer-invoice CSV; use its contractor PDFs only.");
       }
     } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : "Stored contractor-bill package could not be downloaded");
+      setError(safeErrorMessage(downloadError));
     } finally {
       setBusyAction("");
     }
   };
 
   const releaseHold = async (hold: PaymentHold) => {
-    if (!canHandoff || busyAction) return;
-    const reason = window.prompt(
-      `Why is the payment hold on invoice #${hold.invoiceNumber} being released?`,
-    )?.trim() || "";
-    if (!reason) return;
+    if (!canHandoff || busyAction || releaseLock.current) return;
+    releaseLock.current = true;
     setBusyAction(`release:${hold.invoiceId}`);
     setError(null);
     setNotice(null);
     try {
-      const response = await controllerExportRequest("/api/contractor-invoice-holds", {
-        method: "PATCH",
-        body: JSON.stringify({
-          action: "release",
-          invoiceId: hold.invoiceId,
-          reason,
-        }),
-      });
-      const payload = await response.json().catch((): ErrorPayload => ({}));
-      if (!response.ok) throw new Error(payload.error || "Could not release payment hold");
-      setNotice(`Payment hold released for invoice #${hold.invoiceNumber}.`);
-      await refresh();
+      const context = await prepareInvoicePaymentHold(hold.invoiceId);
+      const reason = window.prompt(
+        `Why is the payment hold on invoice #${hold.invoiceNumber} being released?`,
+        releaseReasons.current.get(hold.invoiceId) || "",
+      )?.trim() || "";
+      if (!reason) return;
+      if (!releaseReasons.current.has(hold.invoiceId)) releaseReasons.current.set(hold.invoiceId, reason);
+      const result = await updateInvoicePaymentHold(hold.invoiceId, "release", reason, context.expectedSourceEventId);
+      releaseReasons.current.delete(hold.invoiceId);
+      setNotice(`Payment hold released for invoice #${hold.invoiceNumber} — ${financialNotificationFeedback(result)}.`);
+      const operator = noticeOperator(currentUser);
+      try {
+        setHoldRefresh(value => value + 1);
+        await refresh(hold.invoiceId);
+        if (operator) await invalidateFinancialNotices(queryClient, operator, hold.invoiceId);
+      } catch { setError("The release was saved, but the latest view could not be loaded. Refresh the invoice."); }
     } catch (releaseError) {
-      setError(releaseError instanceof Error
-        ? releaseError.message
-        : "Could not release payment hold");
+      const error = safeFinancialNotificationCommandError(releaseError);
+      if (!error.uncertain && error.code !== "OPERATION_REUSED") releaseReasons.current.delete(hold.invoiceId);
+      setError(safeErrorMessage(error));
     } finally {
+      releaseLock.current = false;
       setBusyAction("");
     }
   };
@@ -389,7 +389,7 @@ export default function ControllerExportPanel({
       }
       await downloadResponse(response, `Contractor-Bill-Handoff-Audit-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : "Audit CSV could not be downloaded");
+      setError(safeErrorMessage(downloadError));
     } finally {
       setBusyAction("");
     }
@@ -414,8 +414,8 @@ export default function ControllerExportPanel({
           <div style={{ fontSize: 11, color: T.muted, marginTop: 4, lineHeight: 1.5 }}>
             {approvedCount} approved contractor bill{approvedCount === 1 ? "" : "s"} waiting
             {pendingCount > 0 ? ` · ${pendingCount} already staged` : ""}.
-            {(holdsQuery.data?.holds.length || 0) > 0
-              ? ` ${holdsQuery.data?.holds.length} contractor bill${holdsQuery.data?.holds.length === 1 ? " is" : "s are"} on payment hold.`
+            {visibleHolds.length > 0
+              ? ` ${visibleHolds.length} payment hold${visibleHolds.length === 1 ? " is" : "s are"} shown on this page.`
               : ""}
             {canHandoff
               ? " Downloading stages a payables batch; only confirmation marks it entered in QuickBooks."
@@ -480,17 +480,21 @@ export default function ControllerExportPanel({
       {error && <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>{error}</div>}
       {!error && queueQuery.error && (
         <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
-          {queueQuery.error instanceof Error ? queueQuery.error.message : "Could not load the export queue"}
+          {safeErrorMessage(queueQuery.error)}
         </div>
       )}
 
-      {(holdsQuery.data?.holds.length || 0) > 0 && (
-        <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: `1px solid ${T.danger}44`, background: T.dangerSoft }}>
+      {holdOperator && (
+        <div aria-label="Current payment holds" aria-busy={holdsQuery.isFetching} style={{ marginTop: 14, padding: 12, borderRadius: 10, border: `1px solid ${T.danger}44`, background: T.dangerSoft }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: T.danger, marginBottom: 8 }}>
             Held — do not pay or include
           </div>
           <div style={{ display: "grid", gap: 7 }}>
-            {(holdsQuery.data?.holds || []).map(hold => (
+            {holdsQuery.isLoading && <div role="status">Loading payment holds…</div>}
+            {!holdsQuery.isLoading && !holdsQuery.error && visibleHolds.length === 0 && (
+              <div role="status">{holdPagination.position.page === 1 ? "No current payment holds." : "No holds remain on this page. Go back or refresh newest."}</div>
+            )}
+            {visibleHolds.map(hold => (
               <div key={hold.invoiceId} style={{ display: "grid", gridTemplateColumns: "minmax(85px,.6fr) minmax(90px,.7fr) minmax(140px,1.2fr) minmax(180px,1.6fr) auto", gap: 8, alignItems: "center", fontSize: 10, color: T.muted }}>
                 <span className="mono" style={{ color: T.danger, fontWeight: 800 }}>#{hold.invoiceNumber}</span>
                 <span className="mono">
@@ -507,7 +511,7 @@ export default function ControllerExportPanel({
                 <span title={hold.reason}>{hold.reason} · {hold.holdByName} · {dateTime(hold.holdAt)}</span>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
                   <span className="mono" style={{ color: T.ink }}>{money(hold.total)}</span>
-                  {canHandoff && (
+                  {canHandoff && holdsQuery.data?.canRelease && (
                     <button
                       type="button"
                       className="btn-soft"
@@ -521,11 +525,18 @@ export default function ControllerExportPanel({
               </div>
             ))}
           </div>
-        </div>
-      )}
-      {holdsQuery.error && (
-        <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>
-          {holdsQuery.error instanceof Error ? holdsQuery.error.message : "Could not load payment holds"}
+          {holdsQuery.error && <div role="alert" style={{ fontSize: 11, color: T.danger, marginTop: 8 }}>{safeErrorMessage(holdsQuery.error)}</div>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <span role="status" style={{ fontSize: 11 }}>
+              Page {holdPagination.position.page} · {visibleHolds.length} shown{!holdsQuery.error && holdsQuery.data?.hasMore ? " · More holds available" : ""}
+            </span>
+            <button type="button" className="btn-soft" onClick={holdPagination.previous}
+              disabled={holdsQuery.isFetching || Boolean(busyAction) || holdPagination.position.page === 1}>Previous holds</button>
+            <button type="button" className="btn-soft" onClick={() => holdPagination.next(holdsQuery.data?.nextCursor || null)}
+              disabled={holdsQuery.isFetching || Boolean(busyAction) || Boolean(holdsQuery.error) || !holdsQuery.data?.hasMore}>Next holds</button>
+            <button type="button" className="btn-soft" onClick={() => setHoldRefresh(value => value + 1)}
+              disabled={holdsQuery.isFetching || Boolean(busyAction)}>Refresh newest holds</button>
+          </div>
         </div>
       )}
 
@@ -557,7 +568,7 @@ export default function ControllerExportPanel({
           {historyQuery.isLoading && <div role="status" style={{ color: T.muted, fontSize: 11 }}>Loading contractor-bill history…</div>}
           {historyQuery.error && (
             <div role="alert" style={{ color: T.danger, fontSize: 11 }}>
-              {historyQuery.error instanceof Error ? historyQuery.error.message : "Could not load contractor-bill history"}
+              {safeErrorMessage(historyQuery.error)}
             </div>
           )}
           <div style={{ display: "grid", gap: 10 }}>

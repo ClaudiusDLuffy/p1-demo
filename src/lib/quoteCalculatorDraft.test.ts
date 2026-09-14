@@ -4,13 +4,12 @@ import {
   clampBulkQuoteLineCount,
   createQuoteCalculatorDraft,
   parseQuoteCalculatorDraft,
-  quoteCalculatorDraftKey,
 } from "./quoteCalculatorDraft";
 
 const draft = createQuoteCalculatorDraft(
   {
     workOrderId: "WOT123",
-    selectedSourceId: "source-1",
+    selectedSourceId: "00000000-0000-4000-8000-000000000001",
     pricing: {
       laborRate: "110",
       partsMarkupPercent: "25",
@@ -23,17 +22,21 @@ const draft = createQuoteCalculatorDraft(
       qty: 2,
       sourceRate: 80,
       rate: 110,
-      sourceInvoiceLineId: "source-line-1",
+      sourceInvoiceLineId: "00000000-0000-4000-8000-000000000002",
     }],
   },
   "2026-07-31T04:50:00.000Z",
 );
 
-test("builds a user and work-order scoped storage key", () => {
-  assert.equal(
-    quoteCalculatorDraftKey("user@example.com", "WOT 123"),
-    "p1:quote-calculator:v1:user%40example.com:WOT%20123",
-  );
+test("minimal quote payload is versioned and retains no profile or owner substitute", () => {
+  assert.equal(draft.version, 2);
+  assert.equal(parseQuoteCalculatorDraft(JSON.stringify({ ...draft, profile: {} }), "WOT123"), null);
+});
+test("quote keeps no added TTL but rejects invalid timestamp, binary fields and oversized lines", () => {
+  assert.ok(parseQuoteCalculatorDraft(JSON.stringify(draft), "WOT123"));
+  for (const extra of [{ savedAt: "never" }, { pdfText: "synthetic" }, { lines: [{ ...draft.lines[0], desc: "x".repeat(4001) }] }]) {
+    assert.equal(parseQuoteCalculatorDraft(JSON.stringify({ ...draft, ...extra }), "WOT123"), null);
+  }
 });
 
 test("round-trips a valid calculator draft", () => {

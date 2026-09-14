@@ -1,3 +1,5 @@
+import { evaluateSla, type SlaWorkOrder } from "./sla/evaluation";
+
 export const WORK_ORDER_TABLE_COLUMNS = [
   "work_order",
   "status",
@@ -25,7 +27,7 @@ export type WorkOrderColumnFilters = Partial<Record<
   string
 >>;
 
-export type WorkOrderTableRow = {
+export type WorkOrderTableRow = SlaWorkOrder & {
   // Some shared view helpers deliberately describe only the fields they use,
   // while the concrete portal row still carries `id`. Keep the fallback
   // contract structural so those safely narrowed rows remain compatible.
@@ -74,6 +76,7 @@ export function filterAndSortWorkOrderTable<T extends WorkOrderTableRow>(
   filters: WorkOrderColumnFilters,
   sort: WorkOrderTableSort,
   contractorName: (id: string | null | undefined) => string = () => "",
+  now: Date = new Date(),
 ): T[] {
   const filtered = rows.filter(workOrder => {
     if (!includes(workOrder.id, filters.workOrder)) return false;
@@ -85,7 +88,7 @@ export function filterAndSortWorkOrderTable<T extends WorkOrderTableRow>(
     if (!includes(contractorName(workOrder.contractor), filters.contractor)) return false;
     if (filters.createdDate && String(workOrder.createdAt || "").slice(0, 10) !== filters.createdDate) return false;
     if (filters.updatedDate && String(workOrder.updatedAt || "").slice(0, 10) !== filters.updatedDate) return false;
-    if (filters.sla === "overdue" && time(workOrder.resolutionBreachAt || workOrder.responseBreachAt, Infinity) >= Date.now()) return false;
+    if (filters.sla === "overdue" && !evaluateSla(workOrder, now).breached) return false;
     return true;
   });
 
@@ -99,7 +102,7 @@ export function filterAndSortWorkOrderTable<T extends WorkOrderTableRow>(
       case "summary": return text(workOrder.summary);
       case "contractor": return text(contractorName(workOrder.contractor));
       case "updated": return time(workOrder.updatedAt, 0);
-      case "sla": return time(workOrder.responseBreachAt || workOrder.resolutionBreachAt, Infinity);
+      case "sla": return evaluateSla(workOrder, now).dueTime ?? Infinity;
       default: return time(workOrder.createdAt, 0);
     }
   };
@@ -108,7 +111,7 @@ export function filterAndSortWorkOrderTable<T extends WorkOrderTableRow>(
     const leftValue = value(left);
     const rightValue = value(right);
     const compared = typeof leftValue === "number" && typeof rightValue === "number"
-      ? leftValue - rightValue
+      ? leftValue === rightValue ? 0 : leftValue - rightValue
       : String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true });
     if (compared !== 0) return sort.direction === "asc" ? compared : -compared;
     return String(left.id).localeCompare(String(right.id)) * (sort.direction === "asc" ? 1 : -1);

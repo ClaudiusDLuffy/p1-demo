@@ -1,91 +1,26 @@
-import { createClient } from "@supabase/supabase-js";
-import { NextRequest, NextResponse } from "next/server";
-import type { Database } from "../../../lib/supabase/database.types";
+import { createApiMethodBoundary } from "../../../lib/server/apiMethodBoundary";
 
-const anonClient = () =>
-  createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
+const apiMethodBoundary = createApiMethodBoundary("/api/client-errors", ["POST"]);
+export const GET = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const DELETE = apiMethodBoundary.methodNotAllowed;
+export const HEAD = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
 
-const text = (value: unknown, maxLength: number) =>
-  String(value || "").slice(0, maxLength);
+import { handleClientDiagnostic } from "../../../lib/server/diagnostics/handler";
+import { authorizeDiagnostic } from "../../../lib/server/diagnostics/authorization";
+import { admitDiagnostic } from "../../../lib/server/diagnostics/rateLimit";
+import { safeLog } from "../../../lib/observability/safeLogger";
 
-const diagnosticDetails = (value: unknown) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const sanitized: Record<string, string | number | boolean | null> = {};
-  for (const [rawKey, detail] of Object.entries(value).slice(0, 20)) {
-    const key = rawKey.slice(0, 80);
-    if (!/^[A-Za-z0-9_.-]+$/.test(key)) continue;
-    if (detail === null || typeof detail === "boolean") {
-      sanitized[key] = detail;
-    } else if (typeof detail === "number" && Number.isFinite(detail)) {
-      sanitized[key] = detail;
-    } else if (typeof detail === "string") {
-      sanitized[key] = detail.slice(0, 200);
-    }
-  }
-  return sanitized;
-};
-
-export async function POST(req: NextRequest) {
-  const token = req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const contentLength = Number(req.headers.get("content-length") || 0);
-  if (Number.isFinite(contentLength) && contentLength > 25_000) {
-    return NextResponse.json({ error: "Diagnostic payload is too large" }, { status: 413 });
-  }
-
-  const auth = anonClient();
-  const { data, error } = await auth.auth.getUser(token);
-  if (error || !data.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const failedRequest = body.lastFailedRequest && typeof body.lastFailedRequest === "object"
-    ? body.lastFailedRequest as Record<string, unknown>
-    : null;
-  const level = body.level === "info" || body.level === "warning"
-    ? body.level
-    : "error";
-
-  const diagnostic = JSON.stringify({
-    userId: data.user.id,
-    level,
-    source: text(body.source, 120),
-    message: text(body.message, 2_000),
-    stack: text(body.stack, 8_000) || null,
-    route: text(body.route, 500),
-    portalView: text(body.portalView, 120) || null,
-    details: diagnosticDetails(body.details),
-    appVersion: process.env.VERCEL_GIT_COMMIT_SHA || "local",
-    userAgent: text(body.userAgent, 600),
-    viewport: text(body.viewport, 60),
-    standalone: body.standalone === true,
-    occurredAt: text(body.occurredAt, 80),
-    lastFailedRequest: failedRequest ? {
-      method: text(failedRequest.method, 20),
-      path: text(failedRequest.path, 500),
-      status: typeof failedRequest.status === "number" ? failedRequest.status : null,
-      occurredAt: text(failedRequest.occurredAt, 80),
-    } : null,
+export const runtime = "nodejs";
+export const maxDuration = 15;
+export async function POST(request: Request): Promise<Response> {
+  return handleClientDiagnostic(request, {
+    authorize: authorizeDiagnostic,
+    admit: admitDiagnostic,
+    // No free-form message, stack, URL, body or arbitrary detail enters logs.
+    log: (report, context) => safeLog("client_diagnostic", context, { code: report.code,
+      ...(report.context?.operationId ? { operationId: report.context.operationId } : {}) }),
   });
-
-  if (level === "info") {
-    console.info("P1 client diagnostic", diagnostic);
-  } else if (level === "warning") {
-    console.warn("P1 client diagnostic", diagnostic);
-  } else {
-    console.error("P1 client error", diagnostic);
-  }
-
-  return new NextResponse(null, { status: 202 });
 }

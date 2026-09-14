@@ -74,7 +74,7 @@ test("contractor history detail is read only across every mutation surface", () 
   );
   assert.match(
     detail,
-    /!contractorHistoryReadOnly && woData\.status !== "closed" && \(\(\) =>/,
+    /!contractorHistoryReadOnly && woData\.status !== "closed" && <WorkOrderTechnicianPicker/,
   );
 });
 

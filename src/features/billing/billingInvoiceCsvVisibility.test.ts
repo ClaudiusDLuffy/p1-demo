@@ -35,6 +35,7 @@ function renderDetail(document: Record<string, unknown>, permissions: string[] =
   } }).outputText, { exports, require: (name: string): unknown => {
     if (name === "react") return { useState: (initial: unknown) => [initial, () => undefined] };
     if (name === "react/jsx-runtime") return { jsx: element, jsxs: element };
+    if (name === "../invoices/invoiceLineQueries") return { useInvoiceLinePage: () => ({ lines: [], hasMore: false, loading: false }) };
     if (componentImports.has(name)) return new Proxy({}, { get: (_target, property) => String(property) });
     return requireHere(name.startsWith(".") ? resolve(filename, "..", name) : name);
   } }, { filename });

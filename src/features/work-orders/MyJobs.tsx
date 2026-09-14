@@ -1,6 +1,8 @@
 "use client";
 // @ts-nocheck
 
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
@@ -13,7 +15,7 @@ import {
 } from "../../lib/clientDiagnostics";
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
-import { useWorkOrdersPageQuery } from "./queries";
+import { useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "./queries";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
@@ -31,16 +33,12 @@ export default function MyJobs(props: any) {
   const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
   const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled);
-  const activeCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, sort: "newest", limit: 1 }, enabled);
-  const pendingCountQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, status: "pending_invoice", sort: "newest", limit: 1 }, enabled);
-  const capitalCountQuery = useWorkOrdersPageQuery({ scope: "capital", contractorId, sort: "newest", limit: 1 }, enabled);
+  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, enabled);
+  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, enabled);
+  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled);
   const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
   const resultDiagnosticRef = useRef<string | null>(null);
-  const jobsError = jobsQuery.error instanceof Error
-    ? jobsQuery.error.message
-    : jobsQuery.error
-      ? String(jobsQuery.error)
-      : null;
+  const jobsError = safeErrorMessage(jobsQuery.error);
   useEffect(() => {
     if (!jobsError) return;
     void reportClientFailure({
@@ -59,7 +57,7 @@ export default function MyJobs(props: any) {
     ) return;
 
     const itemCount = jobsQuery.data?.items.length || 0;
-    const totalCount = jobsQuery.data?.totalCount || 0;
+    const totalCount = jobsQuery.data?.totalCount ?? null;
     const hasMore = jobsQuery.data?.hasMore === true;
     const signature = [contractorId, itemCount, totalCount, hasMore].join(":");
     if (resultDiagnosticRef.current === signature) return;
@@ -76,7 +74,7 @@ export default function MyJobs(props: any) {
         scope: "active",
         page: position.page,
         itemCount,
-        totalCount,
+        ...(totalCount !== null ? { totalCount } : {}),
         hasMore,
         contractorScopeResolved: Boolean(contractorId),
       },
@@ -93,15 +91,16 @@ export default function MyJobs(props: any) {
   const retryJobs = () => {
     void Promise.all([
       jobsQuery.refetch(),
+      jobsQuery.countQuery.refetch(),
       activeCountQuery.refetch(),
       pendingCountQuery.refetch(),
       capitalCountQuery.refetch(),
     ]);
   };
   const jobCounts = {
-    active: activeCountQuery.data?.totalCount || 0,
-    pendingInvoice: pendingCountQuery.data?.totalCount || 0,
-    capital: capitalCountQuery.data?.totalCount || 0,
+    active: activeCountQuery.data?.totalCount ?? "—",
+    pendingInvoice: pendingCountQuery.data?.totalCount ?? "—",
+    capital: capitalCountQuery.data?.totalCount ?? "—",
   };
   // Per-WO parts summary for the parts-status badge. Only counted when there
   // are structured wo_parts rows for the WO — legacy part_needed scalars get
@@ -128,7 +127,7 @@ export default function MyJobs(props: any) {
                 ].map((s, i) => (
                   <div key={i} className="card" style={{ background: s.bg, padding: "20px 22px" }}>
                     <div style={{ fontSize: 11, color: s.c, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>{s.l}</div>
-                    <div className="display stat-value" style={{ fontSize: 30, fontWeight: 500, color: s.c, letterSpacing: -0.6 }}>{s.v}</div>
+                    <div title={COUNT_FRESHNESS_DESCRIPTION} className="display stat-value" style={{ fontSize: 30, fontWeight: 500, color: s.c, letterSpacing: -0.6 }}>{s.v}</div>
                   </div>
                 ))}
               </div>
@@ -233,12 +232,12 @@ export default function MyJobs(props: any) {
                 );
               })}
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 11, color: T.muted }}>
+                <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontSize: 11, color: T.muted }}>
                   {jobsQuery.isError
                     ? "Work orders unavailable"
                     : jobsQuery.isFetching
                       ? "Loading jobs..."
-                      : `${jobsQuery.data?.totalCount || 0} jobs · page ${position.page}`}
+                      : `${jobsQuery.data?.totalCount ?? "—"} jobs · page ${position.page}`}
                 </span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button type="button" className="btn-soft" disabled={position.page <= 1 || jobsQuery.isFetching} onClick={previousPage}>Previous</button>

@@ -33,11 +33,14 @@ test("approve-and-bill waits for server approval before opening Billing", () => 
 });
 
 test("selected work-order photo history is scoped, paged, and reconciled after uploads", () => {
-  assert.match(
-    db,
-    /loadWorkOrderPhotosPage[\s\S]*?rpc\("list_work_order_photos_page"[\s\S]*?p_work_order_id: workOrderId[\s\S]*?p_cursor: cursor/,
-  );
-  assert.match(db, /loadWorkOrderDetails[\s\S]*?loadWorkOrderPhotosPage\(workOrder\.id\)/);
-  assert.match(workOrderHook, /photos: \[\.\.\.\(w\.photos \|\| \[\]\), \.\.\.paths\]/);
-  assert.match(workOrderHook, /invalidateBoth\(\)/);
+  const photoRepository = read("src/features/photos/data/photoMetadataReadRepository.ts");
+  assert.ok(/loadWorkOrderPhotosPage[\s\S]*?dependencies.read\("list_work_order_photos_rows_v1"[\s\S]*?p_work_order_id: workOrderId[\s\S]*?p_cursor: cursor/.test(photoRepository));
+  assert.match(db, /return readWorkOrderPhotosPage\(workOrderId, cursor, limit, signal\)/);
+  assert.ok(/loadWorkOrderDetails[\s\S]*?loadWorkOrderPhotosPage\(workOrder\.id, null, 24, signal\)/.test(db));
+  // The authoritative uploader now merges confirmed paths once, including
+  // partial success, and refreshes only this work order's projections.
+  assert.match(workOrderHook, /photos: merge\(workOrder\.photos\)/);
+  assert.match(workOrderHook, /new Set\(/);
+  assert.match(workOrderHook, /invalidateQueries\(\{ queryKey: workOrderDetailsKey\(woId\) \}\)/);
+  assert.match(workOrderHook, /invalidateQueries\(\{ queryKey: workOrderByIdKey\(woId\) \}\)/);
 });

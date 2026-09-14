@@ -1,5 +1,5 @@
-import { PRIORITY, T } from "./constants";
-import { computeSlaState } from "./slaConfig";
+import { T } from "./constants";
+import { evaluateSla } from "./sla/evaluation";
 
 export type WorkOrderSortKey = "sla_due" | "newest" | "oldest" | "priority";
 
@@ -144,26 +144,7 @@ export const getCreatedTime = (wo?: WorkOrderViewRow | null) =>
 export const getUpdatedTime = (wo?: WorkOrderViewRow | null) =>
   toTime(wo?.updatedAt || wo?.updated_at || wo?.createdAt || wo?.created_at) || getCreatedTime(wo);
 
-export const getSlaDueTime = (wo?: WorkOrderViewRow | null) => {
-  const twoDeadlineState = computeSlaState(
-    wo?.responseBreachAt || null,
-    wo?.resolutionBreachAt || null,
-    wo?.startTimeRaw || wo?.start_time || null,
-  );
-  if (twoDeadlineState) {
-    return twoDeadlineState.headline === "response"
-      ? twoDeadlineState.responseBreachAt.getTime()
-      : twoDeadlineState.resolutionBreachAt.getTime();
-  }
-
-  const explicitDue = toTime(wo?.resolutionBreachAt || wo?.responseBreachAt);
-  if (explicitDue) return explicitDue;
-
-  const started = toTime(wo?.slaStartedAt || wo?.dispatchedAt || wo?.dispatched_at);
-  const hours = PRIORITY[wo?.priority as keyof typeof PRIORITY]?.slaHours || 0;
-  if (!started || hours <= 0) return null;
-  return started + hours * 3600 * 1000;
-};
+export const getSlaDueTime = (wo?: WorkOrderViewRow | null, now: Date = new Date()) => evaluateSla(wo, now).dueTime;
 
 export const formatRelativeTime = (value: unknown) => {
   const time = typeof value === "number" ? value : toTime(value);
@@ -204,15 +185,19 @@ export const formatDateWithRelative = (value: unknown) => {
   return rel ? `${date} | ${rel}` : date;
 };
 
-export const getWorkOrderDateMeta = (wo?: WorkOrderViewRow | null) => ({
-  created: formatDateWithRelative(getCreatedTime(wo)),
-  updated: formatDateWithRelative(getUpdatedTime(wo)),
-  slaDue: getSlaDueTime(wo) ? formatDateWithRelative(getSlaDueTime(wo)) : "No SLA due",
-});
-
-export const getSlaAgingStyle = (wo?: WorkOrderViewRow | null) => {
+export const getWorkOrderDateMeta = (wo?: WorkOrderViewRow | null) => {
   const due = getSlaDueTime(wo);
-  if (!due) {
+  return {
+    created: formatDateWithRelative(getCreatedTime(wo)),
+    updated: formatDateWithRelative(getUpdatedTime(wo)),
+    slaDue: due !== null ? formatDateWithRelative(due) : "No SLA due",
+  };
+};
+
+export const getSlaAgingStyle = (wo?: WorkOrderViewRow | null, now: Date = new Date()) => {
+  const state = evaluateSla(wo, now);
+  const due = state.dueTime;
+  if (due === null) {
     return {
       label: "No SLA",
       color: T.subtle,
@@ -221,8 +206,8 @@ export const getSlaAgingStyle = (wo?: WorkOrderViewRow | null) => {
     };
   }
 
-  const hours = (due - Date.now()) / 3600000;
-  if (hours <= 0) {
+  const hours = state.remainingHours ?? Infinity;
+  if (state.breached) {
     return {
       label: "Breached",
       color: T.danger,
@@ -366,13 +351,14 @@ export const getWorkOrderProgressSteps = (
 export const sortWorkOrders = <T extends WorkOrderViewRow>(
   items: T[],
   sortBy: WorkOrderSortKey,
+  now: Date = new Date(),
 ) => {
   const rows = [...items];
   rows.sort((a, b) => {
     if (sortBy === "priority") {
-      const pr = (priorityRank[a?.priority] || 99) - (priorityRank[b?.priority] || 99);
+      const pr = (priorityRank[a?.priority ?? ""] || 99) - (priorityRank[b?.priority ?? ""] || 99);
       if (pr !== 0) return pr;
-      return (getSlaDueTime(a) || Number.MAX_SAFE_INTEGER) - (getSlaDueTime(b) || Number.MAX_SAFE_INTEGER);
+      return (getSlaDueTime(a, now) ?? Number.MAX_SAFE_INTEGER) - (getSlaDueTime(b, now) ?? Number.MAX_SAFE_INTEGER);
     }
 
     if (sortBy === "oldest") {
@@ -383,11 +369,11 @@ export const sortWorkOrders = <T extends WorkOrderViewRow>(
       return getCreatedTime(b) - getCreatedTime(a);
     }
 
-    const aDue = getSlaDueTime(a);
-    const bDue = getSlaDueTime(b);
-    if (aDue && bDue && aDue !== bDue) return aDue - bDue;
-    if (aDue && !bDue) return -1;
-    if (!aDue && bDue) return 1;
+    const aDue = getSlaDueTime(a, now);
+    const bDue = getSlaDueTime(b, now);
+    if (aDue !== null && bDue !== null && aDue !== bDue) return aDue - bDue;
+    if (aDue !== null && bDue === null) return -1;
+    if (aDue === null && bDue !== null) return 1;
     return getCreatedTime(b) - getCreatedTime(a);
   });
 

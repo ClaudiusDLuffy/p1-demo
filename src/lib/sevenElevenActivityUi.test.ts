@@ -41,17 +41,20 @@ test("only the 7-Eleven composer can create a portal alert", () => {
   assert.match(hook, /activityChannel: channel/);
 });
 
-test("check-in and Pause parts are immediately optimistic and persisted as 7-Eleven updates", () => {
+test("check-in and Pause parts remain optimistic; owning commands persist the 7-Eleven evidence", () => {
   for (const eventKey of ["check_in", "job_paused"]) {
     assert.match(
       hook,
       new RegExp(`localActivity\\(text, "note", isManager, "${eventKey}", true, false, "field_note"\\)`),
     );
-    assert.match(
-      hook,
-      new RegExp(`workflowAuditFor\\([\\s\\S]*?"${eventKey}"[\\s\\S]*?"field_note",[\\s\\n]*true,[\\s\\n]*\\)`),
-    );
   }
+  // Command behavior is exercised by workOrderLifecycleClientBehavior.test
+  // and the executable SQL harness, including transaction-owned sync flags.
+  // The UI must no longer manufacture a persisted lifecycle event itself.
+  const lifecycleHandlers = hook.slice(hook.indexOf("const doStartWork"), hook.indexOf("const patchPartsCache"));
+  assert.match(lifecycleHandlers, /await startWorkOrderVisit\(/);
+  assert.match(lifecycleHandlers, /await pauseWorkOrderForParts\(/);
+  assert.doesNotMatch(lifecycleHandlers, /await (?:insertActivity|updateWorkOrder|openWorkOrderVisit|closeWorkOrderVisit|insertWoPart)\(/);
   assert.match(hook, /localActivity\(text, "note", isManager, "job_completed", true, false, "field_note"\)/);
   assert.match(hook, /completionResult = await completeWorkOrderOnce\(woId/);
   assert.match(hook, /status: workOrderStatusAfterFieldCompletion\(existing\?\.status\)/);

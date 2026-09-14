@@ -2,7 +2,40 @@
 // Maps DB rows (snake_case) → portal shape (camelCase) so existing components
 // don't need to change. Keep this thin — heavy logic stays in components.
 
+import { apiFetch } from "./errors/apiFetch";
+import { normalizeUnknownError } from "./errors/normalizeUnknown";
+import { AppError } from "./errors/AppError";
+import { parseExactCount, type ExactCountResult } from "./counts/countContracts";
+import { boundedReadRpc } from "./counts/readRpc";
+import { loadWorkOrdersPage as readWorkOrdersPage, loadWorkOrderById as readWorkOrderById,
+  workOrderReadArgs } from "../features/work-orders/data/workOrderReadRepository";
+import type { WorkOrderPageParams } from "../features/work-orders/data/workOrderReadContracts";
+import { loadWorkOrderActivitiesPage as readWorkOrderActivitiesPage } from "../features/work-orders/data/activityReadRepository";
+import { loadWorkOrderVisitsPage as readWorkOrderVisitsPage } from "../features/work-orders/data/visitReadRepository";
+import { loadWorkOrderPhotosPage as readWorkOrderPhotosPage } from "../features/photos/data/photoMetadataReadRepository";
+import { loadPhotoBlob as readPhotoBlob, getPhotoUrl as readPhotoUrl } from "../features/photos/browserPhotoStorageAdapter";
+import type { mapActivityPageRow as mapActivity } from "../features/work-orders/data/activityMappers";
+import type { mapVisit } from "../features/work-orders/data/visitMappers";
+export type { WorkOrderPageParams, WorkOrderTableSortColumn } from "../features/work-orders/data/workOrderReadContracts";
+export { workOrderReadArgs };
+import { parseNavigationSummaryV2 } from "./counts/navigationSummary";
+import { parseInvoiceSummary, invoiceSummaryForLegacyUi, invoiceDocumentForLegacyUi } from "../features/invoices/invoiceReadContracts";
+import { readInvoiceSummary, readInvoiceDocument } from "../features/invoices/invoiceReads";
 import { supabase } from "./supabase/client";
+import { cancelUnattachedUpload, createWorkOrderPhotoPorts, deleteBoundObject, uploadBoundAttachment } from "./privateObjectClient";
+import { createPhotoUploadController } from "../features/photos/photoUploadController";
+import { createContractorInvoiceCommands, safeContractorInvoiceError } from "./contractorInvoiceCommands";
+import { contractorInvoiceDraftCommand, compatibleContractorInvoiceResult } from "./contractorInvoiceDraftAdapter";
+import type { ContractorInvoiceContext } from "./contractorInvoiceCommandContracts";
+import { createLifecycleCommands, safeLifecycleError } from "./workOrderLifecycleCommands";
+import { createAssignmentCommands, AssignmentCommandError } from "./workOrderAssignmentCommands";
+import { reviewInvoiceWithNotification, reviewInvoicesWithNotification, retractInvoiceWithNotification } from "./financialNotificationCommands";
+import type { FinancialReviewResult, FinancialBatchReviewResult } from "./financialNotificationCommandContracts";
+import type { AssignmentContext } from "./workOrderAssignmentContracts";
+import { manualWorkOrderSchema } from "./workOrderCreationCommand";
+export type { RejectUnassignedWorkOrderResult, DuplicateWorkOrderForReassignmentResult,
+  AssignmentTransitionDeliveryStatus, WorkOrderContractorTransitionResult } from "./workOrderAssignmentContracts";
+import { lifecycleContextSchema, lifecycleRpcContext, type LifecycleContext } from "./workOrderLifecycleContracts";
 import { stateCodeFromWorkOrder, timezoneForWorkOrder } from "./billingRules";
 import { collectSupabasePages } from "./paginatedQuery";
 import {
@@ -11,12 +44,10 @@ import {
 } from "./cursorPagination";
 import { computeSlaBreaches } from "./slaConfig";
 import { WorkOrderSchema } from "./schemas";
-import type { Invoice, WorkOrder } from "./schemas";
+import type { WorkOrder } from "./schemas";
 import type { Database, Json } from "./supabase/database.types";
-import type {
-  PortalRealtimeChange,
-  PortalRealtimeTable,
-} from "./realtimeInvalidation";
+import { createPortalRealtimeSubscription } from "./realtime/realtimeSubscription";
+import type { NormalizedRealtimeEvent } from "./realtime/realtimeEvent";
 import type { WorkOrderReopenMode } from "./workOrderReopen";
 import type {
   ContractorEstimate,
@@ -28,7 +59,6 @@ import type {
 } from "./contractorEstimate";
 import { workOrderCanEnterSevenElevenQueue } from "./workOrderView";
 import {
-  canonicalSevenElevenWorkOrderId,
   normalizeExactPortalWorkOrderId,
 } from "./workOrderIdentity";
 
@@ -37,7 +67,7 @@ import {
 export async function signIn(email: string, password: string): Promise<any> {
   const sb = supabase();
   const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
@@ -46,7 +76,7 @@ export type SignOutScope = "global" | "local" | "others";
 export async function signOut(scope: SignOutScope = "local"): Promise<void> {
   const sb = supabase();
   const { error } = await sb.auth.signOut({ scope });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
 export async function getSession(): Promise<any> {
@@ -66,60 +96,10 @@ export async function loadCurrentProfile(): Promise<any | null> {
       .select("permission")
       .eq("profile_id", user.id),
   ]);
-  if (profileResult.error) throw profileResult.error;
-  if (permissionsResult.error) throw permissionsResult.error;
+  if (profileResult.error) throw normalizeUnknownError(profileResult.error);
+  if (permissionsResult.error) throw normalizeUnknownError(permissionsResult.error);
   return mapProfile(profileResult.data, (permissionsResult.data || [])
     .map((grant: any) => String(grant.permission)));
-}
-
-// ── PROFILES (all users) ────────────────────────────────────────────────────
-
-// profiles_read: staff see all, contractors see contractors
-export async function loadAllProfiles(): Promise<any[]> {
-  const sb = supabase();
-  const [profilesResult, permissionsResult] = await Promise.all([
-    sb.from("profiles").select("*").order("name"),
-    (sb as any).from("staff_permission_grants").select("profile_id, permission"),
-  ]);
-  if (profilesResult.error) throw profilesResult.error;
-  if (permissionsResult.error) throw permissionsResult.error;
-  const permissionsByProfile = new Map<string, string[]>();
-  for (const grant of permissionsResult.data || []) {
-    const profileId = String(grant.profile_id);
-    const permissions = permissionsByProfile.get(profileId) || [];
-    permissions.push(String(grant.permission));
-    permissionsByProfile.set(profileId, permissions);
-  }
-  return (profilesResult.data || []).map(profile => mapProfile(
-    profile,
-    permissionsByProfile.get(profile.id) || [],
-  ));
-}
-
-// Contractor technicians — RLS returns all rows to staff and only authorized
-// company rows to contractors. A linked portal profile is the canonical display
-// identity; the table name remains the fallback for record-only legacy rows.
-export async function loadTechnicians(): Promise<any[]> {
-  const sb = supabase();
-  const { data, error } = await sb
-    .from("contractor_technicians")
-    .select("*, portal_profile:profiles!contractor_technicians_profile_id_fkey(name)")
-    .order("name");
-  if (error) throw error;
-  return (data || []).map((t: any) => {
-    const portalProfile = Array.isArray(t.portal_profile)
-      ? t.portal_profile[0]
-      : t.portal_profile;
-    return {
-      id: t.id,
-      contractorId: t.contractor_id,
-      profileId: t.profile_id || null,
-      name: portalProfile?.name || t.name,
-      storedName: t.name,
-      tier: t.tier,
-      isActive: t.is_active,
-    };
-  });
 }
 
 const mapProfile = (p: any, staffPermissions: string[] = []) => ({
@@ -174,44 +154,6 @@ export type WorkOrderDetails = {
   detailsLoaded: true;
 };
 
-export type WorkOrderTableSortColumn = "work_order" | "status" | "priority"
-  | "incident" | "store" | "summary" | "contractor" | "technician"
-  | "created" | "updated" | "closed" | "sla";
-
-export type WorkOrderPageParams = {
-  scope?: "active" | "operations" | "operations_all" | "history" | "capital" | "ready_to_bill" | "all"
-    | "staff_work" | "staff_work_unread" | "staff_work_todo" | "staff_work_ready"
-    | "dashboard_unassigned" | "dashboard_pending_submission"
-    | "dashboard_pending_approval" | "dashboard_awaiting_parts"
-    | "dashboard_seven_eleven_updates" | "dashboard_p1_parts_to_order"
-    | "dashboard_pending_capital_completion";
-  search?: string;
-  contractorId?: string | null;
-  contractorIds?: string[] | null;
-  priority?: string;
-  status?: string;
-  state?: string;
-  resolution?: string;
-  from?: string;
-  to?: string;
-  needsAction?: boolean;
-  sort?: "sla_due" | "newest" | "oldest" | "priority";
-  pendingFirst?: boolean;
-  limit?: number;
-  cursor?: string | null;
-  storeNumber?: string | null;
-  tableSortColumn?: WorkOrderTableSortColumn;
-  tableSortDirection?: "asc" | "desc";
-  workOrderFilter?: string;
-  incidentFilter?: string;
-  storeFilter?: string;
-  summaryFilter?: string;
-  contractorFilter?: string;
-  createdDateFilter?: string;
-  updatedDateFilter?: string;
-  slaFilter?: "all" | "overdue";
-};
-
 export type PortalNavigationSummary = {
   openCount: number;
   p1UnassignedCount: number;
@@ -260,7 +202,7 @@ const cursorPageFromRpc = <T>(value: unknown): CursorPage<T> => {
     items,
     nextCursor: typeof row.nextCursor === "string" ? row.nextCursor : null,
     hasMore: Boolean(row.hasMore),
-    totalCount: Number(row.totalCount || 0),
+    totalCount: typeof row.totalCount === "number" && Number.isSafeInteger(row.totalCount) && row.totalCount >= 0 ? row.totalCount : null,
     aggregates: row.aggregates && typeof row.aggregates === "object" && !Array.isArray(row.aggregates)
       ? Object.fromEntries(Object.entries(row.aggregates as Record<string, unknown>)
         .map(([key, value]) => [key, Number(value || 0)]))
@@ -268,175 +210,36 @@ const cursorPageFromRpc = <T>(value: unknown): CursorPage<T> => {
   };
 };
 
-const mapAssignmentHistory = (rows: any[] = []) => rows.map(assignment => ({
-  id: assignment.id,
-  contractorId: assignment.contractor_id,
-  nextContractorId: assignment.next_contractor_id || null,
-  assignmentVersion: assignment.assignment_version,
-  assignmentStartedAt: assignment.assignment_started_at || null,
-  assignmentEndedAt: assignment.assignment_ended_at,
-  assignmentEndedBy: assignment.assignment_ended_by || null,
-  workflowSnapshot: assignment.workflow_snapshot || {},
-}));
-
-const mapEmbeddedStaffTodo = (todo: any) => todo ? ({
-  id: todo.id,
-  workOrderId: todo.work_order_id,
-  ownerId: todo.owner_id,
-  createdBy: todo.created_by,
-  note: todo.note || null,
-  createdAt: todo.created_at,
-  updatedAt: todo.updated_at,
-}) : null;
-
-const mapWorkOrderListRow = (wo: any): WorkOrder => {
-  const latestNoteAt = wo.latest_note_at || null;
-  const seenAt = wo.staff_notes_seen_at || null;
-  const sevenElevenEligible = workOrderCanEnterSevenElevenQueue({
-    status: wo.status,
-    functional_status: wo.functional_status,
-  });
-  const pendingSevenElevenSyncCount = sevenElevenEligible
-    ? Number(wo.pending_7eleven_sync_count || 0)
-    : 0;
-  const pendingContractorAttentionCount = Number(wo.pending_contractor_attention_count || 0);
-  const assignmentRows = Array.isArray(wo.assignment_history)
-    ? wo.assignment_history
-    : [];
-
-  WorkOrderSchema.safeParse({
-    id: wo.id,
-    status: wo.status,
-    priority: wo.priority,
-    contractor_id: wo.contractor_id,
-    nte: wo.nte == null ? null : Number(wo.nte),
-    created_at: wo.created_at,
-    store_number: wo.store_number,
-    city: wo.city,
-    functional_status: wo.functional_status,
-  });
-
-  return {
-    ...mapWO(wo),
-    incidentReuse: wo.incident_reuse || null,
-    assignmentHistory: mapAssignmentHistory(assignmentRows),
-    activities: [],
-    latestNoteAt,
-    latestContractorActivityAt: wo.latest_contractor_activity_at || null,
-    hasUnreadNotes: !!latestNoteAt && (
-      !seenAt || new Date(latestNoteAt).getTime() > new Date(seenAt).getTime()
-    ),
-    pendingSevenElevenActivities: [],
-    pendingSevenElevenSyncCount,
-    hasPendingSevenElevenSync: pendingSevenElevenSyncCount > 0,
-    pendingContractorActivities: [],
-    pendingContractorAttentionCount,
-    hasPendingContractorAttention: pendingContractorAttentionCount > 0,
-    historyInvoiceTotal: Number(wo.history_invoice_total || 0),
-    historyInvoiceCount: Number(wo.history_invoice_count || 0),
-    billingInvoiceId: wo.billing_invoice_id || null,
-    partsTotal: Number(wo.parts_total || 0),
-    partsReceived: Number(wo.parts_received || 0),
-    staffTodo: mapEmbeddedStaffTodo(wo.staff_todo),
-    staffReadThroughAt: wo.staff_read_through_at || null,
-    visits: [],
-    photos: [],
-    detailsLoaded: false,
-  } as unknown as WorkOrder;
-};
-
 export async function loadWorkOrdersPage(
-  params: WorkOrderPageParams = {},
+  params: WorkOrderPageParams = {}, signal?: AbortSignal,
 ): Promise<CursorPage<WorkOrder>> {
-  const sb = supabase();
-  const tableMode = Boolean(params.tableSortColumn)
-    || params.scope === "dashboard_seven_eleven_updates"
-    || params.scope === "dashboard_pending_submission"
-    || params.scope === "dashboard_p1_parts_to_order"
-    || params.scope === "ready_to_bill"
-    || params.scope === "staff_work"
-    || params.scope === "staff_work_ready";
-  const rpcName = tableMode
-    ? "list_work_orders_table_page"
-    : "list_work_orders_page";
-  const sharedArgs = {
-    p_scope: params.scope || "active",
-    p_search: params.search?.trim() || null,
-    p_contractor_id: params.contractorId || null,
-    p_priority: params.priority && params.priority !== "all" ? params.priority : null,
-    p_status: params.status && params.status !== "all" ? params.status : null,
-    p_state: params.state && params.state !== "all" ? params.state : null,
-    p_resolution: params.resolution && params.resolution !== "all" ? params.resolution : null,
-    p_from: params.from || null,
-    p_to: params.to || null,
-    p_needs_action: Boolean(params.needsAction),
-    p_sort: params.sort || "newest",
-    p_pending_first: Boolean(params.pendingFirst),
-    p_limit: clampPageSize(params.limit),
-    p_cursor: params.cursor || null,
-    p_store_number: params.storeNumber || null,
-    p_contractor_ids: params.contractorIds?.length ? params.contractorIds : null,
-  };
-  const tableArgs = tableMode ? {
-    ...sharedArgs,
-    p_sort_column: params.tableSortColumn
-      || (params.sort === "priority" ? "priority" : params.sort === "sla_due" ? "sla" : "created"),
-    p_sort_direction: params.tableSortDirection
-      || (params.sort === "oldest" ? "asc" : params.sort === "priority" || params.sort === "sla_due" ? "asc" : "desc"),
-    p_work_order_filter: params.workOrderFilter?.trim() || null,
-    p_incident_filter: params.incidentFilter?.trim() || null,
-    p_store_filter: params.storeFilter?.trim() || null,
-    p_summary_filter: params.summaryFilter?.trim() || null,
-    p_contractor_filter: params.contractorFilter?.trim() || null,
-    p_created_date_filter: params.createdDateFilter || null,
-    p_updated_date_filter: params.updatedDateFilter || null,
-    p_sla_filter: params.slaFilter && params.slaFilter !== "all"
-      ? params.slaFilter
-      : null,
-  } : sharedArgs;
-  const { data, error } = await (sb as any).rpc(rpcName, tableArgs);
-  if (error) throw error;
-  const page = cursorPageFromRpc<any>(data);
-  return { ...page, items: page.items.map(mapWorkOrderListRow) };
+  // Compatibility type bridge only: the old declaration names the raw schema,
+  // while callers receive the validated camel-case read model. No raw row cast.
+  return await readWorkOrdersPage(params, signal) as unknown as CursorPage<WorkOrder>;
 }
 
-export async function loadPortalNavigationSummary(): Promise<PortalNavigationSummary> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("get_portal_navigation_summary");
-  if (error) throw error;
-  const value = data && typeof data === "object" && !Array.isArray(data)
-    ? data as Record<string, unknown>
-    : {};
-  return Object.fromEntries(
-    Object.keys(EMPTY_PORTAL_NAVIGATION_SUMMARY).map(key => [key, Number(value[key] || 0)]),
-  ) as PortalNavigationSummary;
+export async function loadWorkOrdersCount(params: WorkOrderPageParams = {}, signal?: AbortSignal): Promise<ExactCountResult> {
+  const { tableMode, args } = workOrderReadArgs(params);
+  const filters: Record<string, unknown> = { ...args };
+  delete filters.p_limit;
+  delete filters.p_cursor;
+  return parseExactCount(await boundedReadRpc(tableMode ? "count_work_orders_table_v2" : "count_work_orders_v1", filters, signal));
 }
 
-export async function loadContractorWorkloadSummary(): Promise<ContractorWorkloadSummary> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("get_contractor_workload_summary");
-  if (error) throw new Error(error.message);
-  const raw = typeof data === "string" ? JSON.parse(data) : data;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  return Object.fromEntries(Object.entries(raw).map(([contractorId, value]) => {
-    const row = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-    return [contractorId, {
-      active: Number(row.active || 0),
-      capital: Number(row.capital || 0),
-    }];
-  }));
+export async function loadPortalNavigationSummary(signal?: AbortSignal): Promise<Partial<PortalNavigationSummary>> {
+  const data = await boundedReadRpc("get_portal_navigation_summary_v2", {}, signal);
+  const { metrics } = parseNavigationSummaryV2(data);
+  // Retain the established UI metric vocabulary, without zero-filling fields
+  // that this role-specific contract did not request or calculate.
+  if (Object.keys(metrics).some(key => !Object.hasOwn(EMPTY_PORTAL_NAVIGATION_SUMMARY, key))) {
+    throw new AppError("INTERNAL_ERROR");
+  }
+  return metrics;
 }
 
-export async function loadWorkOrderById(workOrderId: string): Promise<WorkOrder | null> {
-  if (!workOrderId) return null;
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("get_portal_work_order", {
-    p_work_order_id: workOrderId,
-  });
-  if (error) throw error;
-  return data ? mapWorkOrderListRow(data) : null;
+export async function loadWorkOrderById(workOrderId: string, signal?: AbortSignal): Promise<WorkOrder | null> {
+  // Preserve the historical facade type without adding raw-schema fields to the DTO.
+  return await readWorkOrderById(workOrderId, signal) as unknown as WorkOrder | null;
 }
 
 export async function loadWorkOrderFamily(workOrderId: string): Promise<WorkOrder[]> {
@@ -462,7 +265,7 @@ export async function loadWorkOrderFamily(workOrderId: string): Promise<WorkOrde
   const { data, error } = await candidatesQuery
     .order("duplicate_sequence", { ascending: false, nullsFirst: false })
     .order("id", { ascending: false });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 
   const hydrated = await Promise.all(
     (data || []).map(candidate => loadWorkOrderById(candidate.id)),
@@ -470,6 +273,7 @@ export async function loadWorkOrderFamily(workOrderId: string): Promise<WorkOrde
   return hydrated.filter((workOrder): workOrder is WorkOrder => Boolean(workOrder));
 }
 
+/** @deprecated Compatibility collector only; interactive reads must use loadWorkOrdersPage. */
 export async function loadWorkOrders(): Promise<WorkOrder[]> {
   // The shared shell retains only the active operational set used by badges,
   // dashboard buckets, and mutations. Closed history is never downloaded
@@ -489,157 +293,6 @@ export async function loadWorkOrders(): Promise<WorkOrder[]> {
   return items;
 }
 
-const formatWorkOrderDateTime = (
-  value: string | null | undefined,
-  workOrder: any,
-) => {
-  if (!value) return null;
-  return new Date(value).toLocaleString("en-US", {
-    timeZone: timezoneForWorkOrder({
-      storeTimezone: workOrder.store_timezone,
-      storeState: workOrder.store_state,
-      city: workOrder.city,
-      address: workOrder.address,
-    }),
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-};
-
-const mapWO = (w: any) => ({
-  id: w.id,
-  incidentId: w.incident_id,
-  store: w.store_number,
-  city: w.city,
-  addr: w.address,
-  storeState: w.store_state || null,
-  storeTimezone: w.store_timezone || null,
-  storeCounty: w.store_county || null,
-  storePostalCode: w.store_postal_code || null,
-  lineOfService: w.line_of_service,
-  businessService: w.business_service,
-  category: w.category,
-  subCategory: w.sub_category,
-  summary: w.summary,
-  description: w.description,
-  priority: w.priority,
-  status: w.status,
-  functionalStatus: w.functional_status,
-  contractor: w.contractor_id,
-  afm: w.afm_name,
-  afmEmail: w.afm_email,
-  nte: parseFloat(w.nte || 0),
-  nteFlagThreshold: w.nte_flag_threshold != null ? parseFloat(w.nte_flag_threshold) : 900,
-  nteFlagged: !!w.nte_flagged,
-  nteFlagAmount: w.nte_flag_amount != null ? parseFloat(w.nte_flag_amount) : null,
-  invoiceTotal: w.invoice_total ? parseFloat(w.invoice_total) : undefined,
-  eta: w.eta,
-  dispatchedAt: w.dispatched_at,
-  startTime: formatWorkOrderDateTime(w.start_time, w),
-  startTimeRaw: w.start_time || null,
-  endTime: formatWorkOrderDateTime(w.end_time, w),
-  endTimeRaw: w.end_time || null,
-  assetMake: w.asset_make,
-  assetModel: w.asset_model,
-  assetSerial: w.asset_serial,
-  assetYear: w.asset_year || null,
-  repairQuote: w.repair_quote ? parseFloat(w.repair_quote) : null,
-  installQuote: w.install_quote ? parseFloat(w.install_quote) : null,
-  capitalNotes: w.capital_notes || null,
-  isCapital: w.is_capital,
-  capitalStatus: w.capital_status,
-  resolutionCode: w.resolution_code || null,
-  resolutionNotes: w.resolution_notes || null,
-  partNeeded: w.part_needed,
-  partEta: w.part_eta,
-  source: w.source,
-  billingOnly: !!w.billing_only,
-  billingReadyAt: w.billing_ready_at || null,
-  billingReadyBy: w.billing_ready_by || null,
-  contractorAssignmentStartedAt: w.contractor_assignment_started_at || null,
-  contractorAssignmentVersion: Number(w.contractor_assignment_version || 0),
-  duplicatedFromWorkOrderId: w.duplicated_from_work_order_id || null,
-  duplicateRootWorkOrderId: w.duplicate_root_work_order_id || null,
-  duplicateSequence: w.duplicate_sequence == null
-    ? null
-    : Number(w.duplicate_sequence),
-  externalWorkOrderId: w.duplicate_root_work_order_id || w.id,
-  workflowCycle: Number(w.workflow_cycle || 0),
-  contractorInvoicingCompletedAt: w.contractor_invoicing_completed_at || null,
-  contractorInvoicingCompletedBy: w.contractor_invoicing_completed_by || null,
-  contractorInvoicingAssignmentVersion:
-    w.contractor_invoicing_assignment_version == null
-      ? null
-      : Number(w.contractor_invoicing_assignment_version),
-  contractorInvoicingWorkflowCycle:
-    w.contractor_invoicing_workflow_cycle == null
-      ? null
-      : Number(w.contractor_invoicing_workflow_cycle),
-  contractorInvoicingCompletionSource:
-    w.contractor_invoicing_completion_source || null,
-  staffNotesSeenAt: w.staff_notes_seen_at || null,
-  technicianOnJob: w.technician_on_job,
-  assignedTechnicianProfileId: w.assigned_technician_profile_id || null,
-  technicianAssignedAt: w.technician_assigned_at || null,
-  technicianAssignedBy: w.technician_assigned_by || null,
-  createdAt: w.created_at,
-  updatedAt: w.updated_at,
-  closedAt: w.closed_at,
-  slaStartedAt: w.sla_started_at,
-  responseBreachAt: w.response_breach_at,
-  resolutionBreachAt: w.resolution_breach_at,
-  age: ageString(w.created_at, w.dispatched_at),
-});
-
-const mapActivity = (a: any, timeZone?: string) => ({
-  id: a.id,
-  authorId: a.author_id,
-  author: a.author_name,
-  createdAt: a.created_at,
-  time: new Date(a.created_at).toLocaleString("en-US", {
-    ...(timeZone ? { timeZone } : {}),
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }),
-  text: a.text,
-  type: a.type,
-  activityChannel: a.activity_channel
-    || (a.requires_7eleven_sync
-      ? "field_note"
-      : a.is_staff_only
-        ? "internal_note"
-        : a.type === "system"
-          ? "system_event"
-          : "legacy"),
-  enteredByRole: a.entered_by_role || "system",
-  isStaffOverride: !!a.is_staff_override,
-  isStaffOnly: !!a.is_staff_only,
-  overrideForContractorId: a.override_for_contractor_id || null,
-  eventKey: a.event_key || (a.type === "system" ? "system" : "note"),
-  eventData: a.event_data || {},
-  requiresSevenElevenSync: !!a.requires_7eleven_sync,
-  syncedToSevenElevenAt: a.synced_to_7eleven_at || null,
-  syncedToSevenElevenBy: a.synced_to_7eleven_by || null,
-  requiresContractorAttention: !!a.requires_contractor_attention,
-  contractorAcknowledgedAt: a.contractor_attention_acknowledged_at || null,
-  contractorAcknowledgedBy: a.contractor_attention_acknowledged_by || null,
-  workflowCycle: Number(a.workflow_cycle || 0),
-});
-
-const mapVisit = (visit: any) => ({
-  id: visit.id,
-  workOrderId: visit.work_order_id,
-  contractorId: visit.contractor_id || null,
-  checkInAt: visit.check_in_at,
-  checkOutAt: visit.check_out_at || null,
-  createdBy: visit.checked_in_by || null,
-  closedBy: visit.checked_out_by || null,
-});
-
 const pageMeta = <T>(page: CursorPage<T>): Omit<CursorPage<T>, "items"> => ({
   nextCursor: page.nextCursor,
   hasMore: page.hasMore,
@@ -650,38 +303,18 @@ export async function loadWorkOrderActivitiesPage(
   workOrder: Parameters<typeof loadWorkOrderDetails>[0],
   cursor: string | null = null,
   limit = 30,
-): Promise<CursorPage<any>> {
-  if (!workOrder?.id) throw new Error("A work order ID is required");
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("list_work_order_activities_page", {
-    p_work_order_id: workOrder.id,
-    p_limit: clampPageSize(limit),
-    p_cursor: cursor,
-  });
-  if (error) throw error;
-  const page = cursorPageFromRpc<any>(data);
-  const timeZone = timezoneForWorkOrder(workOrder);
-  return { ...page, items: page.items.map(row => mapActivity(row, timeZone)) };
+  signal?: AbortSignal,
+): Promise<CursorPage<ReturnType<typeof mapActivity>>> {
+  return readWorkOrderActivitiesPage(workOrder, cursor, limit, signal);
 }
 
 export async function loadWorkOrderPhotosPage(
   workOrderId: string,
   cursor: string | null = null,
   limit = 24,
+  signal?: AbortSignal,
 ): Promise<CursorPage<string>> {
-  if (!workOrderId) throw new Error("A work order ID is required");
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("list_work_order_photos_page", {
-    p_work_order_id: workOrderId,
-    p_limit: clampPageSize(limit),
-    p_cursor: cursor,
-  });
-  if (error) throw error;
-  const page = cursorPageFromRpc<any>(data);
-  return {
-    ...page,
-    items: page.items.map(photo => photo.storage_path).filter(Boolean),
-  };
+  return readWorkOrderPhotosPage(workOrderId, cursor, limit, signal);
 }
 
 export async function loadAllWorkOrderPhotoPaths(
@@ -718,28 +351,25 @@ export async function loadWorkOrderVisitsPage(
   workOrderId: string,
   cursor: string | null = null,
   limit = 30,
-): Promise<CursorPage<any>> {
-  if (!workOrderId) throw new Error("A work order ID is required");
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("list_work_order_visits_page", {
-    p_work_order_id: workOrderId,
-    p_limit: clampPageSize(limit),
-    p_cursor: cursor,
-  });
-  if (error) throw error;
-  const page = cursorPageFromRpc<any>(data);
-  return { ...page, items: page.items.map(mapVisit) };
+  signal?: AbortSignal,
+): Promise<CursorPage<ReturnType<typeof mapVisit>>> {
+  return readWorkOrderVisitsPage(workOrderId, cursor, limit, signal);
 }
 
-export async function loadAllWorkOrderVisits(workOrderId: string): Promise<any[]> {
-  const visits: any[] = [];
+export async function loadAllWorkOrderVisits(workOrderId: string, signal?: AbortSignal): Promise<ReturnType<typeof mapVisit>[]> {
+  const visits: ReturnType<typeof mapVisit>[] = [];
   let cursor: string | null = null;
   do {
-    const page = await loadWorkOrderVisitsPage(workOrderId, cursor, 100);
+    const page = await loadWorkOrderVisitsPage(workOrderId, cursor, 100, signal);
     visits.push(...page.items);
     cursor = page.hasMore ? page.nextCursor : null;
   } while (cursor);
   return visits;
+}
+
+export async function loadWorkOrderChildCount(workOrderId: string, section: "activities" | "photos" | "visits", signal?: AbortSignal): Promise<ExactCountResult> {
+  const names = { activities: "count_work_order_activities_v1", photos: "count_work_order_photos_v1", visits: "count_work_order_visits_v1" } as const;
+  return parseExactCount(await boundedReadRpc(names[section], { p_work_order_id: workOrderId }, signal));
 }
 
 export async function loadWorkOrderDetails(workOrder: {
@@ -749,13 +379,13 @@ export async function loadWorkOrderDetails(workOrder: {
   city?: string | null;
   addr?: string | null;
   staffNotesSeenAt?: string | null;
-}): Promise<WorkOrderDetails> {
+} | null | undefined, signal?: AbortSignal): Promise<WorkOrderDetails> {
   if (!workOrder?.id) throw new Error("A work order ID is required");
   const [activityResult, photoResult, visitResult, currentWorkOrder] = await Promise.all([
-    loadWorkOrderActivitiesPage(workOrder),
-    loadWorkOrderPhotosPage(workOrder.id),
-    loadWorkOrderVisitsPage(workOrder.id),
-    loadWorkOrderById(workOrder.id),
+    loadWorkOrderActivitiesPage(workOrder, null, 30, signal),
+    loadWorkOrderPhotosPage(workOrder.id, null, 24, signal),
+    loadWorkOrderVisitsPage(workOrder.id, null, 30, signal),
+    loadWorkOrderById(workOrder.id, signal),
   ]);
 
   const activities = activityResult.items;
@@ -812,20 +442,6 @@ export async function loadWorkOrderDetails(workOrder: {
     assignmentHistory: (currentWorkOrder as any)?.assignmentHistory || [],
     detailsLoaded: true,
   };
-}
-
-// "5h", "2d", "1w" — relative age string from a timestamp
-function ageString(createdAt: string, dispatchedAt?: string): string {
-  const ref = dispatchedAt || createdAt;
-  if (!ref) return "—";
-  const diff = Date.now() - new Date(ref).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 14) return `${days}d`;
-  return `${Math.floor(days / 7)}w`;
 }
 
 // ── CONTRACTOR ESTIMATES ──────────────────────────────────────────────────
@@ -889,7 +505,7 @@ export async function loadContractorEstimatesForWorkOrder(
     .eq("work_order_id", workOrderId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
-  if (estimateError) throw estimateError;
+  if (estimateError) throw normalizeUnknownError(estimateError);
   if (!estimates?.length) return [];
 
   const estimateIds = estimates.map(estimate => estimate.id);
@@ -908,8 +524,8 @@ export async function loadContractorEstimatesForWorkOrder(
       .order("created_at", { ascending: true })
       .order("id", { ascending: true }),
   ]);
-  if (lineError) throw lineError;
-  if (attachmentError) throw attachmentError;
+  if (lineError) throw normalizeUnknownError(lineError);
+  if (attachmentError) throw normalizeUnknownError(attachmentError);
 
   const linesByEstimate = new Map<string, ContractorEstimateLine[]>();
   for (const rawLine of rawLines || []) {
@@ -940,7 +556,6 @@ export async function loadContractorEstimatesForWorkOrder(
   ));
 }
 
-const ESTIMATE_ATTACHMENT_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const ESTIMATE_ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
 
 type ContractorEstimateTemplateRow =
@@ -969,7 +584,7 @@ export async function loadContractorEstimateTemplates(): Promise<ContractorEstim
     .select("*")
     .eq("is_active", true)
     .order("display_name", { ascending: true });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return (data || []).map(mapContractorEstimateTemplate);
 }
 
@@ -980,7 +595,7 @@ export async function downloadContractorEstimateTemplate(
   const { data, error } = await sb.storage
     .from("contractor-estimate-templates")
     .download(template.storagePath);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   const url = URL.createObjectURL(data);
   try {
     const link = document.createElement("a");
@@ -1001,41 +616,21 @@ export async function uploadContractorEstimateAttachment(
   if (file.size <= 0 || file.size > ESTIMATE_ATTACHMENT_MAX_BYTES) {
     throw new Error("Equipment forms must be between 1 byte and 15 MB.");
   }
-  const sb = supabase();
-  const storagePath = `${estimateId}/${crypto.randomUUID()}.xlsx`;
-  const { error: uploadError } = await sb.storage
-    .from("contractor-estimate-attachments")
-    .upload(storagePath, file, { contentType: ESTIMATE_ATTACHMENT_MIME, upsert: false });
-  if (uploadError) throw uploadError;
-
-  const { data, error } = await (sb as any).rpc("attach_contractor_estimate_file", {
-    p_estimate_id: estimateId,
-    p_storage_path: storagePath,
-    p_original_name: file.name,
-    p_mime_type: ESTIMATE_ATTACHMENT_MIME,
-    p_size_bytes: file.size,
-  });
-  if (error) {
-    await sb.storage.from("contractor-estimate-attachments").remove([storagePath]);
-    throw error;
-  }
-  return data as ContractorEstimateAttachment;
+  const intent = await uploadBoundAttachment(estimateId, "estimate_attachment", file, file.name);
+  if (!intent.attachmentId) throw new Error("The equipment form receipt could not be confirmed. Retry the same file.");
+  const { data, error } = await supabase().from("contractor_estimate_attachments")
+    .select("id,estimate_id,original_name,storage_path,mime_type,size_bytes,uploaded_by,created_at")
+    .eq("id", intent.attachmentId).single();
+  if (error || !data) throw new Error("The equipment form was saved but could not be refreshed. Retry the same file.");
+  return { id: data.id, estimateId: data.estimate_id, originalName: data.original_name,
+    storagePath: data.storage_path, mimeType: data.mime_type, sizeBytes: Number(data.size_bytes),
+    uploadedBy: data.uploaded_by, createdAt: data.created_at };
 }
 
 export async function removeContractorEstimateAttachment(
   attachmentId: string,
 ): Promise<void> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("remove_contractor_estimate_file", {
-    p_attachment_id: attachmentId,
-  });
-  if (error) throw error;
-  const storagePath = String(data?.storagePath || "");
-  if (!storagePath) throw new Error("The removed equipment form had no storage path.");
-  const { error: storageError } = await sb.storage
-    .from("contractor-estimate-attachments")
-    .remove([storagePath]);
-  if (storageError) throw storageError;
+  await deleteBoundObject("estimate_attachment", attachmentId);
 }
 
 export async function downloadContractorEstimateAttachment(
@@ -1045,7 +640,7 @@ export async function downloadContractorEstimateAttachment(
   const { data, error } = await sb.storage
     .from("contractor-estimate-attachments")
     .download(attachment.storagePath);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   const url = URL.createObjectURL(data);
   try {
     const link = document.createElement("a");
@@ -1097,7 +692,7 @@ export async function saveContractorEstimate(
     p_submit: Boolean(input.submit),
     p_expected_updated_at: input.expectedUpdatedAt || null,
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   const result = data as Record<string, Json> | null;
   if (!result || typeof result.estimateId !== "string") {
     throw new Error("The server returned an invalid estimate result");
@@ -1132,7 +727,7 @@ export async function convertContractorEstimateToInvoice(
     "convert_contractor_estimate_to_invoice",
     { p_estimate_id: estimateId },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   const result = data as Record<string, Json> | null;
   if (!result || typeof result.invoiceId !== "string") {
     throw new Error("The server returned an invalid estimate conversion result");
@@ -1160,20 +755,12 @@ export type InvoicePageParams = {
   workOrderId?: string | null;
 };
 
-const mapInvoicePageRow = (invoice: any): Invoice => ({
-  ...mapInvoice(invoice),
-  lines: (Array.isArray(invoice.lines) ? invoice.lines : []).map(mapInvoiceLine),
-  pdfIsOriginal: Boolean(invoice.pdf_is_original),
-  originalPdfName: invoice.original_pdf_name || null,
-  contractorName: invoice.contractor_name || null,
-  sourceStaffInvoiceId: invoice.source_staff_invoice_id || null,
-}) as unknown as Invoice;
 
 export async function loadInvoicesPage(
   params: InvoicePageParams = {},
-): Promise<CursorPage<Invoice>> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc("list_contractor_invoices_page", {
+  signal?: AbortSignal,
+) {
+  const data = await boundedReadRpc("list_contractor_invoices_rows_v2", {
     p_state: params.state || "all",
     p_search: params.search?.trim() || null,
     p_sort: params.sort || "recent",
@@ -1181,65 +768,37 @@ export async function loadInvoicesPage(
     p_limit: clampPageSize(params.limit),
     p_cursor: params.cursor || null,
     p_work_order_id: params.workOrderId || null,
-  });
-  if (error) throw error;
-  const page = cursorPageFromRpc<any>(data);
-  return { ...page, items: page.items.map(mapInvoicePageRow) };
+  }, signal);
+  const page = cursorPageFromRpc<unknown>(data);
+  return { ...page, items: page.items.map(item => invoiceSummaryForLegacyUi(parseInvoiceSummary(item))) };
 }
 
-export async function loadInvoiceById(invoiceId: string): Promise<Invoice | null> {
+export async function loadInvoicesCount(params: InvoicePageParams = {}, signal?: AbortSignal): Promise<ExactCountResult> {
+  return parseExactCount(await boundedReadRpc("count_contractor_invoices_v1", {
+    p_state: params.state || "all", p_search: params.search?.trim() || null,
+    p_work_order_id: params.workOrderId || null,
+  }, signal));
+}
+
+export async function loadInvoiceSummaryById(invoiceId: string, signal?: AbortSignal) {
   if (!invoiceId) return null;
-  const sb = supabase();
-  const [invoiceResult, lineResult, uploadResult, holdResult] = await Promise.all([
-    sb.from("invoices")
-      .select("*")
-      .eq("id", invoiceId)
-      .eq("invoice_type", "contractor")
-      .is("deleted_at", null)
-      .maybeSingle(),
-    sb.from("invoice_lines")
-      .select("*")
-      .eq("invoice_id", invoiceId)
-      .order("position", { ascending: true })
-      .order("id", { ascending: true }),
-    sb.from("activities")
-      .select("event_data,created_at,id")
-      .eq("event_key", "invoice_uploaded")
-      .is("deleted_at", null)
-      .contains("event_data", { invoiceId })
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    sb.from("contractor_invoice_payment_holds")
-      .select("placed_at,placed_by,reason")
-      .eq("invoice_id", invoiceId)
-      .maybeSingle(),
-  ]);
-  if (invoiceResult.error) throw invoiceResult.error;
-  if (lineResult.error) throw lineResult.error;
-  if (uploadResult.error) throw uploadResult.error;
-  if (holdResult.error) throw holdResult.error;
-  if (!invoiceResult.data) return null;
-  const eventData = uploadResult.data?.event_data;
-  return mapInvoicePageRow({
-    ...invoiceResult.data,
-    lines: lineResult.data || [],
-    pdf_is_original: Boolean(uploadResult.data),
-    original_pdf_name: eventData && typeof eventData === "object" && !Array.isArray(eventData)
-      ? eventData.fileName || null
-      : null,
-    payment_hold_at: holdResult.data?.placed_at || null,
-    payment_hold_by: holdResult.data?.placed_by || null,
-    payment_hold_reason: holdResult.data?.reason || null,
-  });
+  const summary = await readInvoiceSummary(invoiceId, signal);
+  return summary ? invoiceSummaryForLegacyUi(summary) : null;
 }
 
-export async function loadInvoices(): Promise<Invoice[]> {
+/** Compatibility for explicit converted-invoice editor callers only. Ordinary
+ * invoice details use loadInvoiceSummaryById and one bounded line page. */
+export async function loadInvoiceById(invoiceId: string) {
+  if (!invoiceId) return null;
+  const document = await readInvoiceDocument(invoiceId, "edit", new AbortController().signal);
+  return document ? invoiceDocumentForLegacyUi(document) : null;
+}
+
+export async function loadInvoices() {
   // Paid invoices are historical and live behind the invoice cursor list.
   // The shell keeps only workflow-active records needed for badges, review,
   // billing handoff, and work-order actions.
-  const items: Invoice[] = [];
+  const items: Awaited<ReturnType<typeof loadInvoicesPage>>["items"] = [];
   let cursor: string | null = null;
   do {
     const page = await loadInvoicesPage({
@@ -1255,155 +814,63 @@ export async function loadInvoices(): Promise<Invoice[]> {
   return items;
 }
 
-const mapInvoice = (i: any) => ({
-  id: i.id,
-  num: i.num,
-  wot: i.work_order_id,
-  workOrderId: i.work_order_id,
-  externalWorkOrderId: canonicalSevenElevenWorkOrderId(i.work_order_id),
-  store: i.store_number,
-  storeAddr: i.store_address,
-  submissionKey: i.submission_key || null,
-  contractor: i.contractor_id,
-  invoiceType: i.invoice_type || "contractor",
-  documentKind: i.document_kind || "invoice",
-  sourceCapitalQuoteId: i.source_capital_quote_id || null,
-  cme: i.cme,
-  invoiceDate: formatDate(i.invoice_date),
-  invoiceDateRaw: i.invoice_date || null,
-  serviceDate: formatDate(i.service_date),
-  serviceDateRaw: i.service_date || null,
-  dueDate: formatDate(i.due_date),
-  terms: i.terms,
-  state: i.state,
-  subtotal: parseFloat(i.subtotal || 0),
-  salesTax: parseFloat(i.sales_tax || 0),
-  taxState: i.tax_state || null,
-  taxRate: i.tax_rate == null ? null : parseFloat(i.tax_rate),
-  taxRateSource: i.tax_rate_source || null,
-  taxRateReferenceId: i.tax_rate_reference_id || null,
-  taxJurisdictionSnapshot: Array.isArray(i.tax_jurisdiction_snapshot)
-    ? i.tax_jurisdiction_snapshot
-    : [],
-  taxRateVerifiedAt: i.tax_rate_verified_at || null,
-  total: parseFloat(i.total || 0),
-  territory: i.territory || null,
-  pdfStoragePath: i.pdf_storage_path || null,
-  qboInvoiceId: i.qbo_invoice_id || null,
-  qboSyncedAt: i.qbo_synced_at || null,
-  paidAt: i.paid_at || null,
-  paymentHoldAt: i.payment_hold_at || null,
-  paymentHoldBy: i.payment_hold_by || null,
-  paymentHoldReason: i.payment_hold_reason || null,
-  date: shortMonthDay(i.invoice_date),
-  rejectionReason: i.rejection_reason,
-  // Keep the legacy UI alias while newer callers use the explicit field.
-  reason: i.rejection_reason,
-  reviewRevision: Number(i.review_revision || 1),
-  rejectedAt: i.rejected_at || null,
-  rejectedBy: i.rejected_by || null,
-  resubmittedAt: i.resubmitted_at || null,
-  resubmittedBy: i.resubmitted_by || null,
-  createdAt: i.created_at,
-  updatedAt: i.updated_at,
-});
 
 // ── INVOICE PDF STORAGE ────────────────────────────────────────────────────
 // Bucket is private; reads use sb.storage.download which authenticates via
-// the user's session. Path layout: {invoice_id}/{invoice_number}.pdf.
+// the user's session. Object identity is reserved and validated by the server.
 export async function uploadInvoicePdfObject(
   invoiceId: string,
   invoiceNum: string,
   blob: Blob,
+  purpose: "invoice_original" | "invoice_generated" = "invoice_original",
 ): Promise<string> {
-  const sb = supabase();
-  const safeInvoiceNum = String(invoiceNum || "invoice").replace(/[^a-zA-Z0-9_-]/g, "-");
-  const uploadId = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const path = `${invoiceId}/${safeInvoiceNum}-${uploadId}.pdf`;
-  const { error: upErr } = await sb.storage.from("invoice-pdfs").upload(path, blob, {
-    contentType: "application/pdf",
-    upsert: false,
-  });
-  if (upErr) throw upErr;
-  return path;
+  const displayName = blob instanceof File ? blob.name : `${String(invoiceNum || "invoice").slice(0, 240)}.pdf`;
+  return (await uploadBoundAttachment(invoiceId, purpose, blob, displayName)).objectPath;
 }
 
-export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, blob: Blob): Promise<string> {
+export async function uploadInvoicePdf(invoiceId: string, invoiceNum: string, blob: Blob,
+  purpose: "invoice_original" | "invoice_generated" = "invoice_original"): Promise<string> {
   const sb = supabase();
-  const path = await uploadInvoicePdfObject(invoiceId, invoiceNum, blob);
-  const { error: rowErr } = await (sb as any).rpc(
+  const displayName = blob instanceof File ? blob.name : `${String(invoiceNum || "invoice").slice(0, 240)}.pdf`;
+  const intent = await uploadBoundAttachment(invoiceId, purpose, blob, displayName);
+  const path = intent.objectPath;
+  const { error: rowErr } = await sb.rpc(
     "attach_contractor_invoice_pdf",
     { p_invoice_id: invoiceId, p_storage_path: path },
   );
-  if (rowErr) throw rowErr;
+  if (rowErr) {
+    // The guarded cancellation locks/rechecks the invoice. If attach committed
+    // but its response was lost, attached_at prevents removing its source PDF.
+    const recovered = await cancelUnattachedUpload(intent).catch(() => null);
+    if (recovered?.status === "finalized") {
+      // Finalized can also mean a retained historical attachment. It is not
+      // proof that this invoice still points to this upload after replacement.
+      const current = await sb.from("invoices").select("pdf_storage_path").eq("id", invoiceId).maybeSingle();
+      if (!current.error && current.data?.pdf_storage_path === path) return path;
+    }
+    throw new Error("The PDF attachment could not be confirmed. Its upload remains tracked for safe recovery. Reload the page and select the file again, or regenerate the PDF.");
+  }
   return path;
 }
 
 export async function downloadInvoicePdfBlob(storagePath: string): Promise<Blob> {
   const sb = supabase();
   const { data, error } = await sb.storage.from("invoice-pdfs").download(storagePath);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   if (!data) throw new Error("Empty PDF response from storage");
   return data;
 }
 
-const mapInvoiceLine = (l: any) => ({
-  id: l.id,
-  position: l.position,
-  type: l.type,
-  desc: l.description,
-  qty: parseFloat(l.qty),
-  rate: parseFloat(l.rate),
-  amount: parseFloat(l.amount),
-  isTaxable: !!l.is_taxable,
-  sourceInvoiceLineId: l.source_invoice_line_id || null,
-  sourceWorkOrderPartId: l.source_work_order_part_id || null,
-  sourceUnitCost: l.source_unit_cost == null
-    ? null
-    : parseFloat(l.source_unit_cost),
-  markupPercent: l.markup_percent == null
-    ? null
-    : parseFloat(l.markup_percent),
-});
-
-function formatDate(d: string | null): string | null {
-  if (!d) return null;
-  const [y, m, day] = d.split("-");
-  return `${m}/${day}/${y}`;
-}
-function shortMonthDay(d: string | null): string {
-  if (!d) return "";
-  const date = new Date(d + "T00:00:00");
-  return date.toLocaleString("en-US", { month: "short", day: "numeric" });
-}
 
 // ── PHOTO STORAGE URLs ──────────────────────────────────────────────────────
 // Photos in DB are storage paths. Authenticated downloads enforce storage
 // RLS on every load; blob URLs are revoked when the gallery unmounts.
 export async function loadPhotoBlob(path: string): Promise<Blob> {
-  if (!path) throw new Error("A photo path is required");
-  if (path.startsWith("data:") || path.startsWith("http")) {
-    const response = await fetch(path);
-    if (!response.ok) {
-      throw new Error(`Photo download failed (${response.status})`);
-    }
-    return response.blob();
-  }
-
-  const sb = supabase();
-  const { data, error } = await sb.storage.from("photos").download(path);
-  if (error) throw error;
-  if (!data) throw new Error("Empty photo response from storage");
-  return data;
+  return readPhotoBlob(path);
 }
 
 export async function getPhotoUrl(path: string): Promise<string | null> {
-  if (!path) return null;
-  // If it's already a data: URL (legacy in-memory photo), return as-is
-  if (path.startsWith("data:") || path.startsWith("http")) return path;
-  return URL.createObjectURL(await loadPhotoBlob(path));
+  return readPhotoUrl(path);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1478,7 +945,7 @@ export async function updateWorkOrder(id: string, patch: any): Promise<any> {
     ? (sb.from("work_orders") as any).update(dbPatch).eq("id", id).select().single()
     : (sb.from("work_orders") as any).select("*").eq("id", id).single();
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 
   if (hasAfmEmail) {
     const contactResult = afmEmail
@@ -1487,7 +954,7 @@ export async function updateWorkOrder(id: string, patch: any): Promise<any> {
           afm_email: afmEmail,
         })
       : await sb.from("work_order_afm_contacts").delete().eq("work_order_id", id);
-    if (contactResult.error) throw contactResult.error;
+    if (contactResult.error) throw normalizeUnknownError(contactResult.error);
   }
   return data;
 }
@@ -1504,7 +971,7 @@ export async function assignContractorTechnician(
       p_technician_profile_id: technicianProfileId,
     },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
@@ -1514,7 +981,7 @@ export async function moveWorkOrderStraightToBilling(id: string): Promise<any> {
     "move_work_order_straight_to_billing",
     { p_work_order_id: id },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
@@ -1524,7 +991,7 @@ export async function completeCapitalWork(id: string): Promise<any> {
     "complete_capital_work",
     { p_work_order_id: id },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
@@ -1544,7 +1011,7 @@ export async function closeWorkOrderWithoutInvoice(
       p_expected_updated_at: expectedUpdatedAt,
     },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
@@ -1579,7 +1046,7 @@ export async function closeReopenedWorkOrderWithoutAdditionalBilling(
       p_reason: reason,
     },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data as unknown as CloseReopenedFollowUpResult;
 }
 
@@ -1606,7 +1073,7 @@ export async function reopenWorkOrder(
     p_mode: mode,
     p_reason: reason,
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data as unknown as ReopenWorkOrderResult;
 }
 
@@ -1618,9 +1085,10 @@ export async function markWorkOrderNotesSeen(
   const { error } = await (sb.from("work_orders") as any)
     .update({ staff_notes_seen_at: latestNoteAt })
     .eq("id", workOrderId);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
+/** @deprecated Raw visit writes are denied after 0123; use startWorkOrderVisit. */
 export async function openWorkOrderVisit(
   workOrderId: string,
   checkInAt: string,
@@ -1634,16 +1102,17 @@ export async function openWorkOrderVisit(
       .is("deleted_at", null)
       .single(),
   ]);
-  if (workOrderError) throw workOrderError;
+  if (workOrderError) throw normalizeUnknownError(workOrderError);
   const { error } = await (sb as any).from("work_order_visits").insert({
     work_order_id: workOrderId,
     contractor_id: workOrder?.contractor_id || null,
     check_in_at: checkInAt,
     checked_in_by: authData.user?.id || null,
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
+/** @deprecated Use the atomic pause/completion command after 0123. */
 export async function closeWorkOrderVisit(
   workOrderId: string,
   checkOutAt: string,
@@ -1658,7 +1127,7 @@ export async function closeWorkOrderVisit(
     .order("check_in_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (findError) throw findError;
+  if (findError) throw normalizeUnknownError(findError);
   if (!visit?.id) return;
   const { error } = await (sb as any)
     .from("work_order_visits")
@@ -1668,7 +1137,7 @@ export async function closeWorkOrderVisit(
     })
     .eq("id", visit.id)
     .is("check_out_at", null);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
 export async function correctWorkOrderVisit(
@@ -1684,7 +1153,7 @@ export async function correctWorkOrderVisit(
     p_check_out_at: checkOutAt,
     p_reason: reason.trim(),
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
@@ -1705,19 +1174,13 @@ function inferActivityEventKey(text: string, type: "note" | "system" | "ai"): st
   if (/draft (saved|updated)/.test(value)) return "invoice_draft";
   if (/invoice .*uploaded|uploaded invoice/.test(value)) return "invoice_uploaded";
   if (/invoice .*submitted/.test(value)) return "invoice_submitted";
-  if (/checked in|started work/.test(value)) return "check_in";
-  if (/job completed|clocked out/.test(value)) return "job_completed";
-  if (/work paused/.test(value)) return "job_paused";
   if (/^part added/.test(value)) return "part_added";
   if (/^part removed/.test(value)) return "part_removed";
   if (/part|tracking|return date/.test(value)) return "part_updated";
   if (/added .*photo/.test(value)) return "photo_added";
   if (/photo removed/.test(value)) return "photo_removed";
-  if (/eta set/.test(value)) return "eta_updated";
   if (/technician on job/.test(value)) return "technician_updated";
-  if (/^reassigned from /.test(value)) return "work_order_reassigned";
-  if (/^(?:dispatched|assigned) to /.test(value)) return "work_order_assignment";
-  if (/^work order unassigned by /.test(value)) return "work_order_unassigned";
+  // Assignment command identities are never inferred from caller prose.
   if (/dispatched|assigned|unassigned/.test(value)) return "assignment";
   if (/moved to|status|reopened|closed/.test(value)) return "status_change";
   return type === "system" ? "system" : "note";
@@ -1757,12 +1220,12 @@ export async function insertActivity(
   // Only the automatic contractor-alert path needs the inserted identifier.
   if (!audit.requiresContractorAttention) {
     const { error } = await insert;
-    if (error) throw error;
+    if (error) throw normalizeUnknownError(error);
     return null;
   }
 
   const { data, error } = await insert.select("id").single();
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data.id;
 }
 
@@ -1771,13 +1234,10 @@ export async function markActivitySevenElevenSynced(
   synced: boolean,
 ): Promise<void> {
   const sb = supabase();
-  const { error } = await sb.from("activities")
-    .update({
-      synced_to_7eleven_at: synced ? new Date().toISOString() : null,
-      synced_to_7eleven_by: null,
-    })
-    .eq("id", activityId);
-  if (error) throw error;
+  const { error } = await sb.rpc("mark_work_order_activity_synced_v1", {
+    p_activity_id: activityId, p_synced: synced,
+  });
+  if (error) throw safeLifecycleError(error);
 }
 
 export async function markActivityContractorAttention(
@@ -1789,7 +1249,7 @@ export async function markActivityContractorAttention(
     p_activity_id: activityId,
     p_required: required,
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
 export async function acknowledgeContractorAttention(
@@ -1799,7 +1259,7 @@ export async function acknowledgeContractorAttention(
   const { error } = await sb.rpc("acknowledge_contractor_attention", {
     p_activity_id: activityId,
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
 // Soft delete — the row stays in the DB but loadWorkOrders filters it out.
@@ -1810,107 +1270,50 @@ export async function deleteActivity(activityId: string): Promise<void> {
   const { error } = await sb.from("activities")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", activityId);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
-// Soft delete only — sets deleted_at + deleted_by, never hard delete.
-// Related invoices / photos / activities are intentionally left intact so
-// the row can be restored via SQL. Writes a system activity entry as the
-// audit trail for this destructive (but recoverable) action.
+// The old destructive export fails closed: removal requires the reasoned,
+// versioned rejection command. Never restore a raw-write compatibility path.
 export async function deleteWorkOrder(workOrderId: string, authorName: string): Promise<void> {
-  const sb = supabase();
-  const { data: { user } } = await sb.auth.getUser();
-  const { error } = await sb.from("work_orders").update({
-    deleted_at: new Date().toISOString(),
-    deleted_by: user?.id || null,
-  }).eq("id", workOrderId);
-  if (error) throw error;
-  await insertActivity(workOrderId, "System", `Work order deleted by ${authorName}.`, "system");
+  void workOrderId;
+  void authorName;
+  throw new AssignmentCommandError("22023", "Use Reject work order with a reason. Only untouched, unassigned work can be removed.");
 }
 
-export type RejectUnassignedWorkOrderResult = {
-  applied: boolean;
-  reason: string;
-  workOrderId: string;
-  rejectedAt: string;
-  rejectedBy: string;
-};
+function assignmentCommands() {
+  const sb = supabase();
+  return createAssignmentCommands((name, args) => sb.rpc(name, args));
+}
 
 export async function rejectUnassignedWorkOrder(
   workOrderId: string,
   reason: string,
-): Promise<RejectUnassignedWorkOrderResult> {
-  const sb = supabase();
-  const { data, error } = await sb.rpc("reject_unassigned_work_order", {
-    p_work_order_id: workOrderId,
-    p_reason: reason,
-  });
-  if (error) throw error;
-  return data as unknown as RejectUnassignedWorkOrderResult;
+  context: AssignmentContext,
+) {
+  return assignmentCommands().reject({ ...context, workOrderId }, reason);
 }
-
-export type DuplicateWorkOrderForReassignmentResult = {
-  applied: boolean;
-  reason: string;
-  sourceWorkOrderId: string;
-  rootWorkOrderId: string;
-  workOrderId: string;
-  duplicateSequence: number;
-  deliveryId: string | null;
-  deliveryStatus: AssignmentTransitionDeliveryStatus | null;
-};
 
 export async function duplicateWorkOrderForReassignment(
   workOrderId: string,
-): Promise<DuplicateWorkOrderForReassignmentResult> {
-  const sb = supabase();
-  const { data, error } = await sb.rpc(
-    "duplicate_work_order_for_reassignment_notified",
-    { p_source_work_order_id: workOrderId },
-  );
-  if (error) throw error;
-  return data as unknown as DuplicateWorkOrderForReassignmentResult;
+  context: AssignmentContext,
+) {
+  return assignmentCommands().duplicate({ ...context, workOrderId });
 }
-
-export type AssignmentTransitionDeliveryStatus =
-  | "pending"
-  | "claimed"
-  | "sent"
-  | "unknown"
-  | "skipped";
-
-export type WorkOrderContractorTransitionResult = {
-  applied: boolean;
-  reason: "assigned" | "reassigned" | "unassigned" | string;
-  workOrderId: string;
-  contractorId: string | null;
-  assignmentVersion: number;
-  status: string;
-  functionalStatus: string | null;
-  isCapital: boolean;
-  capitalStatus: string | null;
-  assignmentStartedAt: string | null;
-  dispatchedAt: string | null;
-  deliveryId: string | null;
-  deliveryStatus: AssignmentTransitionDeliveryStatus | null;
-};
 
 export async function transitionWorkOrderContractor(
   workOrderId: string,
   newContractorId: string | null,
   expectedAssignmentVersion: number,
-): Promise<WorkOrderContractorTransitionResult> {
-  const sb = supabase();
-  const { data, error } = await sb.rpc(
-    "transition_work_order_contractor",
-    {
-      p_work_order_id: workOrderId,
-      p_new_contractor_id: newContractorId,
-      p_expected_assignment_version: expectedAssignmentVersion,
-    },
-  );
-  if (error) throw error;
-  return data as WorkOrderContractorTransitionResult;
+  context: AssignmentContext,
+) {
+  return assignmentCommands().transition({ ...context, workOrderId, expectedAssignmentVersion }, newContractorId);
+}
+
+export async function administrativelyCloseVisitAndTransfer(
+  context: AssignmentContext, contractorId: string | null, reason: string, confirmed: boolean,
+) {
+  return assignmentCommands().administrativeTransfer(context, { contractorId, reason, confirmed });
 }
 
 export type DeclineCapitalWorkOrderResult = {
@@ -1935,23 +1338,27 @@ export async function declineCapitalWorkOrder(
     p_work_order_id: workOrderId,
     p_expected_assignment_version: expectedAssignmentVersion,
   });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data as DeclineCapitalWorkOrderResult;
 }
 
 // Invoice soft delete is routed through an authenticated staff-only endpoint.
 // The server verifies the updated row and records an audit without allowing an
 // audit failure to masquerade as a failed delete. WO status remains unchanged.
-export async function deleteInvoice(invoiceId: string): Promise<void> {
+export async function deleteInvoice(invoiceId: string, command: {
+  operationId: string; expectedInvoiceVersion: number | null;
+  expectedAssignmentVersion: number | null; expectedWorkflowCycle: number | null;
+}): Promise<void> {
   const sb = supabase();
   const { data } = await sb.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error("Your session expired. Sign in and try again.");
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/contractor-invoices?id=${encodeURIComponent(invoiceId)}`,
     {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(command),
     },
   );
   const payload = await response.json().catch(() => ({}));
@@ -1960,16 +1367,9 @@ export async function deleteInvoice(invoiceId: string): Promise<void> {
   }
 }
 
-export async function deleteOwnContractorInvoice(
-  invoiceId: string,
-): Promise<Record<string, unknown>> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc(
-    "delete_own_contractor_invoice",
-    { p_invoice_id: invoiceId },
-  );
-  if (error) throw error;
-  return (data || {}) as Record<string, unknown>;
+export async function deleteOwnContractorInvoice(invoiceId: string, inputContext: ContractorInvoiceContext) {
+  if (inputContext.invoiceId !== invoiceId) throw safeContractorInvoiceError({ code: "PT409" });
+  return contractorInvoiceCommands().deleteOwn(inputContext);
 }
 
 export type FinishContractorInvoicingResult = {
@@ -1991,6 +1391,7 @@ export type CompleteContractorWorkAndInvoicingResult =
     invoicingCompletionApplied: boolean;
   };
 
+/** @deprecated Unused unversioned RPC is private after 0123; current UI uses versioned field completion and separate invoicing confirmation. */
 export async function completeContractorWorkAndInvoicing(
   workOrderId: string,
   {
@@ -2028,7 +1429,7 @@ export async function completeContractorWorkAndInvoicing(
       p_activity_text: activityText,
     },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data as CompleteContractorWorkAndInvoicingResult;
 }
 
@@ -2040,7 +1441,7 @@ export async function finishContractorInvoicing(
     "finish_contractor_invoicing",
     { p_work_order_id: workOrderId },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data as FinishContractorInvoicingResult;
 }
 
@@ -2065,7 +1466,7 @@ export async function findExistingWoId(
     .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
-  if (activeError) throw activeError;
+  if (activeError) throw normalizeUnknownError(activeError);
   if (active) return { id: active.id, deleted: false };
 
   // Check soft deleted.
@@ -2076,7 +1477,7 @@ export async function findExistingWoId(
     .not("deleted_at", "is", null)
     .limit(1)
     .maybeSingle();
-  if (deletedError) throw deletedError;
+  if (deletedError) throw normalizeUnknownError(deletedError);
   if (deleted) return { id: deleted.id, deleted: true };
 
   return null;
@@ -2086,9 +1487,25 @@ export async function findExistingWoId(
 export async function nextWorkOrderId(): Promise<{ wo: string; inc: string }> {
   const sb = supabase();
   const { data, error } = await (sb as any).rpc("next_wo_id");
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   // Returns shape { wo: 'FWKD11400001', inc: 'INC24000001' }
   return data;
+}
+
+const lifecycleCommands = createLifecycleCommands((name, args) => supabase().rpc(name, args));
+export const setWorkOrderEta = lifecycleCommands.setEta;
+export const startWorkOrderVisit = lifecycleCommands.start;
+export const pauseWorkOrderForParts = lifecycleCommands.pause;
+
+export async function flagWorkOrderCapital(context: LifecycleContext): Promise<void> {
+  const args = lifecycleRpcContext(lifecycleContextSchema.parse(context));
+  const { error } = await supabase().rpc("flag_work_order_capital_v1", {
+    p_work_order_id: args.p_work_order_id,
+    p_expected_assignment_version: args.p_expected_assignment_version,
+    p_expected_workflow_cycle: args.p_expected_workflow_cycle,
+    p_expected_lifecycle_version: args.p_expected_lifecycle_version,
+  });
+  if (error) throw safeLifecycleError(error);
 }
 
 export async function completeWorkOrderOnce(
@@ -2102,6 +1519,7 @@ export async function completeWorkOrderOnce(
     resolutionCode,
     resolutionNotes,
     activityText,
+    context,
   }: {
     completedAt: string;
     assetMake: string;
@@ -2111,6 +1529,7 @@ export async function completeWorkOrderOnce(
     resolutionCode?: string | null;
     resolutionNotes?: string | null;
     activityText: string;
+    context: LifecycleContext;
   },
 ): Promise<{
   applied: boolean;
@@ -2118,34 +1537,24 @@ export async function completeWorkOrderOnce(
   activityId?: string;
   workOrderStatus?: string;
 }> {
-  const sb = supabase();
-  const { data, error } = await sb.rpc("complete_work_order_once", {
-    p_work_order_id: workOrderId,
-    p_completed_at: completedAt,
-    p_asset_make: assetMake,
-    p_asset_model: assetModel,
-    p_asset_serial: assetSerial,
-    p_asset_year: assetYear || null,
-    p_resolution_code: resolutionCode || null,
-    p_resolution_notes: resolutionNotes || null,
-    p_activity_text: activityText,
+  // Keep the old exported name and presentation-text argument. Authoritative
+  // event identity and persisted wording are now owned by the database.
+  void activityText;
+  return lifecycleCommands.complete({
+    ...context, workOrderId, completedAt, assetMake, assetModel, assetSerial,
+    assetYear: assetYear ?? null,
+    resolutionCode: resolutionCode || null, resolutionNotes: resolutionNotes || null,
   });
-  if (error) throw error;
-  return (data || { applied: true }) as {
-    applied: boolean;
-    reason?: string;
-    activityId?: string;
-    workOrderStatus?: string;
-  };
 }
 
-export async function insertWorkOrder(wo: any, activityText?: string, authorName?: string): Promise<WorkOrder> {
+export async function insertWorkOrder(input: unknown, activityText: string | undefined, authorName: string | undefined,
+  operationId: string, intakeStartedAt: string): Promise<WorkOrder> {
+  const wo = manualWorkOrderSchema.parse(input);
   const sb = supabase();
-  const { data: { user } } = await sb.auth.getUser();
   // SLA clock starts at intake (creation), NOT at assignment. For email-
   // ingested WOs (Phase 1.5), pass slaStartedAt as the email's received-at;
   // for portal-created WOs we use now.
-  const startedAt = wo.slaStartedAt ? new Date(wo.slaStartedAt) : new Date();
+  const startedAt = new Date(intakeStartedAt);
   const breaches = computeSlaBreaches(wo.priority, startedAt);
   // Best-effort: keep the stores table populated for the Stores/Kanban
   // context. The store_number FK was dropped (migration 0004) so a failed
@@ -2186,10 +1595,10 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
     sla_started_at: startedAt.toISOString(),
     response_breach_at: breaches.responseBreachAt?.toISOString() ?? null,
     resolution_breach_at: breaches.resolutionBreachAt?.toISOString() ?? null,
-    created_by: user?.id || null,
   };
-  const { data, error } = await sb.from("work_orders").insert(dbRow).select().single();
-  if (error) throw error;
+  const result = await assignmentCommands().create(operationId, dbRow);
+  const { data, error } = await sb.from("work_orders").select().eq("id", result.workOrderId).single();
+  if (error) throw normalizeUnknownError(error);
   if (String(wo.afmEmail || "").trim()) {
     const { error: afmContactError } = await sb
       .from("work_order_afm_contacts")
@@ -2197,12 +1606,12 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
         work_order_id: wo.id,
         afm_email: String(wo.afmEmail).trim(),
       });
-    if (afmContactError) throw afmContactError;
+    if (afmContactError) throw normalizeUnknownError(afmContactError);
   }
-  if (activityText && authorName) {
+  if (result.applied && activityText && authorName) {
     await insertActivity(wo.id, authorName, activityText, "system");
   }
-  return data as unknown as WorkOrder;
+  return WorkOrderSchema.parse(data);
 }
 
 // Source-of-truth invoice numbering. The RPC can see the global numeric
@@ -2211,7 +1620,7 @@ export async function insertWorkOrder(wo: any, activityText?: string, authorName
 export async function nextInvoiceNumFromDb(): Promise<string> {
   const sb = supabase();
   const { data, error } = await sb.rpc("next_contractor_invoice_num");
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   const nextNum = String(data || "").trim();
   if (!/^\d+$/.test(nextNum)) {
     throw new Error("Invoice number allocator returned an invalid value");
@@ -2219,268 +1628,28 @@ export async function nextInvoiceNumFromDb(): Promise<string> {
   return nextNum;
 }
 
-// Postgres unique-violation. We need to distinguish "number collided" from
-// other errors so the caller can retry or surface a friendly message.
-const isInvoiceNumCollision = (err: any): boolean => {
-  if (!err) return false;
-  if (err.code === "23505") return true;                            // canonical
-  const msg = String(err.message || err.details || "").toLowerCase();
-  return msg.includes("invoices_num_key") || (msg.includes("duplicate") && msg.includes("num"));
-};
-
-// Retry wrapper around the insert. If the user typed a specific number we
-// throw with `attemptedNum` set so the UI can show "X already exists, using
-// Y instead"; if it was auto-suggested we just resolve a fresh number and
-// retry transparently. Bounded to a small attempt count.
-async function insertInvoiceWithRetry(
-  baseRow: any,
-  desiredNum: string,
-  userTyped: boolean,
-): Promise<{ header: any; finalNum: string; collidedFrom: string | null }> {
+// Browser financial writes use one versioned, idempotent command.
+// Existing exports remain compatibility facades for the invoice hook.
+function contractorInvoiceCommands() {
   const sb = supabase();
-  let tryNum = desiredNum;
-  let collidedFrom: string | null = null;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const { data, error } = await sb.from("invoices").insert({ ...baseRow, num: tryNum }).select().single();
-    if (!error) return { header: data, finalNum: tryNum, collidedFrom };
-    if (!isInvoiceNumCollision(error)) throw error;
-    if (userTyped) {
-      const conflict: any = new Error(
-        `Invoice #${tryNum} already exists for this contractor`,
-      );
-      conflict.code = "INVOICE_NUM_CONFLICT";
-      throw conflict;
-    }
-    if (attempt === 0) collidedFrom = tryNum;
-    tryNum = await nextInvoiceNumFromDb();
-    // Guard against the absurd "DB says next is the same one that just
-    // collided" case (shouldn't happen, but if it does bump explicitly).
-    if (tryNum === collidedFrom || tryNum === baseRow.num) {
-      tryNum = String((parseInt(tryNum) || 6500) + 1);
-    }
-  }
-  throw new Error("Could not allocate an unused invoice number after several attempts. Please try again.");
+  return createContractorInvoiceCommands((name, args) => sb.rpc(name, args));
 }
 
-export async function insertInvoice(inv: any, lines: any[], authorName: string): Promise<Invoice> {
-  const sb = supabase();
-  const { data: { user } } = await sb.auth.getUser();
-  // Insert header
-  const calculatedSubtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
-  const salesTax = parseFloat(inv.salesTax ?? inv.tax) || 0;
-  const hasTotalOverride = inv.totalOverride !== undefined
-    && Number.isFinite(Number(inv.totalOverride));
-  const total = hasTotalOverride ? Number(inv.totalOverride) : calculatedSubtotal + salesTax;
-  const subtotal = hasTotalOverride ? Math.max(total - salesTax, 0) : calculatedSubtotal;
-  const todayIso = new Date().toISOString().slice(0, 10);
-  // Resolve the number at insert time. If the caller passed a number, prefer
-  // it (the user may have typed one); otherwise pull a fresh one from the DB
-  // so we don't trust stale React-Query cache.
-  const userTyped = !!inv.userTypedNum;
-  const baseNum = inv.num && String(inv.num).trim()
-    ? String(inv.num).trim()
-    : await nextInvoiceNumFromDb();
-  const requestedState = inv.state === "draft" ? "draft" : "submitted";
-  if (requestedState === "submitted") {
-    if (!inv.submissionKey) {
-      throw new Error("Invoice submission key is missing. Close and reopen the invoice form.");
-    }
-
-    const rpcLines = lines.map((line) => ({
-      type: line.type || "Other",
-      description: line.desc || line.description || "",
-      qty: parseFloat(line.qty) || 1,
-      rate: parseFloat(line.rate) || 0,
-    }));
-    const { data, error } = await (sb as any).rpc(
-      "submit_contractor_invoice_once",
-      {
-        p_submission_key: inv.submissionKey,
-        p_work_order_id: inv.wot,
-        p_num: baseNum,
-        p_user_typed_num: userTyped,
-        p_cme: inv.cme || null,
-        p_store_address: inv.storeAddr || null,
-        p_invoice_date: inv.invoiceDate || todayIso,
-        p_service_date: inv.serviceDate || null,
-        p_due_date: inv.dueDate || null,
-        p_terms: inv.terms || "Net 30",
-        p_sales_tax: salesTax,
-        p_total_override: hasTotalOverride ? total : null,
-        p_lines: rpcLines,
-      },
-    );
-    if (error) {
-      if (isInvoiceNumCollision(error)) {
-        const conflict: any = new Error(
-          error.message || `Invoice #${baseNum} already exists for this contractor`,
-        );
-        conflict.code = "INVOICE_NUM_CONFLICT";
-        throw conflict;
-      }
-      throw error;
-    }
-
-    const header = Array.isArray(data) ? data[0] : data;
-    if (!header?.id) throw new Error("Invoice submission returned no invoice");
-    const finalNum = String(header.num || baseNum);
-    return {
-      ...header,
-      num: finalNum,
-      total: parseFloat(header.total ?? total),
-      _collidedFrom: finalNum !== baseNum ? baseNum : null,
-    } as unknown as Invoice;
-  }
-
-  const baseRow = {
-    work_order_id: inv.wot,
-    store_number: inv.store,
-    store_address: inv.storeAddr || null,
-    contractor_id: inv.contractor || null,
-    cme: inv.cme || null,
-    invoice_date: inv.invoiceDate || todayIso,
-    service_date: inv.serviceDate || null,
-    due_date: inv.dueDate || null,
-    terms: inv.terms || "Net 30",
-    // New submissions use the atomic RPC above. This path only persists a
-    // draft, whose line rows remain editable by the assigned contractor.
-    state: "draft",
-    subtotal,
-    sales_tax: salesTax,
-    total,
-    created_by: user?.id || null,
-  };
-  let header: any;
-  let finalNum: string;
-  let collidedFrom: string | null = null;
+export async function insertInvoice(inv: unknown, lines: unknown[], authorName: string) {
+  void authorName; // Caller display identity is never an authoritative RPC input.
   try {
-    const res = await insertInvoiceWithRetry(baseRow, baseNum, userTyped);
-    header = res.header;
-    finalNum = res.finalNum;
-    collidedFrom = res.collidedFrom;
-  } catch (e: any) {
-    // Bubble a tagged error so the hook can shape the toast.
-    if (isInvoiceNumCollision(e)) {
-      const err: any = new Error(e.message || "Invoice number conflict");
-      err.code = "INVOICE_NUM_CONFLICT";
-      throw err;
-    }
-    throw e;
-  }
-  // Insert lines (1:N)
-  if (lines.length > 0) {
-    const lineRows = lines.map((l, i) => ({
-      invoice_id: header.id,
-      position: i + 1,
-      type: l.type,
-      description: l.desc || l.description || "",
-      qty: parseFloat(l.qty) || 1,
-      rate: parseFloat(l.rate) || 0,
-    }));
-    const { error: lErr } = await sb.from("invoice_lines").insert(lineRows);
-    if (lErr) throw lErr;
-  }
-  // Drafts must NOT touch the parent WO — saving a draft mid-visit can't
-  // advance the WO into pending_approval and can't write an audit entry that
-  // claims it was submitted. Only the submit path moves the WO forward.
-  await insertActivity(inv.wot, authorName, `Invoice ${finalNum} draft saved.`, "system");
-  // Surface the resolved number + the collided-from number so the caller can
-  // show "X already exists, using Y instead" without parsing the row again.
-  return { ...header, num: finalNum, total, _collidedFrom: collidedFrom } as unknown as Invoice;
+    const command = contractorInvoiceDraftCommand(inv, lines, null);
+    const result = await contractorInvoiceCommands().save(command.intent, command.context, command.payload);
+    return compatibleContractorInvoiceResult(result, command.payload.num);
+  } catch (error) { throw safeContractorInvoiceError(error); }
 }
 
-// Update an existing invoice's lines (full replace) + recompute totals.
-// Used to resume an existing draft and either re-save or submit it. Does
-// NOT touch WO status — the caller decides via updateInvoiceState whether
-// this is still a draft or a real submission.
-export async function updateInvoiceWithLines(
-  invoiceId: string,
-  patch: { num?: string; userTypedNum?: boolean; cme?: string | null; invoiceDate?: string; serviceDate?: string | null; terms?: string; storeAddr?: string | null; state?: string; salesTax?: number; totalOverride?: number },
-  lines: any[],
-): Promise<{ id: string; num: string; subtotal: number; salesTax: number; total: number; collidedFrom: string | null }> {
-  const sb = supabase();
-  const calculatedSubtotal = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0);
-  const salesTax = parseFloat(patch.salesTax as any) || 0;
-  const hasTotalOverride = patch.totalOverride !== undefined
-    && Number.isFinite(Number(patch.totalOverride));
-  const total = hasTotalOverride ? Number(patch.totalOverride) : calculatedSubtotal + salesTax;
-  const subtotal = hasTotalOverride ? Math.max(total - salesTax, 0) : calculatedSubtotal;
-  const update: any = {
-    subtotal, sales_tax: salesTax, total,
-    updated_at: new Date().toISOString(),
-  };
-  if (patch.cme !== undefined) update.cme = patch.cme || null;
-  if (patch.invoiceDate) update.invoice_date = patch.invoiceDate;
-  if (patch.serviceDate !== undefined) update.service_date = patch.serviceDate || null;
-  if (patch.terms) update.terms = patch.terms;
-  if (patch.storeAddr !== undefined) update.store_address = patch.storeAddr || null;
-  const { data: currentInvoice, error: currentInvoiceError } = await sb
-    .from("invoices")
-    .select("num,state")
-    .eq("id", invoiceId)
-    .maybeSingle();
-  if (currentInvoiceError) throw currentInvoiceError;
-  if (!currentInvoice) throw new Error("Invoice was not found");
-
-  const requestedState = patch.state || currentInvoice.state;
-  const deferSubmission = currentInvoice.state === "draft"
-    && requestedState === "submitted";
-  if (patch.state && !deferSubmission) update.state = patch.state;
-  // Preserve contractor-supplied invoice numbers exactly. A conflict within
-  // the same contractor is surfaced instead of silently renumbering it.
-  let finalNum: string | null = patch.num != null ? String(patch.num).trim() : null;
-  let collidedFrom: string | null = null;
-  const userTyped = !!patch.userTypedNum;
-  // Pre-flight: read the current invoice's num so we know whether the user
-  // is actually changing it. If they're keeping it the same, no collision is
-  // possible (it's their own row).
-  const originalNum: string | null = currentInvoice.num ?? null;
-  // Try the update. If num collides, regenerate and retry; otherwise leave
-  // num out of the update payload and just write the rest.
-  let attempts = 0;
-  while (true) {
-    const writeNum = finalNum != null && finalNum !== originalNum;
-    const payload = writeNum ? { ...update, num: finalNum } : update;
-    const { error: uErr } = await sb.from("invoices").update(payload).eq("id", invoiceId);
-    if (!uErr) break;
-    if (!isInvoiceNumCollision(uErr) || attempts >= 5 || finalNum == null) throw uErr;
-    if (userTyped) {
-      const conflict: any = new Error(
-        `Invoice #${finalNum} already exists for this contractor`,
-      );
-      conflict.code = "INVOICE_NUM_CONFLICT";
-      throw conflict;
-    }
-    if (attempts === 0) collidedFrom = finalNum;
-    finalNum = await nextInvoiceNumFromDb();
-    if (finalNum === collidedFrom) finalNum = String((parseInt(finalNum) || 6500) + 1);
-    attempts++;
-  }
-  // Replace lines: simpler + safer than diffing while editing a draft. The
-  // table has on-delete-cascade so this is a single round trip per side.
-  const { error: dErr } = await sb.from("invoice_lines").delete().eq("invoice_id", invoiceId);
-  if (dErr) throw dErr;
-  if (lines.length > 0) {
-    const rows = lines.map((l, i) => ({
-      invoice_id: invoiceId,
-      position: i + 1,
-      type: l.type,
-      description: l.desc || l.description || "",
-      qty: parseFloat(l.qty) || 1,
-      rate: parseFloat(l.rate) || 0,
-    }));
-    const { error: lErr } = await sb.from("invoice_lines").insert(rows);
-    if (lErr) throw lErr;
-  }
-  if (deferSubmission) {
-    const { error: submitError } = await sb
-      .from("invoices")
-      .update({ state: "submitted" })
-      .eq("id", invoiceId)
-      .eq("state", "draft");
-    if (submitError) throw submitError;
-  }
-  return { id: invoiceId, num: (finalNum ?? originalNum ?? "") as string, subtotal, salesTax, total, collidedFrom };
+export async function updateInvoiceWithLines(invoiceId: string, patch: unknown, lines: unknown[]) {
+  try {
+    const command = contractorInvoiceDraftCommand(patch, lines, invoiceId);
+    const result = await contractorInvoiceCommands().save(command.intent, command.context, command.payload);
+    return compatibleContractorInvoiceResult(result, command.payload.num);
+  } catch (error) { throw safeContractorInvoiceError(error); }
 }
 
 export async function correctContractorInvoiceTotal(
@@ -2497,123 +1666,53 @@ export async function correctContractorInvoiceTotal(
       p_reason: reason?.trim() || null,
     },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data;
 }
 
-export type ContractorInvoiceReviewResult = {
-  invoiceId: string;
-  invoiceNum: string;
-  invoiceState: "submitted" | "approved" | "rejected" | "revised" | "paid";
-  workOrderId: string;
-  workOrderStatus: "pending_invoice" | "pending_approval" | "closed" | null;
-  reviewRevision: number;
-  rejectionReason?: string | null;
-  total?: number;
-  pdfStoragePath?: string | null;
-};
-
-export type BatchContractorInvoiceReviewResult = {
-  action: "approve" | "reject";
-  count: number;
-  invoiceIds: string[];
-  results: ContractorInvoiceReviewResult[];
-};
+export type ContractorInvoiceReviewResult = FinancialReviewResult;
+export type BatchContractorInvoiceReviewResult = FinancialBatchReviewResult;
 
 export async function reviewContractorInvoice(
   invoiceId: string,
   action: "approve" | "reject",
   reason?: string | null,
+  expectedRevision?: number,
 ): Promise<ContractorInvoiceReviewResult> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc(
-    "review_contractor_invoice",
-    {
-      p_invoice_id: invoiceId,
-      p_action: action,
-      p_reason: reason?.trim() || null,
-    },
-  );
-  if (error) throw error;
-  return data as ContractorInvoiceReviewResult;
+  return reviewInvoiceWithNotification(invoiceId, action, reason, expectedRevision);
 }
 
 export async function reviewContractorInvoices(
   invoiceIds: string[],
   action: "approve" | "reject",
   reason?: string | null,
+  expectedRevisions?: Record<string, number>,
 ): Promise<BatchContractorInvoiceReviewResult> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc(
-    "review_contractor_invoices",
-    {
-      p_invoice_ids: invoiceIds,
-      p_action: action,
-      p_reason: reason?.trim() || null,
-    },
-  );
-  if (error) throw error;
-  return data as BatchContractorInvoiceReviewResult;
+  return reviewInvoicesWithNotification(invoiceIds, action, reason, expectedRevisions);
 }
 
-export async function resubmitRejectedContractorInvoice(
-  invoiceId: string,
-  patch: {
-    cme?: string | null;
-    storeAddr?: string | null;
-    invoiceDate?: string | null;
-    serviceDate?: string | null;
-    terms?: string | null;
-    salesTax?: number | null;
-    totalOverride?: number | null;
-    pdfStoragePath?: string | null;
-  },
-  lines: any[],
-): Promise<ContractorInvoiceReviewResult> {
-  const sb = supabase();
-  const rpcLines = lines.map(line => ({
-    type: line.type || "Other",
-    description: line.desc || line.description || "",
-    qty: parseFloat(line.qty) || 1,
-    rate: parseFloat(line.rate) || 0,
-  }));
-  const { data, error } = await (sb as any).rpc(
-    "resubmit_rejected_contractor_invoice",
-    {
-      p_invoice_id: invoiceId,
-      p_cme: patch.cme || null,
-      p_store_address: patch.storeAddr || null,
-      p_invoice_date: patch.invoiceDate || null,
-      p_service_date: patch.serviceDate || null,
-      p_terms: patch.terms || "Net 30",
-      p_sales_tax: patch.salesTax ?? 0,
-      p_total_override: patch.totalOverride ?? null,
-      p_lines: rpcLines,
-      p_pdf_storage_path: patch.pdfStoragePath || null,
-    },
-  );
-  if (error) throw error;
-  return data as ContractorInvoiceReviewResult;
+export async function resubmitRejectedContractorInvoice(invoiceId: string, patch: unknown, lines: unknown[]) {
+  try {
+    const command = contractorInvoiceDraftCommand(patch, lines, invoiceId);
+    const result = await contractorInvoiceCommands().save("revise", command.context, command.payload);
+    return compatibleContractorInvoiceResult(result, command.payload.num);
+  } catch (error) { throw safeContractorInvoiceError(error); }
 }
 
 export async function retractContractorInvoiceRejection(
   invoiceId: string,
+  expectedRevision?: number,
 ): Promise<ContractorInvoiceReviewResult> {
-  const sb = supabase();
-  const { data, error } = await (sb as any).rpc(
-    "retract_contractor_invoice_rejection",
-    { p_invoice_id: invoiceId },
-  );
-  if (error) throw error;
-  return data as ContractorInvoiceReviewResult;
+  return retractInvoiceWithNotification(invoiceId, expectedRevision);
 }
 
-// Patch an invoice's state (and optionally paid_at). Used by the Owner
-// approve / mark-paid actions that carry a WO from pending_approval → closed.
-export async function updateInvoiceState(invoiceId: string, state: string, extra: Record<string, any> = {}): Promise<void> {
-  const sb = supabase();
-  const { error } = await sb.from("invoices").update({ state: state as any, ...extra }).eq("id", invoiceId);
-  if (error) throw error;
+// Compatibility export for retired callers. Review and revision-bound handoff
+// commands, not arbitrary state patches, own financial transitions.
+export async function updateInvoiceState(invoiceId: string, state: string, extra: Record<string, unknown> = {}): Promise<void> {
+  void invoiceId;
+  void state;
+  void extra;
+  throw new Error("Use the guarded invoice review or contractor-bill handoff workflow.");
 }
 
 export async function insertWorkReport(
@@ -2685,16 +1784,20 @@ export async function loadWoParts(): Promise<any[]> {
   return rows.map(mapWoPart);
 }
 
-export async function loadWoPartsForWorkOrder(workOrderId: string): Promise<any[]> {
+export async function loadWoPartsForWorkOrder(workOrderId: string, signal?: AbortSignal): Promise<any[]> {
   if (!workOrderId) return [];
+  signal?.throwIfAborted();
   const sb = supabase();
-  const { data, error } = await (sb as any)
+  let query = (sb as any)
     .from("wo_parts")
     .select("*")
     .eq("work_order_id", workOrderId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
-  if (error) throw error;
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
+  signal?.throwIfAborted();
+  if (error) throw normalizeUnknownError(error);
   return (data || []).map(mapWoPart);
 }
 
@@ -2719,7 +1822,7 @@ export async function insertWoPart(part: {
     expected_return_date: part.expectedReturnDate || null,
     created_by: user?.id || null,
   }).select().single();
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return mapWoPart(data);
 }
 
@@ -2743,21 +1846,21 @@ export async function updateWoPart(
   if (patch.trackingNumber !== undefined) dbPatch.tracking_number = patch.trackingNumber || null;
   if (patch.expectedReturnDate !== undefined) dbPatch.expected_return_date = patch.expectedReturnDate || null;
   const { data, error } = await ((sb as any).from("wo_parts") as any).update(dbPatch).eq("id", id).select().single();
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return mapWoPart(data);
 }
 
 export async function deleteWoPart(id: string): Promise<void> {
   const sb = supabase();
   const { error } = await (sb as any).from("wo_parts").delete().eq("id", id);
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
 }
 
 export async function requestP1PartOrder(id: string): Promise<any> {
   const sb = supabase();
   const { data, error } = await (sb as any)
     .rpc("request_p1_part_order", { p_part_id: id });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return mapWoPart(data);
 }
 
@@ -2771,20 +1874,25 @@ export async function setP1PartOrderStatus(
       p_part_id: id,
       p_status: status,
     });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return mapWoPart(data);
 }
 
 export async function loadP1PartCostsForWorkOrder(
   workOrderId: string,
+  signal?: AbortSignal,
 ): Promise<any[]> {
   if (!workOrderId) return [];
+  signal?.throwIfAborted();
   const sb = supabase();
-  const { data, error } = await (sb as any).rpc(
+  let query = (sb as any).rpc(
     "list_p1_part_costs_for_work_order",
     { p_work_order_id: workOrderId },
   );
-  if (error) throw error;
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
+  signal?.throwIfAborted();
+  if (error) throw normalizeUnknownError(error);
   return (data || []).map((row: any) => ({
     partId: row.part_id,
     unitCost: Number(row.unit_cost),
@@ -2796,14 +1904,19 @@ export async function loadP1PartCostsForWorkOrder(
 export async function loadBillableP1Parts(
   workOrderId: string,
   excludeInvoiceId?: string | null,
+  signal?: AbortSignal,
 ): Promise<any[]> {
   if (!workOrderId) return [];
+  signal?.throwIfAborted();
   const sb = supabase();
-  const { data, error } = await (sb as any).rpc("list_billable_p1_parts", {
+  let query = (sb as any).rpc("list_billable_p1_parts", {
     p_work_order_id: workOrderId,
     p_exclude_invoice_id: excludeInvoiceId || null,
   });
-  if (error) throw error;
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
+  signal?.throwIfAborted();
+  if (error) throw normalizeUnknownError(error);
   return (data || []).map((row: any) => ({
     partId: row.part_id,
     workOrderId: row.work_order_id,
@@ -2830,7 +1943,7 @@ export async function setP1PartOrderStatusWithCost(
       p_unit_cost: unitCost == null ? null : unitCost,
     },
   );
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   const result = Array.isArray(data) ? data[0] : data;
   return {
     ...mapWoPart(result?.part || result),
@@ -2847,59 +1960,52 @@ export async function loadWorkReports(
     .select("*")
     .eq("work_order_id", workOrderId)
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) throw normalizeUnknownError(error);
   return data || [];
 }
 
 // ── PHOTO STORAGE ─────────────────────────────────────────────────────────
+const compatibilityPhotoControllers = new Map<string, ReturnType<typeof createPhotoUploadController<import("./privateObjectContracts").UploadIntent>>>();
+const knownPhotoIds = new Map<string, string>();
 export async function uploadPhotos(
   workOrderId: string,
   files: FileList | File[],
   authorName: string,
   audit: ActivityAuditOptions = {},
 ): Promise<string[]> {
-  const sb = supabase();
-  const { data: { user } } = await sb.auth.getUser();
-  const uploaded: string[] = [];
-  const arr = Array.from(files);
-  for (const file of arr) {
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const filename = `${Date.now()}_${crypto.randomUUID()}`;
-    const path = `wo/${workOrderId}/${filename}.${ext}`;
-    const { error: upErr } = await sb.storage.from("photos").upload(path, file, { contentType: file.type, upsert: false });
-    if (upErr) throw upErr;
-    const { error: rowErr } = await sb.from("photos").insert({
-      work_order_id: workOrderId,
-      storage_path: path,
-      uploader_id: user?.id || null,
-      uploader_name: authorName,
-    });
-    if (rowErr) throw rowErr;
-    uploaded.push(path);
+  // Compatibility signature retained; actor and evidence are command-owned.
+  void authorName; void audit;
+  const { data, error } = await supabase().from("work_orders")
+    .select("contractor_assignment_version,workflow_cycle").eq("id", workOrderId).single();
+  if (error || !data) throw new Error("Photo access could not be confirmed.");
+  let controller = compatibilityPhotoControllers.get(workOrderId);
+  const unfinished = controller?.snapshot().some(item => !["confirmed", "cancelled"].includes(item.status));
+  if (!controller || !unfinished) {
+    controller = createPhotoUploadController(createWorkOrderPhotoPorts(workOrderId,
+      data.contractor_assignment_version, data.workflow_cycle));
+    compatibilityPhotoControllers.set(workOrderId, controller);
   }
-  if (uploaded.length > 0) {
-    await insertActivity(workOrderId, authorName, `Added ${uploaded.length} photo${uploaded.length > 1 ? "s" : ""}.`, "note", audit);
-  }
-  return uploaded;
+  const result = unfinished ? await controller.retry() : await controller.start(Array.from(files));
+  const confirmed = result.flatMap(item => item.status === "confirmed" && item.storagePath ? [item.storagePath] : []);
+  if (!confirmed.length) throw new Error("Photos were not confirmed. Retry or cancel the pending uploads.");
+  return confirmed;
 }
 
 export async function removePhoto(workOrderId: string, storagePath: string): Promise<{ success: boolean; error?: unknown }> {
-  const sb = supabase();
-  // Delete the row (RLS allows uploader or staff)
-  const { data: deletedRows, error: dbError } = await sb
-    .from("photos")
-    .delete()
-    .eq("work_order_id", workOrderId)
-    .eq("storage_path", storagePath)
-    .select("id");
-  if (dbError) return { success: false, error: dbError };
-  if (!deletedRows || deletedRows.length === 0) {
-    return { success: false, error: new Error("Only the uploader or a staff member can delete this image") };
-  }
-  // Delete the file from storage
-  const { error: storageError } = await sb.storage.from("photos").remove([storagePath]);
-  if (storageError) return { success: false, error: storageError };
-  return { success: true };
+  try {
+    const key = `${workOrderId}:${storagePath}`;
+    let id = knownPhotoIds.get(key);
+    if (!id) {
+      // Read-only adapter for the existing path-shaped gallery API. Mutation
+      // requests carry only a metadata ID, never a caller-supplied object path.
+      const { data, error } = await supabase().from("photos").select("id")
+        .eq("work_order_id", workOrderId).eq("storage_path", storagePath).single();
+      if (error || !data) throw new Error("Photo access could not be confirmed. Refresh the work order.");
+      id = data.id; knownPhotoIds.set(key, id);
+    }
+    await deleteBoundObject("photo", id);
+    return { success: true };
+  } catch (error: unknown) { return { success: false, error }; }
 }
 
 // ── REALTIME SUBSCRIPTION ──────────────────────────────────────────────────
@@ -2907,29 +2013,8 @@ export async function removePhoto(workOrderId: string, storagePath: string): Pro
 // invalidate only the data affected by a change instead of reloading the
 // entire portal for every row event.
 export function subscribeToChanges(
-  onChange: (change: PortalRealtimeChange) => void,
+  onChange: (change: NormalizedRealtimeEvent) => void,
 ): () => void {
-  const sb = supabase();
-  const handleChange = (table: PortalRealtimeTable) => (payload: any) => {
-    onChange({
-      table,
-      eventType: payload.eventType,
-      new: payload.new || {},
-      old: payload.old || {},
-    });
-  };
-  const channel = sb
-    .channel("portal-changes")
-    .on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, handleChange("work_orders"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "activities" }, handleChange("activities"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "invoices" }, handleChange("invoices"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "contractor_estimates" }, handleChange("contractor_estimates"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "photos" }, handleChange("photos"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "wo_parts" }, handleChange("wo_parts"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_visits" }, handleChange("work_order_visits"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "work_order_technician_assignments" }, handleChange("work_order_technician_assignments"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_todos" }, handleChange("staff_work_order_todos"))
-    .on("postgres_changes", { event: "*", schema: "public", table: "staff_work_order_notification_reads" }, handleChange("staff_work_order_notification_reads"))
-    .subscribe();
-  return () => { sb.removeChannel(channel); };
+  // Compatibility export; the application hook is the sole subscription owner.
+  return createPortalRealtimeSubscription(supabase(), { event: onChange });
 }

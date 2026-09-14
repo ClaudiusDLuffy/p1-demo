@@ -1,10 +1,14 @@
+import { readMigrationInventory } from "./migration-inventory.mjs";
 // Isolated, in-memory regression checks. No Docker, Supabase connection,
 // environment-file loading, or production data. See the release runbook.
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { reproduceLegacyLifecycleFindings } from './lifecycle-test-support/legacy-reproductions.mjs';
+import { verifyStagedLifecycleRelease } from './lifecycle-test-support/staged-acceptance.mjs';
+import { initializeSupabaseFixtureDatabase, applyFixtureMigration, initializeLifecycleActors, actorTransactions } from './lifecycle-test-support/engine-fixtures.mjs';
 process.on('uncaughtException', e => { console.error(`FATAL ${e.code || ''}: ${e.message}`); process.exit(1); });
 if (!process.env.P1_SQL_TEST_ENGINE_DIR) {
   throw new Error('Set P1_SQL_TEST_ENGINE_DIR to an isolated installation of @electric-sql/pglite (tested with 0.5.8).');
@@ -14,23 +18,12 @@ const { PGlite } = requireEngine('@electric-sql/pglite');
 const { pg_trgm } = requireEngine('@electric-sql/pglite/contrib/pg_trgm');
 const { pgcrypto } = requireEngine('@electric-sql/pglite/contrib/pgcrypto');
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const db = new PGlite({ extensions: { pg_trgm, pgcrypto } });
-// Test-only Supabase platform stubs. Portal migrations and RPCs are unchanged.
-await db.exec(`
-create role anon; create role authenticated; create role service_role bypassrls;
-create schema auth; create schema storage; create schema extensions;
-create table auth.users(id uuid primary key, email text, raw_user_meta_data jsonb default '{}');
-create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-create function auth.role() returns text language sql stable as $$ select coalesce(current_setting('request.jwt.claim.role', true), '') $$;
-create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb) $$;
-grant usage on schema auth, public, storage to anon, authenticated, service_role;
-create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
-create table storage.objects(id uuid primary key default gen_random_uuid(), bucket_id text, name text, owner uuid, metadata jsonb, created_at timestamptz default now(), updated_at timestamptz default now());
-alter table storage.objects enable row level security;
-create publication supabase_realtime;
-alter default privileges in schema public grant all on tables to authenticated, service_role;
-alter default privileges in schema public grant all on sequences to authenticated, service_role;
-`);
+const createDatabase = async () => {
+  const isolated = new PGlite({ extensions: { pg_trgm, pgcrypto } });
+  await initializeSupabaseFixtureDatabase(isolated);
+  return isolated;
+};
+const db = await createDatabase();
 
 function statements(sql) {
   const parts = []; let start = 0, quote = '', dollar = '', block = 0, line = false;
@@ -50,57 +43,29 @@ function statements(sql) {
   return parts;
 }
 
-const files = readdirSync(`${repo}/supabase/migrations`).filter(f => /^\d+.*\.sql$/.test(f)).sort();
-for (const name of files) {
+const files = readMigrationInventory(repo).filter(f => /^\d+.*\.sql$/.test(f)).sort();
+// The historical positive controls and vulnerability reproductions run against
+// the committed baseline before later expansion/contraction stages are applied.
+const legacyFiles = files.filter(name => Number(name.match(/^\d+/)[0]) <= 122);
+for (const name of legacyFiles) {
   try {
-    if (name.startsWith('0105_')) {
-      // Empty fixtures matching the identifiers required by historical data
-      // repairs; no production records or credentials are read.
-      const fixtureSource = readFileSync(`${repo}/supabase/migrations/${name}`, 'utf8');
-      const fixtureEmails = [...new Set(fixtureSource.match(/[a-z0-9.]+@[a-z0-9.]+\.[a-z]+/g))];
-      await db.exec("insert into public.organizations(id,name,slug,active) values ('10000000-0000-4000-8000-000000000001','Fixture Company','fixture-company',true)");
-      for (const [i,email] of fixtureEmails.entries()) {
-        const id = `20000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`;
-        await db.query('insert into auth.users(id,email) values ($1,$2)',[id,email]);
-        await db.query("update public.profiles set contractor_organization_id='10000000-0000-4000-8000-000000000001', contractor_access_level='report_only', name=$2 where id=$1",[id,`Fixture ${i+1}`]);
-        if (i === 0) await db.query("update public.organizations set canonical_contractor_id=$1 where id='10000000-0000-4000-8000-000000000001'",[id]);
-      }
-    }
-    if (name.startsWith('0108_')) {
-      const fixtureEmail = readFileSync(`${repo}/supabase/migrations/${name}`, 'utf8').match(/[a-z0-9.]+@[a-z0-9.]+\.[a-z]+/)[0];
-      await db.query('insert into auth.users(id,email) values ($1,$2)', ['30000000-0000-4000-8000-000000000001',fixtureEmail]);
-      await db.exec("update public.profiles set role='back_office',name='Accounting Fixture' where id='30000000-0000-4000-8000-000000000001'");
-    }
-    for (const statement of statements(readFileSync(`${repo}/supabase/migrations/${name}`, 'utf8'))) await db.exec(statement);
+    await applyFixtureMigration({ db, repo, name, statements });
     if (name >= '0105') console.log(`applied ${name}`);
   } catch (e) { console.error(`FAILED ${name}: ${e.code} ${e.message}`); process.exit(1); }
 }
-const mgr = '40000000-0000-4000-8000-000000000001';
-const controller = '40000000-0000-4000-8000-000000000002';
-const inactive = '40000000-0000-4000-8000-000000000003';
-const contractor = '40000000-0000-4000-8000-000000000004';
-const outsider = '40000000-0000-4000-8000-000000000005';
+const { mgr, controller, inactive, contractor, outsider } = await initializeLifecycleActors(db);
 let passed = 0;
 async function check(name, fn) {
   try { await fn(); passed++; console.log(`PASS ${name}`); }
   catch (e) { console.error(`FAIL ${name}: ${e.code || ''} ${e.message}`); process.exit(1); }
 }
-const as = (role, id, fn) => db.transaction(async tx => {
-  assert.ok(['anon','authenticated','service_role'].includes(role));
-  await tx.exec(`set local role ${role}`);
-  await tx.query("select set_config('request.jwt.claim.role',$1,true), set_config('request.jwt.claim.sub',$2,true)",[role,id || '']);
-  return fn(tx);
-});
+const as = actorTransactions(db);
 const state = async id => (await db.query('select id,status,workflow_cycle,contractor_assignment_version,updated_at::text,closed_at::text from public.work_orders where id=$1',[id])).rows[0];
 const closeArgs = row => [row.id,row.workflow_cycle,row.contractor_assignment_version,row.updated_at];
 const closeFollowUp = (tx,args) => tx.query("select public.close_reopened_work_order_without_additional_billing($1,$2,$3,$4,'Prior billing covers this follow-up') as result",args);
 const closeNoInvoice = (tx,args) => tx.query('select public.close_work_order_without_invoice($1,$2,$3,$4) as result',args);
 const deny = async (fn,code) => assert.rejects(fn, e => e.code === code);
-for (const [id,role,active] of [[mgr,'manager',true],[controller,'back_office',true],[inactive,'dispatcher',false],[contractor,'contractor',true],[outsider,'contractor',true]]) {
-  await db.query('insert into auth.users(id,email) values ($1,$2)',[id,`${id}@example.invalid`]);
-  await db.query('update public.profiles set role=$2,active=$3,is_assignable=true where id=$1',[id,role,active]);
-}
-await db.query("insert into public.staff_permission_grants(profile_id,permission) values ($1,'invoice_controller')",[controller]);
+await reproduceLegacyLifecycleFindings({ db, check, contractor });
 await db.query("insert into public.work_orders(id,status,functional_status,contractor_id,contractor_assignment_started_at,priority,sla_started_at,response_breach_at,resolution_breach_at) values ('WOT9000001','assigned','Dispatched',$1,now()-interval '3 days','p4',now()-interval '3 days',now()-interval '1 day',now()+interval '1 day')",[contractor]);
 await db.exec("insert into public.work_orders(id) values ('WOT9000002')");
 await check('direct terminal update and terminal insert denied',async()=>{
@@ -290,7 +255,7 @@ await check('intake-owned removal claims are private, bounded to their provenanc
   assert.equal((await claim()).rows[0].result.claimStatus,'already_sent');
 });
 await check('new migrations can be reapplied to populated workflow fixtures',async()=>{
-  for (const name of files.filter(f=>/^(0119|0120|0121)_/.test(f))) {
+  for (const name of legacyFiles.filter(f=>/^(0119|0120|0121)_/.test(f))) {
     for (const statement of statements(readFileSync(`${repo}/supabase/migrations/${name}`, 'utf8'))) await db.exec(statement);
   }
 });
@@ -301,5 +266,8 @@ for (const name of ['0119_close_reopened_follow_up_without_billing_verification.
     console.log(`PASS audit ${name}`);
   } catch (e) { console.error(`FAILED audit ${name}: ${e.code} ${e.message}`); process.exit(1); }
 }
+await verifyStagedLifecycleRelease({
+  db, as, files, repo, statements, check, contractor, mgr, controller, inactive, outsider, createDatabase,
+});
 console.log(`${passed} runtime workflow checks passed`);
 await db.close();

@@ -1,4 +1,6 @@
-export type BillingTrip = {
+import { requiresVisitDurationReview, type VisitDurationReview } from "./visitDurationReview";
+
+export type BillingTrip = VisitDurationReview & {
   id?: string;
   checkInAt: string;
   checkOutAt: string | null;
@@ -307,6 +309,7 @@ export function calculateTripHours(
   timeZone: string,
   now = new Date(),
 ): BillingTripHours | null {
+  if (requiresVisitDurationReview(trip)) return null;
   const start = new Date(trip.checkInAt);
   const end = trip.checkOutAt ? new Date(trip.checkOutAt) : now;
   if (

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import ts from "typescript";
+import { createWorkOrderDetailReadHarness, rawPage, respond } from "./activity-visit-read-test-support/harness";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const db = read("src/lib/db.ts");
@@ -14,12 +16,10 @@ const migration = read("supabase/migrations/0076_cursor_pagination_and_portal_in
 const tableMigration = read("supabase/migrations/0086_work_order_table_sorting.sql");
 
 test("work-order lists use RLS-aware cursor pages instead of global detail rows", () => {
-  const listLoader = db.slice(
-    db.indexOf("export async function loadWorkOrders"),
-    db.indexOf("const formatWorkOrderDateTime"),
-  );
-  assert.match(db, /\? "list_work_orders_table_page"\s*:\s*"list_work_orders_page"/);
-  assert.match(db, /rpc\(rpcName, tableArgs\)/);
+  const listLoader = read("src/features/work-orders/data/workOrderReadRepository.ts");
+  assert.ok(/\? "list_work_orders_table_rows_v2"\s*:\s*"list_work_orders_rows_v1"/.test(listLoader));
+  assert.ok(/dependencies\.read\(tableMode[^\n]+args, signal\)/.test(listLoader));
+  assert.match(listLoader, /parseWorkOrderReadPage\(data\)/);
   assert.doesNotMatch(listLoader, /\.from\("photos"\)/);
   assert.doesNotMatch(listLoader, /\.from\("work_order_visits"\)/);
   assert.match(migration, /security invoker/i);
@@ -30,20 +30,28 @@ test("work-order lists use RLS-aware cursor pages instead of global detail rows"
   assert.match(tableMigration, /grant execute[\s\S]*authenticated, service_role/i);
 });
 
-test("opened work-order details request only their first scoped cursor pages", () => {
-  const detailLoader = db.slice(
-    db.indexOf("export async function loadWorkOrderDetails"),
-    db.indexOf('// "5h", "2d", "1w"'),
-  );
-  assert.match(detailLoader, /loadWorkOrderActivitiesPage\(workOrder\)/);
-  assert.match(detailLoader, /loadWorkOrderPhotosPage\(workOrder\.id\)/);
-  assert.match(detailLoader, /loadWorkOrderVisitsPage\(workOrder\.id\)/);
+test("opened work-order details request only their first scoped cursor pages", async () => {
+  const parsed = ts.createSourceFile("db.ts", db, ts.ScriptTarget.Latest, true);
+  const owner = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "loadWorkOrderDetails");
+  assert.ok(owner && ts.isFunctionDeclaration(owner) && owner.body);
+  const detailLoader = owner.body.getText(parsed);
+  assert.ok(/loadWorkOrderActivitiesPage\(workOrder, null, 30, signal\)/.test(detailLoader));
+  assert.ok(/loadWorkOrderPhotosPage\(workOrder\.id, null, 24, signal\)/.test(detailLoader));
+  assert.ok(/loadWorkOrderVisitsPage\(workOrder\.id, null, 30, signal\)/.test(detailLoader));
   assert.doesNotMatch(detailLoader, /collectSupabasePages<any>/);
-  for (const rpc of [
-    "list_work_order_activities_page",
-    "list_work_order_photos_page",
-    "list_work_order_visits_page",
-  ]) assert.match(db, new RegExp(`rpc\\("${rpc}"`));
+  const harness = createWorkOrderDetailReadHarness([
+    respond(rawPage([])), respond(rawPage([])), respond(rawPage([])), respond(null),
+  ]);
+  const controller = new AbortController();
+  await harness.loadDetails({ id: "SYNTHETIC-SCOPED-PARENT" }, controller.signal);
+  assert.deepEqual(harness.calls.map(call => call.name), [
+    "list_work_order_activities_rows_v1",
+    "list_work_order_photos_rows_v1",
+    "list_work_order_visits_rows_v1",
+    "get_portal_work_order",
+  ]);
+  assert.deepEqual(harness.calls.slice(0, 3).map(call => call.args.p_limit), [30, 24, 30]);
+  for (const call of harness.calls) assert.strictEqual(call.signal, controller.signal);
 });
 
 test("portal and billing merge scoped detail queries without a second initial reset", () => {
@@ -120,9 +128,8 @@ test("My Jobs reports a safe first-page result summary without row contents", ()
   );
 });
 
-test("invoice workflow mutations use exact or work-order-scoped reads", () => {
-  assert.match(workOrderHook, /loadInvoiceById\(invoiceId\)/);
-  assert.match(workOrderHook, /loadWorkOrderInvoicesForMutation/);
-  assert.match(workOrderHook, /workOrderId,/);
-  assert.match(workOrderHook, /loadInvoicesPage\(/);
+test("invoice review uses exact reads and no longer collects invoice pages for raw paid writes", () => {
+  assert.match(workOrderHook, /loadInvoiceSummaryById\(invoiceId\)/);
+  assert.doesNotMatch(workOrderHook, /loadWorkOrderInvoicesForMutation|loadInvoicesPage\(/);
+  assert.match(workOrderHook, /reviewContractorInvoice\(/);
 });

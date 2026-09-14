@@ -1,3 +1,5 @@
+import { legacySlaHours } from "./sla/policy";
+
 export const T = {
   bg: "#FAF7F2",
   bgWarm: "#F5F0E8",
@@ -34,11 +36,11 @@ export const DEMO_ACCOUNTS: {
 }[] = [];
 
 export const PRIORITY = {
-  p1: { label: "P1 Critical", short: "P1", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC", icon: "âš¡", slaHours: 8 },
-  p2: { label: "P2 Emergency", short: "P2", color: T.accent, bg: T.accentSoft, ring: T.accentRing, icon: "â—†", slaHours: 24 },
-  p3: { label: "P3 Standard", short: "P3", color: T.warn, bg: T.warnSoft, ring: "#EED9A6", icon: "â—", slaHours: 72 },
-  p4: { label: "P4 Minor", short: "P4", color: T.muted, bg: T.borderSoft, ring: T.border, icon: "â—‹", slaHours: 168 },
-  p5: { label: "P5 Preventative", short: "P5", color: T.success, bg: T.successSoft, ring: "#CFDED3", icon: "PM", slaHours: 0 },
+  p1: { label: "P1 Critical", short: "P1", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC", icon: "âš¡", slaHours: legacySlaHours("p1") },
+  p2: { label: "P2 Emergency", short: "P2", color: T.accent, bg: T.accentSoft, ring: T.accentRing, icon: "â—†", slaHours: legacySlaHours("p2") },
+  p3: { label: "P3 Standard", short: "P3", color: T.warn, bg: T.warnSoft, ring: "#EED9A6", icon: "â—", slaHours: legacySlaHours("p3") },
+  p4: { label: "P4 Minor", short: "P4", color: T.muted, bg: T.borderSoft, ring: T.border, icon: "â—‹", slaHours: legacySlaHours("p4") },
+  p5: { label: "P5 Preventative", short: "P5", color: T.success, bg: T.successSoft, ring: "#CFDED3", icon: "PM", slaHours: legacySlaHours("p5") },
 };
 
 export const STATUS = {

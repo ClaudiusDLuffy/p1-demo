@@ -1,17 +1,28 @@
 ﻿"use client";
 // @ts-nocheck
+import { apiFetch } from "../lib/errors/apiFetch";
+import { DirectoryScopeProvider, useDirectoryLabels } from "../features/directory/queries";
+import { DirectorySelect } from "../features/directory/DirectorySelect";
+import { directoryScopeKey } from "../features/directory/contracts";
+import { loadDirectorySelection } from "../features/directory/api";
+import { safeErrorMessage } from "../lib/errors/normalizeUnknown";
 import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from "react";
+import { createWorkOrderCreationAttempt } from "../lib/workOrderCreationCommand";
+import { AssignmentCommandError } from "../lib/workOrderAssignmentCommands";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  insertActivity, insertWorkOrder, findExistingWoId, markWorkOrderNotesSeen,
-  subscribeToChanges,
+  insertWorkOrder, findExistingWoId, markWorkOrderNotesSeen,
 } from "../lib/db";
 import { supabase } from "../lib/supabase/client";
-import { computeSlaState, computeSlaBreaches } from "../lib/slaConfig";
+import { priorityEditSlaPatch } from "../lib/sla/priorityEdit";
 import { slaLabel, slaRemaining } from "../lib/slaDisplay";
-import { Modal } from "./ui/Modal";
+import { Modal, requestTopModalClose } from "./ui/Modal";
+import { useUnsavedChangesGuard } from "../lib/forms/useUnsavedChangesGuard";
+import { hasDirtySensitiveForms } from "../lib/forms/dirtyFormRegistry";
+import { hasCurrentSensitiveDrafts } from "../lib/drafts/browserDraftSession";
+import { isShellActionForm, shellFormSnapshot } from "../lib/forms/portalFormDismissal";
 import { Input } from "./ui/Input";
 import { DatePickerField, TimePickerField } from "./ui/DateTimePicker";
 import { Sel } from "./ui/Sel";
@@ -29,41 +40,28 @@ import useWorkOrders from "../features/work-orders/useWorkOrders";
 import KanbanBoard from "../features/work-orders/KanbanBoard";
 import WorkOrderList from "../features/work-orders/WorkOrderList";
 import WorkOrderDetail from "../features/work-orders/WorkOrderDetail";
+import AdministrativeTransferAction from "../features/work-orders/AdministrativeTransferAction";
 import CloseReopenedFollowUpModal from "../features/work-orders/CloseReopenedFollowUpModal";
 import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import {
-  WORK_ORDER_DETAILS_KEY,
-  WORK_ORDER_BY_ID_KEY,
-  WORK_ORDER_PAGES_KEY,
   WORK_ORDERS_KEY,
-  WO_PARTS_KEY,
-  CONTRACTOR_WORKLOAD_SUMMARY_KEY,
-  PORTAL_NAVIGATION_SUMMARY_KEY,
   useWorkOrderByIdQuery,
   useWorkOrderDetailsQuery,
   usePortalNavigationSummaryQuery,
-  useProfilesQuery,
-  useTechniciansQuery,
-  workOrderDetailsKey,
 } from "../features/work-orders/queries";
 import InvoiceList from "../features/invoices/InvoiceList";
 import InvoiceDetail from "../features/invoices/InvoiceDetail";
 import useInvoices from "../features/invoices/useInvoices";
 import {
-  INVOICE_BY_ID_KEY,
-  INVOICE_PAGES_KEY,
-  INVOICES_KEY,
   useInvoiceByIdQuery,
 } from "../features/invoices/queries";
-import { CONTRACTOR_ESTIMATES_KEY } from "../features/estimates/queries";
 import ContractorList from "../features/contractors/ContractorList";
 import SubDispatchView from "../features/contractors/SubDispatchView";
 import StaffWorkHub from "../features/staff-work/StaffWorkHub";
+import ReceivingDispatchQueue from "../features/receiving-dispatch/ReceivingDispatchQueue";
 import {
-  STAFF_NOTIFICATION_READS_KEY,
-  STAFF_WORK_TODOS_KEY,
   addStaffWorkTodo,
   completeStaffWorkTodo,
   markStaffWorkOrderRead,
@@ -79,13 +77,11 @@ import Dashboard from "../features/dashboard/Dashboard";
 import AddressBookModal from "../features/contacts/AddressBookModal";
 import FloatingProfitCalculator from "../features/billing/FloatingProfitCalculator";
 import {
-  BILLING_INVOICE_BY_ID_KEY,
-  BILLING_INVOICE_PAGES_KEY,
   BILLING_INVOICES_KEY,
   useBillingInvoiceByIdQuery,
 } from "../features/billing/queries";
 import {
-  T, DEMO_ACCOUNTS, PRIORITY, MONTHS, WEEKDAYS,
+  T, PRIORITY, MONTHS, WEEKDAYS,
 } from "../lib/constants";
 import {
   dateTimeInputPartsInTimeZone,
@@ -107,10 +103,11 @@ import {
   isCapitalLifecycleStage,
   isCapitalWorkOrder,
 } from "../lib/workOrderView";
-import {
-  PORTAL_AUTO_REFRESH_MS,
-  shouldRefreshPortal,
-} from "../lib/portalRefresh";
+import { shouldRefreshPortal } from "../lib/portalRefresh";
+import { usePortalRealtime } from "../lib/realtime/usePortalRealtime";
+import { invalidatePortalPlan } from "../lib/realtime/realtimeBatcher";
+import { isPortalVisible, usePortalVisibility } from "../lib/realtime/browserVisibility";
+import { selectedWorkOrderReadVisible, selectedWorkOrderDetailVisible } from "../lib/realtime/portalReadVisibility";
 import {
   WORK_ORDER_REOPEN_REASON_MAX_LENGTH,
   normalizeWorkOrderReopenReason,
@@ -119,13 +116,9 @@ import {
   type ReopenableWorkOrder,
   type WorkOrderReopenMode,
 } from "../lib/workOrderReopen";
-import {
-  REALTIME_INVALIDATION_BATCH_MS,
-  datasetsForRealtimeTables,
-  type PortalRealtimeTable,
-  workOrderIdFromRealtimeChange,
-} from "../lib/realtimeInvalidation";
 import { billingApiFetch as billingFetch } from "../lib/billingApi";
+import { useInvoiceDocumentAction } from "../features/invoices/useInvoiceDocumentAction";
+import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt } from "../lib/staffFinancialClient";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -168,7 +161,8 @@ async function notificationFetch(path: string, body: Record<string, unknown>) {
   const token = data.session?.access_token;
   if (!token) return;
 
-  const res = await fetch(path, {
+  try {
+  await apiFetch(path, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -177,10 +171,7 @@ async function notificationFetch(path: string, body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    console.error("Notification request failed", payload.error || res.statusText);
-  }
+  } catch { void reportClientFailure({ source: "notification_request", message: "RESULT_UNCONFIRMED" }); }
 }
 
 type ReopenTarget = ReopenableWorkOrder & {
@@ -1118,15 +1109,18 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   }
 }
 @media(min-width: 1201px) { .mobile-bottom-nav { display: none !important; } }
+@media(prefers-reduced-motion: reduce) { .p1-button-spinner { animation: none !important; } }
 `;
 
 
 // ===============================================================
 //  MAIN
 // ===============================================================
+const EMPTY_EDIT_WO = { priority: "", store: "", city: "", addr: "", lineOfService: "", businessService: "", category: "", subCategory: "", afm: "", afmEmail: "", summary: "", description: "" };
+
 export default function PortalShell() {
   const [page, setPage] = useState("dashboard");
-  const [selectedWO, setSelectedWO] = useState(null);
+  const [selectedWO, setSelectedWO] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterC, setFilterC] = useState("all");
   const [filterP, setFilterP] = useState("all");
@@ -1136,8 +1130,10 @@ export default function PortalShell() {
     storeNumber: string;
   } | null>(null);
   const workOrderStoreViewSequenceRef = useRef(0);
+  const workOrderCreationAttempts = useRef(new Map<string, ReturnType<typeof createWorkOrderCreationAttempt>>());
   const [invTab, setInvTab] = useState("all");
   const [selectedBillingInvoice, setSelectedBillingInvoice] = useState<string | null>(null);
+  const billingDeleteAttempts = useRef(new Map<string, ReturnType<typeof createStaffFinancialAttempt>>());
   const [workflowReturn, setWorkflowReturn] = useState<{
     workOrderId: string;
     page: string;
@@ -1154,19 +1150,25 @@ export default function PortalShell() {
   const [histReso, setHistReso] = useState("all");
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState<string | null>(null);
   const fire = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2800); }, []);
   const [aiEnhancing, setAiEnhancing] = useState(false);
-  const [aiNote, setAiNote] = useState(null);
-  const [modal, setModal] = useState(null);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  const [modal, setModal] = useState<string | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [reopenTarget, setReopenTarget] = useState<ReopenTarget | null>(null);
   const [reopenMode, setReopenMode] = useState<WorkOrderReopenMode | "">("");
   const [reopenReason, setReopenReason] = useState("");
   const [reopenError, setReopenError] = useState("");
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [logoutConfirmation, setLogoutConfirmation] = useState(false);
+  const [administrativeTransferDirty, setAdministrativeTransferDirty] = useState(false);
+  const shellFormSession = useRef<string | null>(null);
+  const shellFormBaseline = useRef("");
+  const [followUpCloseSnapshot, setFollowUpCloseSnapshot] = useState<{
+    id: string; workflowCycle: number; contractorAssignmentVersion: number; updatedAt: string | null;
+  } | null>(null);
   const [reassignTarget, setReassignTarget] = useState<string>("");
-  const [reassignSearch, setReassignSearch] = useState("");
   const [rejectWorkOrderReason, setRejectWorkOrderReason] = useState("");
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const pullStartYRef = useRef<number | null>(null);
@@ -1254,7 +1256,6 @@ export default function PortalShell() {
   const [etaTimeInput, setEtaTimeInput] = useState("14:00");
   // Staff "Edit work order" form. One object mirroring the editable fields;
   // populated from woData when the modal opens, diffed on save.
-  const EMPTY_EDIT_WO = { priority: "", store: "", city: "", addr: "", lineOfService: "", businessService: "", category: "", subCategory: "", afm: "", afmEmail: "", summary: "", description: "" };
   const [editWoForm, setEditWoForm] = useState<any>(EMPTY_EDIT_WO);
   const [startNotesInput, setStartNotesInput] = useState("");
   const [pauseReasonInput, setPauseReasonInput] = useState("");
@@ -1263,7 +1264,7 @@ export default function PortalShell() {
   const [partEtaInput, setPartEtaInput] = useState("");
   // Repeatable parts grid for the pause modal (one row per part). Each row
   // becomes a wo_parts insert when the contractor confirms the pause.
-  const [pausePartsList, setPausePartsList] = useState<{ description: string; partNumber: string; qty: number; expectedReturnDate: string }[]>([]);
+  const [pausePartsList, setPausePartsList] = useState<{ uiId: string; description: string; partNumber: string; qty: number; expectedReturnDate: string }[]>([]);
   const [pauseNotesInput, setPauseNotesInput] = useState("");
   const [assetMakeInput, setAssetMakeInput] = useState("");
   const [assetModelInput, setAssetModelInput] = useState("");
@@ -1272,21 +1273,31 @@ export default function PortalShell() {
   const [resolutionInput, setResolutionInput] = useState("");
   const [resolutionNotesInput, setResolutionNotesInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
-  const { currentUser, setCurrentUser, loginEmail, setLoginEmail,
+  const { currentUser, refreshCurrentProfile, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
   // Wait for the profile before enabling portal data. Starting on the raw
   // session and then resetting again when the profile arrives caused every
   // initial query to run twice.
-  const isAuthenticated = !!currentUser?.id;
+  const isAuthenticated = !!currentUser?.id && currentUser.active === true;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const invoiceController = isInvoiceController(currentUser);
   const notesSeenInFlight = useRef(new Set<string>());
   const staffReadInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
+  const refreshVisiblePortal = usePortalRealtime(currentUser, refreshCurrentProfile);
+  const refreshBillingMutation = useCallback((invoiceId?: string, workOrderId?: string, closesWork = false) => {
+    if (!currentUser) return Promise.resolve();
+    return invalidatePortalPlan(qc, currentUser, { refreshIdentity: false, targets: [
+      { family: "billing_pages" }, { family: "billing_counts" }, { family: "billing_detail", id: invoiceId },
+      { family: "invoice_pages" }, { family: "invoice_counts" }, { family: "navigation" },
+      ...(workOrderId ? [{ family: "work_detail" as const, id: workOrderId }, { family: "work_children" as const, id: workOrderId }] : []),
+      ...(closesWork ? [{ family: "work_pages" as const }, { family: "work_counts" as const }] : []),
+    ] }, isPortalVisible());
+  }, [currentUser, qc]);
   const refreshPortal = useCallback(async () => {
     if (typeof window === "undefined" || !shouldRefreshPortal({
-      authenticated: Boolean(currentUser?.id),
+      authenticated: isAuthenticated,
       visible: document.visibilityState === "visible",
       online: navigator.onLine,
       busy: refreshInFlightRef.current,
@@ -1300,12 +1311,12 @@ export default function PortalShell() {
     try {
       // Refetch mounted read models in place. Local form state, pagination,
       // navigation history, and scroll position are intentionally untouched.
-      await qc.invalidateQueries({ refetchType: "active" });
+      await refreshVisiblePortal();
     } finally {
       refreshInFlightRef.current = false;
       setIsRefreshing(false);
     }
-  }, [currentUser?.id, qc]);
+  }, [isAuthenticated, refreshVisiblePortal]);
   const handlePullEnd = useCallback(() => {
     const shouldRefresh = pullDistanceRef.current >= 64;
     pullEligibleRef.current = false;
@@ -1314,35 +1325,17 @@ export default function PortalShell() {
     if (shouldRefresh) void refreshPortal();
   }, [refreshPortal, updatePullDistance]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !currentUser?.id) return;
-
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refreshPortal();
-    };
-    const intervalId = window.setInterval(() => {
-      void refreshPortal();
-    }, PORTAL_AUTO_REFRESH_MS);
-
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    window.addEventListener("online", refreshWhenVisible);
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-      window.removeEventListener("online", refreshWhenVisible);
-    };
-  }, [currentUser?.id, refreshPortal]);
-  const { data: navigationSummary } = usePortalNavigationSummaryQuery(isAuthenticated);
+  const { data: navigationSummary } = usePortalNavigationSummaryQuery(isAuthenticated && !invoiceController, currentUser);
+  const selectedWorkOrderVisible = selectedWorkOrderReadVisible(page, modal);
+  const selectedWorkOrderDetailShown = selectedWorkOrderDetailVisible(page);
+  const selectedWorkOrderBeingRead = usePortalVisibility() && selectedWorkOrderDetailShown;
   const selectedWorkOrderQuery = useWorkOrderByIdQuery(
     selectedWO,
-    isAuthenticated && Boolean(selectedWO),
+    isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO),
+    currentUser,
   );
   const selectedWorkOrderLookup = selectedWorkOrderQuery.data;
-  const selectedWorkOrderError = selectedWorkOrderQuery.error instanceof Error
-    ? selectedWorkOrderQuery.error.message
-    : selectedWorkOrderQuery.error
-      ? String(selectedWorkOrderQuery.error)
-      : null;
+  const selectedWorkOrderError = safeErrorMessage(selectedWorkOrderQuery.error);
   useEffect(() => {
     if (!selectedWorkOrderError || !selectedWO) return;
     void reportClientFailure({
@@ -1357,51 +1350,52 @@ export default function PortalShell() {
   const selectedWorkOrderBase = selectedWorkOrderLookup || null;
   const workOrderDetailsQuery = useWorkOrderDetailsQuery(
     selectedWorkOrderBase,
-    isAuthenticated && Boolean(selectedWO),
+    isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO),
+    currentUser,
+    { countEnabled: selectedWorkOrderDetailShown },
   );
   const selectedWorkOrderDetails = workOrderDetailsQuery.data;
-  const { data: profilesData } = useProfilesQuery(isAuthenticated);
-  const { data: techniciansData } = useTechniciansQuery(isAuthenticated);
   const woParts: any[] = [];
-  const USERS = useMemo(
-    () => profilesData ?? DEMO_ACCOUNTS.map(d => ({ id: d.email, ...d, role: "manager" })),
-    [profilesData]
-  );
-  const technicians = useMemo(() => techniciansData ?? [], [techniciansData]);
+  const selectedDirectoryIds = selectedWorkOrderBase as unknown as { contractor?: string; staffTodo?: { ownerId?: string } } | null;
+  const shellLabels = useDirectoryLabels([selectedDirectoryIds?.contractor, selectedDirectoryIds?.staffTodo?.ownerId], isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO), currentUser);
   const { workOrders, setWorkOrders,
     loadingStates,
     patchLocalWO, localActivity, dbCall,
-    doAssign, doStraightToBilling, doUnassign, doDeleteWO,
-    doRejectUnassignedWO, doDuplicateForReassignment, doReassign,
+    doAssign, doStraightToBilling, doUnassign,
+    doRejectUnassignedWO, doDuplicateForReassignment, doReassign, doAdministrativeTransfer,
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
     doCloseReopenedFollowUp, doReopen,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
-    doAddPhotos, doRemovePhoto,
+    doAddPhotos, doRemovePhoto, photoUploadItems, retryPhotoUploads, cancelPhotoUploads, photoDeleteErrors, retryPhotoDeletion,
     doAddPart, doUpdatePart, doDeletePart,
     doRequestP1PartOrder, doSetP1PartOrderStatus,
     doMarkSevenElevenSynced,
     doMarkContractorAttention, doAcknowledgeContractorAttention } = useWorkOrders({
-      currentUser, USERS, workOrdersData: shellWorkOrdersData, invoices, setInvoices, fire,
+      currentUser, workOrdersData: shellWorkOrdersData, invoices, setInvoices, fire,
       selectedWorkOrderId: selectedWO,
       selectedWorkOrderDetails,
       startDateInput, startTimeInput, pauseDateInput, pauseTimeInput,
       setSelectedWO, setAiNote, setPage,
       isManager,
       noteText, setNoteText, SERVICE_TO_TRADES, contractorFor,
-      getUser: (id: string) => USERS.find(u => u.id === id),
       dateNow, timeNow, fmt,
     });
   const logout = async () => { await authLogout(); setWorkOrders([]); };
-  const handleLogout = async () => {
+  const performLogout = async () => {
     setLogoutLoading(true);
     try {
       await logout();
     } finally {
       setLogoutLoading(false);
+      setLogoutConfirmation(false);
     }
+  };
+  const handleLogout = async () => {
+    if (hasDirtySensitiveForms() || hasCurrentSensitiveDrafts()) { setLogoutConfirmation(true); return; }
+    await performLogout();
   };
   const modalActionStyle = {
     opacity: modalLoading ? 0.7 : 1,
@@ -1409,6 +1403,15 @@ export default function PortalShell() {
     display: "flex",
     alignItems: "center",
     gap: 6,
+  };
+  const invoiceUiSession = useRef({ key: "", generation: 0 });
+  const invoiceUiKey = JSON.stringify([directoryScopeKey(currentUser), modal, selectedWO]);
+  if (invoiceUiSession.current.key !== invoiceUiKey) {
+    invoiceUiSession.current = { key: invoiceUiKey, generation: invoiceUiSession.current.generation + 1 };
+  }
+  const captureInvoiceUiSession = () => {
+    const generation = invoiceUiSession.current.generation;
+    return () => invoiceUiSession.current.generation === generation;
   };
   const {
     newInv, setNewInv,
@@ -1420,13 +1423,14 @@ export default function PortalShell() {
     doSaveDraftInvoice,
     doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
     lineAmount, invSubtotal,
-  } = useInvoices({ currentUser, profiles: USERS, fire });
+  } = useInvoices({ currentUser, fire });
   const selectedInvoiceInBootstrap = selectedInvoice
     ? invoices.find((invoice: any) => invoice.id === selectedInvoice) || null
     : null;
   const { data: selectedInvoiceLookup } = useInvoiceByIdQuery(
     selectedInvoice,
-    isAuthenticated && Boolean(selectedInvoice) && !selectedInvoiceInBootstrap,
+    isAuthenticated && page === "invoices" && Boolean(selectedInvoice) && !selectedInvoiceInBootstrap,
+    currentUser,
   );
   const invoiceDetailRows = selectedInvoiceLookup && !selectedInvoiceInBootstrap
     ? [...invoices, selectedInvoiceLookup]
@@ -1434,7 +1438,8 @@ export default function PortalShell() {
   const selectedInvoiceData = selectedInvoiceInBootstrap || selectedInvoiceLookup || null;
   const { data: selectedInvoiceWorkOrder } = useWorkOrderByIdQuery(
     selectedInvoiceData?.wot,
-    isAuthenticated && Boolean(selectedInvoice) && Boolean(selectedInvoiceData?.wot),
+    isAuthenticated && page === "invoices" && Boolean(selectedInvoice) && Boolean(selectedInvoiceData?.wot),
+    currentUser,
   );
   const portalView = useMemo<PortalViewState>(() => ({
     page,
@@ -1536,6 +1541,17 @@ export default function PortalShell() {
   useEffect(() => {
     if (typeof window === "undefined" || !currentUser?.id) return;
     const onPopState = (event: PopStateEvent) => {
+      // A browser Back request dismisses the top overlay first. Retain the
+      // current view while its dirty guard asks; no form is unmounted here.
+      if (requestTopModalClose("navigation")) {
+        const currentView = portalView;
+        writePortalHistoryStateSafely(window.history, "pushState", {
+          ...window.history.state, [PORTAL_HISTORY_KEY]: currentView,
+          p1PortalDepth: portalHistoryDepthRef.current,
+          p1PortalScrollTop: latestScrollTopRef.current,
+        }, portalUrlForView(window.location.href, currentView));
+        return;
+      }
       const restored = portalViewFromHistoryState(event.state);
       if (!restored) return;
 
@@ -1568,7 +1584,7 @@ export default function PortalShell() {
 
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [currentUser?.id, setSelectedInvoice, setSelectedWO]);
+  }, [currentUser?.id, setSelectedInvoice, setSelectedWO, portalView]);
 
   const backFromWorkOrder = useCallback(() => {
     setAiNote(null);
@@ -1656,23 +1672,35 @@ export default function PortalShell() {
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
   // on modal close. Passed to InvoiceCreateModal to hydrate the form.
   const [resumeDraft, setResumeDraft] = useState<any>(null);
+  const loadCompleteInvoice = useInvoiceDocumentAction(currentUser, `${page}:${selectedInvoice || ""}:${selectedBillingInvoice || ""}`);
+  const invoiceOpenSequence = useRef(0);
   const { data: resumeDraftWorkOrder } = useWorkOrderByIdQuery(
     resumeDraft?.wot,
     isAuthenticated && modal === "createInvoice" && Boolean(resumeDraft?.wot),
+    currentUser,
   );
   const doSubmitInvoice = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
-    const ok = await submitInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null);
-    if (ok) { setResumeDraft(null); setModal("invoiceSubmitted"); }
+    const isCurrent = captureInvoiceUiSession();
+    const ok = await submitInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null, isCurrent);
+    if (ok && isCurrent()) { setResumeDraft(null); setModal("invoiceSubmitted"); }
     return ok;
   };
   const doSaveDraft = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
-    const ok = await doSaveDraftInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null);
-    if (ok) setResumeDraft(null);
+    const isCurrent = captureInvoiceUiSession();
+    const ok = await doSaveDraftInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null, isCurrent);
+    if (ok && isCurrent()) setResumeDraft(null);
     return ok;
   };
-  const openCreateInvoice = (draft?: any) => { setResumeDraft(draft ?? null); setModal("createInvoice"); };  // Tick every 60s so SLA countdowns update live
-  const [, forceTick] = useState(0);
-  useEffect(() => { const i = setInterval(() => forceTick(x => x + 1), 60000); return () => clearInterval(i); }, []);
+  const openCreateInvoice = async (draft?: { id?: string }) => {
+    const sequence = ++invoiceOpenSequence.current;
+    try {
+      const complete = draft?.id ? await loadCompleteInvoice(draft.id, "edit") : null;
+      if (sequence !== invoiceOpenSequence.current) return;
+      setResumeDraft(complete); setModal("createInvoice");
+    } catch (error) { fire(`Invoice could not be opened: ${safeErrorMessage(error)}`); }
+  };  // Tick every 60s so SLA countdowns update live
+  const [slaTick, forceTick] = useState(() => new Date());
+  useEffect(() => { const i = setInterval(() => forceTick(new Date()), 60000); return () => clearInterval(i); }, []);
 
   const isDemoManager = currentUser?.role === "manager" && currentUser?.isDemo === true;
   useEffect(() => {
@@ -1803,7 +1831,7 @@ export default function PortalShell() {
   ]);
 
   useEffect(() => {
-    if (!isManager || !selectedWO || !woData?.hasUnreadNotes || !woData?.latestNoteAt) return;
+    if (!selectedWorkOrderBeingRead || !isManager || !selectedWO || !woData?.hasUnreadNotes || !woData?.latestNoteAt) return;
     if (notesSeenInFlight.current.has(selectedWO)) return;
 
     const workOrderId = selectedWO;
@@ -1819,29 +1847,61 @@ export default function PortalShell() {
         );
         setWorkOrders((items: any[]) => markSeen(items) || []);
         qc.setQueryData(WORK_ORDERS_KEY, markSeen);
-        void qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY });
-        void qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
-        void qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY });
+        if (currentUser) void invalidatePortalPlan(qc, currentUser, { refreshIdentity: false, targets: [
+          { family: "work_detail", id: workOrderId }, { family: "work_pages", subset: "staff" }, { family: "work_pages", subset: "notes" },
+          { family: "work_counts", subset: "staff" }, { family: "navigation" },
+        ] }, isPortalVisible());
       })
       .catch((error: any) => {
-        fire(`Could not clear new-note indicator: ${error.message || error}`);
+        fire(`Could not clear new-note indicator: ${safeErrorMessage(error)}`);
       })
       .finally(() => {
         notesSeenInFlight.current.delete(workOrderId);
       });
-  }, [fire, isManager, qc, selectedWO, setWorkOrders, woData?.hasUnreadNotes, woData?.latestNoteAt]);
+  }, [fire, isManager, qc, currentUser, selectedWorkOrderBeingRead, selectedWO, setWorkOrders, woData?.hasUnreadNotes, woData?.latestNoteAt]);
 
+  const shellFormState = useMemo(() => ({ etaDateInput, etaTimeInput, editWoForm, reassignTarget,
+    rejectWorkOrderReason, reopenMode, reopenReason, startDateInput, startTimeInput,
+    startNotesInput, pauseDateInput, pauseTimeInput, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pausePartsList,
+    pauseNotesInput, closeDateInput, closeTimeInput, assetMakeInput, assetModelInput,
+    assetSerialInput, assetYearInput, resolutionInput, resolutionNotesInput }),
+  [etaDateInput, etaTimeInput, editWoForm, reassignTarget, rejectWorkOrderReason,
+    reopenMode, reopenReason, startDateInput, startTimeInput, startNotesInput,
+    pauseDateInput, pauseTimeInput, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pausePartsList, pauseNotesInput,
+    closeDateInput, closeTimeInput, assetMakeInput, assetModelInput, assetSerialInput,
+    assetYearInput, resolutionInput, resolutionNotesInput]);
+  const shellScope = `${currentUser?.id || ""}:${modal || ""}:${woData?.id || reopenTarget?.id || ""}`;
+  const shellDismissal = useUnsavedChangesGuard({
+    scopeKey: shellScope,
+    enabled: isAuthenticated && isShellActionForm(modal),
+    dirty: administrativeTransferDirty || (shellFormSession.current === shellScope
+      && shellFormBaseline.current !== shellFormSnapshot(modal, shellFormState)),
+    busy: modalLoading,
+    onClose: () => {
+      setModal(null); setPendingDelete(null); setRejectWorkOrderReason("");
+      setAdministrativeTransferDirty(false); resetReopenForm();
+    },
+  });
   useEffect(() => {
-    if (!woData) return;
+    if (shellFormSession.current === shellScope) return;
+    shellFormSession.current = shellScope;
+    setAdministrativeTransferDirty(false);
+    setFollowUpCloseSnapshot(modal === "closeReopenedFollowUp" && woData ? {
+      id: woData.id, workflowCycle: Number(woData.workflowCycle || 0),
+      contractorAssignmentVersion: Number(woData.contractorAssignmentVersion || 0), updatedAt: woData.updatedAt || null,
+    } : null);
+    const initial = { ...shellFormState };
+    if (!woData) { shellFormBaseline.current = shellFormSnapshot(modal, initial); return; }
     const storeNow = dateTimeInputPartsInTimeZone(
       new Date(),
       timezoneForWorkOrder(woData),
     );
     if (modal === "setEta") {
+      initial.etaDateInput = storeNow.date; initial.etaTimeInput = "14:00";
       setEtaDateInput(storeNow.date);
       setEtaTimeInput("14:00");
     }
-    if (modal === "editWO") setEditWoForm({
+    if (modal === "editWO") { initial.editWoForm = {
       priority: woData.priority || "",
       store: woData.store || "",
       city: woData.city || "",
@@ -1854,17 +1914,21 @@ export default function PortalShell() {
       afmEmail: woData.afmEmail || "",
       summary: woData.summary || "",
       description: woData.description || "",
-    });
+    }; setEditWoForm(initial.editWoForm); }
     if (modal === "reassign") {
+      initial.reassignTarget = "";
       setReassignTarget("");
-      setReassignSearch("");
     }
     if (modal === "startWork") {
+      initial.startDateInput = storeNow.date; initial.startTimeInput = storeNow.time; initial.startNotesInput = "";
       setStartDateInput(storeNow.date);
       setStartTimeInput(storeNow.time);
       setStartNotesInput("");
     }
     if (modal === "pauseWork") {
+      initial.pauseDateInput = storeNow.date; initial.pauseTimeInput = storeNow.time;
+      initial.pauseReasonInput = ""; initial.pausePartsList = []; initial.pauseNotesInput = "";
+      initial.partDescInput = ""; initial.partNumInput = ""; initial.partEtaInput = "";
       setPauseDateInput(storeNow.date);
       setPauseTimeInput(storeNow.time);
       setPauseReasonInput("");
@@ -1875,6 +1939,10 @@ export default function PortalShell() {
       setPauseNotesInput("");
     }
     if (modal === "closeComplete") {
+      Object.assign(initial, { closeDateInput: storeNow.date, closeTimeInput: storeNow.time,
+        assetMakeInput: woData.assetMake || "", assetModelInput: woData.assetModel || "",
+        assetSerialInput: woData.assetSerial || "", assetYearInput: woData.assetYear || "",
+        resolutionInput: "", resolutionNotesInput: woData.resolutionNotes || "" });
       setCloseDateInput(storeNow.date);
       setCloseTimeInput(storeNow.time);
       setAssetMakeInput(woData.assetMake || "");
@@ -1884,83 +1952,9 @@ export default function PortalShell() {
       setResolutionInput("");
       setResolutionNotesInput(woData.resolutionNotes || "");
     }
-  }, [modal, woData]);
+    shellFormBaseline.current = shellFormSnapshot(modal, initial);
+  }, [modal, woData, shellScope, shellFormState]);
 
-  // Subscribe to realtime so changes from other clients propagate.
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    const pendingTables = new Set<PortalRealtimeTable>();
-    const pendingWorkOrderIds = new Set<string>();
-    let needsBroadDetailRefresh = false;
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const flush = () => {
-      flushTimer = null;
-      const datasets = datasetsForRealtimeTables(pendingTables);
-      pendingTables.clear();
-
-      if (datasets.length > 0) {
-        void qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY });
-        void qc.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY });
-      }
-
-      for (const dataset of datasets) {
-        if (dataset === "workOrders") {
-          void qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-          void qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
-          void qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY });
-        }
-        if (dataset === "invoices") {
-          void qc.invalidateQueries({ queryKey: INVOICES_KEY });
-          void qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY });
-          void qc.invalidateQueries({ queryKey: INVOICE_BY_ID_KEY });
-        }
-        if (dataset === "billingInvoices") {
-          void qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
-          void qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
-          void qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
-        }
-        if (dataset === "contractorEstimates") {
-          void qc.invalidateQueries({ queryKey: CONTRACTOR_ESTIMATES_KEY });
-        }
-        if (dataset === "woParts") void qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
-        if (dataset === "staffWorkTodos") void qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY });
-        if (dataset === "staffNotificationReads") void qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY });
-        if (dataset === "workOrderDetails") {
-          // Prefix invalidation safely covers DELETE payloads that do not
-          // include work_order_id unless replica identity is FULL.
-          const ids = [...pendingWorkOrderIds];
-          if (needsBroadDetailRefresh || ids.length === 0) {
-            void qc.invalidateQueries({ queryKey: WORK_ORDER_DETAILS_KEY });
-          } else {
-            for (const workOrderId of ids) {
-              void qc.invalidateQueries({ queryKey: workOrderDetailsKey(workOrderId) });
-            }
-          }
-        }
-      }
-
-      pendingWorkOrderIds.clear();
-      needsBroadDetailRefresh = false;
-    };
-
-    const unsub = subscribeToChanges(change => {
-      pendingTables.add(change.table);
-      const datasets = datasetsForRealtimeTables([change.table]);
-      if (datasets.includes("workOrderDetails")) {
-        const workOrderId = workOrderIdFromRealtimeChange(change);
-        if (workOrderId) pendingWorkOrderIds.add(workOrderId);
-        else needsBroadDetailRefresh = true;
-      }
-      if (!flushTimer) {
-        flushTimer = setTimeout(flush, REALTIME_INVALIDATION_BATCH_MS);
-      }
-    });
-    return () => {
-      if (flushTimer) clearTimeout(flushTimer);
-      unsub();
-    };
-  }, [currentUser?.id, qc]);
   const nav = useCallback((p: string) => {
     setPage(p);
     setSelectedWO(null);
@@ -2001,15 +1995,18 @@ export default function PortalShell() {
   const billingInvoices: any[] = [];
   const { data: selectedBillingInvoiceLookup } = useBillingInvoiceByIdQuery(
     selectedBillingInvoice,
-    isAuthenticated && isManager && Boolean(selectedBillingInvoice),
+    isAuthenticated && page === "billing" && isManager && Boolean(selectedBillingInvoice),
+    currentUser,
   );
   const selectedBillingInvoiceData = selectedBillingInvoiceLookup || null;
   const { data: selectedBillingWorkOrder } = useWorkOrderByIdQuery(
     selectedBillingInvoiceData?.wot,
     isAuthenticated
+      && page === "billing"
       && isManager
       && Boolean(selectedBillingInvoice)
       && Boolean(selectedBillingInvoiceData?.wot),
+    currentUser,
   );
   const billingReadyWorkOrders = useMemo(() => {
     return maskedWorkOrders
@@ -2027,13 +2024,6 @@ export default function PortalShell() {
         - new Date(a.billingReadyAt || a.updatedAt || 0).getTime(),
       );
   }, [maskedWorkOrders]);
-  const staffProfiles = useMemo(
-    () => USERS.filter((profile: any) =>
-      profile.active !== false
-      && ["manager", "dispatcher", "back_office"].includes(profile.role),
-    ),
-    [USERS],
-  );
   const staffWorkRows = useMemo(
     () => {
       const embeddedTodos = maskedWorkOrders
@@ -2051,7 +2041,7 @@ export default function PortalShell() {
         workOrders: maskedWorkOrders,
         todos: embeddedTodos,
         reads: embeddedReads,
-        profiles: staffProfiles,
+        profiles: shellLabels.items,
         readyWorkOrderIds: new Set(billingReadyWorkOrders.map((workOrder: any) => workOrder.id)),
         currentUserId: currentUser?.id || "",
       });
@@ -2060,7 +2050,7 @@ export default function PortalShell() {
       billingReadyWorkOrders,
       currentUser?.id,
       maskedWorkOrders,
-      staffProfiles,
+      shellLabels.items,
     ],
   );
   const dashboardWorkOrders = useMemo(() => {
@@ -2076,37 +2066,21 @@ export default function PortalShell() {
       hasUnreadNotes: unreadIds.has(workOrder.id),
     }));
   }, [maskedWorkOrders, staffWorkRows]);
-  const staffUnreadCount = useMemo(
-    () => navigationSummary?.staffUnreadCount
-      ?? staffWorkRows.filter(row => row.isUnread).length,
-    [navigationSummary?.staffUnreadCount, staffWorkRows],
-  );
-  const staffMyTodoCount = useMemo(
-    () => navigationSummary?.myTodoCount
-      ?? staffWorkRows.filter(row => row.isMyTodo).length,
-    [navigationSummary?.myTodoCount, staffWorkRows],
-  );
+  const staffUnreadCount = navigationSummary?.staffUnreadCount ?? null;
+  const staffMyTodoCount = navigationSummary?.myTodoCount ?? null;
   const selectedStaffTodo = useMemo(
     () => woData?.staffTodo || null,
     [woData?.staffTodo],
   );
   const selectedStaffTodoOwner = useMemo(
     () => selectedStaffTodo
-      ? staffProfiles.find(profile => profile.id === selectedStaffTodo.ownerId) || null
+      ? shellLabels.items.find(profile => profile.id === selectedStaffTodo.ownerId) || null
       : null,
-    [selectedStaffTodo, staffProfiles],
+    [selectedStaffTodo, shellLabels.items],
   );
-  const loadBillingInvoiceForExport = async (invoice: any) => {
-    const payload = await billingFetch(
-      `/api/billing-invoices?invoiceId=${encodeURIComponent(invoice.id)}`,
-    );
-    const exportInvoice = payload.invoice;
-    if (!exportInvoice) throw new Error("Billing invoice could not be reloaded");
-
+  const loadBillingInvoiceForExport = async (invoice: { id: string }, purpose: "pdf" | "csv" = "pdf") => {
+    const exportInvoice = await loadCompleteInvoice(invoice.id, purpose, true);
     assertStaffInvoiceIntegrity(exportInvoice);
-    qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) =>
-      (items || []).map(item => item.id === exportInvoice.id ? exportInvoice : item),
-    );
     return exportInvoice;
   };
   const doDownloadBillingInvoice = async (invoice: any) => {
@@ -2122,6 +2096,7 @@ export default function PortalShell() {
       );
       const { triggerBlobDownload, generateStaffInvoicePDFBlob, loadLogoDataUrl } = await import("../lib/invoicePdf");
       const logoDataUrl = await loadLogoDataUrl();
+      loadCompleteInvoice.assertCurrent();
       const blob = generateStaffInvoicePDFBlob({
         num: exportInvoice.num,
         documentKind: exportInvoice.documentKind || "invoice",
@@ -2141,16 +2116,17 @@ export default function PortalShell() {
       triggerBlobDownload(blob, `${documentLabel}-${exportInvoice.num}-${externalWorkOrderId || "Standalone"}.pdf`);
       fire(`${documentLabel === "Capital-Quote" ? "Capital quote" : "Invoice"} ${exportInvoice.num} downloaded`);
     } catch (e: any) {
-      fire(`Download failed: ${e.message || e}`);
+      fire(`Download failed: ${safeErrorMessage(e)}`);
     }
   };
   const doDownloadBillingInvoiceCsv = async (invoice: any) => {
     try {
-      const exportInvoice = await loadBillingInvoiceForExport(invoice);
+      const exportInvoice = await loadBillingInvoiceForExport(invoice, "csv");
       if (exportInvoice.documentKind === "capital_quote") {
         throw new Error("Capital quotes cannot use the SaasAnt customer-invoice format");
       }
       const { downloadStaffInvoiceCsv } = await import("../lib/invoiceCsv");
+      loadCompleteInvoice.assertCurrent();
       downloadStaffInvoiceCsv({
         ...exportInvoice,
         externalWorkOrderId: canonicalSevenElevenWorkOrderId(
@@ -2161,19 +2137,27 @@ export default function PortalShell() {
       });
       fire(`Invoice ${exportInvoice.num} SaasAnt CSV downloaded`);
     } catch (e: any) {
-      fire(`CSV download failed: ${e.message || e}`);
+      fire(`CSV download failed: ${safeErrorMessage(e)}`);
     }
   };
   const doDeleteBillingInvoice = async (invoice: any) => {
     try {
-      await billingFetch(`/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`, { method: "DELETE" });
+      const key = `${currentUser?.id}:${invoice.id}`;
+      const attempt = billingDeleteAttempts.current.get(key) || createStaffFinancialAttempt();
+      billingDeleteAttempts.current.set(key, attempt);
+      const snapshot = captureStaffInvoiceSnapshot(invoice);
+      const command = attempt.delete({ expectedInvoiceVersion: snapshot.expectedInvoiceVersion,
+        expectedAssignmentVersion: snapshot.expectedAssignmentVersion, expectedWorkflowCycle: snapshot.expectedWorkflowCycle });
+      await billingFetch(`/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`, {
+        method: "DELETE", body: JSON.stringify(command),
+      });
+      attempt.confirmed();
+      billingDeleteAttempts.current.delete(key);
       setSelectedBillingInvoice(null);
-      qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
-      qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
-      qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
+      await refreshBillingMutation(invoice.id, invoice.wot);
       fire(`Invoice #${invoice.num} deleted`);
     } catch (e: any) {
-      fire(`Delete failed: ${e.message || e}`);
+      fire(`Delete failed: ${safeErrorMessage(e)}`);
     }
   };
   const doMarkBillingInvoiceBilled = async (invoice: any) => {
@@ -2188,20 +2172,12 @@ export default function PortalShell() {
       qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) =>
         (items || []).map(item => item.id === invoice.id ? payload.invoice : item),
       );
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY }),
-        qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY }),
-        qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY }),
-        qc.invalidateQueries({ queryKey: INVOICES_KEY }),
-        qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
-      ]);
+      await refreshBillingMutation(invoice.id, invoice.wot, true);
       fire(payload.finalization?.pendingCapitalCompletion
         ? `Capital quote #${invoice.num} submitted to 7-Eleven; work remains open pending completion`
         : `Invoice #${invoice.num} sent to 7-Eleven; work order closed`);
     } catch (e: any) {
-      fire(`Billing update failed: ${e.message || e}`);
+      fire(`Billing update failed: ${safeErrorMessage(e)}`);
       throw e;
     }
   };
@@ -2214,30 +2190,31 @@ export default function PortalShell() {
           body: JSON.stringify({ action: "mark_ready" }),
         },
       );
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY }),
-        qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY }),
-        qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY }),
-      ]);
+      await refreshBillingMutation(invoice.id, invoice.wot);
       fire(`${invoice.documentKind === "capital_quote" ? "Capital quote" : "Invoice"} #${invoice.num} is ready for 7-Eleven`);
       return payload.invoice;
     } catch (e: any) {
-      fire(`Ready-for-7-Eleven update failed: ${e.message || e}`);
+      fire(`Ready-for-7-Eleven update failed: ${safeErrorMessage(e)}`);
       throw e;
     }
   };
-  const doConvertQuoteToBillingInvoice = async (payload: Record<string, unknown>) => {
+  const doConvertQuoteToBillingInvoice = async (payload: Record<string, unknown>, isFormCurrent: () => boolean = () => true, onAccepted?: () => void) => {
+    const isSessionCurrent = captureInvoiceUiSession();
+    const isCurrent = () => isSessionCurrent() && isFormCurrent();
+    if (!isCurrent()) return;
     const result = await billingFetch("/api/billing-invoices", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     const invoice = result.invoice;
+    if (!isCurrent()) return invoice;
+    onAccepted?.();
     qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
       if (!invoice?.id) return items || [];
       return [invoice, ...(items || []).filter((item) => item.id !== invoice.id)];
     });
-    await qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
-    await qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
+    await refreshBillingMutation(invoice?.id, invoice?.wot);
+    if (!isCurrent()) return invoice;
     fire(`Invoice #${invoice?.num || ""} draft created`);
     if (invoice?.id) {
       setSelectedWO(null);
@@ -2283,15 +2260,13 @@ export default function PortalShell() {
     setModal("createBillingInvoice");
     return true;
   };
-  const refreshStaffWork = async () => {
-    await Promise.all([
-      qc.invalidateQueries({ queryKey: STAFF_WORK_TODOS_KEY }),
-      qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }),
-      qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-      qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
-      qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
-    ]);
-  };
+  const refreshStaffWork = useCallback(async (workOrderId?: string) => {
+    if (!currentUser) return;
+    await invalidatePortalPlan(qc, currentUser, { refreshIdentity: false, targets: [
+      { family: "staff_todos" }, { family: "staff_reads" }, { family: "work_detail", id: workOrderId },
+      { family: "work_pages", subset: "staff" }, { family: "work_counts", subset: "staff" }, { family: "navigation" },
+    ] }, isPortalVisible());
+  }, [currentUser, qc]);
   const runStaffWorkAction = async (
     workOrderId: string,
     action: () => Promise<unknown>,
@@ -2300,10 +2275,10 @@ export default function PortalShell() {
     setStaffWorkBusyId(workOrderId);
     try {
       await action();
-      await refreshStaffWork();
+      await refreshStaffWork(workOrderId);
       fire(successMessage);
     } catch (error: any) {
-      fire(`My Work update failed: ${error.message || error}`);
+      fire(`My Work update failed: ${safeErrorMessage(error)}`);
     } finally {
       setStaffWorkBusyId(null);
     }
@@ -2334,7 +2309,7 @@ export default function PortalShell() {
   };
 
   useEffect(() => {
-    if (!isManager || !selectedWO || !woData) return;
+    if (!selectedWorkOrderBeingRead || !isManager || !selectedWO || !woData) return;
     const latestNotificationAt = latestContractorActivityAt(woData);
     if (!latestNotificationAt) return;
 
@@ -2349,14 +2324,9 @@ export default function PortalShell() {
     const workOrderId = selectedWO;
     staffReadInFlight.current.add(workOrderId);
     void markStaffWorkOrderRead(workOrderId, latestNotificationAt)
-      .then(() => Promise.all([
-        qc.invalidateQueries({ queryKey: STAFF_NOTIFICATION_READS_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
-        qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
-      ]))
+      .then(() => refreshStaffWork(workOrderId))
       .catch((error: any) => {
-        fire(`Could not mark update read: ${error.message || error}`);
+        fire(`Could not mark update read: ${safeErrorMessage(error)}`);
       })
       .finally(() => staffReadInFlight.current.delete(workOrderId));
   }, [
@@ -2365,29 +2335,10 @@ export default function PortalShell() {
     qc,
     selectedWO,
     woData,
+    refreshStaffWork,
+    selectedWorkOrderBeingRead,
   ]);
-  const getUser = (id: string) => USERS.find(u => u.id === id);
-  const contractorsOnly = useMemo(
-    () => USERS.filter(u => u.role === "contractor"),
-    [USERS]
-  );
-  const assignableContractors = useMemo(
-    () => contractorsOnly.filter((contractor: any) =>
-      contractor.isAssignable !== false,
-    ),
-    [contractorsOnly],
-  );
-  const reassignContractorOptions = useMemo(() => {
-    const q = reassignSearch.trim().toLowerCase();
-    if (!q) return assignableContractors;
-    return assignableContractors.filter((c: any) =>
-      [c.name, c.company, c.territory, ...(c.trades || [])]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [assignableContractors, reassignSearch]);
+  const getUser = shellLabels.getUser;
   const myWOs = useMemo(
     () => currentUser?.role === "contractor"
       ? maskedWorkOrders.filter((w: any) =>
@@ -2421,28 +2372,15 @@ export default function PortalShell() {
     [myWOs, search, filterC, filterP, filterStatus]
   );
   const statusCounts = useMemo(() => {
-    const localOpenCount = workOrders.filter(w => activeStatuses.includes(w.status)).length;
     const localClosed = workOrders.filter(w => w.status === "closed");
     return {
-      openCount: navigationSummary?.openCount ?? localOpenCount,
-      p1Unassigned: navigationSummary?.p1UnassignedCount
-        ?? workOrders.filter(w => w.priority === "p1" && w.status === "unassigned").length,
-      capitalCount: navigationSummary?.capitalCount
-        ?? workOrders.filter(w =>
-          (w.isCapital || ["capital", "pending_capital_completion"].includes(w.status))
-          && w.status !== "closed",
-        ).length,
-      pendAppr: navigationSummary?.pendingApprovalCount
-        ?? workOrders.filter(w => w.status === "pending_approval").length,
+      openCount: navigationSummary?.openCount ?? null,
+      p1Unassigned: navigationSummary?.p1UnassignedCount ?? null,
+      capitalCount: navigationSummary?.capitalCount ?? null,
+      pendAppr: navigationSummary?.pendingApprovalCount ?? null,
       closedWOs: localClosed,
-      historyCount: navigationSummary?.historyCount ?? localClosed.length,
-      slaBreached: navigationSummary?.slaBreachedCount ?? workOrders.filter(w => {
-        if (!activeStatuses.includes(w.status)) return false;
-        const s2 = computeSlaState(w.responseBreachAt, w.resolutionBreachAt, w.startTimeRaw);
-        if (s2) return s2.responseBreached || s2.resolutionBreached;
-        const s = slaRemaining(w);
-        return s && s.remainingHours <= 0;
-      }).length,
+      historyCount: navigationSummary?.historyCount ?? null,
+      slaBreached: navigationSummary?.slaBreachedCount ?? null,
     };
   }, [navigationSummary, workOrders]);
   const {
@@ -2452,6 +2390,7 @@ export default function PortalShell() {
   // Realtime subscription propagates the same change to other clients within ~200ms.
 
   const doCreateWO = async (newWO: any) => {
+    if (!currentUser?.id || currentUser.active !== true) return { ok: false, error: { msg: "Sign in with an active account to create a work order." } };
     // WOT# is the ONLY required field. Everything else is optional with
     // sensible defaults - manual intake must never be blocked on data we
     // don't have yet.
@@ -2476,12 +2415,19 @@ export default function PortalShell() {
         return { ok: false, error: { msg: `${dbDup.id} already exists — open it instead?`, openWoId: dbDup.id } };
       }
     } catch (e: any) {
-      return { ok: false, error: { msg: `Dedup check failed: ${e?.message || e}` } };
+      return { ok: false, error: { msg: `Dedup check failed: ${safeErrorMessage(e)}` } };
     }
     // Assign-on-create: blank -> Unassigned; a contractor id -> Assigned.
     const contractor = newWO.assign || null;
     const status = contractor ? "assigned" : "unassigned";
-    const contractorName = contractor ? getUser(contractor)?.name : null;
+    let contractorName: string | null = null;
+    if (contractor) {
+      try {
+        const selected = await loadDirectorySelection("assignable_contractors", contractor);
+        if (!selected) return { ok: false, error: { msg: "Choose an available contractor." } };
+        contractorName = selected.name;
+      } catch (error) { return { ok: false, error: { msg: safeErrorMessage(error) } }; }
+    }
     const dispatchedAt = contractor ? new Date().toISOString() : null;
     // Priority defaults to P4 (standard) when left blank. Text fields default
     // to "" so the UI renders cleanly; a missing incident remains null.
@@ -2519,13 +2465,16 @@ export default function PortalShell() {
     }
     setWorkOrders(prev => [{ ...wo, age: "now", activities: optimisticActivities, photos: [] }, ...prev]);
     try {
-      await insertWorkOrder(wo, createdText, "System");
-      if (assignedText) {
-        await insertActivity(wot, "System", assignedText, "system", {
-          staffOnly: true,
-          eventKey: "work_order_assignment",
-        });
+      let attempt = workOrderCreationAttempts.current.get(wot);
+      if (attempt && !attempt.matches(wo)) throw new AssignmentCommandError("PT409",
+        "An earlier creation is unconfirmed. Reopen the work order or retry the unchanged form before editing it.");
+      if (!attempt) {
+        attempt = createWorkOrderCreationAttempt(wo);
+        workOrderCreationAttempts.current.set(wot, attempt);
       }
+      await attempt.run((captured, operationId, startedAt) => insertWorkOrder(captured, createdText, "System", operationId, startedAt));
+      workOrderCreationAttempts.current.delete(wot);
+      // Assignment evidence is created inside the atomic create command.
       if (contractor) {
         await notificationFetch("/api/notifications/dispatch", {
           workOrderId: wot,
@@ -2535,18 +2484,19 @@ export default function PortalShell() {
       fire(contractor
         ? `Work order ${wot} created. Assigned to ${contractorName}.`
         : `Work order ${wot} created. Added to Unassigned.`);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
-        qc.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
-        qc.invalidateQueries({ queryKey: PORTAL_NAVIGATION_SUMMARY_KEY }),
-        qc.invalidateQueries({ queryKey: CONTRACTOR_WORKLOAD_SUMMARY_KEY }),
-      ]);
+      if (currentUser) await invalidatePortalPlan(qc, currentUser, { refreshIdentity: false, targets: [
+        { family: "work_pages" }, { family: "work_counts" }, { family: "work_detail", id: wot },
+        { family: "navigation" }, { family: "directory_workload", id: contractor || undefined },
+      ] }, isPortalVisible());
       return true;
     } catch (e: any) {
       // Roll back the optimistic card so no phantom WO lingers, and surface
       // the failure inline in the modal - never a silent failure.
       setWorkOrders(prev => prev.filter(w => w.id !== wo.id));
-      const msg = String(e?.message || e);
+      if (e instanceof AssignmentCommandError && ["22023", "42501", "23505", "ASSIGNMENT_UNAVAILABLE"].includes(e.code)) {
+        workOrderCreationAttempts.current.delete(wot);
+      }
+      const msg = String(safeErrorMessage(e));
       // The async DB dedup above usually catches this, but a race between
       // the pre-check and the insert can still trip the unique constraint.
       // When that happens we don't know the existing id from the error
@@ -2579,27 +2529,9 @@ export default function PortalShell() {
     }, 800);
   };
 
-  const contractorActiveBadge = useMemo(
-    () => navigationSummary?.contractorActiveCount
-      ?? myWOs.filter(w => activeStatuses.includes(w.status)).length,
-    [myWOs, navigationSummary?.contractorActiveCount],
-  );
-  const contractorInvoiceBadge = useMemo(
-    () => (navigationSummary?.contractorInvoiceCount
-      ?? invoices.filter(i =>
-        i.contractor === (currentUser?.contractorAccountId || currentUser?.id)
-        && (i.state === "submitted" || i.state === "revised" || i.state === "rejected"),
-      ).length) || null,
-    [invoices, currentUser?.contractorAccountId, currentUser?.id, navigationSummary?.contractorInvoiceCount],
-  );
-  const contractorAttentionBadge = useMemo(
-    () => (navigationSummary?.contractorAttentionCount
-      ?? myWOs.reduce(
-        (count: number, wo: any) => count + Number(wo.pendingContractorAttentionCount || 0),
-        0,
-      )) || null,
-    [myWOs, navigationSummary?.contractorAttentionCount],
-  );
+  const contractorActiveBadge = navigationSummary?.contractorActiveCount ?? null;
+  const contractorInvoiceBadge = navigationSummary?.contractorInvoiceCount || null;
+  const contractorAttentionBadge = navigationSummary?.contractorAttentionCount || null;
   const submittedInvoice = useMemo(
     () => invoices.find(i => i.num === submittedInvoiceNum),
     [invoices, submittedInvoiceNum]
@@ -2637,7 +2569,7 @@ export default function PortalShell() {
     const preferred = ["dashboard", "staff_work", "work_orders", "invoices"];
     const items = preferred
       .map(id => sideItems.find(item => item.id === id))
-      .filter(Boolean);
+      .filter((item): item is NonNullable<typeof item> => item != null);
     return items.length ? items : sideItems.slice(0, 4);
   }, [sideItems]);
 
@@ -2649,6 +2581,22 @@ export default function PortalShell() {
     setModal(null);
     setPage("dashboard");
   }, [invoiceController, page]);
+
+  const sensitiveShellIdentity = useRef<string | null>(null);
+  useEffect(() => {
+    const identity = isAuthenticated ? JSON.stringify(directoryScopeKey(currentUser)) : null;
+    if (sensitiveShellIdentity.current === identity) return;
+    sensitiveShellIdentity.current = identity;
+    // Clear transient form memory as well as the separately fenced storage.
+    // Do not reset live query caches or change authentication persistence here.
+    setModal(null); setLogoutConfirmation(false); setLightbox(null); setDrawerOpen(false);
+    setBillingDraftToEdit(null); setBillingSourceToStart(null); setBillingWorkOrderToStart(null);
+    setResumeDraft(null); setNoteText(""); setReassignTarget(""); setRejectWorkOrderReason("");
+    setStartNotesInput(""); setPauseNotesInput(""); setPauseReasonInput(""); setPausePartsList([]);
+    setAssetMakeInput(""); setAssetModelInput(""); setAssetSerialInput(""); setAssetYearInput("");
+    setResolutionInput(""); setResolutionNotesInput(""); setEditWoForm(EMPTY_EDIT_WO);
+    setAdministrativeTransferDirty(false); resetReopenForm(); resetNewInv();
+  }, [currentUser, isAuthenticated, resetNewInv, resetReopenForm]);
 
   // ===============================================================
   //  LOGIN
@@ -2669,6 +2617,7 @@ export default function PortalShell() {
   //  LAYOUT
   // ===============================================================
   return (
+    <DirectoryScopeProvider key={JSON.stringify(directoryScopeKey(currentUser))} actor={currentUser}>
     <div className="app-root" style={{ display: "flex", minHeight: "100vh", fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 13, color: T.ink, background: T.bg, position: "relative" }}>
       <style>{CSS}</style>
       <ClientDiagnostics portalView={page} />
@@ -3028,7 +2977,7 @@ export default function PortalShell() {
                   style={{ width: 40, height: 40, padding: 0, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}
                 >
                   <Ico d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" size={17} color={T.ink} />
-                  {staffUnreadCount > 0 && (
+                  {staffUnreadCount !== null && staffUnreadCount > 0 && (
                     <span style={{ position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 10, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 }}>
                       {staffUnreadCount > 99 ? "99+" : staffUnreadCount}
                     </span>
@@ -3085,7 +3034,7 @@ export default function PortalShell() {
                   style={{ width: 40, height: 40, borderRadius: 10, border: `1px solid ${T.border}`, background: T.bgWarm, position: "relative", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
                 >
                   <Ico d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" size={17} color={T.ink} />
-                  {staffUnreadCount > 0 && (
+                  {staffUnreadCount !== null && staffUnreadCount > 0 && (
                     <span style={{ position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 10, background: T.accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 }}>
                       {staffUnreadCount > 99 ? "99+" : staffUnreadCount}
                     </span>
@@ -3145,7 +3094,6 @@ export default function PortalShell() {
             doAutoAssign={doAutoAssign}
             invoices={invoices}
             currentUser={currentUser}
-            staffProfiles={staffProfiles}
             getUser={getUser}
             setSelectedWO={setSelectedWO}
             setAiNote={setAiNote}
@@ -3155,15 +3103,26 @@ export default function PortalShell() {
             woParts={woParts}
           />
 
+          {page === "staff_work" && isManager && !invoiceController && (
+            <ReceivingDispatchQueue profile={currentUser} onOpenWorkOrder={(workOrderId: string) => {
+              setWorkOrderReturnPage("staff_work");
+              setSelectedWO(workOrderId);
+              setAiNote(null);
+              setPage("wo_detail");
+            }} />
+          )}
+
           {isManager && !invoiceController && (
             <StaffWorkHub
               page={page}
               rows={staffWorkRows}
               filter={staffWorkFilter}
               setFilter={setStaffWorkFilter}
-              staffProfiles={staffProfiles}
-              currentUserId={currentUser?.id || ""}
-              summaryCounts={navigationSummary ? {
+                currentUserId={currentUser?.id || ""}
+              summaryCounts={typeof navigationSummary?.staffWorkCount === "number"
+                && typeof navigationSummary.staffUnreadCount === "number"
+                && typeof navigationSummary.myTodoCount === "number"
+                && typeof navigationSummary.readyToBillCount === "number" ? {
                 all: navigationSummary.staffWorkCount,
                 unread: navigationSummary.staffUnreadCount,
                 todo: navigationSummary.myTodoCount,
@@ -3201,13 +3160,13 @@ export default function PortalShell() {
             isManager={isManager}
             filterC={filterC}
             setFilterC={setFilterC}
-            contractorsOnly={contractorsOnly}
             filterP={filterP}
             setFilterP={setFilterP}
             filterStatus={filterStatus}
             setFilterStatus={setFilterStatus}
             filteredWOs={filteredWOs}
             slaLabel={slaLabel}
+            slaNow={slaTick}
             setSelectedWO={setSelectedWO}
             setAiNote={setAiNote}
             setPage={setPage}
@@ -3220,11 +3179,12 @@ export default function PortalShell() {
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} currentUser={currentUser} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
 
-          <SubDispatchView page={page} currentUser={currentUser} USERS={USERS} technicians={technicians} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} doAssignPortalTechnician={doAssignPortalTechnician} getUser={getUser} loadingStates={loadingStates} />
+          <SubDispatchView page={page} currentUser={currentUser} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} doAssign={doAssign} doReassign={doReassign} doSetTechnician={doSetTechnician} doAssignPortalTechnician={doAssignPortalTechnician} getUser={getUser} loadingStates={loadingStates} />
 
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} doBatchReviewInvoices={doBatchReviewInvoices} onEditRejected={openCreateInvoice} />
 
           <InvoiceDetail
+            key={`${currentUser.id}:${selectedInvoice || ""}`}
             page={page}
             selectedInvoice={selectedInvoice}
             invoices={invoiceDetailRows}
@@ -3289,28 +3249,33 @@ export default function PortalShell() {
 
           {isManager && !invoiceController && page === "billing" && selectedBillingInvoice && (
             <BillingInvoiceDetail
+              key={`${currentUser.id}:${selectedBillingInvoice || ""}`}
               invoice={selectedBillingInvoiceData}
               workOrder={selectedBillingInvoiceData?.wot
                 ? selectedBillingWorkOrder
                 : null}
-              invoiceLines={selectedBillingInvoiceData?.lines || []}
               onBack={() => {
                 if (!returnToWorkflowWorkOrder()) setSelectedBillingInvoice(null);
               }}
               backLabel={workflowReturn?.workOrderId
                 ? `Back to ${workflowReturn.workOrderId}`
                 : "Back to billing"}
-              onEdit={() => {
+              onEdit={async () => {
                 if (
                   !selectedBillingInvoiceData
                   || !["draft", "submitted"].includes(selectedBillingInvoiceData.state)
                   || selectedBillingInvoiceData.qboInvoiceId
                   || selectedBillingInvoiceData.qboSyncedAt
                 ) return;
-                setBillingDraftToEdit(selectedBillingInvoiceData);
-                setBillingSourceToStart(null);
-                setBillingWorkOrderToStart(null);
-                setModal("createBillingInvoice");
+                const sequence = ++invoiceOpenSequence.current;
+                try {
+                  const complete = await loadCompleteInvoice(selectedBillingInvoiceData.id, "edit", true);
+                  if (sequence !== invoiceOpenSequence.current) return;
+                  setBillingDraftToEdit(complete);
+                  setBillingSourceToStart(null);
+                  setBillingWorkOrderToStart(null);
+                  setModal("createBillingInvoice");
+                } catch (error) { fire(`Invoice could not be opened: ${safeErrorMessage(error)}`); }
               }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onDownloadCsv={() => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv(selectedBillingInvoiceData)}
@@ -3326,11 +3291,6 @@ export default function PortalShell() {
           <ContractorList
             page={page}
             isManager={isManager}
-            contractorsOnly={assignableContractors}
-            technicians={technicians}
-            users={USERS}
-            workOrders={workOrders}
-            activeStatuses={activeStatuses}
             nav={nav}
             setFilterC={setFilterC}
             fire={fire}
@@ -3339,7 +3299,6 @@ export default function PortalShell() {
           {isManager && !invoiceController && (
             <StaffContractorPreview
               page={page}
-              contractors={assignableContractors}
               onOpenWorkOrder={(workOrderId: string) => {
                 setWorkOrderReturnPage("contractor_preview");
                 setSelectedInvoice(null);
@@ -3370,7 +3329,6 @@ export default function PortalShell() {
             setHistReso={setHistReso}
             invoices={invoices}
             closedWOs={closedWOs}
-            contractorsOnly={contractorsOnly}
             setSelectedWO={setSelectedWO}
             setAiNote={setAiNote}
             getUser={getUser}
@@ -3401,14 +3359,13 @@ export default function PortalShell() {
           )}
 
           <WorkOrderDetail
+            key={`${currentUser.id}:${selectedWO || ""}`}
             page={page}
             selectedWO={selectedWO}
             woData={woData}
             workOrders={maskedWorkOrders}
             invoices={invoices}
             billingInvoices={billingInvoices}
-            technicians={technicians}
-            USERS={USERS}
             modal={modal}
             isManager={isManager}
             setSelectedWO={setSelectedWO}
@@ -3423,7 +3380,6 @@ export default function PortalShell() {
             slaRemaining={slaRemaining}
             fmt={fmt}
             getUser={getUser}
-            contractorsOnly={assignableContractors}
             doAssign={doAssign}
             doStraightToBilling={handleStraightToBilling}
             setReassignTarget={setReassignTarget}
@@ -3444,9 +3400,10 @@ export default function PortalShell() {
             doRejectInvoice={doRejectInvoice}
             doRetractInvoiceRejection={doRetractInvoiceRejection}
             openCreateInvoice={openCreateInvoice}
-            onConvertQuote={async (payload: Record<string, unknown>) => {
+            onConvertQuote={async (payload: Record<string, unknown>, isCurrent: () => boolean = () => true, onAccepted?: () => void) => {
+              if (!isCurrent()) return;
               if (woData?.id) rememberWorkOrderReturn(woData.id);
-              return doConvertQuoteToBillingInvoice(payload);
+              return doConvertQuoteToBillingInvoice(payload, isCurrent, onAccepted);
             }}
             pdfBusy={pdfBusy}
             activityMenuId={activityMenuId}
@@ -3467,6 +3424,11 @@ export default function PortalShell() {
             setLightbox={setLightbox}
             doAddPhotos={doAddPhotos}
             doRemovePhoto={doRemovePhoto}
+            photoUploadItems={photoUploadItems[woData?.id || ""] || []}
+            retryPhotoUploads={(operationIds?: readonly string[]) => retryPhotoUploads(woData.id, operationIds)}
+            cancelPhotoUploads={(operationIds?: readonly string[]) => cancelPhotoUploads(woData.id, operationIds)}
+            photoDeleteError={photoDeleteErrors[woData?.id || ""] || ""}
+            retryPhotoDeletion={() => retryPhotoDeletion(woData.id)}
             doDeleteActivity={doDeleteActivity}
             doSetEta={doSetEta}
             doStartWork={doStartWork}
@@ -3492,7 +3454,6 @@ export default function PortalShell() {
             doSetP1PartOrderStatus={doSetP1PartOrderStatus}
             staffTodo={selectedStaffTodo}
             staffTodoOwner={selectedStaffTodoOwner}
-            staffProfiles={staffProfiles}
             staffMyTodoCount={staffMyTodoCount}
             staffTodoBusy={staffWorkBusyId === woData?.id}
             onAddStaffTodo={(workOrderId: string) => void runStaffWorkAction(
@@ -3511,6 +3472,7 @@ export default function PortalShell() {
               "To-do owner updated",
             )}
             onLoadMoreActivities={workOrderDetailsQuery.loadMoreActivities}
+            paginationError={workOrderDetailsQuery.paginationError}
             onLoadMorePhotos={workOrderDetailsQuery.loadMorePhotos}
             onLoadMoreVisits={workOrderDetailsQuery.loadMoreVisits}
             loadingMoreActivities={workOrderDetailsQuery.loadingActivities}
@@ -3528,7 +3490,6 @@ export default function PortalShell() {
         <WorkOrderCreateForm
           onClose={() => setModal(null)}
           doCreateWO={doCreateWO}
-          contractorsOnly={assignableContractors}
           setSelectedWO={setSelectedWO}
           setPage={setPage}
           setAiNote={setAiNote}
@@ -3543,7 +3504,7 @@ export default function PortalShell() {
         />
       )}
       {modal === "setEta" && woData && (
-        <Modal onClose={() => setModal(null)} title="Set ETA" width={400}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Set ETA" width={400}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>When will you arrive at Store #{woData.store}?</div>
           <div style={{ display: "grid", gap: 14 }}>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -3552,7 +3513,7 @@ export default function PortalShell() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
               setModalLoading(true);
@@ -3570,7 +3531,8 @@ export default function PortalShell() {
                 t,
                 timezoneForWorkOrder(woData),
               );
-              await doSetEta(woData.id, eta); setModal(null);
+              const saved = await doSetEta(woData.id, eta);
+              if (saved) setModal(null);
               } finally {
                 setModalLoading(false);
               }
@@ -3584,7 +3546,7 @@ export default function PortalShell() {
       )}
 
       {modal === "reassign" && woData && (
-        <Modal onClose={() => setModal(null)} title="Reassign work order" width={420}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Reassign work order" width={420}>
           <div className="reassign-copy" style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
             Currently assigned to <span style={{ color: T.ink, fontWeight: 600 }}>{woData.contractor ? (getUser(woData.contractor)?.name || "-") : "Unassigned"}</span>. Pick a new contractor - the original SLA deadline is preserved.
           </div>
@@ -3595,112 +3557,22 @@ export default function PortalShell() {
           </div>
           <div className="reassign-picker">
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 8 }}>New contractor</div>
-            {assignableContractors.length >= 10 && (
-              <div className="reassign-search-wrap" style={{ position: "relative", marginBottom: 10 }}>
-                <input
-                  className="reassign-search"
-                  value={reassignSearch}
-                  onChange={(e: any) => setReassignSearch(e.target.value)}
-                  placeholder="Search contractor, company, territory..."
-                  autoComplete="off"
-                  style={{
-                    width: "100%",
-                    padding: "11px 36px 11px 13px",
-                    borderRadius: 12,
-                    border: `1px solid ${T.border}`,
-                    background: T.surfaceSoft,
-                    color: T.ink,
-                    fontSize: 13,
-                    fontFamily: "inherit",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-                {reassignSearch && (
-                  <button
-                    type="button"
-                    onClick={() => setReassignSearch("")}
-                    aria-label="Clear contractor search"
-                    style={{
-                      position: "absolute",
-                      right: 8,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      width: 28,
-                      height: 28,
-                      borderRadius: "50%",
-                      border: "none",
-                      background: T.bgWarm,
-                      color: T.muted,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                    }}
-                  >
-                    x
-                  </button>
-                )}
-              </div>
-              )}
-            <div className="reassign-options" style={{ display: "grid", gap: 8, maxHeight: 280, overflowY: "auto", overflowX: "hidden", paddingRight: 2 }}>
-              {reassignContractorOptions.map(c => {
-                const selected = reassignTarget === c.id;
-                const current = c.id === woData.contractor;
-                return (
-                  <button
-                    className="reassign-option"
-                    key={c.id}
-                    type="button"
-                    onClick={() => {
-                      if (!current) setReassignTarget(c.id);
-                    }}
-                    disabled={current}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      border: `1px solid ${selected ? T.accent : T.borderSoft}`,
-                      background: selected ? T.accentSoft : current ? T.bgWarm : T.surface,
-                      cursor: current ? "default" : "pointer",
-                      opacity: current ? 0.62 : 1,
-                      fontFamily: "inherit",
-                      boxShadow: selected ? `0 0 0 2px ${T.accent}18` : "0 1px 2px rgba(31,30,28,0.03)",
-                    }}
-                  >
-                    <div className="reassign-option-row" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                      <div className="reassign-option-main" style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: current ? T.subtle : T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-                        <div style={{ fontSize: 11, color: T.muted, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {[c.company, c.territory].filter(Boolean).join(" · ") || "Contractor"}
-                        </div>
-                      </div>
-                      <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "3px 8px", color: current ? T.subtle : selected ? "#fff" : T.accent, background: current ? T.borderSoft : selected ? T.accent : T.accentSoft }}>
-                        {current ? "Current" : selected ? "Selected" : "Choose"}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-              {reassignContractorOptions.length === 0 && (
-                <div style={{
-                  padding: "18px 14px",
-                  borderRadius: 12,
-                  border: `1px dashed ${T.border}`,
-                  background: T.surfaceSoft,
-                  color: T.subtle,
-                  fontSize: 12,
-                  textAlign: "center",
-                }}>
-                  No contractors match your search
-                </div>
-              )}
-            </div>
+            <DirectorySelect aria-label="New contractor" domain="assignable_contractors" value={reassignTarget} emptyLabel="Choose a contractor…" disabled={modalLoading}
+              excludedIds={[woData.contractor]} onChange={event => setReassignTarget(event.target.value)} />
           </div>
+          {isManager && !invoiceController && currentUser?.active !== false && reassignTarget && reassignTarget !== woData.contractor && (
+            <AdministrativeTransferAction key={`${woData.id}-${reassignTarget}`} contractorId={reassignTarget} disabled={modalLoading} onDirtyChange={setAdministrativeTransferDirty}
+              onTransfer={async (reason, confirmed) => {
+                setModalLoading(true);
+                try {
+                  const changed = await doAdministrativeTransfer(woData.id, reassignTarget, reason, confirmed);
+                  if (changed) { setModal(null); setReassignTarget(""); }
+                  return changed;
+                } finally { setModalLoading(false); }
+              }} />
+          )}
           <div className="reassign-actions" style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button disabled={modalLoading} onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
                 if (!reassignTarget || reassignTarget === woData.contractor) return;
@@ -3724,7 +3596,7 @@ export default function PortalShell() {
       )}
 
       {modal === "unassign" && woData && (
-        <Modal onClose={() => setModal(null)} title="Unassign work order" width={420}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Unassign work order" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             {isCapitalLifecycleStage(woData)
               ? <>Unassign this capital work order? It will remain in its current <span style={{ color: T.violet, fontWeight: 600 }}>Capital</span> stage with no contractor.</>
@@ -3737,8 +3609,19 @@ export default function PortalShell() {
               ? <>The current contractor will lose portal access and receive an automatic removal email. The capital workflow and staff quote remain attached; resolve any open contractor invoices first.</>
               : <>The current contractor will lose portal access and receive an automatic removal email. If invoicing may still be needed, use <strong>Duplicate for reassignment</strong> instead.</>}
           </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+          {isManager && !invoiceController && currentUser?.active !== false && (
+            <AdministrativeTransferAction key={`${woData.id}-unassign`} contractorId={null} disabled={modalLoading} onDirtyChange={setAdministrativeTransferDirty}
+              onTransfer={async (reason, confirmed) => {
+                setModalLoading(true);
+                try {
+                  const changed = await doAdministrativeTransfer(woData.id, null, reason, confirmed);
+                  if (changed) setModal(null);
+                  return changed;
+                } finally { setModalLoading(false); }
+              }} />
+          )}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+            <button disabled={modalLoading} onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
                 setModalLoading(true);
@@ -3757,13 +3640,10 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "rejectUnassignedWO" && woData && (
+      {(modal === "rejectUnassignedWO" || modal === "deleteWO") && woData && (
         <Modal
-          onClose={() => {
-            if (modalLoading) return;
-            setRejectWorkOrderReason("");
-            setModal(null);
-          }}
+          onRequestClose={shellDismissal.requestClose}
+          dismissDisabled={modalLoading}
           title="Reject work order?"
           width={480}
           closeOnBackdrop={!modalLoading}
@@ -3772,10 +3652,10 @@ export default function PortalShell() {
             Reject <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>{woData.id}</span>{" "}
             <CopyWorkOrderButton value={woData.id} /> before assignment? It will leave every active portal queue and no contractor will be notified.
             <br /><br />
-            This is a recoverable soft removal with a staff-only audit record. A later intake email for the same work-order number remains archived until an admin restores it.
+            Only untouched, unassigned work can be removed. History is retained with a staff-only audit record. A later intake email for the same work-order number remains archived; any historical correction requires a separately approved recovery process.
           </div>
           <div style={{ marginTop: 18 }}>
-            <Field label="Reason (required)">
+            <Field label="Reason (required)" required>
               <TA
                 rows={3}
                 maxLength={500}
@@ -3792,10 +3672,7 @@ export default function PortalShell() {
           <div style={{ display: "flex", gap: 8, marginTop: 20, justifyContent: "flex-end" }}>
             <button
               type="button"
-              onClick={() => {
-                setRejectWorkOrderReason("");
-                setModal(null);
-              }}
+              onClick={() => shellDismissal.requestClose("cancel_button")}
               disabled={modalLoading}
               className="btn-soft"
             >Cancel</button>
@@ -3845,7 +3722,7 @@ export default function PortalShell() {
 
       {modal === "duplicateForReassignment" && woData && (
         <Modal
-          onClose={() => { if (!modalLoading) setModal(null); }}
+          onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading}
           title="Duplicate for reassignment?"
           width={500}
           closeOnBackdrop={!modalLoading}
@@ -3861,7 +3738,7 @@ export default function PortalShell() {
             The current contractor will be emailed automatically to stop field work and use the original record only for approved incurred-cost invoicing.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button type="button" onClick={() => setModal(null)} disabled={modalLoading} className="btn-soft">Cancel</button>
+            <button type="button" onClick={() => shellDismissal.requestClose("cancel_button")} disabled={modalLoading} className="btn-soft">Cancel</button>
             <button
               type="button"
               onClick={async () => {
@@ -3881,40 +3758,15 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "deleteWO" && woData && (
-        <Modal onClose={() => setModal(null)} title="Delete work order?" width={440}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-            This will remove WOT <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>{woData.id}</span>{" "}
-            <CopyWorkOrderButton value={woData.id} /> from all views. This action can be undone by an admin via the database.
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
-            <button
-              onClick={async () => {
-                setModalLoading(true);
-                try {
-                  await doDeleteWO(woData.id);
-                  setModal(null);
-                } finally {
-                  setModalLoading(false);
-                }
-              }}
-              disabled={modalLoading}
-              style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: modalLoading ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: modalLoading ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}
-            >{modalLoading ? <><BtnSpinner />Deleting...</> : "Delete"}</button>
-          </div>
-        </Modal>
-      )}
-
       {modal === "closeWithoutInvoice" && woData && (
-        <Modal onClose={() => setModal(null)} title="Close without an invoice" width={460}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Close without an invoice" width={460}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             Close <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
             <CopyWorkOrderButton value={woData.id} /> without an invoice? The work order will appear in History immediately and leave the active board after the normal 24-hour closed-job window.
             <br /><br />No invoice, line item, activity, photo, part, or assignment history will be deleted. Any open visit will be closed at the time of this action.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} disabled={modalLoading} className="btn-soft">Cancel</button>
+            <button onClick={() => shellDismissal.requestClose("cancel_button")} disabled={modalLoading} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
                 setModalLoading(true);
@@ -3942,21 +3794,21 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      {modal === "closeReopenedFollowUp" && woData && (
+      {modal === "closeReopenedFollowUp" && woData && followUpCloseSnapshot && (
         <CloseReopenedFollowUpModal
-          key={`${woData.id}:${woData.workflowCycle}:${woData.updatedAt}`}
-          workOrderId={woData.id}
+          key={`${currentUser.id}:${followUpCloseSnapshot.id}`}
+          workOrderId={followUpCloseSnapshot.id}
           onClose={() => setModal(null)}
           onConfirm={async reason => {
-            if (!woData.updatedAt) {
+            if (!followUpCloseSnapshot.updatedAt) {
               fire("Work-order version is missing. Refresh the page before closing this follow-up.");
               return false;
             }
             return doCloseReopenedFollowUp(
-              woData.id,
-              Number(woData.workflowCycle || 0),
-              Number(woData.contractorAssignmentVersion || 0),
-              woData.updatedAt,
+              followUpCloseSnapshot.id,
+              followUpCloseSnapshot.workflowCycle,
+              followUpCloseSnapshot.contractorAssignmentVersion,
+              followUpCloseSnapshot.updatedAt,
               reason,
             );
           }}
@@ -3967,7 +3819,7 @@ export default function PortalShell() {
         const reopenOptions = workOrderReopenOptions(reopenTarget);
         return (
           <Modal
-            onClose={() => { if (!modalLoading) closeReopenModal(); }}
+            onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading}
             closeOnBackdrop={!modalLoading}
             title="Reopen work order"
             width={540}
@@ -4012,7 +3864,7 @@ export default function PortalShell() {
               })}
             </div>
 
-            <Field label="Reason for reopening *">
+            <Field label="Reason for reopening *" required error={reopenError}>
               <TA
                 rows={3}
                 maxLength={WORK_ORDER_REOPEN_REASON_MAX_LENGTH}
@@ -4043,7 +3895,7 @@ export default function PortalShell() {
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={closeReopenModal}
+                onClick={() => shellDismissal.requestClose("cancel_button")}
                 disabled={modalLoading}
                 className="btn-soft"
               >Cancel</button>
@@ -4087,12 +3939,12 @@ export default function PortalShell() {
       })()}
 
       {modal === "deleteActivity" && pendingDelete && (
-        <Modal onClose={() => { setModal(null); setPendingDelete(null); }} title="Delete comment" width={420}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Delete comment" width={420}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             Delete this comment? This cannot be undone.
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => { setModal(null); setPendingDelete(null); }} className="btn-soft">Cancel</button>
+            <button onClick={() => shellDismissal.requestClose("cancel_button")} disabled={modalLoading} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
                 setModalLoading(true);
@@ -4142,12 +3994,9 @@ export default function PortalShell() {
             const fromL = PRIORITY[orig.priority]?.label || orig.priority || "(none)";
             const toL = PRIORITY[editWoForm.priority]?.label || editWoForm.priority;
             entries.push(`Priority changed from ${fromL} to ${toL} by ${currentUser.name}.`);
-            // Recompute SLA breach windows off the existing intake time so the
-            // SLA badge reflects the new priority's deadlines.
-            const startedAt = woData.slaStartedAt ? new Date(woData.slaStartedAt) : new Date();
-            const b = computeSlaBreaches(editWoForm.priority, startedAt);
-            patch.responseBreachAt = b.responseBreachAt?.toISOString() ?? null;
-            patch.resolutionBreachAt = b.resolutionBreachAt?.toISOString() ?? null;
+            // Preserve every stored deadline, including a partially populated
+            // row. This header edit is not an authoritative SLA escalation.
+            Object.assign(patch, priorityEditSlaPatch(woData, editWoForm.priority));
           }
           if (entries.length === 0) { fire("No changes to save"); setModal(null); return; }
           setModalLoading(true);
@@ -4160,7 +4009,7 @@ export default function PortalShell() {
         };
         const set = (k: string) => (e: any) => setEditWoForm((f: any) => ({ ...f, [k]: e.target.value }));
         return (
-          <Modal onClose={() => setModal(null)} title="Edit work order" width={620}>
+          <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Edit work order" width={620}>
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
               Editing <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>{" "}
               <CopyWorkOrderButton value={woData.id} />. Status, contractor assignment, and timestamps have their own actions and aren't edited here. Each change is logged.
@@ -4195,7 +4044,7 @@ export default function PortalShell() {
               <Field label="Description"><TA rows={3} value={editWoForm.description} onChange={set("description")} /></Field>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-              <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+              <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
               <button onClick={saveEdit} disabled={modalLoading} className="btn-primary" style={{ opacity: modalLoading ? 0.7 : 1, cursor: modalLoading ? "default" : "pointer" }}>{modalLoading ? "Saving..." : "Save changes"}</button>
             </div>
           </Modal>
@@ -4203,23 +4052,25 @@ export default function PortalShell() {
       })()}
 
       {modal === "startWork" && woData && (
-        <Modal onClose={() => setModal(null)} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
           <div style={{ display: "grid", gap: 14 }}>
-            <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {woData.assignmentTransferPendingVisit ? (
+              <div role="note" style={{ fontSize: 12, color: T.muted }}>Start a new visit now for the receiving assignment. The previous administratively closed visit is not inherited. Any later actual-time correction requires a reason and audit evidence.</div>
+            ) : <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Arrival date"><DatePickerField value={startDateInput} onChange={setStartDateInput} /></Field>
               <Field label="Arrival time"><TimePickerField value={startTimeInput} onChange={setStartTimeInput} /></Field>
-            </div>
+            </div>}
             <Field label="Initial notes"><TA rows={2} value={startNotesInput} onChange={(e: any) => setStartNotesInput(e.target.value)} placeholder="What are you seeing on site?" /></Field>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
                 setModalLoading(true);
                 try {
-                  await doStartWork(woData.id, startNotesInput);
-                  setModal(null);
+                  const started = await doStartWork(woData.id, startNotesInput);
+                  if (started) setModal(null);
                 } finally {
                   setModalLoading(false);
                 }
@@ -4227,13 +4078,13 @@ export default function PortalShell() {
               disabled={modalLoading}
               className="btn-accent"
               style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />{woData.status === "parts" ? "Resuming..." : "Starting..."}</> : (woData.status === "parts" ? "Resume" : "Start work")}</button>
+            >{modalLoading ? <><BtnSpinner />{woData.status === "parts" ? "Resuming..." : "Starting..."}</> : woData.assignmentTransferPendingVisit ? "Start new visit now" : (woData.status === "parts" ? "Resume" : "Start work")}</button>
           </div>
         </Modal>
       )}
 
       {modal === "pauseWork" && woData && (
-        <Modal onClose={() => setModal(null)} title="Pause work" width={500}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Pause work" width={500}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Why can't the job be completed this trip?</div>
           <div style={{ display: "grid", gap: 14 }}>
             <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => setPauseReasonInput(e.target.value)}>
@@ -4251,7 +4102,7 @@ export default function PortalShell() {
                   <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts on order</div>
                   <button
                     type="button"
-                    onClick={() => setPausePartsList(prev => [...prev, { description: "", partNumber: "", qty: 1, expectedReturnDate: "" }])}
+                    onClick={() => setPausePartsList(prev => [...prev, { uiId: crypto.randomUUID(), description: "", partNumber: "", qty: 1, expectedReturnDate: "" }])}
                     className="btn-soft"
                     style={{ padding: "5px 10px", fontSize: 11 }}
                   >+ Add part</button>
@@ -4263,11 +4114,12 @@ export default function PortalShell() {
                 )}
                 <div style={{ display: "grid", gap: 12 }}>
                   {pausePartsList.map((row, i) => (
-                    <div key={i} style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.warn}22` }}>
+                    <div key={row.uiId} style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.warn}22` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6 }}>Part {i + 1}</div>
                         <button
                           type="button"
+                          aria-label={`Remove part ${i + 1}`}
                           onClick={() => setPausePartsList(prev => prev.filter((_, j) => j !== i))}
                           style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 14, padding: 0 }}
                         >x</button>
@@ -4288,13 +4140,14 @@ export default function PortalShell() {
             <Field label="Notes"><TA rows={2} value={pauseNotesInput} onChange={(e: any) => setPauseNotesInput(e.target.value)} placeholder="Explain what was done so far..." /></Field>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
                 setModalLoading(true);
                 try {
-                  await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput, pausePartsList);
-                  setModal(null);
+                  const paused = await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput,
+                    pausePartsList.map(({ description, partNumber, qty, expectedReturnDate }) => ({ description, partNumber, qty, expectedReturnDate })));
+                  if (paused) setModal(null);
                 } finally {
                   setModalLoading(false);
                 }
@@ -4309,7 +4162,8 @@ export default function PortalShell() {
 
       {modal === "closeComplete" && woData && !isManager && (
         <Modal
-          onClose={() => setModal(null)}
+          onRequestClose={shellDismissal.requestClose}
+          dismissDisabled={modalLoading}
           title="Mark work complete"
           width={540}
         >
@@ -4339,14 +4193,14 @@ export default function PortalShell() {
                 <option>Other</option>
               </Sel></Field>
             </div>
-            <Field label="Closing notes"><TA id="resolution-notes" rows={3} value={resolutionNotesInput} onChange={(e: any) => setResolutionNotesInput(e.target.value)} placeholder="Brief summary of what was found and done..." /></Field>
+            <Field label="Closing notes" controlId="resolution-notes"><TA id="resolution-notes" rows={3} value={resolutionNotesInput} onChange={(e: any) => setResolutionNotesInput(e.target.value)} placeholder="Brief summary of what was found and done..." /></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="End date"><DatePickerField value={closeDateInput} onChange={setCloseDateInput} /></Field>
               <Field label="End time"><TimePickerField value={closeTimeInput} onChange={setCloseTimeInput} /></Field>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => setModal(null)} className="btn-soft">Cancel</button>
+            <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
               setModalLoading(true);
@@ -4398,13 +4252,7 @@ export default function PortalShell() {
                 ? (items || []).map(item => item.id === invoice.id ? invoice : item)
                 : [invoice, ...(items || [])];
             });
-            qc.invalidateQueries({ queryKey: BILLING_INVOICES_KEY });
-            qc.invalidateQueries({ queryKey: BILLING_INVOICE_PAGES_KEY });
-            qc.invalidateQueries({ queryKey: BILLING_INVOICE_BY_ID_KEY });
-            qc.invalidateQueries({ queryKey: INVOICES_KEY });
-            qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY });
-            qc.invalidateQueries({ queryKey: WORK_ORDERS_KEY });
-            qc.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY });
+            void refreshBillingMutation(invoice?.id, invoice?.wot, true);
             if (invoice?.id) {
               setSelectedWO(null);
               setSelectedBillingInvoice(invoice.id);
@@ -4452,8 +4300,6 @@ export default function PortalShell() {
         <AddressBookModal
           open={modal === "addressBook"}
           onClose={() => setModal(null)}
-          staff={staffProfiles}
-          contractors={assignableContractors}
         />
       )}
 
@@ -4462,14 +4308,25 @@ export default function PortalShell() {
         fmt={fmt}
       />
 
-      {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, background: "rgba(31,30,28,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 20, cursor: "zoom-out" }}>
-          <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} />
-          <button onClick={e => { e.stopPropagation(); setLightbox(null); }} style={{ position: "absolute", top: 20, right: 20, width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>Ã—</button>
+      {lightbox && <Modal title="Work-order photo" width={1000} onRequestClose={() => setLightbox(null)}>
+        <img src={lightbox} alt="Work-order photo" style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 10 }} />
+      </Modal>}
+
+      {shellDismissal.dialog}
+      {logoutConfirmation && <Modal title="Sign out and remove local drafts?" width={460}
+        onRequestClose={() => { if (!logoutLoading) setLogoutConfirmation(false); }}
+        dismissDisabled={logoutLoading} closeOnBackdrop={false}
+        description="Signing out removes this account’s local drafts and unsaved changes from this browser. Submitted records are not affected.">
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button type="button" className="btn-soft" data-modal-initial-focus="true" disabled={logoutLoading}
+            onClick={() => setLogoutConfirmation(false)}>Keep working</button>
+          <button type="button" className="btn-primary" data-destructive="true" disabled={logoutLoading}
+            onClick={() => { void performLogout(); }}>{logoutLoading ? "Signing out..." : "Sign out and remove drafts"}</button>
         </div>
-      )}
+      </Modal>}
 
       {toast && <div className="app-toast">{toast}</div>}
     </div>
+    </DirectoryScopeProvider>
   );
 }

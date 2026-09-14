@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Invoice PDF generator — matches the layout of P1's real Invoice 6556 (QuickBooks-style).
 // Uses jsPDF + autoTable. Zero server dependency, runs in the browser, downloads instantly.
 
@@ -266,8 +265,18 @@ export function generateInvoicePDF(inv: Invoice, logoDataUrl?: string | null, op
     margin: { left: M, right: M },
   });
 
-  // @ts-ignore — autoTable adds lastAutoTable
-  let endY = (doc as any).lastAutoTable.finalY + 18;
+  // autoTable adds this runtime property, but jsPDF's type does not declare it.
+  const lastTable = "lastAutoTable" in doc ? doc.lastAutoTable : null;
+  if (
+    typeof lastTable !== "object"
+    || lastTable === null
+    || !("finalY" in lastTable)
+    || typeof lastTable.finalY !== "number"
+    || !Number.isFinite(lastTable.finalY)
+  ) {
+    throw new Error("Could not create the invoice PDF.");
+  }
+  let endY = lastTable.finalY + 18;
 
   // ── Totals (right-aligned)
   const totalsX = W - M - 200;

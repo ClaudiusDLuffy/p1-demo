@@ -1,7 +1,9 @@
 "use client";
 // @ts-nocheck
 
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { WorkReportSchema, WorkReportForm as WorkReportFormType } from "../../lib/schemas";
@@ -20,7 +22,7 @@ export default function WorkReportForm(props: any) {
     register,
     handleSubmit,
     control,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<WorkReportFormType>({
     resolver: zodResolver(WorkReportSchema),
     defaultValues: {
@@ -37,6 +39,7 @@ export default function WorkReportForm(props: any) {
     control,
     name: "partsUsed",
   });
+  const dismissal = useUnsavedChangesGuard({ dirty: isDirty, busy: isSubmitting, onClose });
 
   const onSubmit = async (data: WorkReportFormType) => {
     setSubmitError(null);
@@ -49,7 +52,7 @@ export default function WorkReportForm(props: any) {
       overrideForContractorId: isManager ? contractorId || null : null,
     });
     if (!result.success) {
-      const msg = result.error instanceof Error ? result.error.message : "Work report submit failed";
+      const msg = safeErrorMessage(result.error);
       setSubmitError(msg);
       return;
     }
@@ -57,7 +60,8 @@ export default function WorkReportForm(props: any) {
   };
 
   return (
-    <Modal onClose={onClose} title="Submit work report" width={560}>
+    <Modal onRequestClose={dismissal.requestClose} dismissDisabled={isSubmitting} title="Submit work report" width={560}>
+      {dismissal.dialog}
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
           Work report for Store #{woStore || "-"} / {woId}
@@ -67,18 +71,15 @@ export default function WorkReportForm(props: any) {
             <Input {...register("technicianName")} placeholder="Technician name" />
           </Field>
           <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Arrival time *">
+            <Field label="Arrival time *" required error={errors.arrivalTime?.message}>
               <Input type="datetime-local" {...register("arrivalTime")} />
-              {errors.arrivalTime && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.arrivalTime.message}</span>}
             </Field>
-            <Field label="Departure time *">
+            <Field label="Departure time *" required error={errors.departureTime?.message}>
               <Input type="datetime-local" {...register("departureTime")} />
-              {errors.departureTime && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.departureTime.message}</span>}
             </Field>
           </div>
-          <Field label="Work performed *">
+          <Field label="Work performed *" required error={errors.workPerformed?.message}>
             <TA rows={4} {...register("workPerformed")} placeholder="Describe the completed work" />
-            {errors.workPerformed && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.workPerformed.message}</span>}
           </Field>
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -88,10 +89,10 @@ export default function WorkReportForm(props: any) {
             <div style={{ display: "grid", gap: 8 }}>
               {fields.map((field, i) => (
                 <div key={field.id} className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 130px 90px auto", gap: 8 }}>
-                  <Input {...register(`partsUsed.${i}.name` as const)} placeholder="Part name" />
-                  <Input {...register(`partsUsed.${i}.partNumber` as const)} placeholder="Part #" />
-                  <Input type="number" step="1" {...register(`partsUsed.${i}.qty` as const, { valueAsNumber: true })} placeholder="Qty" />
-                  <button type="button" onClick={() => remove(i)} className="btn-soft" style={{ padding: "8px 10px", fontSize: 11 }}>Remove</button>
+                  <Input aria-label={`Part ${i + 1} name`} {...register(`partsUsed.${i}.name` as const)} placeholder="Part name" />
+                  <Input aria-label={`Part ${i + 1} number`} {...register(`partsUsed.${i}.partNumber` as const)} placeholder="Part #" />
+                  <Input aria-label={`Part ${i + 1} quantity`} type="number" step="1" {...register(`partsUsed.${i}.qty` as const, { valueAsNumber: true })} placeholder="Qty" />
+                  <button type="button" aria-label={`Remove part ${i + 1}`} onClick={() => remove(i)} className="btn-soft" style={{ padding: "8px 10px", fontSize: 11 }}>Remove</button>
                 </div>
               ))}
             </div>
@@ -111,7 +112,7 @@ export default function WorkReportForm(props: any) {
         </div>
         {submitError && <div style={{ fontSize: 12, color: T.danger, marginTop: 14 }}>{submitError}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-          <button type="button" onClick={onClose} className="btn-soft">Cancel</button>
+          <button type="button" disabled={isSubmitting} onClick={() => dismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="btn-primary" style={{ opacity: isSubmitting ? 0.6 : 1 }}>{isSubmitting ? "Submitting..." : "Submit report"}</button>
         </div>
       </form>

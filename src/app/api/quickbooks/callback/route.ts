@@ -1,3 +1,15 @@
+import { createApiMethodBoundary } from "../../../../lib/server/apiMethodBoundary";
+
+const apiMethodBoundary = createApiMethodBoundary("/api/quickbooks/callback", ["GET"]);
+export const POST = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const DELETE = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { runRequestOperation } from "../../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../../lib/errors/httpBoundary";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -12,25 +24,19 @@ import {
 } from "../../../../lib/server/quickBooksOnline";
 import { STAFF_ROLES } from "../../../../lib/server/staffAuthorization";
 import { createServerClient } from "../../../../lib/supabase/server";
+import { getPortalOrigin } from "../../../../lib/config/server/appEnvironment";
+import { ConfigurationError } from "../../../../lib/config/shared";
 
 export const runtime = "nodejs";
 
 const STATE_PATTERN = /^[A-Za-z0-9_-]{40,128}$/;
 
 const portalRedirect = (
-  request: NextRequest,
+  _request: NextRequest,
   status: "connected" | "cancelled" | "pending" | "error",
   reason?: string,
 ) => {
-  const configuredBase = String(
-    process.env.NEXT_PUBLIC_APP_URL || process.env.PORTAL_URL || "",
-  ).trim();
-  let url: URL;
-  try {
-    url = configuredBase ? new URL(configuredBase) : new URL(request.nextUrl.origin);
-  } catch {
-    url = new URL(request.nextUrl.origin);
-  }
+  const url = new URL(getPortalOrigin());
   url.pathname = "/";
   url.search = "";
   url.hash = "";
@@ -58,9 +64,13 @@ const isDefinitiveDatabaseRejection = (error: unknown) => {
 };
 
 export async function GET(request: NextRequest) {
+  const context = createRequestContext(request, "/api/quickbooks/callback");
+  try {
+    return await runRequestOperation(context, async () => {
+  getPortalOrigin();
   const rawState = String(request.nextUrl.searchParams.get("state") || "").trim();
   if (!STATE_PATTERN.test(rawState)) {
-    return portalRedirect(request, "error", "invalid_state");
+    return await finalizeApiResponse(await portalRedirect(request, "error", "invalid_state"), context);
   }
 
   const sb = createServerClient();
@@ -77,21 +87,21 @@ export async function GET(request: NextRequest) {
     .select("actor_id,environment,redirect_uri,created_at")
     .maybeSingle();
   if (stateError || !consumedState) {
-    return portalRedirect(request, "error", "expired_state");
+    return await finalizeApiResponse(await portalRedirect(request, "error", "expired_state"), context);
   }
   const oauthState = consumedState as OAuthStateRow;
 
   if (oauthState.environment !== "sandbox") {
-    return portalRedirect(request, "error", "production_locked");
+    return await finalizeApiResponse(await portalRedirect(request, "error", "production_locked"), context);
   }
 
   if (request.nextUrl.searchParams.has("error")) {
-    return portalRedirect(request, "cancelled");
+    return await finalizeApiResponse(await portalRedirect(request, "cancelled"), context);
   }
 
   const code = String(request.nextUrl.searchParams.get("code") || "").trim();
   if (!code || code.length > 4_096 || !isQuickBooksRealmId(realmId)) {
-    return portalRedirect(request, "error", "invalid_callback");
+    return await finalizeApiResponse(await portalRedirect(request, "error", "invalid_callback"), context);
   }
 
   const [profileResult, permissionResult] = await Promise.all([
@@ -114,7 +124,7 @@ export async function GET(request: NextRequest) {
     || !STAFF_ROLES.has(profileResult.data.role || "")
     || !permissionResult.data
   ) {
-    return portalRedirect(request, "error", "authorization_changed");
+    return await finalizeApiResponse(await portalRedirect(request, "error", "authorization_changed"), context);
   }
 
   let refreshTokenForCleanup = "";
@@ -125,7 +135,7 @@ export async function GET(request: NextRequest) {
   try {
     const config = getQuickBooksConfig(oauthState.environment);
     if (config.redirectUri !== oauthState.redirect_uri) {
-      return portalRedirect(request, "error", "configuration_changed");
+      return await finalizeApiResponse(await portalRedirect(request, "error", "configuration_changed"), context);
     }
 
     const tokens = await exchangeQuickBooksAuthorizationCode(
@@ -241,8 +251,9 @@ export async function GET(request: NextRequest) {
     }
     refreshTokenForCleanup = "";
 
-    return portalRedirect(request, "connected");
-  } catch {
+    return await finalizeApiResponse(await portalRedirect(request, "connected"), context);
+  } catch (error) {
+    if (error instanceof ConfigurationError && !refreshTokenForCleanup) throw error;
     if (refreshTokenForCleanup && !saveWasAttempted) {
       const sameRealmConnection = await sb
         .from("quickbooks_connections")
@@ -264,8 +275,11 @@ export async function GET(request: NextRequest) {
       }
     }
     if (persistenceNeedsVerification) {
-      return portalRedirect(request, "pending", "persistence_pending");
+      return await finalizeApiResponse(await portalRedirect(request, "pending", "persistence_pending"), context);
     }
-    return portalRedirect(request, "error", "connection_failed");
+    return await finalizeApiResponse(await portalRedirect(request, "error", "connection_failed"), context);
   }
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

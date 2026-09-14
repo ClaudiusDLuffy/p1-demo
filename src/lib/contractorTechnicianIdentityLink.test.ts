@@ -17,7 +17,9 @@ const aliasRepairAudit = read(
   "supabase/audits/0107_raymon_rush_alias_repair_verification.sql",
 );
 const bootstrap = read("scripts/bootstrap.ts");
-const databaseLoader = read("src/lib/db.ts");
+const directoryMigration = read("supabase/migrations/0144_bounded_role_scoped_directories.sql");
+const directorySelect = read("src/features/directory/DirectorySelect.tsx");
+const technicianPicker = read("src/features/work-orders/WorkOrderTechnicianPicker.tsx");
 const workOrderDetail = read(
   "src/features/work-orders/WorkOrderDetail.tsx",
 );
@@ -80,22 +82,20 @@ test("matching Rush work orders are linked to his login identity", () => {
   );
 });
 
-test("the technician loader renders linked portal names as canonical", () => {
-  assert.match(
-    databaseLoader,
-    /portal_profile:profiles!contractor_technicians_profile_id_fkey\(name\)/,
-  );
-  assert.match(databaseLoader, /name: portalProfile\?\.name \|\| t\.name/);
-  assert.match(databaseLoader, /storedName: t\.name/);
+test("the bounded technician projection renders linked portal names as canonical", () => {
+  assert.match(directoryMigration, /'profileId', t\.profile_id, 'name', coalesce\(p\.name, t\.name\)/);
+  assert.match(directoryMigration, /join public\.profiles p on p\.id = t\.profile_id/);
 });
 
 test("unlinked dropdown entries are explicit record-only choices", () => {
   const recordOnlyLabel = /record only \(no portal login\)/;
-  assert.match(workOrderDetail, recordOnlyLabel);
-  assert.match(subDispatch, recordOnlyLabel);
+  assert.match(directorySelect, recordOnlyLabel);
+  assert.match(workOrderDetail, /<WorkOrderTechnicianPicker/);
+  assert.match(technicianPicker, /<DirectorySelect[\s\S]*technicianValues/);
+  assert.match(subDispatch, /<DirectorySelect[\s\S]*technicianValues/);
   assert.match(
-    workOrderDetail,
-    /selectedTechnician\?\.profileId[\s\S]*doAssignPortalTechnician/,
+    technicianPicker,
+    /profileId[\s\S]*doAssignPortalTechnician/,
   );
   assert.match(
     subDispatch,

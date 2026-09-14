@@ -2,6 +2,11 @@ import {
   getAllowedDispatchSenders,
   isConfirmedWorkOrderIntakeEmail,
 } from "./emailParser";
+import { createHash } from "node:crypto";
+import { requireGraphConfig } from "./config/server/graph";
+import { getEmailIntakeConfig } from "./config/server/emailIntake";
+import { ConfigurationError } from "./config/shared";
+import { correlatedFetch } from "./server/requestOperation";
 
 export type GraphEmail = {
   id: string;
@@ -18,6 +23,7 @@ export type GraphEmail = {
 type TokenCache = {
   token: string;
   expiresAt: number;
+  configurationIdentity: string;
 };
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
@@ -26,8 +32,6 @@ const GRAPH_REQUEST_TIMEOUT_MS = 15_000;
 const INTAKE_BATCH_SIZE = 25;
 const INTAKE_PAGE_SIZE = 50;
 const INTAKE_MAX_PAGES = 5;
-const DEFAULT_RECOVERY_LOOKBACK_HOURS = 24;
-const MAX_RECOVERY_LOOKBACK_HOURS = 168;
 
 const graphRetryAfterSeconds = (response: Response) => {
   const raw = response.headers.get("retry-after");
@@ -64,38 +68,18 @@ export const isGraphHttpError = (error: unknown): error is GraphHttpError =>
 
 let tokenCache: TokenCache | null = null;
 
-const outlookConfig = () => ({
-  tenantId: process.env.OUTLOOK_TENANT_ID || "",
-  clientId: process.env.OUTLOOK_CLIENT_ID || "",
-  clientSecret: process.env.OUTLOOK_CLIENT_SECRET || "",
-  userEmail: process.env.OUTLOOK_USER_EMAIL || "",
-  folderName: process.env.OUTLOOK_FOLDER_NAME || "7-Eleven Dispatch",
-});
+const outlookConfig = requireGraphConfig;
 
 const intakeStartAt = () => {
-  const raw = process.env.EMAIL_INTAKE_START_AT || "";
-  if (!raw) {
-    throw new Error("EMAIL_INTAKE_START_AT is required before email intake can run");
-  }
-
-  const date = new Date(raw);
-  if (!Number.isFinite(date.getTime())) {
-    throw new Error("EMAIL_INTAKE_START_AT must be a valid ISO timestamp");
-  }
-
-  return date.toISOString();
+  const config = getEmailIntakeConfig();
+  if (!config.enabled) throw new ConfigurationError("FEATURE_DISABLED", "email_intake");
+  return config.startAt;
 };
 
 const intakeRecoveryStartAt = (startAt: string) => {
-  const configuredHours = Number(
-    process.env.EMAIL_INTAKE_RECOVERY_LOOKBACK_HOURS ||
-      DEFAULT_RECOVERY_LOOKBACK_HOURS,
-  );
-  if (!Number.isFinite(configuredHours) || configuredHours <= 0) {
-    throw new Error("EMAIL_INTAKE_RECOVERY_LOOKBACK_HOURS must be a positive number");
-  }
-
-  const lookbackHours = Math.min(configuredHours, MAX_RECOVERY_LOOKBACK_HOURS);
+  const config = getEmailIntakeConfig();
+  if (!config.enabled) throw new ConfigurationError("FEATURE_DISABLED", "email_intake");
+  const lookbackHours = config.recoveryLookbackHours;
   const recoveryStart = Date.now() - lookbackHours * 60 * 60 * 1000;
   return new Date(Math.max(new Date(startAt).getTime(), recoveryStart)).toISOString();
 };
@@ -138,7 +122,10 @@ const fetchWithTimeout = async (
   const timeout = setTimeout(() => controller.abort(), GRAPH_REQUEST_TIMEOUT_MS);
 
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await correlatedFetch(url, {
+      ...init,
+      signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
+    });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`${operation} timed out after ${GRAPH_REQUEST_TIMEOUT_MS / 1000} seconds`);
@@ -155,13 +142,15 @@ const assertResponseOk = (res: Response, operation: string) => {
   }
 };
 
-export async function getAccessToken(): Promise<string> {
+export async function getAccessToken(signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const { tenantId, clientId, clientSecret } = outlookConfig();
+  const configurationIdentity = createHash("sha256").update(JSON.stringify([tenantId, clientId, clientSecret])).digest("hex");
   const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt - TOKEN_REFRESH_SKEW_MS > now) {
+  if (tokenCache && tokenCache.configurationIdentity === configurationIdentity && tokenCache.expiresAt - TOKEN_REFRESH_SKEW_MS > now) {
     return tokenCache.token;
   }
 
-  const { tenantId, clientId, clientSecret } = outlookConfig();
   if (!tenantId || !clientId || !clientSecret) {
     throw new Error("Graph authentication is not configured");
   }
@@ -179,6 +168,7 @@ export async function getAccessToken(): Promise<string> {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
+      ...(signal ? { signal } : {}),
     },
     "Graph token request",
   );
@@ -191,6 +181,7 @@ export async function getAccessToken(): Promise<string> {
 
   tokenCache = {
     token: data.access_token,
+    configurationIdentity,
     expiresAt: now + ((data.expires_in || 3600) * 1000),
   };
   return data.access_token;
@@ -357,7 +348,10 @@ export async function sendEmail(
   to: string[],
   subject: string,
   body: string,
+  signal?: AbortSignal,
+  requireAccepted = false,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const { userEmail } = outlookConfig();
   const recipients = to.map(email => email.trim()).filter(Boolean);
   if (!accessToken) throw new Error("Graph access token is unavailable");
@@ -371,6 +365,7 @@ export async function sendEmail(
     {
       method: "POST",
       headers: graphHeaders(accessToken),
+      ...(signal ? { signal } : {}),
       body: JSON.stringify({
         message: {
           subject,
@@ -388,4 +383,9 @@ export async function sendEmail(
     "Graph send-mail request",
   );
   assertResponseOk(res, "Graph send-mail request");
+  if (requireAccepted && res.status !== 202) {
+    // A nonstandard success response is not the documented sendMail receipt.
+    // The request may have been accepted: callers must quarantine ambiguity.
+    throw new Error("Graph send-mail acceptance could not be confirmed");
+  }
 }

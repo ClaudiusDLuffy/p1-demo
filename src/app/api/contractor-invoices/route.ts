@@ -1,3 +1,17 @@
+import { createApiMethodBoundary } from "../../../lib/server/apiMethodBoundary";
+
+const apiMethodBoundary = createApiMethodBoundary("/api/contractor-invoices", ["DELETE"]);
+export const GET = apiMethodBoundary.methodNotAllowed;
+export const POST = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const HEAD = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { legacyErrorResponse } from "../../../lib/errors/legacyResponse";
+import { runRequestOperation } from "../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../lib/errors/httpBoundary";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "../../../lib/supabase/server";
@@ -6,19 +20,26 @@ import {
   loadStaffPermissions,
   STAFF_ROLES,
 } from "../../../lib/server/staffAuthorization";
+import { FinancialDeleteSchema, FinancialInvoiceIdSchema } from "../../../lib/staffInvoiceContracts";
+import { FinancialRequestError, financialErrorResponse, parseFinancialRequest } from "../../../lib/financialHttpBoundary";
+import { deleteFinancialCommand } from "../../../lib/staffFinancialCommands";
 import type { Database } from "../../../lib/supabase/database.types";
+import { getServerPublicSupabaseConfig } from "../../../lib/config/server/supabase";
+import { ConfigurationError } from "../../../lib/config/shared";
 
-const jsonError = (message: string, status: number) =>
-  NextResponse.json({ error: message }, { status });
+const jsonError = legacyErrorResponse;
 
 const bearerToken = (request: NextRequest) =>
   request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] || "";
 
-const authClient = () => createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+const authClient = () => {
+  const configuration = getServerPublicSupabaseConfig();
+  return createClient<Database>(
+  configuration.url,
+  configuration.publishableKey,
   { auth: { autoRefreshToken: false, persistSession: false } },
 );
+};
 
 async function requireInvoiceStaff(request: NextRequest) {
   const token = bearerToken(request);
@@ -33,15 +54,15 @@ async function requireInvoiceStaff(request: NextRequest) {
     .select("id, role, name, active")
     .eq("id", data.user.id)
     .maybeSingle();
-  if (profileError) return { error: jsonError(profileError.message, 500) };
+  if (profileError) return { error: jsonError("Staff access could not be verified", 500) };
   if (!profile?.active || !STAFF_ROLES.has(profile.role || "")) {
     return { error: jsonError("Forbidden", 403) };
   }
   let staffPermissions: string[];
   try {
     staffPermissions = await loadStaffPermissions(sb, profile.id);
-  } catch (permissionError) {
-    return { error: jsonError(permissionError instanceof Error ? permissionError.message : "Permission lookup failed", 500) };
+  } catch {
+    return { error: jsonError("Staff permissions could not be verified", 500) };
   }
   const authorizedProfile = { ...profile, staffPermissions };
   if (isInvoiceControllerProfile(authorizedProfile)) {
@@ -51,83 +72,24 @@ async function requireInvoiceStaff(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await requireInvoiceStaff(request);
-  if ("error" in auth) return auth.error;
-
-  const id = request.nextUrl.searchParams.get("id")?.trim();
-  if (!id) return jsonError("Invoice id is required", 400);
-
+  const context = createRequestContext(request, "/api/contractor-invoices");
   try {
-    const { data: invoice, error: invoiceError } = await auth.sb
-      .from("invoices")
-      .select("id, num, work_order_id, deleted_at")
-      .eq("id", id)
-      .eq("invoice_type", "contractor")
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (invoiceError) throw invoiceError;
-    if (!invoice) return jsonError("Contractor invoice not found or already deleted", 404);
-
-    const { data: sourceLinks, error: sourceError } = await auth.sb
-      .from("staff_invoice_sources")
-      .select("staff_invoice_id")
-      .eq("contractor_invoice_id", id);
-    if (sourceError) throw sourceError;
-
-    const linkedStaffIds = Array.from(new Set<string>(
-      (sourceLinks || []).map(link => String(link.staff_invoice_id)),
-    ));
-    if (linkedStaffIds.length > 0) {
-      const { data: activeStaffInvoices, error: linkedError } = await auth.sb
-        .from("invoices")
-        .select("id, num")
-        .in("id", linkedStaffIds)
-        .eq("invoice_type", "staff")
-        .is("deleted_at", null)
-        .limit(1);
-      if (linkedError) throw linkedError;
-      if (activeStaffInvoices?.length) {
-        return jsonError(
-          `Invoice #${invoice.num} is used by billing invoice #${activeStaffInvoices[0].num}. Delete or unlink that billing invoice first.`,
-          409,
-        );
-      }
-    }
-
-    const deletedAt = new Date().toISOString();
-    const { data: deleted, error: deleteError } = await auth.sb
-      .from("invoices")
-      .update({ deleted_at: deletedAt, deleted_by: auth.user.id })
-      .eq("id", id)
-      .eq("invoice_type", "contractor")
-      .is("deleted_at", null)
-      .select("id, num, work_order_id, deleted_at")
-      .maybeSingle();
-    if (deleteError) throw deleteError;
-    if (!deleted) return jsonError("Invoice changed before it could be deleted", 409);
-
-    if (deleted.work_order_id) {
-      const { error: auditError } = await auth.sb
-        .from("activities")
-        .insert({
-          work_order_id: deleted.work_order_id,
-          author_id: auth.user.id,
-          author_name: auth.profile.name || "P1 staff",
-          text: `Invoice #${deleted.num} deleted by ${auth.profile.name || "P1 staff"}.`,
-          type: "system",
-          is_staff_override: false,
-          is_staff_only: true,
-          event_key: "invoice_deleted",
-          event_data: { invoiceId: deleted.id, invoiceNum: deleted.num },
-        });
-      // The invoice deletion is the primary action. A logging outage must not
-      // turn a completed soft-delete into a false error in the UI.
-      if (auditError) console.error("Contractor invoice delete audit failed", auditError);
-    }
-
-    return NextResponse.json({ invoice: deleted });
+    return await runRequestOperation(context, async () => {
+  try {
+    const id = FinancialInvoiceIdSchema.safeParse(request.nextUrl.searchParams.get("id"));
+    if (!id.success) throw new FinancialRequestError("FINANCIAL_VALIDATION_FAILED", "A valid invoice id is required", 422);
+    const command = await parseFinancialRequest(request, FinancialDeleteSchema);
+    const auth = await requireInvoiceStaff(request);
+    if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
+    const result = await deleteFinancialCommand(auth.sb, auth.user.id, id.data, "contractor", command);
+    return await finalizeApiResponse(await NextResponse.json({ invoice: {
+      id: result.invoiceId, num: result.invoiceNum, work_order_id: result.workOrderId, deleted_at: result.deletedAt,
+    }, command: result }), context);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Invoice delete failed";
-    return jsonError(message, 500);
+    if (error instanceof ConfigurationError) throw error;
+    return await finalizeApiResponse(await financialErrorResponse(error), context);
   }
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

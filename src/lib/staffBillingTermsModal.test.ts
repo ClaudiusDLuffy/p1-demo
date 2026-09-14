@@ -70,6 +70,7 @@ function harness(input: {
     exports, initialToday: "2026-09-09", todayIso: () => "2026-09-09",
     require: requireHere, Sel, T, STAFF_BILLING_TERMS_OPTIONS,
     register: (name: string) => ({ name, onChange: () => undefined }),
+    fieldAria: (name: string) => ({ id: `synthetic-${name}`, "aria-invalid": undefined }),
     initialStaffBillingTerms, nextStaffBillingDueDate,
     modal: input.modal ?? "createBillingInvoice",
     draftHydrated: { current: input.hydrated ?? true },

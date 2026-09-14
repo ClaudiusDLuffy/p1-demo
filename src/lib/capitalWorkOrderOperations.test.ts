@@ -50,7 +50,8 @@ test("Work orders includes capital while the focused Capital view remains", () =
 });
 
 test("capital detail exposes guarded assignment controls and a classification badge", () => {
-  assert.match(detail, /canAssignCurrentWorkOrder && contractorsOnly\.map/);
+  assert.match(detail, /canAssignCurrentWorkOrder && <DirectorySelect domain="assignable_contractors"/);
+  assert.match(detail, /if \(event\.target\.value\) void doAssign\(woData\.id, event\.target\.value\)/);
   assert.match(detail, /canChangeCurrentAssignment && \(/);
   assert.match(detail, /<CapitalWorkOrderBadge workOrder=\{woData\}/);
   assert.match(detail, /isManager && !invoiceController && canFlagWorkOrderCapital\(woData\)/);
@@ -144,7 +145,9 @@ test("client transitions preserve capital state but clear outgoing field data", 
   assert.equal(ordinaryUnassignment.isCapital, false);
   assert.equal(ordinaryUnassignment.dispatchedAt, null);
 
-  assert.equal((hook.match(/assignmentBoundaryPatch\(/g) || []).length, 4);
+  // The actual hook-closure tests cover assignment callers. Counting call-site
+  // strings would reject an additional, legitimate administrative transfer
+  // without proving anything about capital-state or privacy preservation.
   assert.match(hook, /const result = await declineCapitalWorkOrder\(/);
   assert.match(hook, /contractorAssignmentVersion: result\.assignmentVersion/);
   assert.doesNotMatch(hook, /status: hasContractor \? "assigned" : "unassigned"/);
@@ -181,7 +184,10 @@ test("database assignment boundary preserves capital workflow and privacy", () =
 });
 
 test("capital identity is canonicalized at intake and covered by a release audit", () => {
-  assert.match(intake, /update\(\{ status: "capital", is_capital: true \}\)/);
+  // The exact committed patch/result is characterized behaviorally in
+  // workOrderLifecycleIntakeCompatibility.test.ts; the SQL harness executes
+  // the owning command and its service-only authorization/rollback behavior.
+  assert.match(intake, /rpc\("record_email_capital_pending_v1",[\s\S]*?p_work_order_id: match\.id/);
   assert.match(migration, /set is_capital = true[\s\S]*status::text in \('capital', 'pending_capital_completion'\)/);
   for (const check of [
     "capital_lifecycle_preserved",

@@ -27,6 +27,7 @@ type StaffActionContext = {
 };
 
 export type WorkOrderAssignmentEligibility = StaffActionContext & {
+  assignmentTransferPendingVisit?: boolean;
   status?: string | null;
   functionalStatus?: string | null;
   contractorId?: string | null;
@@ -46,6 +47,7 @@ export function canAssignWorkOrder(
 
   const status = String(input.status || "");
   return CAPITAL_ASSIGNMENT_STATUSES.has(status)
+    || (input.assignmentTransferPendingVisit === true && status === "wip" && input.functionalStatus === "Work in Progress")
     || (status === "unassigned" && input.functionalStatus === "New");
 }
 

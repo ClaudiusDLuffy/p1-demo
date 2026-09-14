@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import { useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChangePasswordSchema, ChangePasswordForm } from "../../lib/schemas";
@@ -17,7 +18,7 @@ export default function ChangePasswordModal(props: any) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<ChangePasswordForm>({
     resolver: zodResolver(ChangePasswordSchema),
     defaultValues: {
@@ -25,6 +26,7 @@ export default function ChangePasswordModal(props: any) {
       confirm: "",
     },
   });
+  const dismissal = useUnsavedChangesGuard({ dirty: isDirty, busy: isSubmitting, onClose });
 
   const onSubmit = async (data: ChangePasswordForm) => {
     setSubmitError(null);
@@ -38,21 +40,20 @@ export default function ChangePasswordModal(props: any) {
   };
 
   return (
-    <Modal onClose={onClose} title="Change password" width={420}>
+    <Modal onRequestClose={dismissal.requestClose} dismissDisabled={isSubmitting} title="Change password" width={420}>
+      {dismissal.dialog}
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ display: "grid", gap: 14 }}>
-          <Field label="New password">
+          <Field label="New password" required error={errors.password?.message}>
             <Input type="password" {...register("password")} />
-            {errors.password && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.password.message}</span>}
           </Field>
-          <Field label="Confirm new password">
+          <Field label="Confirm new password" required error={errors.confirm?.message}>
             <Input type="password" {...register("confirm")} />
-            {errors.confirm && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.confirm.message}</span>}
           </Field>
         </div>
         {submitError && <div style={{ fontSize: 12, color: T.danger, marginTop: 14 }}>{submitError}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-          <button type="button" onClick={onClose} className="btn-soft">Cancel</button>
+          <button type="button" disabled={isSubmitting} onClick={() => dismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
           <button type="submit" disabled={isSubmitting} className="btn-primary" style={{ opacity: isSubmitting ? 0.6 : 1 }}>{isSubmitting ? "Saving..." : "Save password"}</button>
         </div>
       </form>

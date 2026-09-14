@@ -1,7 +1,10 @@
 "use client";
 // @ts-nocheck
 
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
+
 import { Badge } from "../../components/ui/Badge";
+import { useDirectoryLabels } from "../directory/queries";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Ico } from "../../components/ui/Ico";
@@ -14,7 +17,10 @@ import {
   isInvoiceController,
 } from "../../lib/staffPermissions";
 import ControllerExportPanel from "./ControllerExportPanel";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import FinancialNoticeQueue from "../financial-notifications/FinancialNoticeQueue";
+import { financialReviewSelection } from "../financial-notifications/contracts";
+import { useDeferredValue, useEffect, useId, useMemo, useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useInvoicesPageQuery } from "./queries";
@@ -55,7 +61,7 @@ function InvoiceWorkOrderReference({
 }
 
 export default function InvoiceList(props: any) {
-  const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, getUser, fmt, doBatchReviewInvoices, onEditRejected } = props;
+  const { page, selectedInvoice, invTab, setInvTab, isManager, invoices, currentUser, setSelectedInvoice, fmt, doBatchReviewInvoices, onEditRejected } = props;
   const controller = isInvoiceController(currentUser);
   const canBatchReview = isManager && !controller && !!doBatchReviewInvoices;
   const [search, setSearch] = useState("");
@@ -66,6 +72,9 @@ export default function InvoiceList(props: any) {
   const [batchDialog, setBatchDialog] = useState<"approve" | "reject" | null>(null);
   const [batchReason, setBatchReason] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchSelection, setBatchSelection] = useState<ReturnType<typeof financialReviewSelection>>(null);
+  const batchFieldId = useId();
   const invoiceTabs = [
     { id: "all", l: "All", m: "All" },
     { id: "draft", l: "Draft", m: "Draft" },
@@ -128,6 +137,7 @@ export default function InvoiceList(props: any) {
     () => (invoicePageQuery.data?.items || []) as any[],
     [invoicePageQuery.data?.items],
   );
+  const { getUser } = useDirectoryLabels(visibleInvoices.map(invoice => invoice.contractor), page === "invoices" && !selectedInvoice);
   const handoffSelectionMode = canHandoffQuickBooks(currentUser)
     && invTab === "approved";
   const handoffSelectableInvoices = useMemo(
@@ -236,22 +246,37 @@ export default function InvoiceList(props: any) {
     if (batchBusy) return;
     setBatchDialog(null);
     setBatchReason("");
+    setBatchError(null);
+    setBatchSelection(null);
+  };
+  const batchDismissal = useUnsavedChangesGuard({ dirty: batchReason.length > 0, busy: batchBusy,
+    enabled: page === "invoices" && !selectedInvoice && Boolean(batchDialog), onClose: closeBatchDialog });
+
+  const openBatchDialog = (action: "approve" | "reject") => {
+    setBatchSelection(financialReviewSelection(selectedReviewInvoices));
+    setBatchError(null);
+    setBatchDialog(action);
   };
 
   const submitBatchReview = async () => {
-    if (!batchDialog || selectedReviewInvoices.length === 0) return;
+    if (!batchDialog || batchBusy) return;
     if (batchDialog === "reject" && !batchReason.trim()) return;
+    const selection = batchSelection;
+    if (!selection) { setBatchError("The selected invoice revisions are unavailable. Refresh and select them again."); return; }
+    setBatchError(null);
     setBatchBusy(true);
     try {
       const ok = await doBatchReviewInvoices(
-        selectedReviewInvoices.map((invoice: any) => String(invoice.id)),
+        selection.invoiceIds,
         batchDialog,
         batchReason,
+        selection.expectedRevisions,
       );
       if (ok) {
         setSelectedReviewIds(new Set());
         setBatchDialog(null);
         setBatchReason("");
+        setBatchSelection(null);
       }
     } finally {
       setBatchBusy(false);
@@ -263,6 +288,7 @@ export default function InvoiceList(props: any) {
           {/* ═════ INVOICES ═════ */}
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
+              {isManager && <FinancialNoticeQueue profile={currentUser} onOpenInvoice={setSelectedInvoice} />}
               <ControllerExportPanel
                 invoices={invoices}
                 currentUser={currentUser}
@@ -329,8 +355,8 @@ export default function InvoiceList(props: any) {
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <button type="button" className="btn-soft" onClick={() => setSelectedReviewIds(new Set())}>Clear</button>
-                    <button type="button" className="btn-primary" onClick={() => setBatchDialog("approve")}>Approve selected</button>
-                    <button type="button" className="btn-soft" onClick={() => setBatchDialog("reject")} style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject selected</button>
+                    <button type="button" className="btn-primary" onClick={() => openBatchDialog("approve")}>Approve selected</button>
+                    <button type="button" className="btn-soft" onClick={() => openBatchDialog("reject")} style={{ color: T.danger, borderColor: `${T.danger}44` }}>Reject selected</button>
                   </div>
                 </div>
               )}
@@ -432,7 +458,7 @@ export default function InvoiceList(props: any) {
                         </td>
                         <td style={{ padding: "13px 14px", color: T.subtle }}>{inv.date}</td>
                         <td style={{ padding: "13px 14px" }}>#{inv.store}</td>
-                        <td className="mono" style={{ padding: "13px 14px", textAlign: "right", color: T.muted }}>{(inv.lines || []).length}</td>
+                        <td className="mono" style={{ padding: "13px 14px", textAlign: "right", color: T.muted }}>{inv.lineCount ?? (inv.lines || []).length}</td>
                         <td className="mono" style={{ padding: "13px 14px", textAlign: "right", fontWeight: 700 }}>{fmt(Math.round(inv.total))}</td>
                       </tr>
                       );
@@ -527,10 +553,10 @@ export default function InvoiceList(props: any) {
               </div>
 
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, color: T.muted }}>
+                <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontSize: 11, color: T.muted }}>
                   {invoicePageQuery.isFetching
                     ? "Loading invoices..."
-                    : `${invoicePageQuery.data?.totalCount || 0} invoice${invoicePageQuery.data?.totalCount === 1 ? "" : "s"} · page ${pagePosition.page}`}
+                    : `${invoicePageQuery.data?.totalCount ?? "—"} invoice${invoicePageQuery.data?.totalCount === 1 ? "" : "s"} · page ${pagePosition.page}`}
                 </span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
@@ -558,7 +584,8 @@ export default function InvoiceList(props: any) {
               )}
 
               {batchDialog === "approve" && (
-                <Modal onClose={closeBatchDialog} title={`Approve ${selectedReviewInvoices.length} invoices`} width={480}>
+                <Modal onRequestClose={batchDismissal.requestClose} dismissDisabled={batchBusy} title={`Approve ${batchSelection?.invoiceIds.length ?? 0} invoices`} width={480}>
+                  {batchError && <p role="alert" style={{ color: T.danger }}>{batchError}</p>}
                   <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
                     Approve all selected Submitted/Revised invoices in one transaction? If any invoice has changed or cannot be reviewed, none will be approved.
                   </div>
@@ -567,36 +594,42 @@ export default function InvoiceList(props: any) {
                     {selectedReviewInvoices.length > 8 ? ` +${selectedReviewInvoices.length - 8} more` : ""}
                   </div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <button type="button" onClick={closeBatchDialog} disabled={batchBusy} className="btn-soft">Cancel</button>
+                    <button type="button" onClick={() => batchDismissal.requestClose("cancel_button")} disabled={batchBusy} className="btn-soft">Cancel</button>
                     <button type="button" onClick={submitBatchReview} disabled={batchBusy} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6, opacity: batchBusy ? 0.7 : 1 }}>
-                      {batchBusy ? <><BtnSpinner />Approving...</> : `Approve ${selectedReviewInvoices.length}`}
+                      {batchBusy ? <><BtnSpinner />Approving...</> : `Approve ${batchSelection?.invoiceIds.length ?? 0}`}
                     </button>
                   </div>
                 </Modal>
               )}
 
               {batchDialog === "reject" && (
-                <Modal onClose={closeBatchDialog} title={`Reject ${selectedReviewInvoices.length} invoices`} width={500}>
+                <Modal onRequestClose={batchDismissal.requestClose} dismissDisabled={batchBusy} title={`Reject ${batchSelection?.invoiceIds.length ?? 0} invoices`} width={500}>
+                  {batchError && <p id={`${batchFieldId}-error`} role="alert" style={{ color: T.danger }}>{batchError}</p>}
                   <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
-                    The same reason will be recorded on every selected invoice and sent to each affected contractor. If any invoice cannot be rejected, the entire batch is rolled back.
+                    The same reason will be recorded on every selected invoice and notifications queued for the affected contractors. Queued does not mean delivered. If any invoice cannot be rejected, the entire batch is rolled back.
                   </div>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Shared rejection reason</label>
+                  <label htmlFor={`${batchFieldId}-reason`} style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Shared rejection reason</label>
                   <textarea
+                    id={`${batchFieldId}-reason`}
+                    required
+                    disabled={batchBusy}
+                    aria-invalid={Boolean(batchError)}
+                    aria-describedby={batchError ? `${batchFieldId}-error` : undefined}
                     rows={4}
                     value={batchReason}
                     onChange={(event) => setBatchReason(event.target.value)}
                     placeholder="e.g. Missing receipts or labor-hour details"
-                    style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none" }}
+                    style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box" }}
                   />
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                    <button type="button" onClick={closeBatchDialog} disabled={batchBusy} className="btn-soft">Cancel</button>
+                    <button type="button" onClick={() => batchDismissal.requestClose("cancel_button")} disabled={batchBusy} className="btn-soft">Cancel</button>
                     <button
                       type="button"
                       onClick={submitBatchReview}
                       disabled={batchBusy || !batchReason.trim()}
                       style={{ padding: "10px 18px", borderRadius: 10, background: T.danger, color: "#fff", border: "none", cursor: batchBusy || !batchReason.trim() ? "default" : "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit", opacity: batchBusy || !batchReason.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6 }}
                     >
-                      {batchBusy ? <><BtnSpinner />Rejecting...</> : `Reject ${selectedReviewInvoices.length}`}
+                      {batchBusy ? <><BtnSpinner />Rejecting...</> : `Reject ${batchSelection?.invoiceIds.length ?? 0}`}
                     </button>
                   </div>
                 </Modal>
@@ -606,6 +639,7 @@ export default function InvoiceList(props: any) {
 
           {/* ═════ INVOICE DETAIL (editorial receipt view) ═════ */}
 
+      {batchDismissal.dialog}
     </>
   );
 }

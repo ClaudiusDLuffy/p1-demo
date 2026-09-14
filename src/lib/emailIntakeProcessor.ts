@@ -1,3 +1,5 @@
+import "server-only";
+import { logIntakeOutcome } from "./server/logIntakeOutcome";
 import {
   type GraphEmail,
   getAccessToken,
@@ -18,13 +20,13 @@ import {
   intakeStateBlockReason,
 } from "./intakeStatePolicy";
 import { createServerClient } from "./supabase/server";
-import { sendDispatchNotification } from "./notificationService";
 import {
   chooseIntakeWorkOrderMatch,
   type IntakeWorkOrderMatch,
   type WorkOrderMatchCandidate,
 } from "./emailIntakeMatching";
-import { intakeErrorMessage } from "./intakeError";
+import { IntakeLogUnconfirmedError, recordTrustedEmailIntakeResult } from "./server/emailIntakeLog";
+import type { EmailIntakeAction } from "./emailIntakeLogContracts";
 import {
   BILLING_ONLY_ACTIVITY,
   BILLING_ONLY_INTAKE_REASON,
@@ -41,33 +43,33 @@ import {
   drainPendingPriorityEscalationNotifications,
 } from "./emailPriorityEscalationProcessor";
 import { drainEmailAssignmentRemovals } from "./emailAssignmentRemovalProcessor";
+import { createEmailWorkOrder } from "./workOrderEmailCreation";
+import { getEmailIntakeConfig, getEmailIntakePolicyConfig } from "./config/server/emailIntake";
+import { getServerSupabaseConfig } from "./config/server/supabase";
+import { getPortalOrigin } from "./config/server/appEnvironment";
+import { ConfigurationError } from "./config/shared";
 
 type WorkOrderInsert = Database["public"]["Tables"]["work_orders"]["Insert"];
 type WorkOrderUpdate = Database["public"]["Tables"]["work_orders"]["Update"];
-type IntakeLogClient = {
-  from: (table: "email_intake_log") => {
-    insert: (row: Record<string, unknown>) => PromiseLike<{
-      error: { message: string } | null;
-    }>;
-  };
-};
-
 export type IntakeResult = {
   emailId: string;
   subject: string;
-  action: "created" | "updated" | "skipped" | "failed";
+  action: EmailIntakeAction;
   workOrderId: string | null;
   reason: string;
   parseConfidence: "high" | "medium" | "low";
   contractorAssigned: string | null;
   processedAt: string;
+  logStatus?: "recorded" | "already_recorded" | "unconfirmed";
+  logError?: "INTAKE_LOG_UNCONFIRMED" | "INTAKE_LOG_CONFLICT";
 };
 
 const stateAllowlistReason = (state: string | null) => {
+  const configuration = getEmailIntakePolicyConfig();
   return intakeStateBlockReason(
     state,
-    process.env.EMAIL_INTAKE_ALLOWED_STATES,
-    process.env.EMAIL_INTAKE_TEXAS_ENABLED,
+    configuration.allowedStates,
+    configuration.texasEnabled ? "true" : "false",
   );
 };
 
@@ -78,14 +80,14 @@ const stateActivationDecision = (
   return intakeStateActivationDecision(
     state,
     receivedAt,
-    process.env.EMAIL_INTAKE_FLORIDA_START_AT,
+    getEmailIntakePolicyConfig().floridaStartAt,
   );
 };
 
 const priorityCutoverDecision = (receivedAt: string) =>
   priorityIntakeCutoverDecision(
     receivedAt,
-    process.env.EMAIL_PRIORITY_INTAKE_START_AT,
+    getEmailIntakePolicyConfig().priorityStartAt,
   );
 
 const compactPatch = (parsed: ParsedWorkOrder) => {
@@ -201,11 +203,11 @@ const skippedResult = (
   reason,
 });
 
-const insertLog = async (email: GraphEmail, result: IntakeResult) => {
+const recordLog = async (email: GraphEmail, result: IntakeResult): Promise<IntakeResult> => {
   try {
-    const sb = createServerClient();
-    const logClient = sb as unknown as IntakeLogClient;
-    const { error } = await logClient.from("email_intake_log").insert({
+    // Preserve the existing source preference, but let the trusted schema reject
+    // malformed provider values rather than stringify them into an identity.
+    const receipt = await recordTrustedEmailIntakeResult(email.internetMessageId || email.id, {
       email_id: result.emailId,
       subject: result.subject,
       action: result.action,
@@ -215,11 +217,14 @@ const insertLog = async (email: GraphEmail, result: IntakeResult) => {
       contractor_assigned: result.contractorAssigned,
       raw_subject: email.subject,
       raw_from: email.from?.emailAddress?.address || null,
-      processed_at: result.processedAt,
     });
-    if (error) console.error("Email intake log insert failed", error);
-  } catch (err) {
-    console.error("Email intake log insert error", err);
+    return { ...result, logStatus: receipt.reason };
+  } catch (error) {
+    // Work-order and Graph operations are separate transactions. Do not report
+    // them as undone, or claim trusted evidence exists after an uncertain write.
+    const code = error instanceof IntakeLogUnconfirmedError ? error.code : "INTAKE_LOG_UNCONFIRMED";
+    logIntakeOutcome("intake_history_unconfirmed");
+    return { ...result, logStatus: "unconfirmed", logError: code };
   }
 };
 
@@ -240,21 +245,17 @@ const finalizeEmailProcessing = async (
   if (shouldFinishEmail) {
     try {
       await finishEmail(email, folderId);
-    } catch (err) {
-      const finishReason = intakeErrorMessage(
-        err,
-        "unknown mailbox finalization error",
-      );
-      console.error("Email intake mailbox finalization failed", finishReason);
+    } catch {
+      const finishReason = "mailbox finalization failed; operator review required";
+      logIntakeOutcome("intake_mailbox_unconfirmed");
       finalizedResult = {
         ...finalizedResult,
-        reason: `${finalizedResult.reason}; mailbox finalization failed: ${finishReason}`,
+        reason: `${finalizedResult.reason}; ${finishReason}`,
       };
     }
   }
 
-  await insertLog(email, finalizedResult);
-  return finalizedResult;
+  return recordLog(email, finalizedResult);
 };
 
 export async function processEmail(
@@ -281,8 +282,7 @@ export async function processEmail(
       result,
       "not a confirmed direct 7-Eleven dispatch or priority update; mailbox left unchanged",
     );
-    await insertLog(email, result);
-    return result;
+    return recordLog(email, result);
   }
 
   try {
@@ -460,8 +460,7 @@ export async function processEmail(
               ...billingOnlyFields,
             };
 
-            const { error } = await sb.from("work_orders").insert(row);
-            if (error) throw error;
+            await createEmailWorkOrder((name, args) => sb.rpc(name, args), row, emailPrioritySourceMessageId(email));
             await saveAfmContact(workOrderId, parsed.afmEmail);
 
             if (billingOnly) {
@@ -470,22 +469,8 @@ export async function processEmail(
                 staffOnly: true,
               });
             } else if (contractor) {
-              await sendDispatchNotification({
-                workOrder: {
-                  id: workOrderId,
-                  incidentId: parsed.incidentId,
-                  storeNumber: parsed.storeNumber,
-                  city: parsed.city,
-                  state: parsed.state,
-                  address: parsed.address,
-                  priority,
-                  summary: parsed.summary,
-                  description: parsed.description,
-                },
-                contractorAssigned: Boolean(contractor.contractorId),
-                contractorEmail: contractor.contractorEmail,
-                contractorName: contractor.contractorName,
-              }).catch(err => console.error("Dispatch notification failed", err));
+              // Receiving delivery is queued by the authoritative assignment
+              // transaction; no post-commit Graph call is required here.
             }
 
             result = {
@@ -603,14 +588,11 @@ export async function processEmail(
           result = skippedResult(result, "status email did not match an active work order");
         } else if (parsed.emailType === "TYPE_CAPITAL_PENDING") {
           const sb = createServerClient();
-          const { error } = await sb
-            .from("work_orders")
-            .update({ status: "capital", is_capital: true })
-            .eq("id", match.id)
-            .is("deleted_at", null);
+          const { error } = await sb.rpc("record_email_capital_pending_v1", {
+            p_work_order_id: match.id,
+          });
 
           if (error) throw error;
-          await addSystemActivity(match.id, "Capital approval pending");
           result = {
             ...result,
             action: "updated",
@@ -631,13 +613,13 @@ export async function processEmail(
     } else {
       result = skippedResult(result, "unsupported email type");
     }
-  } catch (err) {
-    console.error("Email intake processing failed", err);
+  } catch {
+    logIntakeOutcome("intake_processing_failed");
     shouldFinishEmail = false;
     result = {
       ...result,
       action: "failed",
-      reason: intakeErrorMessage(err, "unknown processing error"),
+      reason: "email processing failed; operator review required",
     };
   }
 
@@ -645,6 +627,12 @@ export async function processEmail(
 }
 
 export async function runIntakeCycle(): Promise<IntakeResult[]> {
+  if (!getEmailIntakeConfig().enabled) throw new ConfigurationError("FEATURE_DISABLED", "email_intake", ["EMAIL_INTAKE_ENABLED"]);
+  // Validate local configuration before mailbox writes or any notification
+  // send-start. Missing EMAIL_PRIORITY_INTAKE_START_AT still uses the existing
+  // priority-policy hold; no cutover is invented by configuration parsing.
+  getServerSupabaseConfig();
+  getPortalOrigin();
   const accessToken = await getAccessToken();
   const folderId = await getOrCreateFolder(accessToken);
   const emails = await getDispatchInboxEmails(accessToken);
@@ -653,11 +641,11 @@ export async function runIntakeCycle(): Promise<IntakeResult[]> {
     results.push(await processEmail(email, folderId));
   }
   await Promise.all([
-    drainPendingPriorityEscalationNotifications(accessToken).catch(error => {
-      console.error("Priority escalation outbox drain failed", error);
+    drainPendingPriorityEscalationNotifications(accessToken).catch(() => {
+      logIntakeOutcome("intake_priority_drain_failed");
     }),
-    drainEmailAssignmentRemovals(accessToken).catch(error => {
-      console.error("Email assignment-removal outbox drain failed", error);
+    drainEmailAssignmentRemovals(accessToken).catch(() => {
+      logIntakeOutcome("intake_removal_drain_failed");
     }),
   ]);
   return results;

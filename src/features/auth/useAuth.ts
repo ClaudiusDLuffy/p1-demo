@@ -10,13 +10,20 @@ import {
   supabase,
 } from "../../lib/supabase/client";
 import { DEMO_ACCOUNTS } from "../../lib/constants";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
+import { parseAuthProfile, type PortalAuthProfile } from "./authProfile";
+import { activateBrowserDraftSession, draftActivationTicket, revokeBrowserDraftSession, suspendBrowserDraftSession } from "../../lib/drafts/browserDraftSession";
+
+type AuthControls = { fire?: (message: string) => void; setPage(page: string): void;
+  setSelectedWO(id: string | null): void; setAiNote(value: null): void; setInvoices?(values: never[]): void };
 
 export async function changePassword(
   newPassword: string
 ): Promise<{ success: boolean; error?: string }> {
   const sb = supabase();
   const { error } = await sb.auth.updateUser({ password: newPassword });
-  if (error) return { success: false, error: error.message };
+  if (error) return { success: false, error: safeErrorMessage(error) };
   return { success: true };
 }
 
@@ -26,9 +33,11 @@ export default function useAuth({
   setSelectedWO,
   setAiNote,
   setInvoices,
-}: any) {
+}: AuthControls) {
   const qc = useQueryClient();
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<PortalAuthProfile | null>(null);
+  const currentProfileRef = useRef<PortalAuthProfile | null>(null);
+  const profileRequestRef = useRef(0);
   const [loginEmail, setLoginEmail] = useState(() => getRememberedEmail());
   const [loginPassword, setLoginPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(() => getRememberMePreference());
@@ -44,67 +53,66 @@ export default function useAuth({
   useEffect(() => { const t = setTimeout(() => setFadeIn(true), 50); return () => clearTimeout(t); }, []);
 
   const hydrateProfile = useCallback(async (userId: string) => {
-    if (expectedUserIdRef.current !== userId) return;
+    if (expectedUserIdRef.current !== userId) return false;
+    const request = ++profileRequestRef.current;
+    let draftTicket = draftActivationTicket();
     try {
       const sb = supabase();
       const [profileResult, scopeResult, permissionsResult] = await Promise.all([
         sb.from("profiles").select("*").eq("id", userId).single(),
-        (sb as any).rpc("get_my_contractor_scope"),
-        (sb as any)
-          .from("staff_permission_grants")
+        // Narrow contract for this existing RPC until generated types include it.
+        (sb as unknown as { rpc(name: "get_my_contractor_scope"): PromiseLike<{ data: unknown; error: unknown }> }).rpc("get_my_contractor_scope"),
+        sb.from("staff_permission_grants")
           .select("permission")
           .eq("profile_id", userId),
       ]);
       const { data: prof, error } = profileResult;
       if (error) throw error;
-      if (scopeResult.error) throw scopeResult.error;
-      if (permissionsResult.error) throw permissionsResult.error;
       if (!prof) throw new Error("Profile not found for this account");
+      // An inactive exact self row is sufficient to stop the old session's
+      // read/subscription scope even if active-only scope/grant RPCs deny it.
+      if (prof.active !== false && scopeResult.error) throw scopeResult.error;
+      if (prof.active !== false && permissionsResult.error) throw permissionsResult.error;
       // An older profile request can finish after a new account signs in.
       // Never let that stale response restore the previous identity.
-      if (expectedUserIdRef.current !== prof.id) return;
-      if (lastLoadedUserIdRef.current === prof.id) return;
+      if (expectedUserIdRef.current !== prof.id || request !== profileRequestRef.current) return false;
+      const next = parseAuthProfile(prof, prof.active ? scopeResult.data : {}, prof.active ? permissionsResult.data : [], DEMO_ACCOUNTS.some(d => d.email === prof.email));
+      const previous = currentProfileRef.current;
+      const changed = previous !== null && directoryActorScope(previous) !== directoryActorScope(next);
+      const initial = lastLoadedUserIdRef.current !== prof.id;
+      if (changed) {
+        revokeBrowserDraftSession(previous.id);
+        draftTicket = draftActivationTicket();
+        // Role, active state, company and grant changes are identity changes,
+        // not ordinary invalidations. Cancel late old-scope reads before clear.
+        await qc.cancelQueries();
+        if (expectedUserIdRef.current !== prof.id || request !== profileRequestRef.current) return false;
+        qc.clear(); setSelectedWO(null); setAiNote(null); setInvoices?.([]);
+      }
+      activateBrowserDraftSession(next.id, next.active, draftTicket);
       lastLoadedUserIdRef.current = prof.id;
-      const profAny = prof as any;
-      const scope = scopeResult.data || {};
-      setCurrentUser({
-        id: prof.id, name: prof.name, email: prof.email, initials: prof.initials, role: prof.role,
-        title: prof.title, company: prof.company, phone: prof.phone, territory: prof.territory,
-        trades: prof.trades || [], color: prof.color,
-        isDemo: DEMO_ACCOUNTS.some(d => d.email === prof.email),
-        contractorTier: prof.contractor_tier || null,
-        dispatcherId: prof.dispatcher_id || null,
-        contractorAccountId: scope.contractorAccountId || (prof.role === "contractor" ? prof.id : null),
-        contractorOrganizationId: scope.organizationId || null,
-        contractorOrganizationName: scope.organizationName || null,
-        contractorAccessLevel: scope.accessLevel || null,
-        staffPermissions: (permissionsResult.data || [])
-          .map((grant: any) => String(grant.permission)),
-        canInvoice: !!scope.canInvoice,
-        canManageTeam: !!scope.canManageTeam,
-        // Display cap for the WO NTE shown to this contractor. Mask applied
-        // at the PortalShell boundary so this never reaches staff math or
-        // the NTE-flag bucket. Falls back to 1000 pre-migration.
-        contractorNteDisplay: profAny.contractor_nte_display != null ? Number(profAny.contractor_nte_display) : 1000,
-        // Reserved for Phase 2 per-contractor rates — the invoice form no
-        // longer reads these (rates start empty, Truck Charge defaults 60).
-        defaultLaborRate: prof.default_labor_rate ?? null,
-        defaultTruckRate: prof.default_truck_rate ?? null,
-      });
-      setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
-    } catch (err: any) {
-      if (expectedUserIdRef.current !== userId) return;
-      setLoginError(err?.message || "Could not load your profile");
-      if (fire) fire(err?.message || "Could not load your profile");
+      currentProfileRef.current = next;
+      setCurrentUser(next);
+      if (initial || changed) setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
+      return next.active && !changed;
+    } catch (err: unknown) {
+      if (expectedUserIdRef.current !== userId || request !== profileRequestRef.current) return false;
+      setLoginError(safeErrorMessage(err));
+      if (fire) fire(safeErrorMessage(err));
       throw err;
     } finally {
-      if (expectedUserIdRef.current === userId) {
+      if (expectedUserIdRef.current === userId && request === profileRequestRef.current) {
         loginAttemptRef.current = false;
         authTransitionRef.current = null;
         setLoginLoading(false);
       }
     }
-  }, [fire, setPage]);
+  }, [fire, setPage, qc, setSelectedWO, setAiNote, setInvoices]);
+
+  const refreshCurrentProfile = useCallback(async () => {
+    const id = expectedUserIdRef.current;
+    return id ? hydrateProfile(id) : false;
+  }, [hydrateProfile]);
 
   // Real Supabase auth - replaces demo button login
   const doLogin = async (email: string, password: string, remember = rememberMe) => {
@@ -117,12 +125,14 @@ export default function useAuth({
     authTransitionRef.current = "login";
     try {
       setRememberMePreference(remember, v);
+      suspendBrowserDraftSession();
       // Gate every profile-scoped query while Supabase changes identity. A
       // successful password sign-in replaces the local session itself, so a
       // pre-login sign-out would only create a 401 window (and its default
       // global scope would revoke the user's sessions on other devices).
       expectedUserIdRef.current = null;
       lastLoadedUserIdRef.current = null;
+      currentProfileRef.current = null;
       qc.clear();
       setHasSession(false);
       setCurrentUser(null);
@@ -139,18 +149,21 @@ export default function useAuth({
         authTransitionRef.current = null;
         setLoginLoading(false);
       }
-    } catch (err: any) {
-      setLoginError(err.message || "Sign in failed");
+    } catch (err: unknown) {
+      setLoginError(safeErrorMessage(err));
       loginAttemptRef.current = false;
       authTransitionRef.current = null;
       setLoginLoading(false);
     }
   };
   const logout = async () => {
+    // Fence delayed cleanup/autosaves before identity/UI teardown. Failure never blocks sign-out.
+    revokeBrowserDraftSession(expectedUserIdRef.current);
     loginAttemptRef.current = false;
     authTransitionRef.current = "logout";
     expectedUserIdRef.current = null;
     lastLoadedUserIdRef.current = null;
+    currentProfileRef.current = null;
     qc.clear();
     setHasSession(false);
     setCurrentUser(null);
@@ -180,7 +193,7 @@ export default function useAuth({
         if (!mounted) return;
         try {
           await hydrateProfile(userId);
-        } catch (err: any) {
+        } catch {
           if (!mounted) return;
           // hydrateProfile already surfaced the error.
         }
@@ -198,36 +211,42 @@ export default function useAuth({
       if ((event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session?.user) {
         const nextUserId = session.user.id;
         if (expectedUserIdRef.current !== nextUserId) {
+          if (expectedUserIdRef.current) revokeBrowserDraftSession(expectedUserIdRef.current);
           // INITIAL_SESSION and cross-tab sign-ins can change identity without
           // going through doLogin in this component.
           qc.clear();
           lastLoadedUserIdRef.current = null;
+          currentProfileRef.current = null;
           setCurrentUser(null);
         }
         expectedUserIdRef.current = nextUserId;
         setHasSession(true);
         hydrate(nextUserId);
       } else if (event === "INITIAL_SESSION" && !session) {
+        revokeBrowserDraftSession();
         // No session on mount - make sure the spinner isn't left on.
         expectedUserIdRef.current = null;
         lastLoadedUserIdRef.current = null;
+        currentProfileRef.current = null;
         setHasSession(false);
         setLoginLoading(false);
       } else if (event === "SIGNED_OUT") {
+        revokeBrowserDraftSession(expectedUserIdRef.current);
         qc.clear();
         expectedUserIdRef.current = null;
         lastLoadedUserIdRef.current = null;
+        currentProfileRef.current = null;
         setHasSession(false);
         setCurrentUser(null);
         if (!loginAttemptRef.current) setLoginLoading(false);
       }
     });
-    return () => { mounted = false; subscription.unsubscribe(); };
+    return () => { mounted = false; profileRequestRef.current += 1; subscription.unsubscribe(); };
   }, [hydrateProfile, qc]);
 
   return {
     currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
-    fadeIn, doLogin, logout
+    fadeIn, doLogin, logout, refreshCurrentProfile
   };
 }

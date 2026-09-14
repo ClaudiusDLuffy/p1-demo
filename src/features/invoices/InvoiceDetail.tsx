@@ -16,11 +16,19 @@ import {
   isInvoiceController,
 } from "../../lib/staffPermissions";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
-import { useMemo, useState } from "react";
-import { useBillingInvoicePageQuery } from "../billing/queries";
+import { useId, useMemo, useRef, useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
+import { useBillingInvoiceByIdQuery } from "../billing/queries";
+import { useInvoiceLinePage } from "./invoiceLineQueries";
+import InvoiceLinePagination from "./InvoiceLinePagination";
+import FinancialNoticeStatus from "../financial-notifications/FinancialNoticeStatus";
+import { prepareInvoicePaymentHold } from "../../lib/financialNotificationCommands";
+import { safeFinancialNotificationCommandError } from "../../lib/financialNotificationCommandContracts";
+import { useDirectorySelection } from "../directory/queries";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 
 export default function InvoiceDetail(props: any) {
-  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, getUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold, pdfBusy, fmt, loadingStates = {} } = props;
+  const { page, selectedInvoice, invoices, billingInvoices = [], workOrders, isManager, currentUser, setSelectedInvoice, onBack, backLabel = "Back to invoices", onOpenBillingInvoice, onEditRejected, doApproveInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold, pdfBusy, fmt, loadingStates = {} } = props;
   const controller = isInvoiceController(currentUser);
   const canReview = isManager && !controller;
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -36,24 +44,27 @@ export default function InvoiceDetail(props: any) {
   const [correctedTotal, setCorrectedTotal] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
+  const [correctionOriginal, setCorrectionOriginal] = useState("");
+  const fieldId = useId();
   const [paymentHoldAction, setPaymentHoldAction] = useState<"hold" | "release" | null>(null);
   const [paymentHoldReason, setPaymentHoldReason] = useState("");
   const [paymentHoldBusy, setPaymentHoldBusy] = useState(false);
+  const [paymentHoldError, setPaymentHoldError] = useState<string | null>(null);
+  const paymentHoldContext = useRef<Awaited<ReturnType<typeof prepareInvoicePaymentHold>> | null>(null);
+  const paymentHoldLock = useRef(false);
+  const currentInvoiceId = useRef(selectedInvoice);
+  currentInvoiceId.current = selectedInvoice;
   const inv = useMemo(
     () => invoices.find(i => i.id === selectedInvoice),
     [invoices, selectedInvoice]
   );
-  const linkedStaffInvoiceQuery = useBillingInvoicePageQuery({
-    queue: "work_order",
-    workOrderId: inv?.wot || null,
-    sort: "recent",
-    direction: "desc",
-    limit: 100,
-  }, isManager && Boolean(inv?.wot));
-  const contractorProfile = inv
-    ? getUser?.(inv.contractor)
-      || (currentUser?.role === "contractor" ? currentUser : null)
-    : null;
+  const linkedStaffInvoiceQuery = useBillingInvoiceByIdQuery(inv?.sourceStaffInvoiceId, isManager && Boolean(inv?.sourceStaffInvoiceId));
+  const lineQuery = useInvoiceLinePage(inv || {}, page === "invoices" && Boolean(inv));
+  const lines = inv?.projection === "summary" ? lineQuery.lines : inv?.lines || [];
+  const contractorProfileQuery = useDirectorySelection("contact_detail", inv?.contractor || null);
+  const contractorProfile = contractorProfileQuery.data
+    || (currentUser?.role === "contractor"
+      && inv?.contractor === (currentUser.contractorAccountId || currentUser.id) ? currentUser : null);
   const contractorName = contractorProfile?.company
     || contractorProfile?.name
     || "Contractor";
@@ -94,11 +105,35 @@ export default function InvoiceDetail(props: any) {
   const linkedStaffInvoices = useMemo(
     () => !isManager || !inv
       ? []
-      : (linkedStaffInvoiceQuery.data?.items || billingInvoices).filter((billingInvoice: any) =>
-          (billingInvoice.sourceInvoiceIds || []).includes(inv.id),
-        ),
-    [billingInvoices, inv, isManager, linkedStaffInvoiceQuery.data?.items],
+      : linkedStaffInvoiceQuery.data ? [linkedStaffInvoiceQuery.data]
+        : billingInvoices.filter((billingInvoice: any) => (billingInvoice.sourceInvoiceIds || []).includes(inv.id)),
+    [billingInvoices, inv, isManager, linkedStaffInvoiceQuery.data],
   );
+  const openPaymentHold = async (action: "hold" | "release") => {
+    if (!inv || paymentHoldLock.current) return;
+    const invoiceId = String(inv.id);
+    paymentHoldLock.current = true;
+    setPaymentHoldBusy(true);
+    setPaymentHoldError(null);
+    try {
+      const context = await prepareInvoicePaymentHold(invoiceId);
+      if (currentInvoiceId.current !== invoiceId) return;
+      paymentHoldContext.current = context;
+      setPaymentHoldReason("");
+      setPaymentHoldAction(action);
+    } catch (error) { setPaymentHoldError(safeFinancialNotificationCommandError(error).message); }
+    finally { paymentHoldLock.current = false; setPaymentHoldBusy(false); }
+  };
+  const rejectDismissal = useUnsavedChangesGuard({ dirty: rejectReason.length > 0, busy: submittingReject,
+    enabled: page === "invoices" && Boolean(inv) && rejecting,
+    onClose: () => { setRejecting(false); setRejectReason(""); } });
+  const correctionDismissal = useUnsavedChangesGuard({
+    dirty: correctedTotal !== correctionOriginal || correctionReason.length > 0,
+    busy: submittingCorrection, enabled: page === "invoices" && Boolean(inv) && correctingTotal,
+    onClose: () => { setCorrectingTotal(false); setCorrectionReason(""); } });
+  const holdDismissal = useUnsavedChangesGuard({ dirty: paymentHoldReason.length > 0, busy: paymentHoldBusy,
+    enabled: page === "invoices" && Boolean(inv) && Boolean(paymentHoldAction),
+    onClose: () => { if (!paymentHoldLock.current) { setPaymentHoldAction(null); setPaymentHoldReason(""); } } });
   return (
     <>
           {page === "invoices" && selectedInvoice && (() => {
@@ -116,7 +151,9 @@ export default function InvoiceDetail(props: any) {
                       <button
                         type="button"
                         onClick={() => {
-                          setCorrectedTotal(Number(inv.total || 0).toFixed(2));
+                          const original = Number(inv.total || 0).toFixed(2);
+                          setCorrectionOriginal(original);
+                          setCorrectedTotal(original);
                           setCorrectionReason("");
                           setCorrectingTotal(true);
                         }}
@@ -128,10 +165,8 @@ export default function InvoiceDetail(props: any) {
                     {canPlacePaymentHold && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setPaymentHoldReason("");
-                          setPaymentHoldAction("hold");
-                        }}
+                        onClick={() => { void openPaymentHold("hold"); }}
+                        disabled={paymentHoldBusy}
                         className="btn-soft"
                         style={{ color: T.danger, borderColor: `${T.danger}44` }}
                       >
@@ -141,10 +176,8 @@ export default function InvoiceDetail(props: any) {
                     {canReleasePaymentHold && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setPaymentHoldReason("");
-                          setPaymentHoldAction("release");
-                        }}
+                        onClick={() => { void openPaymentHold("release"); }}
+                        disabled={paymentHoldBusy}
                         className="btn-primary"
                       >
                         Release payment hold
@@ -193,13 +226,14 @@ export default function InvoiceDetail(props: any) {
                     )}
                   </div>
                 </div>
+                {isManager && <FinancialNoticeStatus key={inv.id} profile={currentUser} invoiceId={inv.id}
+                  invoiceVersion={inv.invoiceVersion} reviewRevision={inv.reviewRevision} />}
+                {paymentHoldError && !paymentHoldAction && <p role="alert">{paymentHoldError}</p>}
+                {paymentHoldBusy && !paymentHoldAction && <p role="status">Checking the current payment hold…</p>}
                 {paymentHoldAction && (
                   <Modal
-                    onClose={() => {
-                      if (paymentHoldBusy) return;
-                      setPaymentHoldAction(null);
-                      setPaymentHoldReason("");
-                    }}
+                    onRequestClose={holdDismissal.requestClose}
+                    dismissDisabled={paymentHoldBusy}
                     title={paymentHoldAction === "hold"
                       ? `Hold invoice #${inv.num}`
                       : `Release hold for #${inv.num}`}
@@ -216,6 +250,9 @@ export default function InvoiceDetail(props: any) {
                       </span>
                       <textarea
                         rows={3}
+                        disabled={paymentHoldBusy}
+                        aria-invalid={Boolean(paymentHoldError)}
+                        aria-describedby={paymentHoldError ? `${fieldId}-hold-error` : undefined}
                         value={paymentHoldReason}
                         onChange={(event) => setPaymentHoldReason(event.target.value)}
                         placeholder={paymentHoldAction === "hold"
@@ -226,15 +263,13 @@ export default function InvoiceDetail(props: any) {
                         style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
                       />
                     </label>
+                    {paymentHoldError && <p id={`${fieldId}-hold-error`} role="alert">{paymentHoldError}</p>}
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
                       <button
                         type="button"
                         className="btn-soft"
                         disabled={paymentHoldBusy}
-                        onClick={() => {
-                          setPaymentHoldAction(null);
-                          setPaymentHoldReason("");
-                        }}
+                        onClick={() => holdDismissal.requestClose("cancel_button")}
                       >
                         Cancel
                       </button>
@@ -243,16 +278,24 @@ export default function InvoiceDetail(props: any) {
                         className={paymentHoldAction === "hold" ? "btn-soft" : "btn-primary"}
                         disabled={paymentHoldBusy || !paymentHoldReason.trim()}
                         onClick={async () => {
+                          const context = paymentHoldContext.current;
+                          if (paymentHoldLock.current) return;
+                          if (!context || context.invoiceId !== inv.id) {
+                            setPaymentHoldError("The invoice selection changed. Close this form and review the current invoice.");
+                            return;
+                          }
+                          paymentHoldLock.current = true;
                           setPaymentHoldBusy(true);
                           try {
                             const ok = paymentHoldAction === "hold"
-                              ? await doPlaceInvoicePaymentHold(inv, paymentHoldReason)
-                              : await doReleaseInvoicePaymentHold(inv, paymentHoldReason);
+                              ? await doPlaceInvoicePaymentHold(inv, paymentHoldReason, context.expectedSourceEventId)
+                              : await doReleaseInvoicePaymentHold(inv, paymentHoldReason, context.expectedSourceEventId);
                             if (ok) {
                               setPaymentHoldAction(null);
                               setPaymentHoldReason("");
                             }
                           } finally {
+                            paymentHoldLock.current = false;
                             setPaymentHoldBusy(false);
                           }
                         }}
@@ -268,7 +311,7 @@ export default function InvoiceDetail(props: any) {
                   </Modal>
                 )}
                 {confirmApprove && (
-                  <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} title={`Approve invoice #${inv.num}`} width={440}>
+                  <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} dismissDisabled={approving} title={`Approve invoice #${inv.num}`} width={440}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
                       Approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This updates only this invoice. The work order advances only when all live invoices are approved or entered in QuickBooks.
                     </div>
@@ -292,7 +335,7 @@ export default function InvoiceDetail(props: any) {
                   </Modal>
                 )}
                 {confirmRetract && (
-                  <Modal onClose={() => { if (!retracting) setConfirmRetract(false); }} title={`Undo rejection for #${inv.num}`} width={460}>
+                  <Modal onClose={() => { if (!retracting) setConfirmRetract(false); }} dismissDisabled={retracting} title={`Undo rejection for #${inv.num}`} width={460}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
                       Withdraw the rejection and approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This is allowed only while the contractor has not resubmitted it. The correction is recorded in the activity log.
                     </div>
@@ -319,14 +362,14 @@ export default function InvoiceDetail(props: any) {
                   </Modal>
                 )}
                 {rejecting && (
-                  <Modal onClose={() => { setRejecting(false); setRejectReason(""); }} title={`Reject invoice #${inv.num}`} width={460}>
+                  <Modal onRequestClose={rejectDismissal.requestClose} dismissDisabled={submittingReject} title={`Reject invoice #${inv.num}`} width={460}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 12, lineHeight: 1.55 }}>
                       The contractor sees this reason and can correct and resubmit the invoice. The work order remains in review until every invoice is approved or entered in QuickBooks.
                     </div>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
-                    <textarea rows={3} value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box", outline: "none" }} />
+                    <label htmlFor={`${fieldId}-reject-reason`} style={{ fontSize: 11, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.6, display: "block", marginBottom: 6 }}>Rejection reason</label>
+                    <textarea id={`${fieldId}-reject-reason`} required disabled={submittingReject} rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Missing parts receipt, labor hours unclear…" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface, color: T.ink, resize: "vertical", boxSizing: "border-box" }} />
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                      <button onClick={() => { setRejecting(false); setRejectReason(""); }} className="btn-soft">Cancel</button>
+                      <button disabled={submittingReject} onClick={() => rejectDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
                       <button
                         onClick={async () => {
                           setSubmittingReject(true);
@@ -342,11 +385,8 @@ export default function InvoiceDetail(props: any) {
                 )}
                 {correctingTotal && (
                   <Modal
-                    onClose={() => {
-                      if (submittingCorrection) return;
-                      setCorrectingTotal(false);
-                      setCorrectionReason("");
-                    }}
+                    onRequestClose={correctionDismissal.requestClose}
+                    dismissDisabled={submittingCorrection}
                     title={`Correct invoice #${inv.num} total`}
                     width={460}
                   >
@@ -360,6 +400,7 @@ export default function InvoiceDetail(props: any) {
                         min="0.01"
                         step="0.01"
                         value={correctedTotal}
+                        disabled={submittingCorrection}
                         onChange={(event) => setCorrectedTotal(event.target.value)}
                         inputMode="decimal"
                         autoFocus
@@ -371,13 +412,14 @@ export default function InvoiceDetail(props: any) {
                       <textarea
                         rows={2}
                         value={correctionReason}
+                        disabled={submittingCorrection}
                         onChange={(event) => setCorrectionReason(event.target.value)}
                         placeholder="Entered decimal did not match the uploaded PDF"
                         style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
                       />
                     </label>
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
-                      <button type="button" className="btn-soft" disabled={submittingCorrection} onClick={() => setCorrectingTotal(false)}>Cancel</button>
+                      <button type="button" className="btn-soft" disabled={submittingCorrection} onClick={() => correctionDismissal.requestClose("cancel_button")}>Cancel</button>
                       <button
                         type="button"
                         className="btn-primary"
@@ -406,12 +448,12 @@ export default function InvoiceDetail(props: any) {
                   </Modal>
                 )}
                 {confirmDelete && (
-                  <Modal onClose={() => setConfirmDelete(false)} title="Delete invoice" width={420}>
+                  <Modal onClose={() => { if (!deleting) setConfirmDelete(false); }} dismissDisabled={deleting} title="Delete invoice" width={420}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
                       Delete this invoice? This cannot be undone from the portal.
                     </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button onClick={() => setConfirmDelete(false)} className="btn-soft">Cancel</button>
+                      <button disabled={deleting} onClick={() => setConfirmDelete(false)} className="btn-soft">Cancel</button>
                       <button
                         onClick={async () => {
                           setDeleting(true);
@@ -446,6 +488,8 @@ export default function InvoiceDetail(props: any) {
                       <div className="invoice-top-header-right" style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 2 }}>From</div>
                         <div className="display invoice-company-name" style={{ fontSize: 18, color: T.ink, lineHeight: 1 }}>{contractorName}</div>
+                        {contractorProfileQuery.isFetching && !contractorProfile && <div style={{ fontSize: 10, color: T.muted }}>Loading contractor details…</div>}
+                        {contractorProfileQuery.error && <div style={{ fontSize: 10, color: T.muted }}>{safeErrorMessage(contractorProfileQuery.error)} <button type="button" disabled={contractorProfileQuery.isFetching} onClick={() => void contractorProfileQuery.refetch()}>Retry details</button></div>}
                         {contractorProfile?.company && contractorProfile?.name && <div className="invoice-company-legal" style={{ fontSize: 10, color: T.subtle, marginTop: 2 }}>{contractorProfile.name}</div>}
                         {contractorProfile?.email && <div style={{ fontSize: 10, color: T.muted, marginTop: 4 }}>{contractorProfile.email}</div>}
                         {contractorProfile?.phone && <div style={{ fontSize: 10, color: T.muted }}>{contractorProfile.phone}</div>}
@@ -505,19 +549,20 @@ export default function InvoiceDetail(props: any) {
 
                   {/* Line items */}
                   <div>
-                    {(inv.lines || []).length === 0 && inv.pdfStoragePath && (
+                    {(inv.lineCount ?? lines.length) === 0 && inv.pdfStoragePath && (
                       <div style={{ padding: "18px 32px", background: T.surfaceSoft, borderBottom: `1px solid ${T.borderSoft}`, fontSize: 12, color: T.muted }}>
                         Line-item details are contained in the uploaded contractor invoice PDF.
                       </div>
                     )}
-                    {(inv.lines || []).length > 0 && (<>
+                    {inv.projection === "summary" && <InvoiceLinePagination query={lineQuery} total={inv.lineCount} />}
+                    {lines.length > 0 && (<>
                     <div className="desktop-only-table">
                       <div style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "12px 32px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
                         <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div>
                       </div>
-                      {(inv.lines || []).map((l: any, i: number) => (
+                      {lines.map((l: any, i: number) => (
                         <div key={i} style={{ display: "grid", gridTemplateColumns: "36px 130px 1fr 60px 90px 100px", gap: 0, padding: "14px 32px", borderBottom: `1px solid ${T.borderSoft}`, alignItems: "start", fontSize: 12 }}>
-                          <div className="mono" style={{ color: T.subtle }}>{i + 1}</div>
+                          <div className="mono" style={{ color: T.subtle }}>{lineQuery.lineOffset + i + 1}</div>
                           <div style={{ color: T.inkSoft, fontWeight: 500 }}>{l.type}</div>
                           <div style={{ color: T.ink, lineHeight: 1.55, paddingRight: 14 }}>{l.desc}</div>
                           <div className="mono" style={{ textAlign: "right", color: T.muted }}>{l.qty}</div>
@@ -527,7 +572,7 @@ export default function InvoiceDetail(props: any) {
                       ))}
                     </div>
                     <div className="mobile-only-cards">
-                      {(inv.lines || []).map((line: any, i: number) => (
+                      {lines.map((line: any, i: number) => (
                         <div
                           key={i}
                           style={{
@@ -548,7 +593,7 @@ export default function InvoiceDetail(props: any) {
                                 color: T.ink,
                                 marginBottom: 2,
                               }}>
-                                {i + 1}. {line.lineType || line.type}
+                                {lineQuery.lineOffset + i + 1}. {line.lineType || line.type}
                               </div>
                               <div style={{
                                 fontSize: 12,
@@ -619,6 +664,7 @@ export default function InvoiceDetail(props: any) {
           })()}
 
 
+      {rejectDismissal.dialog}{correctionDismissal.dialog}{holdDismissal.dialog}
     </>
   );
 }

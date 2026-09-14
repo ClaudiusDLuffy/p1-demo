@@ -3161,6 +3161,106 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_financial_notification_review_compatibility_v1: {
+        Args: { p_invoice_id: string; p_event: string };
+        Returns: Json;
+      };
+      get_financial_notification_status_v1: {
+        Args: { p_invoice_id: string; p_cursor?: Json | null; p_limit?: number }
+        Returns: Json
+      }
+      list_financial_notification_unresolved_v1: {
+        Args: { p_family?: string | null; p_state?: string | null; p_search?: string; p_cursor?: Json | null; p_limit?: number }
+        Returns: Json
+      }
+      get_financial_notification_history_v1: {
+        Args: { p_event_id: string; p_cursor?: Json | null; p_limit?: number }
+        Returns: Json
+      }
+      request_financial_notification_resend_v1: {
+        Args: { p_event_id: string; p_delivery_id: string; p_operation_id: string; p_reason: string }
+        Returns: Json
+      }
+      resolve_financial_notification_out_of_band_v1: {
+        Args: { p_event_id: string; p_delivery_id: string; p_operation_id: string; p_reason: string }
+        Returns: Json
+      }
+      annotate_financial_notification_history_v1: {
+        Args: { p_event_id: string; p_delivery_id: string; p_operation_id: string; p_reason: string }
+        Returns: Json
+      }
+      review_contractor_invoice_with_notification_v1: {
+        Args: { p_invoice_id: string; p_action: string; p_reason: string | null; p_operation_id: string; p_expected_revision: number }
+        Returns: Json
+      }
+      review_contractor_invoices_with_notification_v1: {
+        Args: { p_invoice_ids: string[]; p_action: string; p_reason: string | null; p_operation_id: string; p_expected_revisions: Json }
+        Returns: Json
+      }
+      retract_contractor_invoice_rejection_with_notification_v1: {
+        Args: { p_invoice_id: string; p_operation_id: string; p_expected_revision: number }
+        Returns: Json
+      }
+      set_contractor_invoice_payment_hold_with_notification_v1: {
+        Args: { p_invoice_id: string; p_action: string; p_reason: string; p_operation_id: string; p_expected_source_event_id?: string | null }
+        Returns: Json
+      }
+      claim_financial_notification_deliveries_v1: {
+        Args: { p_limit: number; p_lease_seconds: number; p_claim_token: string }
+        Returns: Json
+      }
+      prepare_financial_notification_send_v1: {
+        Args: { p_delivery_id: string; p_claim_token: string }
+        Returns: Json
+      }
+      complete_financial_notification_delivery_v1: {
+        Args: { p_delivery_id: string; p_claim_token: string; p_status: string; p_error_code: string | null; p_provider_status: number | null; p_provider_reference: string | null; p_retry_after_seconds?: number | null }
+        Returns: Json
+      }
+      get_receiving_dispatch_current_v1: {
+        Args: { p_work_order_id: string; p_assignment_version: number }
+        Returns: Json
+      }
+      list_receiving_dispatch_unresolved_v1: {
+        Args: { p_state?: string | null; p_search?: string; p_cursor?: Json | null; p_limit?: number }
+        Returns: Json
+      }
+      get_receiving_dispatch_history_v1: {
+        Args: { p_delivery_id: string; p_cursor?: Json | null; p_limit?: number }
+        Returns: Json
+      }
+      request_receiving_dispatch_resend_v1: {
+        Args: { p_delivery_id: string; p_assignment_version: number; p_operation_id: string; p_reason: string }
+        Returns: Json
+      }
+      resolve_receiving_dispatch_out_of_band_v1: {
+        Args: { p_delivery_id: string; p_assignment_version: number; p_operation_id: string; p_reason: string }
+        Returns: Json
+      }
+      prepare_receiving_dispatch_send_v1: {
+        Args: { p_delivery_id: string; p_claim_token: string }
+        Returns: Json
+      }
+      get_receiving_dispatch_message_v1: {
+        Args: { p_delivery_id: string; p_claim_token: string }
+        Returns: Json
+      }
+      claim_receiving_dispatch_deliveries_v1: {
+        Args: { p_claim_token: string; p_lease_seconds: number; p_limit: number }
+        Returns: Json
+      }
+      start_receiving_dispatch_delivery_v1: {
+        Args: { p_claim_token: string; p_delivery_id: string }
+        Returns: boolean
+      }
+      complete_receiving_dispatch_delivery_v1: {
+        Args: { p_claim_token: string; p_delivery_id: string; p_error_code: string | null; p_provider_reference: string | null; p_provider_status: number | null; p_status: string }
+        Returns: Json
+      }
+      resolve_receiving_dispatch_delivery_v1: {
+        Args: { p_actor: string; p_delivery_id: string; p_reason: string; p_resolution_type: string }
+        Returns: Json
+      }
       add_work_order_to_my_todos: {
         Args: { p_note?: string | null; p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]

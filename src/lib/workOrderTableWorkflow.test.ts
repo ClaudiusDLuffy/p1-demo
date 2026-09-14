@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { createWorkOrderReadHarness, rawPage, respond } from "./work-order-read-test-support/harness";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/0109_immediate_seven_eleven_activity_alerts.sql");
@@ -14,7 +15,6 @@ const tableDefinition = migration.slice(
   tableEnd + 4,
 );
 const tableMigration = migration.slice(tableStart);
-const db = read("src/lib/db.ts");
 const list = read("src/features/work-orders/WorkOrderList.tsx");
 
 test("work-order table sorting and filtering operate on the full RLS result set", () => {
@@ -66,11 +66,16 @@ test("active jobs display pending 7-Eleven updates immediately", () => {
   assert.doesNotMatch(tableMigration, /when work_order\.functional_status::text = 'Completed'/);
 });
 
-test("client selects the table RPC and forwards every column control", () => {
-  assert.match(db, /"list_work_orders_table_page"/);
-  assert.match(db, /p_sort_column: params\.tableSortColumn/);
-  assert.match(db, /p_work_order_filter: params\.workOrderFilter/);
-  assert.match(db, /p_contractor_filter: params\.contractorFilter/);
+test("client selects the table RPC and forwards every column control", async () => {
+  const harness = createWorkOrderReadHarness([respond(rawPage([]))]);
+  await harness.loadPage({ tableSortColumn: "work_order", tableSortDirection: "asc",
+    workOrderFilter: "  FWKD-SYNTHETIC  ", contractorFilter: "  Synthetic contractor  " });
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.calls[0].name, "list_work_orders_table_rows_v2");
+  assert.equal(harness.calls[0].args.p_sort_column, "work_order");
+  assert.equal(harness.calls[0].args.p_sort_direction, "asc");
+  assert.equal(harness.calls[0].args.p_work_order_filter, "FWKD-SYNTHETIC");
+  assert.equal(harness.calls[0].args.p_contractor_filter, "Synthetic contractor");
   assert.match(list, /aria-sort=/);
   assert.match(list, /selectTableSort\(column\)/);
   assert.match(list, /renderColumnFilter\(column\)/);

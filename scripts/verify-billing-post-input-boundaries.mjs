@@ -1,0 +1,10 @@
+import { readFileSync } from "node:fs";
+const read = path => readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+const save = read("src/server/billing-invoices/saveBillingInvoice.ts");
+const mutation = read("src/server/billing-invoices/billingMutationUseCases.ts");
+const app = read("src/server/billing-invoices/applicationService.ts");
+if (/NextRequest|NextResponse|request\.json\(|JSON\.parse\(|requireStaff|authorizeBillingRead|\.from\s*\(|\.rpc\s*\(/.test(save)) throw new Error("save use case retains HTTP/auth/direct read ownership");
+if (/export\s+async\s+function\s+POST|StaffInvoiceSaveSchema/.test(mutation)) throw new Error("mutation module retains POST front-half ownership");
+if (/billingMutationUseCases|billingMutationUseCases/.test(app)) throw new Error("application service references broad mutation module");
+if (!app.includes("postBillingInvoice")) throw new Error("POST boundary wiring missing");
+console.log("billing POST input boundaries verified");

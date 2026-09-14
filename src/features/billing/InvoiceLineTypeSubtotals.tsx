@@ -3,22 +3,24 @@
 import { useMemo } from "react";
 
 import { T } from "../../lib/constants";
-import { summarizeInvoiceLineTypes } from "../../lib/invoiceLineSubtotals";
+import { summarizeInvoiceLineTypes, type InvoiceLineSubtotalSummary } from "../../lib/invoiceLineSubtotals";
 
 export default function InvoiceLineTypeSubtotals({
   lines,
   salesTax,
   fmt,
   compact = false,
+  fullSummary,
 }: {
   lines: Array<Record<string, unknown>>;
   salesTax: number;
   fmt: (value: number) => string;
   compact?: boolean;
+  fullSummary?: InvoiceLineSubtotalSummary;
 }) {
   const summary = useMemo(
-    () => summarizeInvoiceLineTypes(lines, salesTax),
-    [lines, salesTax],
+    () => fullSummary ?? summarizeInvoiceLineTypes(lines, salesTax),
+    [lines, salesTax, fullSummary],
   );
 
   return (

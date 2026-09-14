@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { installSyntheticAppEnvironment } from "./config-test-support/syntheticAppEnvironment";
+
+installSyntheticAppEnvironment();
 import { requiresManualContractorAssignment } from "./autoDispatch";
 import {
   isConfirmedInitialDispatchEmail,

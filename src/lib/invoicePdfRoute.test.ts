@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { installSyntheticAppEnvironment } from "./config-test-support/syntheticAppEnvironment";
+
+installSyntheticAppEnvironment();
 import { NextRequest } from "next/server";
 import { jsPDF } from "jspdf";
 
@@ -44,13 +47,14 @@ test("parses a downloaded invoice with a remembered browser session", async () =
     authRequests += 1;
     const requestUrl = new URL(String(input));
     assert.equal(requestUrl.origin, projectUrl);
-    assert.equal(requestUrl.pathname, "/rest/v1/profiles");
-    assert.equal(requestUrl.searchParams.get("select"), "id");
-    assert.equal(requestUrl.searchParams.get("id"), `eq.${userId}`);
     const headers = new Headers(init?.headers);
     assert.equal(headers.get("apikey"), publishableKey);
     assert.equal(headers.get("authorization"), `Bearer ${accessToken}`);
-    return new Response(JSON.stringify([{ id: userId }]), {
+    if (requestUrl.pathname === "/auth/v1/user") return Response.json({ id: userId });
+    assert.equal(requestUrl.pathname, "/rest/v1/profiles");
+    assert.equal(requestUrl.searchParams.get("select"), "id,active,role");
+    assert.equal(requestUrl.searchParams.get("id"), `eq.${userId}`);
+    return new Response(JSON.stringify([{ id: userId, active: true, role: "back_office" }]), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
@@ -75,7 +79,7 @@ test("parses a downloaded invoice with a remembered browser session", async () =
     const payload = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(authRequests, 1);
+    assert.equal(authRequests, 2);
     assert.deepEqual(
       payload.lines.map((line: { desc: string; qty: number; rate: number; amount: number }) => ({
         desc: line.desc,

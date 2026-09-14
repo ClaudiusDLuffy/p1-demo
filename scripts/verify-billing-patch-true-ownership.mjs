@@ -1,0 +1,10 @@
+import fs from "node:fs";
+const root = new URL("..", import.meta.url).pathname;
+const read = p => fs.readFileSync(`${root}/${p}`, "utf8");
+const update = read("src/server/billing-invoices/updateBillingInvoice.ts");
+const app = read("src/server/billing-invoices/applicationService.ts");
+const legacy = read("src/server/billing-invoices/billingMutationUseCases.ts");
+for (const token of ["NextRequest", "NextResponse", "requireStaff", ".from(", ".rpc(", "billingMutationUseCases", "JSON.parse(", "saveStaffFinancialCommand"]) if (update.includes(token)) throw new Error(`PATCH use case retains ${token}`);
+if (app.includes("billingMutationUseCases")) throw new Error("application service retains PATCH monolith");
+if (legacy.includes("saveStaffFinancialCommand") || legacy.includes("StaffInvoicePatchSchema") || legacy.includes("NextRequest")) throw new Error("mutation module retains PATCH behavior");
+console.log("billing PATCH true ownership guard: passed");

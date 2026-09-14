@@ -1,6 +1,7 @@
 import { createServerClient } from "./supabase/server";
 import type { ParsedWorkOrder } from "./emailParser";
 import { normalizeStateCode } from "./billingRules";
+import { logIntakeOutcome } from "./server/logIntakeOutcome";
 
 type DispatchRule = {
   territory: string[];
@@ -131,7 +132,7 @@ export async function resolveContractor(
       .maybeSingle();
 
     if (error) {
-      console.error("Contractor lookup failed", error);
+      logIntakeOutcome("intake_routing_lookup_failed");
       return { contractorId: null, reason: `routing matched ${rule.contractorName}, but lookup failed` };
     }
 
@@ -147,8 +148,8 @@ export async function resolveContractor(
         ? `matched ${rule.contractorName} by VA territory`
         : `matched ${rule.contractorName} by territory/trade`,
     };
-  } catch (err) {
-    console.error("Contractor routing error", err);
+  } catch {
+    logIntakeOutcome("intake_routing_failed");
     return { contractorId: null, reason: `routing matched ${rule.contractorName}, but lookup errored` };
   }
 }

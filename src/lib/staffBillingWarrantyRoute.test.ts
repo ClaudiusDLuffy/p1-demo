@@ -1,98 +1,51 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { resolve } from "node:path";
-import { runInNewContext } from "node:vm";
 import test from "node:test";
-import ts from "typescript";
+import { billingRouteHarness, financialTestIds, validBillingRequest } from "./billingFinancialRouteTestHarness";
 
 type Row = Record<string, unknown>;
-type Result = { data: Row[]; error: null };
-type RequestPort = { headers: Headers; nextUrl: URL; json(): Promise<unknown> };
-const invoiceId = "00000000-0000-4000-8000-000000000001";
-const workOrderId = "WOTSYNTH100";
 const partId = "00000000-0000-4000-8000-000000000002";
 
-/** Actual route auth, canonicalization, tax resolution, RPC mapping and response
- * mapping; only external provider IO is synthetic. This is not a DB/RLS test. */
-function routeHarness(options: { role?: string; permissions?: string[]; active?: boolean; parts?: Row[] } = {}) {
+// Real v4 route/application graph. Arithmetic below models synthetic SQL output,
+// not route-owned calculations or proof of SQL security (the SQL harness owns it).
+function routeHarness(options: { role?: string; permissions?: string[]; active?: boolean; rejectSource?: boolean } = {}) {
   const saves: Row[] = [];
-  const invoice: Row = { id: invoiceId, num: "P1-SYNTH-1", invoice_type: "staff", document_kind: "invoice",
-    state: "draft", deleted_at: null, work_order_id: null, invoice_date: "2026-09-09", terms: "Net 60",
-    subtotal: 0, sales_tax: 0, total: 0 };
   let invoiceLines: Row[] = [];
-  const rowsFor = (table: string): Row[] => {
-    if (table === "profiles") return [{ id: "synthetic-staff", role: options.role ?? "back_office", name: "Synthetic staff", active: options.active ?? true }];
-    if (table === "invoices") return [invoice];
-    if (table === "invoice_lines") return invoiceLines;
-    if (table === "staff_invoice_sources") return [];
-    if (table === "work_orders") return [{ id: workOrderId, deleted_at: null, store_state: "TX" }];
-    throw new Error(`Unexpected synthetic table ${table}`);
-  };
-  class Query implements PromiseLike<Result> {
-    private filters: Array<(row: Row) => boolean> = [];
-    constructor(private readonly table: string) {}
-    select() { return this; }
-    eq(field: string, value: unknown) { this.filters.push(row => row[field] === value); return this; }
-    is(field: string, value: unknown) { return this.eq(field, value); }
-    in(field: string, values: unknown[]) { this.filters.push(row => values.includes(row[field])); return this; }
-    order() { return this; }
-    range() { return this; }
-    private rows() { return rowsFor(this.table).filter(row => this.filters.every(filter => filter(row))); }
-    maybeSingle() { return Promise.resolve({ data: this.rows()[0] ?? null, error: null }); }
-    then<A = Result, B = never>(yes?: ((value: Result) => A | PromiseLike<A>) | null,
-      no?: ((reason: unknown) => B | PromiseLike<B>) | null): Promise<A | B> {
-      return Promise.resolve({ data: this.rows(), error: null }).then(yes, no);
-    }
-  }
-  const database = {
-    from: (table: string) => new Query(table),
-    rpc: async (name: string, args: Row) => {
-      if (name === "list_billable_p1_parts") return { data: options.parts ?? [], error: null };
-      assert.equal(name, "save_staff_billing_invoice_v3");
-      saves.push(args);
-      assert.ok(Array.isArray(args.p_lines));
-      invoiceLines = args.p_lines.map((line: unknown, position: number) => {
+  const receipt: Row = {};
+  const h = billingRouteHarness({
+    role: options.role, active: options.active,
+    controller: options.permissions?.includes("invoice_controller"),
+    commandResultOverride: receipt,
+    compactRpc: (name, args) => {
+      if (name !== "save_staff_billing_invoice_v4") return undefined;
+      assert.equal(args.p_actor_id, financialTestIds.actor);
+      assert.equal(args.p_operation_id, financialTestIds.operation);
+      assert.equal(args.p_expected_assignment_version, 0);
+      assert.equal(args.p_expected_workflow_cycle, 0);
+      assert.ok(typeof args.p_payload === "object" && args.p_payload !== null);
+      const payload = args.p_payload as Row;
+      saves.push(payload);
+      assert.ok(Array.isArray(payload.lines));
+      invoiceLines = payload.lines.map((line: unknown) => {
         assert.ok(typeof line === "object" && line !== null && "qty" in line && "rate" in line);
         assert.ok(typeof line.qty === "number" && typeof line.rate === "number");
-        return { ...line, id: `synthetic-line-${position}`, invoice_id: invoiceId, position, amount: line.qty * line.rate };
+        return { ...line, amount: Math.round(line.qty * line.rate * 100) / 100 };
       });
-      const subtotal = invoiceLines.reduce((sum, line) => sum + Number(line.amount), 0);
-      Object.assign(invoice, { state: args.p_state, work_order_id: args.p_work_order_id, subtotal,
-        sales_tax: args.p_sales_tax, total: subtotal + Number(args.p_sales_tax), terms: args.p_terms });
-      return { data: invoiceId, error: null };
+      if (options.rejectSource) return { data: null, error: { code: "23514", message: "Synthetic canonical source mismatch" } };
+      return undefined;
     },
-  };
-  const filename = resolve("src/app/api/billing-invoices/route.ts");
-  const requireHere = createRequire(import.meta.url);
-  const exports: { POST?: (request: RequestPort) => Promise<Response>; PATCH?: (request: RequestPort) => Promise<Response> } = {};
-  runInNewContext(ts.transpileModule(readFileSync(filename, "utf8"), { compilerOptions: {
-    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
-  } }).outputText, { exports, Error, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://synthetic.invalid", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "synthetic" } },
-    require: (name: string): unknown => {
-      if (name === "next/server") return { NextResponse: Response };
-      if (name === "@supabase/supabase-js") return { createClient: () => ({ auth: {
-        getUser: async () => ({ data: { user: { id: "synthetic-staff" } }, error: null }),
-      } }) };
-      if (name === "../../../lib/supabase/server") return { createServerClient: () => database };
-      if (name === "../../../lib/server/staffAuthorization") return {
-        STAFF_ROLES: new Set(["manager", "dispatcher", "back_office"]),
-        loadStaffPermissions: async () => options.permissions ?? [],
-        isInvoiceControllerProfile: (profile: { staffPermissions: string[] }) => profile.staffPermissions.includes("invoice_controller"),
-      };
-      return requireHere(name.startsWith(".") ? resolve(filename, "..", name) : name);
-    },
-  }, { filename });
-  assert.ok(exports.POST && exports.PATCH);
-  const post = exports.POST, patch = exports.PATCH;
+  });
   const request = async (method: "POST" | "PATCH", lines: unknown[], extra: Row = {}) => {
-    const body = { num: "P1-SYNTH-1", userTypedNum: true, invoiceDate: "2026-09-09", storeNumber: "100",
-      territory: "Texas", equipmentTag: "7-ELEVEN: Miscellaneous", state: "submitted", terms: "Net 60",
-      lines, ...extra };
-    const response = await (method === "POST" ? post : patch)({
-      headers: new Headers({ authorization: "Bearer synthetic" }),
-      nextUrl: new URL(`https://synthetic.invalid/api/billing-invoices?id=${invoiceId}`), json: async () => body,
-    });
+    const body = { ...validBillingRequest(), expectedInvoiceVersion: method === "PATCH" ? 1 : null,
+      state: "submitted", terms: "Net 60", lines,
+      ...(typeof extra.taxRateOverride === "number" ? { salesTaxOverride: null } : {}), ...extra };
+    // The mock's declared SQL outcome is independent of production validation.
+    const safeLines = lines.filter((line): line is Row => typeof line === "object" && line !== null);
+    const subtotal = safeLines.reduce((sum, line) => sum + Math.round(Number(line.qty) * Number(line.rate) * 100), 0) / 100;
+    const taxable = safeLines.reduce((sum, line) => sum + (line.isTaxable ? Number(line.qty) * Number(line.rate) : 0), 0);
+    const salesTax = typeof extra.taxRateOverride === "number" ? taxable * extra.taxRateOverride / 100 : 0;
+    Object.assign(receipt, { subtotal, salesTax, total: subtotal + salesTax });
+    Object.assign(h.invoice, { subtotal, sales_tax: salesTax, total: subtotal + salesTax });
+    const response = await h.handlers[method]!(h.request(method, body, `?id=${financialTestIds.invoice}`));
     const data: unknown = await response.json();
     return { response, data };
   };
@@ -107,7 +60,7 @@ for (const method of ["POST", "PATCH"] as const) {
     for (const state of ["draft", "submitted"]) {
       const h = routeHarness(); const { response, data } = await h.request(method, [{ ...warranty, isTaxable: true }], { state });
       assert.equal(response.status, 200, JSON.stringify(data));
-      assert.equal(h.saves.length, 1); assert.equal(h.saves[0].p_sales_tax, 0); assert.equal(h.saves[0].p_state, state);
+      assert.equal(h.saves.length, 1); assert.equal(h.saves[0].salesTaxOverride, 0); assert.equal(h.saves[0].state, state);
       assert.equal(h.invoiceLines()[0].type, "Warranty"); assert.equal(h.invoiceLines()[0].rate, 0);
       assert.equal(h.invoiceLines()[0].amount, 0);
       assert.ok(typeof data === "object" && data !== null && "invoice" in data);
@@ -120,19 +73,19 @@ for (const method of ["POST", "PATCH"] as const) {
     const h = routeHarness(); const { response, data } = await h.request(method, [warranty, { ...labor, isTaxable: true }], { taxRateOverride: 5 });
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.deepEqual(h.invoiceLines().map(line => line.type), ["Warranty", "Labor"]);
-    assert.equal(h.saves[0].p_sales_tax, 10); assert.equal(h.saves[0].p_tax_rate, 0.05);
+    assert.equal(h.saves[0].taxRateOverride, 5);
+    assert.equal(h.saves[0].taxMode, "manual_rate");
   });
 
-  test(`${method} preserves positive-rate rounding and the existing optional Travel description`, async () => {
+  test(`${method} preserves positive-rate precision and the existing optional Travel description`, async () => {
     const h = routeHarness(); const { response, data } = await h.request(method, [
-      { ...labor, qty: 1.125, rate: 10.005, sourceUnitCost: 12.345, markupPercent: 25.555 },
+      { ...labor, qty: 1.13, rate: 10.01 },
       { type: "Travel", desc: "", qty: 1, rate: 110 },
       { ...warranty, rate: 25 },
     ]);
     assert.equal(response.status, 200, JSON.stringify(data));
     const [rounded, travel, paidWarranty] = h.invoiceLines();
     assert.equal(rounded.qty, 1.13); assert.equal(rounded.rate, 10.01);
-    assert.equal(rounded.source_unit_cost, 12.35); assert.equal(rounded.markup_percent, 25.6);
     assert.equal(travel.type, "Travel"); assert.equal(travel.description, ""); assert.equal(travel.rate, 110);
     assert.equal(paidWarranty.type, "Warranty"); assert.equal(paidWarranty.rate, 25);
   });
@@ -140,6 +93,7 @@ for (const method of ["POST", "PATCH"] as const) {
   test(`${method} rejects zero ordinary rates and malformed Warranty values instead of silently dropping a line`, async () => {
     for (const invalid of [
       { ...labor, rate: 0 }, { ...warranty, rate: -1 }, { ...warranty, rate: -0.001 },
+      { ...labor, qty: 1.125 }, { ...labor, rate: 10.005 },
       { ...warranty, rate: Number.NaN }, { ...warranty, rate: Number.POSITIVE_INFINITY }, { ...warranty, rate: null },
       { ...warranty, rate: "0" }, { ...warranty, rate: false }, { ...warranty, rate: undefined },
       { type: "Warranty", desc: warranty.desc, qty: 1 }, { ...warranty, qty: 0 }, { ...warranty, qty: -1 },
@@ -148,20 +102,24 @@ for (const method of ["POST", "PATCH"] as const) {
     ]) {
       for (const lines of [[invalid], [labor, invalid]]) {
         const h = routeHarness(); const { response } = await h.request(method, lines);
-        assert.equal(response.status, 400, `Malformed line must reject ${method}`);
+        assert.equal(response.status, 422, `Malformed line must reject ${method}`);
         assert.equal(h.saves.length, 0);
       }
     }
   });
 }
 
-test("Warranty labeling cannot bypass existing P1-part canonical quantity, type, cost or tax behavior", async () => {
-  const h = routeHarness({ parts: [{ part_id: partId, description: "Canonical part", qty: 2, unit_cost: 100, marked_up_unit_rate: 125 }] });
-  const { response, data } = await h.request("POST", [{ ...warranty, sourceWorkOrderPartId: partId }], { workOrderId, taxRateOverride: 0 });
-  assert.equal(response.status, 200, JSON.stringify(data));
-  const [line] = h.invoiceLines(); assert.equal(line.type, "Parts/Hardware");
-  assert.equal(line.qty, 2); assert.equal(line.rate, 125); assert.equal(line.amount, 250);
-  assert.equal(line.source_work_order_part_id, partId); assert.equal(line.markup_percent, 25);
+test("Warranty labeling cannot bypass the authoritative P1-part rejection or turn it into a client-priced save", async () => {
+  const h = routeHarness({ rejectSource: true });
+  const { response, data } = await h.request("POST", [{ ...warranty, sourceWorkOrderPartId: partId, sourceUnitCost: 100, markupPercent: 25 }]);
+  assert.equal(response.status, 422, JSON.stringify(data));
+  assert.equal(h.saves.length, 1);
+  const [line] = h.invoiceLines();
+  assert.equal(line.sourceWorkOrderPartId, partId);
+  assert.equal(line.type, "Warranty");
+  assert.equal(line.rate, 0);
+  // No route rewrite/retry hides the SQL ownership contradiction. Positive
+  // canonical quantity/type/cost/tax behavior is exercised by the SQL suite.
 });
 
 test("the Warranty path does not broaden inactive, contractor or invoice-controller route access", async () => {

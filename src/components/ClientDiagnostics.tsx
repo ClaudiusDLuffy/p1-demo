@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { REQUEST_ID_HEADER } from "../lib/observability/correlationId";
 import {
   diagnosticRequestPath,
   rememberFailedRequest,
@@ -42,6 +43,7 @@ export default function ClientDiagnostics({ portalView }: Props) {
             method: String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase(),
             path,
             status: response.status,
+            correlationId: response.headers.get(REQUEST_ID_HEADER) ?? undefined,
             occurredAt: new Date().toISOString(),
           });
         }

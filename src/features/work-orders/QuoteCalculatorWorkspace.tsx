@@ -1,15 +1,23 @@
 "use client";
 
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { AppError } from "../../lib/errors/AppError";
+import { useDirectoryActor } from "../directory/queries";
+import { useInvoiceDocumentAction } from "../invoices/useInvoiceDocumentAction";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type DragEvent,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "../../components/ui/Modal";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
+import { browserDraftSession } from "../../lib/drafts/browserDraftSession";
+import type { DraftLease } from "../../lib/drafts/draftSession";
 import { Ico } from "../../components/ui/Ico";
 import { Input } from "../../components/ui/Input";
 import { Sel } from "../../components/ui/Sel";
@@ -23,12 +31,13 @@ import {
   type QuoteCalculatorLine,
 } from "../../lib/quoteCalculator";
 import { STAFF_BILLING_LINE_TYPES } from "../../lib/staffBilling";
+import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt, type StaffInvoiceSnapshot } from "../../lib/staffFinancialClient";
 import { resolveQuickBooksEquipmentTag } from "../../lib/quickBooksEquipmentTags";
 import {
   clampBulkQuoteLineCount,
   createQuoteCalculatorDraft,
-  parseQuoteCalculatorDraft,
-  quoteCalculatorDraftKey,
+  validateQuoteCalculatorDraft,
+  type QuoteCalculatorDraft,
 } from "../../lib/quoteCalculatorDraft";
 
 const ICON = {
@@ -94,6 +103,9 @@ type ContractorInvoice = {
   num?: string | number | null;
   total?: number | string | null;
   lines?: SourceInvoiceLine[];
+  projection?: "summary" | "complete_document";
+  invoiceVersion?: number;
+  sourceStaffInvoiceId?: string | null;
 };
 
 type BillingInvoice = {
@@ -103,6 +115,8 @@ type BillingInvoice = {
 
 type QuoteWorkOrder = {
   id: string;
+  contractorAssignmentVersion?: number | null;
+  workflowCycle?: number | null;
   store?: string | number | null;
   addr?: string | null;
   storeState?: string | null;
@@ -121,16 +135,17 @@ type QuoteCalculatorProps = {
   userId?: string | null;
   fmt: (amount: number) => string;
   fire?: (message: string) => void;
-  onConvert?: (payload: Record<string, unknown>) => Promise<unknown>;
+  onConvert?: (payload: Record<string, unknown>, isFormCurrent?: () => boolean, onAccepted?: () => void) => Promise<unknown>;
 };
 
 type ViewMode = "table" | "focus";
 type FocusMotion = "next" | "previous";
 
 const sourceLines = (
-  invoice: ContractorInvoice | null | undefined,
+  invoice: Pick<ContractorInvoice, "projection" | "lines" | "total"> | null | undefined,
 ): QuoteCalculatorLine[] => {
   if (!invoice) return [emptyLine()];
+  if (invoice.projection === "summary") throw new AppError("STALE_VERSION");
   if (!(invoice.lines || []).length) {
     return [{
       id: lineId(),
@@ -152,6 +167,9 @@ const sourceLines = (
     sourceInvoiceLineId: line.id || null,
   }));
 };
+
+const initialSourceLines = (invoice: ContractorInvoice | null | undefined) =>
+  invoice?.projection === "summary" ? [emptyLine()] : sourceLines(invoice);
 
 const stateCodeForWorkOrder = (workOrder: QuoteWorkOrder) => {
   const direct = String(workOrder.storeState || "").trim().toUpperCase();
@@ -198,7 +216,25 @@ export default function QuoteCalculatorWorkspace({
   fire,
   onConvert,
 }: QuoteCalculatorProps) {
+  const actor = useDirectoryActor();
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [resolvedSourceId, setResolvedSourceId] = useState<string | null>(null);
+  const sourceGeneration = useRef({ value: 0 });
+  const currentWorkOrder = useRef(workOrder.id);
+  currentWorkOrder.current = workOrder.id;
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const sourceLifetime = JSON.stringify([directoryActorScope(actor), workOrder.id, workspaceOpen]);
+  const currentSourceLifetime = useRef(sourceLifetime);
+  currentSourceLifetime.current = sourceLifetime;
+  const conversionScope = `${userId || ""}:${sourceLifetime}`;
+  const conversionSession = useRef({ scope: conversionScope, generation: 0 });
+  if (conversionSession.current.scope !== conversionScope) {
+    conversionSession.current = { scope: conversionScope, generation: conversionSession.current.generation + 1 };
+  }
+  const conversionInFlight = useRef<object | null>(null);
+  const readDocument = useInvoiceDocumentAction(actor, `${workOrder.id}:${workspaceOpen}`);
+  const financialAttempt = useRef(createStaffFinancialAttempt());
+  const financialSnapshot = useRef<StaffInvoiceSnapshot | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const [lines, setLines] = useState<QuoteCalculatorLine[]>([emptyLine()]);
@@ -206,7 +242,13 @@ export default function QuoteCalculatorWorkspace({
   const [partsMarkupPercent, setPartsMarkupPercent] = useState("25");
   const [overallMarginPercent, setOverallMarginPercent] = useState("0");
   const [hasDraft, setHasDraft] = useState(false);
+  const [persisted, setPersisted] = useState(false);
+  const [persistenceFailed, setPersistenceFailed] = useState(false);
+  const draftLease = useRef<DraftLease<QuoteCalculatorDraft> | null>(null);
+  const replacement = useRef<(() => Promise<void> | void) | null>(null);
   const [converting, setConverting] = useState(false);
+  useEffect(() => { setConverting(false); }, [conversionScope]);
+  useEffect(() => () => { conversionSession.current = { ...conversionSession.current, generation: conversionSession.current.generation + 1 }; }, []);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkCount, setBulkCount] = useState(1);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -229,6 +271,7 @@ export default function QuoteCalculatorWorkspace({
     () => contractorInvoices.filter((invoice) =>
       invoice.wot === workOrder?.id
       && !["draft", "rejected"].includes(invoice.state)
+      && !invoice.sourceStaffInvoiceId
       && !linkedSourceIds.has(invoice.id),
     ),
     [contractorInvoices, linkedSourceIds, workOrder?.id],
@@ -252,13 +295,22 @@ export default function QuoteCalculatorWorkspace({
     [lines, pricing],
   );
   const draftStorageKey = useMemo(
-    () => quoteCalculatorDraftKey(userId, workOrder.id),
+    () => `${userId || ""}:${workOrder.id}`,
     [userId, workOrder.id],
   );
   const focusedLine = lines[Math.min(focusIndex, lines.length - 1)] || lines[0];
 
   useEffect(() => {
+    const generation = sourceGeneration.current;
+    setSourceLoading(false);
+    return () => { generation.value++; };
+  }, [sourceLifetime]);
+
+  useEffect(() => {
+    const generation = sourceGeneration.current;
     initializedWorkOrder.current = workOrder.id;
+    setResolvedSourceId(null);
+    setSourceLoading(false);
     waitingForInitialSource.current = false;
     hydratingDraft.current = true;
     setWorkspaceOpen(false);
@@ -266,9 +318,17 @@ export default function QuoteCalculatorWorkspace({
     setFocusIndex(0);
     setFocusMotion("next");
 
-    const rawDraft = window.localStorage.getItem(draftStorageKey);
-    const recovered = parseQuoteCalculatorDraft(rawDraft, workOrder.id);
-    if (rawDraft && !recovered) window.localStorage.removeItem(draftStorageKey);
+    draftLease.current?.close();
+    draftLease.current = browserDraftSession()?.open("quote-calculator", workOrder.id, validateQuoteCalculatorDraft) ?? null;
+    const saved = draftLease.current?.read();
+    const recovered = saved?.workOrderId === workOrder.id && saved.financialSnapshot ? saved : null;
+    const snapshot = recovered?.financialSnapshot;
+    financialSnapshot.current = snapshot ? { workOrderId: snapshot.workOrderId ?? null,
+      expectedInvoiceVersion: snapshot.expectedInvoiceVersion ?? null, expectedAssignmentVersion: snapshot.expectedAssignmentVersion ?? null,
+      expectedWorkflowCycle: snapshot.expectedWorkflowCycle ?? null } : null;
+    financialAttempt.current = createStaffFinancialAttempt();
+    setPersisted(!!recovered && !!draftLease.current?.isPersisted());
+    setPersistenceFailed(false);
 
     if (recovered) {
       setSelectedSourceId(recovered.selectedSourceId);
@@ -280,7 +340,7 @@ export default function QuoteCalculatorWorkspace({
     } else {
       const source = availableSourcesRef.current[0] || null;
       setSelectedSourceId(source?.id || "");
-      setLines(priceQuoteLines(sourceLines(source), DEFAULT_PRICING));
+      setLines(priceQuoteLines(initialSourceLines(source), DEFAULT_PRICING));
       setLaborRate(String(DEFAULT_PRICING.laborRate));
       setPartsMarkupPercent(String(DEFAULT_PRICING.partsMarkupPercent));
       setOverallMarginPercent(String(DEFAULT_PRICING.overallMarginPercent));
@@ -293,6 +353,9 @@ export default function QuoteCalculatorWorkspace({
     });
 
     return () => {
+      generation.value++;
+      draftLease.current?.close();
+      draftLease.current = null;
       if (hydrationFrame.current != null) {
         window.cancelAnimationFrame(hydrationFrame.current);
       }
@@ -312,19 +375,38 @@ export default function QuoteCalculatorWorkspace({
     const source = availableSources[0];
     waitingForInitialSource.current = false;
     setSelectedSourceId(source.id);
-    setLines(priceQuoteLines(sourceLines(source), DEFAULT_PRICING));
+    setLines(priceQuoteLines(initialSourceLines(source), DEFAULT_PRICING));
   }, [availableSources, hasDraft, workOrder.id]);
 
-  useEffect(() => {
-    if (
-      !hasDraft
-      || hydratingDraft.current
-      || initializedWorkOrder.current !== workOrder.id
-    ) {
-      return;
+  const sourcePending = selectedSource?.projection === "summary" && !hasDraft
+    && resolvedSourceId !== `${selectedSource.id}:${selectedSource.invoiceVersion ?? 0}`;
+  const readSourceLines = async (source: ContractorInvoice | null | undefined) => {
+    const generation = ++sourceGeneration.current.value;
+    const parent = workOrder.id;
+    setSourceLoading(true);
+    try {
+      const complete = source?.projection === "summary"
+        ? await readDocument(source.id, "source_import", true)
+        : source;
+      if (generation !== sourceGeneration.current.value || currentWorkOrder.current !== parent
+        || currentSourceLifetime.current !== sourceLifetime) return null;
+      const result = sourceLines(complete);
+      setResolvedSourceId(source ? `${source.id}:${source.invoiceVersion ?? 0}` : null);
+      return result;
+    } catch (error) {
+      if (generation === sourceGeneration.current.value && currentWorkOrder.current === parent
+        && currentSourceLifetime.current === sourceLifetime) fire?.(safeErrorMessage(error));
+      return null;
+    } finally {
+      if (generation === sourceGeneration.current.value) setSourceLoading(false);
     }
+  };
 
-    const draft = createQuoteCalculatorDraft({
+  const persistDraft = useCallback(() => {
+    if (!hasDraft || hydratingDraft.current || initializedWorkOrder.current !== workOrder.id) return false;
+    try {
+      if (!financialSnapshot.current) financialSnapshot.current = captureStaffInvoiceSnapshot(null, workOrder);
+      const draft = createQuoteCalculatorDraft({
       workOrderId: workOrder.id,
       selectedSourceId,
       lines,
@@ -333,45 +415,27 @@ export default function QuoteCalculatorWorkspace({
         partsMarkupPercent,
         overallMarginPercent,
       },
+      financialSnapshot: financialSnapshot.current,
     });
-    window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+      const saved = draftLease.current?.save(draft).status === "persisted";
+      setPersisted(saved); setPersistenceFailed(!saved); return saved;
+    } catch { setPersisted(false); setPersistenceFailed(true); return false; }
   }, [
-    draftStorageKey,
     hasDraft,
     laborRate,
     lines,
     overallMarginPercent,
     partsMarkupPercent,
     selectedSourceId,
-    workOrder.id,
+    workOrder,
   ]);
+  useEffect(() => { if (hasDraft) persistDraft(); }, [hasDraft, persistDraft]);
 
   useEffect(() => {
     setFocusIndex((current) =>
       Math.max(0, Math.min(current, Math.max(lines.length - 1, 0))),
     );
   }, [lines.length]);
-
-  useEffect(() => {
-    if (!workspaceOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (bulkOpen) {
-        setBulkOpen(false);
-      } else {
-        setWorkspaceOpen(false);
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [bulkOpen, workspaceOpen]);
 
   const updateLine = (
     id: string,
@@ -406,37 +470,47 @@ export default function QuoteCalculatorWorkspace({
     setHasDraft(true);
   };
 
-  const loadSource = (invoice: ContractorInvoice | null | undefined) => {
-    if (
-      hasDraft
-      && invoice?.id !== selectedSourceId
-      && !window.confirm("Replace the current calculator lines with this contractor quote?")
-    ) {
-      return;
-    }
-
+  const applySource = async (invoice: ContractorInvoice | null | undefined) => {
+    const completeLines = await readSourceLines(invoice);
+    if (!completeLines) return;
     setSelectedSourceId(invoice?.id || "");
-    setLines(priceQuoteLines(sourceLines(invoice), pricing));
+    setLines(priceQuoteLines(completeLines, pricing));
     setFocusIndex(0);
     setFocusMotion("next");
     setHasDraft(true);
   };
 
-  const resetDraft = () => {
-    if (!window.confirm("Discard the saved calculator draft for this work order?")) {
-      return;
-    }
+  const discardDraft = () => {
+    if (draftLease.current && !draftLease.current.discard()) { setPersistenceFailed(true); return false; }
+    draftLease.current = browserDraftSession()?.open("quote-calculator", workOrder.id, validateQuoteCalculatorDraft) ?? null;
     const source = availableSources[0] || null;
-    window.localStorage.removeItem(draftStorageKey);
     setSelectedSourceId(source?.id || "");
     setLaborRate(String(DEFAULT_PRICING.laborRate));
     setPartsMarkupPercent(String(DEFAULT_PRICING.partsMarkupPercent));
     setOverallMarginPercent(String(DEFAULT_PRICING.overallMarginPercent));
-    setLines(priceQuoteLines(sourceLines(source), DEFAULT_PRICING));
+    setLines(priceQuoteLines(initialSourceLines(source), DEFAULT_PRICING));
     setFocusIndex(0);
     setHasDraft(false);
-    fire?.("Calculator draft discarded");
+    setPersisted(false); setPersistenceFailed(false);
+    financialSnapshot.current = null;
+    financialAttempt.current.confirmed();
+    return true;
   };
+  const guardScope = `${conversionScope}:${conversionSession.current.generation}`;
+  const dismissal = useUnsavedChangesGuard({ scopeKey: guardScope, dirty: hasDraft, enabled: workspaceOpen, busy: converting || sourceLoading,
+    persistence: persistenceFailed ? "persist_failed" : persisted && draftLease.current?.isPersisted() ? "dirty_persisted" : "dirty_not_persisted",
+    onClose: () => setWorkspaceOpen(false), onDiscard: discardDraft,
+    onKeepDraft: () => persistDraft() && !!draftLease.current?.isPersisted() });
+  const replaceGuard = useUnsavedChangesGuard({ scopeKey: guardScope, dirty: hasDraft, enabled: workspaceOpen, sensitive: false,
+    busy: converting || sourceLoading, onDiscard: discardDraft,
+    onClose: () => { const action = replacement.current; replacement.current = null; void action?.(); } });
+  const loadSource = async (invoice: ContractorInvoice | null | undefined) => {
+    if (hasDraft && invoice?.id !== selectedSourceId) {
+      replacement.current = () => applySource(invoice); replaceGuard.requestClose("programmatic"); return;
+    }
+    await applySource(invoice);
+  };
+  const resetDraft = () => { replacement.current = null; replaceGuard.requestClose("programmatic"); };
 
   const applyPricing = () => {
     if (
@@ -487,7 +561,18 @@ export default function QuoteCalculatorWorkspace({
     setFocusIndex(bounded);
   };
 
-  const openWorkspace = () => {
+  const openWorkspace = async () => {
+    try {
+      if (!financialSnapshot.current) financialSnapshot.current = captureStaffInvoiceSnapshot(null, workOrder);
+    } catch (error) {
+      fire?.(safeErrorMessage(error));
+      return;
+    }
+    if (sourcePending) {
+      const completeLines = await readSourceLines(selectedSource);
+      if (!completeLines) return;
+      setLines(priceQuoteLines(completeLines, pricing));
+    }
     setViewMode(
       window.matchMedia("(max-width: 900px)").matches ? "focus" : "table",
     );
@@ -495,6 +580,7 @@ export default function QuoteCalculatorWorkspace({
   };
 
   const convert = async () => {
+    if (sourceLoading || sourcePending || conversionInFlight.current === conversionSession.current) return;
     const validLines = lines
       .map(quoteLineToBillingLine)
       .filter((line) =>
@@ -515,9 +601,30 @@ export default function QuoteCalculatorWorkspace({
     }
 
     const invoiceDate = localDate();
+    const issuedSession = conversionSession.current;
+    const isCurrent = () => conversionSession.current === issuedSession;
+    const issuedLease = draftLease.current;
+    const issuedAttempt = financialAttempt.current;
+    let accepted = false;
+    const onAccepted = () => {
+      if (accepted || !isCurrent()) return;
+      accepted = true;
+      issuedAttempt.confirmed();
+      let removed = true;
+      try { removed = issuedLease?.discard() ?? true; } catch { removed = false; }
+      if (draftLease.current === issuedLease) draftLease.current = null;
+      setHasDraft(false); setPersisted(false);
+      if (!removed) {
+        try { fire?.("Invoice created. Local draft cleanup could not be confirmed; recovery is disabled for this draft."); }
+        catch { /* Notification failure must not change an accepted financial outcome. */ }
+      }
+    };
+    conversionInFlight.current = issuedSession;
     setConverting(true);
     try {
-      await onConvert?.({
+      if (!financialSnapshot.current) throw new Error("Reopen the quote workspace to capture its current assignment version");
+      const command = issuedAttempt.save({
+        ...financialSnapshot.current,
         invoiceDate,
         dueDate: addDays(invoiceDate, 30),
         serviceDate: "",
@@ -534,40 +641,30 @@ export default function QuoteCalculatorWorkspace({
         lines: validLines,
         sourceInvoiceIds: selectedSource ? [selectedSource.id] : [],
       });
-      window.localStorage.removeItem(draftStorageKey);
-      setHasDraft(false);
+      if (!onConvert) throw new Error("Quote conversion is unavailable");
+      await onConvert(command, isCurrent, onAccepted);
+      if (!isCurrent()) return;
+      onAccepted();
       setWorkspaceOpen(false);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      if (!isCurrent()) return;
+      const message = safeErrorMessage(error);
       fire?.(`Quote conversion failed: ${message}`);
     } finally {
-      setConverting(false);
+      if (isCurrent()) { conversionInFlight.current = null; setConverting(false); }
     }
   };
 
-  const workspace = workspaceOpen && typeof document !== "undefined"
-    ? createPortal(
-        <div
-          className="quote-workspace-overlay"
-          role="presentation"
-          onMouseDown={(event: ReactMouseEvent<HTMLDivElement>) => {
-            if (event.target === event.currentTarget) setWorkspaceOpen(false);
-          }}
-        >
-          <section
+  const workspace = workspaceOpen
+    ? <Modal title="Quote calculator" closeLabel="Close calculator" width="min(1180px, calc(100vw - 24px))"
+        contentStyle={{ padding: 0, overflow: "hidden" }} dismissDisabled={converting || sourceLoading}
+        onClose={() => dismissal.requestClose("close_button")} onRequestClose={dismissal.requestClose}>
+          <fieldset disabled={converting}
             className="quote-workspace-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="quote-workspace-title"
+            style={{ width: "100%", height: "min(760px, calc(100dvh - 140px))", minHeight: 0, minWidth: 0, padding: 0, margin: 0, border: 0 }}
           >
             <header className="quote-workspace-header">
               <div style={{ minWidth: 0 }}>
-                <div
-                  id="quote-workspace-title"
-                  style={{ fontSize: 18, fontWeight: 700, color: T.ink }}
-                >
-                  Quote calculator
-                </div>
                 <div
                   className="mono"
                   style={{ marginTop: 3, fontSize: 11, color: T.muted }}
@@ -607,6 +704,7 @@ export default function QuoteCalculatorWorkspace({
                     type="button"
                     className="quote-toolbar-button"
                     onClick={() => setBulkOpen((current) => !current)}
+                    disabled={sourceLoading}
                     aria-expanded={bulkOpen}
                   >
                     <Ico d={ICON.add} size={15} />
@@ -682,28 +780,19 @@ export default function QuoteCalculatorWorkspace({
                   onClick={resetDraft}
                   title="Discard calculator draft"
                   aria-label="Discard calculator draft"
-                  disabled={!hasDraft}
+                  disabled={!hasDraft || sourceLoading}
                 >
                   <Ico d={ICON.reset} size={16} />
-                </button>
-                <button
-                  type="button"
-                  style={iconButtonStyle}
-                  onClick={() => setWorkspaceOpen(false)}
-                  title="Close calculator"
-                  aria-label="Close calculator"
-                >
-                  <Ico d={ICON.close} size={16} />
                 </button>
               </div>
             </header>
 
-            <div className="quote-pricing-bar">
+            <fieldset className="quote-pricing-bar" disabled={sourceLoading} style={{ margin: 0, border: 0 }}>
               <label>
                 <span>Contractor quote</span>
                 <Sel
                   value={selectedSourceId}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
                     const source = availableSources.find(
                       (invoice) => invoice.id === event.target.value,
                     );
@@ -783,10 +872,10 @@ export default function QuoteCalculatorWorkspace({
                 <Ico d={ICON.refresh} size={15} />
                 <span>Recalculate</span>
               </button>
-            </div>
+            </fieldset>
 
             <div ref={workspaceBodyRef} className="quote-workspace-body">
-              {viewMode === "table" ? (
+              {sourceLoading ? <p role="status" style={{ padding: 16 }}>Loading the complete source invoice…</p> : viewMode === "table" ? (
                 <div className="quote-table">
                   <div className="quote-table-head">
                     <span />
@@ -835,7 +924,7 @@ export default function QuoteCalculatorWorkspace({
                       <span className="quote-line-number">{index + 1}</span>
                       <Sel
                         value={line.type}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                           updateLine(line.id, { type: event.target.value })
                         }
                         style={inputStyle}
@@ -985,7 +1074,7 @@ export default function QuoteCalculatorWorkspace({
                             <span>Type</span>
                             <Sel
                               value={focusedLine.type}
-                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                                 updateLine(focusedLine.id, {
                                   type: event.target.value,
                                 })
@@ -1101,19 +1190,18 @@ export default function QuoteCalculatorWorkspace({
                 type="button"
                 className="btn-primary quote-convert-button"
                 onClick={convert}
-                disabled={converting}
+                disabled={converting || sourceLoading || sourcePending}
               >
                 {converting ? "Creating draft..." : "Convert to invoice"}
               </button>
             </footer>
-          </section>
-        </div>,
-        document.body,
-      )
+          </fieldset>
+        </Modal>
     : null;
 
   return (
     <>
+      {persistenceFailed && <p role="status">Draft recovery is unavailable. Keep this page open or save the invoice before leaving.</p>}
       <style>{`
         .quote-workspace-overlay {
           position: fixed;
@@ -1657,10 +1745,10 @@ export default function QuoteCalculatorWorkspace({
                   color: T.ink,
                 }}
               >
-                {fmt(totals.subtotal)}
+                {sourcePending ? "Open to calculate" : fmt(totals.subtotal)}
               </div>
               <div style={{ marginTop: 4, fontSize: 10, color: T.muted }}>
-                {lines.length} line{lines.length === 1 ? "" : "s"}
+                {sourcePending ? "Source lines load when opened" : `${lines.length} line${lines.length === 1 ? "" : "s"}`}
                 {selectedSource ? ` | Quote #${selectedSource.num}` : " | Manual"}
               </div>
             </div>
@@ -1676,7 +1764,7 @@ export default function QuoteCalculatorWorkspace({
                   whiteSpace: "nowrap",
                 }}
               >
-                Draft saved
+                {persisted && draftLease.current?.isPersisted() ? "Draft saved" : "Draft not saved"}
               </span>
             )}
           </div>
@@ -1699,7 +1787,7 @@ export default function QuoteCalculatorWorkspace({
                 className="mono"
                 style={{ marginTop: 3, fontSize: 12, fontWeight: 700 }}
               >
-                {fmt(totals.sourceCost)}
+                {sourcePending ? "—" : fmt(totals.sourceCost)}
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
@@ -1715,7 +1803,7 @@ export default function QuoteCalculatorWorkspace({
                   color: T.accent,
                 }}
               >
-                +{fmt(totals.partsMarkupUplift)}
+                {sourcePending ? "—" : `+${fmt(totals.partsMarkupUplift)}`}
               </div>
             </div>
           </div>
@@ -1724,6 +1812,7 @@ export default function QuoteCalculatorWorkspace({
             type="button"
             className="btn-primary"
             onClick={openWorkspace}
+            disabled={sourceLoading}
             aria-label="Open quote calculator"
             style={{
               width: "100%",
@@ -1738,11 +1827,13 @@ export default function QuoteCalculatorWorkspace({
             }}
           >
             <Ico d={ICON.expand} size={15} />
-            <span>Open calculator</span>
+            <span>{sourceLoading ? "Loading source…" : "Open calculator"}</span>
           </button>
         </div>
       </div>
       {workspace}
+      {dismissal.dialog}
+      {replaceGuard.dialog}
     </>
   );
 }

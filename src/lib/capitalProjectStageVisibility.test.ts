@@ -54,6 +54,7 @@ function renderCapital(row: Partial<CapitalRow> = {}, visible = true) {
         return { data: { items: [fixture], totalCount: 1, hasMore: false }, isFetching: false };
       },
     };
+    if (name === "../directory/queries") return { useDirectoryLabels: () => ({ getUser: () => null }) };
     return requireHere(name.startsWith(".") ? resolve(filename, "..", name) : name);
   } }, { filename });
   assert.ok(exports.default);
