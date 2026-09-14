@@ -4,13 +4,25 @@ export const STAFF_BILLING_LINE_TYPES = [
   "OT Labor",
   "Parts/Hardware",
   "Shipping",
+  "Warranty",
   "Other",
 ] as const;
 
 export type StaffBillingLineType = typeof STAFF_BILLING_LINE_TYPES[number];
 
+export function isStaffBillingWarrantyLine(type: unknown): boolean {
+  return typeof type === "string" && /^warranty$/i.test(type.trim());
+}
+
+/** Only an explicitly classified Warranty line may have a zero rate. */
+export function isValidStaffBillingRate(type: unknown, rate: unknown): boolean {
+  return typeof rate === "number" && Number.isFinite(rate)
+    && (isStaffBillingWarrantyLine(type) ? rate >= 0 : rate > 0);
+}
+
 export function normalizeStaffBillingLineType(type: unknown): StaffBillingLineType {
   const value = String(type || "").trim();
+  if (isStaffBillingWarrantyLine(value)) return "Warranty";
   if (/^(?:ot|overtime)\s*labor$/i.test(value)) return "OT Labor";
   if (/^labor$/i.test(value)) return "Labor";
   if (/part|hardware|material/i.test(value)) return "Parts/Hardware";
@@ -77,6 +89,7 @@ export function importedStaffBillingRate(
   const sourceCost = Number(sourceUnitCost);
   const finiteSourceCost = Number.isFinite(sourceCost) ? sourceCost : 0;
 
+  if (normalizedType === "Warranty") return 0;
   if (normalizedType === "Labor" || normalizedType === "Travel") return 110;
   if (normalizedType === "OT Labor") return 165;
   if (isStaffBillingPartsLine(normalizedType)) {
@@ -93,6 +106,7 @@ export function staffBillingDescriptionPlaceholder(type: unknown) {
     return "Enter job notes";
   }
   if (normalizedType === "Travel") return "Description (optional)";
+  if (normalizedType === "Warranty") return "Describe warranty work";
   return "Description";
 }
 

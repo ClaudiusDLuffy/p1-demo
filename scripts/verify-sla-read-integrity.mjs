@@ -11,18 +11,18 @@ const db = await createDatabase();
 let passed = 0;
 const check = async (name, run) => { await run(); passed++; console.log(`PASS ${name}`); };
 try {
-  await applyThrough(db, 140);
+  await applyThrough(db, 141);
   const f = await slaFixtures(db);
   const baseline = await reproduceSlaReadDivergence(f, check);
   if (!process.argv.includes('--baseline-only')) {
     const before = await f.definitions();
     const snapshot = await f.assignment.snapshot();
-    await check('SLA supported0140 to0141 forward upgrade installs explicit read-only definitions', () => applyThrough(db, 141, 141));
+    await check('SLA supported0141 to0142 forward upgrade installs explicit read-only definitions', () => applyThrough(db, 142, 142));
     await verifySlaMigration(f, before, snapshot, check);
     await verifySlaSqlParity(f, check);
     await verifySlaReadApis(f, baseline, check);
     const clean = await createDatabase();
-    try { await check('SLA clean install succeeds in filename order through0141', () => applyThrough(clean, 141)); }
+    try { await check('SLA clean install succeeds in filename order through0142', () => applyThrough(clean, 142)); }
     finally { await clean.close(); }
   }
   console.log(`SLA read SQL: ${passed} passed; 0 failed.`);

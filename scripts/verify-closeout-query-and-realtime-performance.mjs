@@ -36,7 +36,7 @@ const save=()=>writeFileSync(evidencePath,JSON.stringify(report,null,2)+'\n',{mo
 let db=null,phase='engine',checks=0;
 try {
   db=await createDatabase();phase='schema';
-  await applyThrough(db,143);
+  await applyThrough(db,144);
   phase='fixture';
   const f=await seedPerformanceFixture(db);
   report.scale={...f.scale,...await seedNotificationPerformanceFixture(db,f.actors)};
@@ -68,7 +68,7 @@ try {
   await metric('legacy_work_orders_continuation','manager',"select public.list_work_orders_page(p_scope=>'active',p_limit=>25,p_cursor=>$1) result",[initial.nextCursor]);
   await metric('legacy_staff_table_actual','manager',"select public.list_work_orders_table_page(p_scope=>'operations',p_limit=>25,p_pending_first=>true,p_sort_column=>'created') result");
   const priorIndexes=new Set((await db.query("select indexname from pg_indexes where schemaname='public'")).rows.map(row=>row.indexname));
-  await applyThrough(db,146,144);
+  await applyThrough(db,147,145);
   const first=await metric('work_orders_first','manager',"select public.list_work_orders_rows_v1(p_scope=>'active',p_limit=>25) result",[],{noTotal:true,nonempty:true});
   await metric('work_orders_continuation','manager',"select public.list_work_orders_rows_v1(p_scope=>'active',p_limit=>25,p_cursor=>$1) result",[first.nextCursor],{noTotal:true,nonempty:true});
   await metric('work_orders_count','manager',"select public.count_work_orders_v1(p_scope=>'active') result");
@@ -186,7 +186,7 @@ try {
     'contractor_receiving_dispatch_deliveries','financial_notification_deliveries','p1_parts_alert_deliveries') order by tablename,indexname`)).rows;
   report.newIndexes=report.existingIndexes.filter(row=>!priorIndexes.has(row.indexname));
   report.indexDecision='See focused closeout before/after index experiments. This catalog records the final additive schema; legacy private-body plans are retained as reference and focused harnesses capture every changed function.';
-  const audit=await db.query(readFileSync(new URL('../supabase/audits/0144_count_independent_page_reads_verification.sql',import.meta.url),'utf8'));
+  const audit=await db.query(readFileSync(new URL('../supabase/audits/0145_count_independent_page_reads_verification.sql',import.meta.url),'utf8'));
   assert.ok(audit.rows.every(row=>row.all_checks_pass));checks++;
   const realtime=spawnSync(process.execPath,['--import','tsx','scripts/measure-realtime-performance.ts'],{encoding:'utf8',maxBuffer:2*1024*1024,timeout:60000});
   assert.equal(realtime.status,0,'Realtime local measurement process');

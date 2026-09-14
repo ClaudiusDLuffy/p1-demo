@@ -16,7 +16,7 @@ const workOrderDetail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const portalShell = read("src/components/PortalShell.tsx");
 const notificationRoute = read("src/app/api/notifications/invoice-review/route.ts");
 const notificationAuthorization = read("src/lib/server/financialNotificationHttp.ts");
-const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+const notificationBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
 
 test("migration installs an atomic, guarded contractor invoice lifecycle", () => {
   assert.match(migration, /^begin;/m);

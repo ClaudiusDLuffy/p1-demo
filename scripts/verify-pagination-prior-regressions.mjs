@@ -19,7 +19,7 @@ try {
   await verifyPriorPaginationSchema(check);
   const diagnostics = await createDatabase();
   try {
-    await applyThrough(diagnostics, 143);
+    await applyThrough(diagnostics, 144);
     const fixture = await diagnosticFixtures(diagnostics);
     await verifyDiagnosticAdmission(fixture, check);
     await verifyDiagnosticSecurity(fixture, check);
@@ -27,17 +27,17 @@ try {
   } finally { await diagnostics.close(); }
   const sla = await createDatabase();
   try {
-    await applyThrough(sla, 140);
+    await applyThrough(sla, 141);
     const fixture = await slaFixtures(sla);
     const baseline = await reproduceSlaReadDivergence(fixture, check);
     const definitions = await fixture.definitions();
     const rows = await fixture.assignment.snapshot();
-    await applyThrough(sla, 143, 141);
+    await applyThrough(sla, 144, 142);
     await verifySlaMigration(fixture, definitions, rows, check);
     await verifySlaSqlParity(fixture, check);
     await verifySlaReadApis(fixture, baseline, check);
   } finally { await sla.close(); }
-  console.log(JSON.stringify({ finalMigration: 143, priorPhaseChecks: checks, failed: 0,
+  console.log(JSON.stringify({ finalMigration: 144, priorPhaseChecks: checks, failed: 0,
     privacy: syntheticSqlPrivacyReceipt(), hostedCertification: false }));
 } catch (error) {
   console.error(`FAIL final-schema regression: ${typeof error?.code === 'string' ? error.code : 'ASSERTION'}`);

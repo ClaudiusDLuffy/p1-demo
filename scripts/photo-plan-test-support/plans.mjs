@@ -27,9 +27,9 @@ const relations = ['public.photos', 'public.private_object_bindings', 'public.wo
 const sourcePaths = ['src/lib/db.ts', 'src/lib/counts/readRpc.ts',
   'supabase/migrations/0076_cursor_pagination_and_portal_indexes.sql',
   'supabase/migrations/0080_fix_pagination_cursor_codec.sql',
-  'supabase/migrations/0131_expand_canonical_storage_photo_workflows.sql',
-  'supabase/migrations/0132_contract_canonical_storage_photo_workflows.sql',
-  'supabase/migrations/0144_count_independent_page_reads.sql'];
+  'supabase/migrations/0132_expand_canonical_storage_photo_workflows.sql',
+  'supabase/migrations/0133_contract_canonical_storage_photo_workflows.sql',
+  'supabase/migrations/0145_count_independent_page_reads.sql'];
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const errorFacts = error => ({ name: record(error) && typeof error.name === 'string' ? error.name : 'Error',
   code: record(error) && typeof error.code === 'string' ? error.code : null,

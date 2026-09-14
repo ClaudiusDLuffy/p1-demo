@@ -12,13 +12,23 @@ const billingCreate = read("src/features/billing/BillingInvoiceCreateModal.tsx")
 const billingDetail = read("src/features/billing/BillingInvoiceDetail.tsx");
 const layout = read("src/app/layout.tsx");
 
-test("portal identifiers and financial figures use readable tabular slashed-zero numerals", () => {
-  assert.match(shell, /\.mono,[\s\S]*?\.numeric-readable/);
-  assert.match(shell, /font-family: var\(--font-inter\)/);
-  assert.match(shell, /font-variant-numeric: tabular-nums slashed-zero/);
-  assert.match(shell, /font-feature-settings: "tnum" 1, "zero" 1/);
-  assert.match(shell, /\.work-order-page-title,[\s\S]*?\.work-order-location-heading[\s\S]*?font-variant-numeric: tabular-nums slashed-zero/);
+test("numeric styles use familiar unslashed zeros while retaining aligned full-height digits", () => {
+  const numericRule = shell.match(/\.mono,\s*\.numeric-readable\s*\{([^}]+)\}/)?.[1];
+  const workOrderRule = shell.match(/\.work-order-page-title,\s*\.work-order-location-heading\s*\{([^}]+)\}/)?.[1];
+  for (const rule of [numericRule, workOrderRule]) {
+    assert.ok(rule, "Shared numeric styles must remain available to existing callers");
+    assert.match(rule, /font-family: Arial, "Helvetica Neue", Helvetica, sans-serif/);
+    assert.match(rule, /font-variant-numeric: tabular-nums lining-nums/);
+    assert.match(rule, /font-feature-settings: "tnum" 1, "lnum" 1, "zero" 0/);
+    assert.doesNotMatch(rule, /slashed-zero|"zero" 1/);
+  }
+});
+
+test("numeric readability does not replace the body font or add another downloaded typeface", () => {
+  assert.match(layout, /fontFamily: "var\(--font-inter\), system-ui, sans-serif"/);
+  assert.match(layout, /import \{ Inter, Instrument_Serif \} from "next\/font\/google"/);
   assert.doesNotMatch(layout, /JetBrains_Mono|font-jetbrains-mono/);
+  assert.match(shell, /\.display \{ font-family: var\(--font-instrument-serif\), Georgia, serif/);
 });
 
 test("large contractor and receivable totals no longer use the decorative serif face", () => {

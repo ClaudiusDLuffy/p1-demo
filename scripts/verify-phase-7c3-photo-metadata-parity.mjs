@@ -296,9 +296,9 @@ async function cursors(read) {
   save();
 }
 try {
-  console.log(JSON.stringify({ phase: 'schema', mode, output })); db = await createDatabase(); await applyThrough(db, 144);
+  console.log(JSON.stringify({ phase: 'schema', mode, output })); db = await createDatabase(); await applyThrough(db, 145);
   fixture = await seedPerformanceFixture(db, { workOrders: mode === 'smoke' ? 100 : 50000, largeDirectories: mode !== 'smoke' });
-  await historicalSupplement(); await applyThrough(db, 146, 145); await seedPhotoCases();
+  await historicalSupplement(); await applyThrough(db, 147, 146); await seedPhotoCases();
   report.scale = (await db.query(`select (select count(*) from public.work_orders)::integer work_orders,
     (select count(*) from public.activities)::integer activities,(select count(*) from public.invoices)::integer invoices,
     (select count(*) from public.invoice_lines)::integer invoice_lines,(select count(*) from public.photos)::integer photos`)).rows[0];

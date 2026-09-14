@@ -224,26 +224,10 @@ const parseQuantity = (raw: string) => {
   return Number.isFinite(value) && value > 0 ? value : null;
 };
 
-function extractLinesFromPage(
-  rows: TextRow[],
-  continuedColumns: InvoiceTableColumns | null = null,
-  budget?: InvoicePdfBudget,
-): InvoicePageLineResult {
-  const headerIndex = rows.findIndex(row => {
-    budget?.checkpoint();
-    const text = rowText(row).toLowerCase();
-    const hasDescription = /\b(description|items?|services?|products?|materials?)\b/.test(text);
-    const hasAmount = /\b(amount|extended|line total|total)\b/.test(text);
-    const hasNumericColumn = /\b(qty|quantity|hours?|units?|rate|unit price|price|unit cost)\b/.test(text);
-    return hasDescription && hasAmount && hasNumericColumn;
-  });
-  let columns = continuedColumns;
-
-  if (headerIndex >= 0) {
-    const header = rows[headerIndex];
+function findTableColumns(header: TextRow): InvoiceTableColumns | null {
     const descriptionHeader = findHeaderColumn(
       header,
-      /\b(description|items?(?:\s*\/\s*services?)?|services?|products?|materials?)\b/i,
+      /\b(description|items?(?:\s*\/\s*services?)?|services?|products?|materials?|labou?r)\b/i,
     );
     const qtyHeader = findHeaderColumn(header, /\b(qty|quantity|hours?|units?)\b/i);
     const rateHeader = findHeaderColumn(header, /\b(rate|unit price|price|unit cost)\b/i);
@@ -252,8 +236,8 @@ function extractLinesFromPage(
       /\b(amount|extended|line total|total)\b/i,
       true,
     );
-    if (!descriptionHeader || !amountHeader || amountHeader.x <= descriptionHeader.x) {
-      return { lines: [], columns: continuedColumns, tableEnded: false };
+    if (!descriptionHeader || !amountHeader || (!qtyHeader && !rateHeader) || amountHeader.x <= descriptionHeader.x) {
+      return null;
     }
 
     const orderedNumericHeaders = [qtyHeader, rateHeader, amountHeader]
@@ -269,46 +253,53 @@ function extractLinesFromPage(
       : qtyHeader
         ? qtyEnd
         : descriptionEnd;
-    columns = {
+    return {
       descriptionEnd,
       qtyEnd,
       amountStart,
       hasQtyColumn: !!qtyHeader,
       hasRateColumn: !!rateHeader,
     };
-  }
+}
 
-  if (!columns) return { lines: [], columns: null, tableEnded: false };
-
+function extractLinesFromPage(
+  rows: TextRow[],
+  continuedColumns: InvoiceTableColumns | null = null,
+  budget?: InvoicePdfBudget,
+): InvoicePageLineResult {
+  let columns = continuedColumns;
   const extracted: InvoiceLineExtraction[] = [];
   let tableEnded = false;
-  for (let index = Math.max(headerIndex + 1, 0); index < rows.length; index += 1) {
+  for (const row of rows) {
     budget?.checkpoint();
-    const row = rows[index];
+    // Preserve upstream's row-order parsing across continuation/section headers
+    // without bypassing the shared row, line, text, or deadline budgets.
+    const headerColumns = findTableColumns(row);
+    if (headerColumns) {
+      columns = headerColumns;
+      tableEnded = false;
+      continue;
+    }
+    if (!columns) continue;
     const fullText = rowText(row);
     const normalized = fullText.toLowerCase();
     if (
       /^(?:sub\s*total|sales\s+tax|tax(?:\s*\(|\s*:|\s+\d|$)|total\s+due|amount\s+due|balance\s+due|grand\s+total|invoice\s+total|work\s+summary|payment\s+terms)\b/.test(normalized)
     ) {
+      columns = null;
       tableEnded = true;
-      break;
-    }
-    if (
-      /\b(description|items?|services?|products?|materials?)\b/.test(normalized)
-      && /\b(amount|extended|line total|total)\b/.test(normalized)
-      && /\b(qty|quantity|hours?|units?|rate|unit price|price|unit cost)\b/.test(normalized)
-    ) {
       continue;
     }
 
-    const descriptionItems = row.items.filter(item => item.x < columns.descriptionEnd);
-    const qtyItems = columns.hasQtyColumn
-      ? row.items.filter(item => item.x >= columns.descriptionEnd && item.x < columns.qtyEnd)
+    const rowColumns = columns;
+    const descriptionItems = row.items.filter(item => item.x < rowColumns.descriptionEnd);
+    const qtyItems = rowColumns.hasQtyColumn
+      ? row.items.filter(item => item.x >= rowColumns.descriptionEnd && item.x < rowColumns.qtyEnd)
       : [];
-    const rateItems = columns.hasRateColumn
-      ? row.items.filter(item => item.x >= columns.qtyEnd && item.x < columns.amountStart)
+    const rateItems = rowColumns.hasRateColumn
+      ? row.items.filter(item => item.x >= rowColumns.qtyEnd && item.x < rowColumns.amountStart)
       : [];
-    const amountItems = row.items.filter(item => item.x >= columns.amountStart);
+    const amountItems = row.items.filter(item => item.x >= rowColumns.amountStart);
 
     const description = joinCell(descriptionItems);
     const amount = parseMoney(joinCell(amountItems));

@@ -16,7 +16,7 @@ const db = await createDatabase();
 let passed = 0;
 const check = async (name, run) => { await run(); passed++; console.log(`PASS ${name}`); };
 try {
-  await applyThrough(db, 138);
+  await applyThrough(db, 139);
   const f = recurrenceFixtures(await partsSmsFixtures(db));
   const target = await reproduceBlockedPartsRecurrence(f, check);
   if (!process.argv.includes('--baseline-only')) {

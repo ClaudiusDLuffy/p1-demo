@@ -17,7 +17,7 @@ assert.ok(process.argv.slice(2).every(argument => ['--baseline-only', '--skip-pr
 const db = await createDatabase();
 let passed = 0;
 try {
-  await applyThrough(db, 137);
+  await applyThrough(db, 138);
   const fixture = await partsSmsFixtures(db);
   const check = async (name, run) => { await run(); passed++; console.log(`PASS ${name}`); };
   await reproduceLegacyPartsSms(fixture, check);
@@ -25,7 +25,7 @@ try {
   console.log(`Parts SMS legacy SQL: ${passed} passed; 0 failed. Reproduces historical gaps, not remediation acceptance.`);
   if (!process.argv.includes('--baseline-only')) {
     fixture.legacyBefore = (await db.query('select * from public.p1_parts_alert_deliveries order by id')).rows;
-    await applyThrough(db, 138, 138);
+    await applyThrough(db, 139, 139);
     const candidate = partsSmsCandidateFixtures(fixture);
     await verifyPartsSmsDelivery(candidate, check);
     await verifyPartsSmsStatusRuns(candidate, check);
@@ -34,10 +34,10 @@ try {
     await verifyPartsSmsBoundsCompatibility(candidate, check);
     await verifyPartsSmsAudit(check);
     if (!process.argv.includes('--skip-prior')) await verifyPriorPartsSmsSchema(check);
-    console.log(`Preserved through-0138 parts SMS SQL: ${passed} passed; 0 failed.`);
+    console.log(`Preserved through-0139 parts SMS SQL: ${passed} passed; 0 failed.`);
     await verifyPartsSmsSourceRecurrence(check);
     await verifyPartsSmsOriginalChecksOnFinalSchema(check);
-    if (!process.argv.includes('--skip-prior')) await verifyPriorPartsSmsSchema(check, 139);
+    if (!process.argv.includes('--skip-prior')) await verifyPriorPartsSmsSchema(check, 140);
     for (const [name, timings] of candidate.measurements) {
       if (!name.includes('parts_sms')) continue;
       const sorted = [...timings].sort((a, b) => a - b);

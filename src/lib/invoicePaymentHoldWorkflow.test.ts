@@ -9,7 +9,7 @@ const migration = read("supabase/migrations/0100_contractor_invoice_payment_hold
 const route = read("src/app/api/contractor-invoice-holds/route.ts");
 const invoiceDetail = read("src/features/invoices/InvoiceDetail.tsx");
 const controllerPanel = read("src/features/invoices/ControllerExportPanel.tsx");
-const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+const notificationBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
 const notificationWorker = read("src/lib/server/financialNotificationWorker.ts");
 const notificationAuthorization = read("src/lib/server/financialNotificationHttp.ts");
 

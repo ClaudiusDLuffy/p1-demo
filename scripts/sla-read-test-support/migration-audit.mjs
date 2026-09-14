@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { helperSignature } from './fixtures.mjs';
 
-const auditSql = readFileSync(new URL('../../supabase/audits/0141_read_only_sla_policy_compatibility_verification.sql', import.meta.url), 'utf8');
+const auditSql = readFileSync(new URL('../../supabase/audits/0142_read_only_sla_policy_compatibility_verification.sql', import.meta.url), 'utf8');
 const call = alias => `public.evaluate_work_order_sla_v1(
               ${alias}.priority::text, ${alias}.dispatched_at,
               ${alias}.response_breach_at, ${alias}.resolution_breach_at,

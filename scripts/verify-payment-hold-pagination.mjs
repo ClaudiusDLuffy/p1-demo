@@ -12,7 +12,7 @@ const metrics = [];
 let checks = 0;
 const check = (condition, label) => { assert.ok(condition, label); checks++; };
 try {
-  await applyThrough(db, 142);
+  await applyThrough(db, 143);
   check(syntheticSqlPrivacyReceipt().substitutedContactIdentities > 0, 'Historical contacts were substituted before fixture migration reads');
   const f = candidateFixtures(await financialNotificationFixtures(db));
   const { actors, as } = f;
@@ -146,7 +146,7 @@ try {
 
   const audit = await db.transaction(async tx => {
     await tx.exec('set transaction read only');
-    return tx.exec(readFileSync('supabase/audits/0142_bounded_payment_hold_history_verification.sql', 'utf8'));
+    return tx.exec(readFileSync('supabase/audits/0143_bounded_payment_hold_history_verification.sql', 'utf8'));
   });
   check(audit[0].rows[0].all_checks_pass, 'Promotion audit succeeds in a genuine READ ONLY transaction');
   console.log(JSON.stringify({ suite: 'payment-hold-pagination', checks, metrics, privacy: syntheticSqlPrivacyReceipt(), externalCalls: 0 }));

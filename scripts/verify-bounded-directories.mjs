@@ -10,7 +10,7 @@ const db = await createDatabase();
 let checks = 0;
 const check = async (label, run) => { await run(); checks++; console.log(`ok ${checks} - ${label}`); };
 try {
-  await applyThrough(db, 142);
+  await applyThrough(db, 143);
   const actors = await initializeLifecycleActors(db);
   const as = actorTransactions(db);
   const definitions = async () => (await db.query(`select p.oid,p.proname,pg_get_functiondef(p.oid) definition,p.proacl
@@ -22,7 +22,7 @@ try {
     'workOrders',(select jsonb_agg(to_jsonb(w) order by id) from public.work_orders w)) data`)).rows[0].data;
   const beforeFunctions = await definitions();
   const beforeRows = await sourceRows();
-  await applyThrough(db, 143, 143);
+  await applyThrough(db, 144, 144);
   await check('additive migration preserves every earlier function definition/ACL and all source rows', async () => {
     const after = await definitions();
     for (const row of beforeFunctions) assert.deepEqual(after.find(candidate => candidate.oid === row.oid), row);
@@ -278,17 +278,17 @@ try {
       await tx.exec('drop function pg_temp.directory_projection_v1(text,uuid)');
     });
   });
-  const auditPath = new URL('../supabase/audits/0143_bounded_role_scoped_directories_verification.sql', import.meta.url);
+  const auditPath = new URL('../supabase/audits/0144_bounded_role_scoped_directories_verification.sql', import.meta.url);
   await check('metadata-only audit executes in READ ONLY transaction', async () => {
     const results = await db.transaction(async tx => { await tx.exec('set transaction read only'); return tx.exec(readFileSync(auditPath,'utf8')); });
     for (const result of results) for (const row of result.rows) for (const [key,value] of Object.entries(row)) {
       if (key !== 'signature') assert.equal(value, true, key);
     }
   });
-  await check('clean numeric install through0143 and supported0142-to0143 data-bearing upgrade both pass the same audit',async () => {
+  await check('clean numeric install through0144 and supported0143-to0144 data-bearing upgrade both pass the same audit',async () => {
     const fresh=await createDatabase();
     try {
-      await applyThrough(fresh,143);
+      await applyThrough(fresh,144);
       const results=await fresh.transaction(async tx=>{await tx.exec('set transaction read only');return tx.exec(readFileSync(auditPath,'utf8'));});
       for(const result of results) for(const row of result.rows) for(const [key,value] of Object.entries(row)) {
         if(key!=='signature') assert.equal(value,true,key);

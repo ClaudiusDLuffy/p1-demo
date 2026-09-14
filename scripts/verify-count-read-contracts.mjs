@@ -18,7 +18,7 @@ const families=[
   ['list_staff_invoices_page','list_staff_invoices_rows_v1','count_staff_invoices_v1',"p_queue=>'all'"],
 ];
 try {
-  await applyThrough(db,143);
+  await applyThrough(db,144);
   const oldDefinitions=(await db.query(`select oid::regprocedure::text signature,pg_get_functiondef(oid) definition
     from pg_proc where pronamespace='public'::regnamespace order by oid`)).rows;
   const policySnapshot=()=>db.query(`select polrelid::regclass::text relation,polname,polcmd,polpermissive,polroles,
@@ -29,7 +29,7 @@ try {
   const priorVisibility={};
   for(const [actorName,actor]of Object.entries(f.actors)) priorVisibility[actorName]=
     (await f.read(actor,'select id from public.work_orders order by id')).rows;
-  await applyThrough(db,144,144);
+  await applyThrough(db,145,145);
   assert.deepEqual((await policySnapshot()).rows,otherPolicies,'Every other RLS policy remains byte-equivalent');checks++;
   for(const [actorName,actor]of Object.entries(f.actors)) {
     assert.deepEqual((await f.read(actor,'select id from public.work_orders order by id')).rows,priorVisibility[actorName],
@@ -159,7 +159,7 @@ try {
     ['list_contractor_invoices_rows_v1',"p_direction=>'invalid'"],
     ['count_staff_invoices_v1',"p_search=>repeat('a',1001)"],['count_staff_invoices_v1',"p_search=>chr(10)"],
   ]) {await assert.rejects(()=>result(name,args),error=>error.code==='22023'&&error.message==='INVALID_REQUEST');checks++;}
-  const audit=readFileSync(new URL('../supabase/audits/0144_count_independent_page_reads_verification.sql',import.meta.url),'utf8');
+  const audit=readFileSync(new URL('../supabase/audits/0145_count_independent_page_reads_verification.sql',import.meta.url),'utf8');
   const auditRows=await db.query(audit);
   check(auditRows.rows.every(row=>row.all_checks_pass===true),'Read-only contract audit');
   const signatures=(await db.query(`select p.proname,pg_get_function_arguments(p.oid) arguments,

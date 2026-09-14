@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 export async function reproduceBlockedPartsRecurrence(f, check) {
   let target;
-  await check('pre0139 real requested A→A+B→A is blocked with both original deliveries immutable', async () => {
+  await check('pre0140 real requested A→A+B→A is blocked with both original deliveries immutable', async () => {
     target = await f.begin();
     const departure = await f.depart(target);
     assert.equal(departure.evaluation.queued, 1);
@@ -20,11 +20,11 @@ export async function reproduceBlockedPartsRecurrence(f, check) {
 }
 
 export async function verifyRecurrenceUpgrade(f, target, check) {
-  await check('0139 upgrade preserves all preexisting delivery columns, attempts and operations', async () => {
+  await check('0140 upgrade preserves all preexisting delivery columns, attempts and operations', async () => {
     await f.unchanged(target, target.original, true);
     assert.equal((await f.delivery(target.departure.opposite.id)).status, 'superseded');
   });
-  await check('0139 supported upgrade recovers only a provable prior source cycle, never reopening the superseded original', async () => {
+  await check('0140 supported upgrade recovers only a provable prior source cycle, never reopening the superseded original', async () => {
     const evaluation = await f.enqueue();
     const child = await f.newestChild(target);
     assert.equal(evaluation.recurrenceQueued, 1);

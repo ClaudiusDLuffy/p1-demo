@@ -99,7 +99,7 @@ export async function verifyFinancialContractionCompatibility(f, check) {
     } finally {await f.db.exec('revoke select,update,delete on public.financial_notification_deliveries,public.financial_notification_events from service_role');}
   });
   await check('read-only financial audit executes inside enforced read-only transaction without payload exposure',async()=>{
-    const audit=readFileSync(fileURLToPath(new URL('../../supabase/audits/0136_financial_notification_integrity_verification.sql',import.meta.url)),'utf8');
+    const audit=readFileSync(fileURLToPath(new URL('../../supabase/audits/0137_financial_notification_integrity_verification.sql',import.meta.url)),'utf8');
     const started=performance.now();
     await f.db.transaction(async tx=>{await tx.exec('set transaction read only');await tx.exec(audit);});
     console.log(`MEASURE financial integrity audit ${(performance.now()-started).toFixed(2)}ms; disposable synthetic PGlite only`);

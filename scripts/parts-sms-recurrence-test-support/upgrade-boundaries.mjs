@@ -7,7 +7,7 @@ import { applyPartsRecurrenceMigration } from './migration.mjs';
 export async function verifyPartsRecurrenceUpgradeBoundaries(check) {
   const db = await createDatabase();
   try {
-    await applyThrough(db, 138);
+    await applyThrough(db, 139);
     const f = recurrenceFixtures(await partsSmsFixtures(db));
     const target = await f.begin();
     const away = await f.depart(target);
@@ -16,7 +16,7 @@ export async function verifyPartsRecurrenceUpgradeBoundaries(check) {
       set created_at=transaction_timestamp()-interval '1 hour' where recipient_id=$1`, [target.recipient.id]);
     const original = await f.freeze(target);
     await applyPartsRecurrenceMigration(db);
-    await check('tied pre0139 source timestamps do not invent historical chronology or automatically reopen an ambiguous original', async () => {
+    await check('tied pre0140 source timestamps do not invent historical chronology or automatically reopen an ambiguous original', async () => {
       const result = await f.enqueue();
       assert.equal(result.recurrenceQueued, 0);
       assert.equal(result.recurrenceBlocked, 1);

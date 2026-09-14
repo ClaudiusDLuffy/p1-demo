@@ -20,18 +20,18 @@ import { verifyEmailReceipts,verifyEmailReceiptValidation } from '../email-intak
 import { verifyActiveEmailAuthorization,verifyEmailRawAndGrants } from '../email-intake-test-support/authorization-acceptance.mjs';
 import { verifyEmailReceiptAtomicity,verifyEmailAudit,verifyEmailAuditAnomalies } from '../email-intake-test-support/atomicity-and-release.mjs';
 
-// Actual earlier-batch routines execute unchanged on final 0132. Separate old
-// harnesses stopping at 0123/0125/0128/0130 do not establish this compatibility.
+// Actual earlier-batch routines execute unchanged on final 0133. Separate old
+// harnesses stopping at 0124/0126/0129/0131 do not establish this compatibility.
 export async function verifyPriorBatchesOnFinalStorageSchema({createDatabase,applyThrough,check,repo}) {
   let currentCase='';
   const checked=(name,run)=>check(name.startsWith('REVIEW GATE')
-    ? `${name} (final 0132 compatibility only)` : `Final 0132 regression: ${name}`,async()=>{
+    ? `${name} (final 0133 compatibility only)` : `Final 0133 regression: ${name}`,async()=>{
       currentCase=name;
       try { await run(); } finally { currentCase=''; }
     });
   const db=await createDatabase();
   try {
-    await applyThrough(db,132);
+    await applyThrough(db,133);
     const actors=await initializeLifecycleActors(db);
     const nonassignable='74000000-0000-4000-8000-000000000002';
     await db.query('insert into auth.users(id,email) values($1,$2)',[nonassignable,'synthetic-nonassignable@storage.example.invalid']);
@@ -87,7 +87,7 @@ export async function verifyPriorBatchesOnFinalStorageSchema({createDatabase,app
   // final-schema database; do not rewrite their actors or weaken constraints.
   const intake=await createDatabase();
   try {
-    await applyThrough(intake,132);
+    await applyThrough(intake,133);
     const actors=await initializeLifecycleActors(intake);
     const fixture=await createEmailSecurityFixtures({db:intake,as:actorTransactions(intake),actors});
     await verifyActiveEmailAuthorization(fixture,checked);
@@ -95,7 +95,7 @@ export async function verifyPriorBatchesOnFinalStorageSchema({createDatabase,app
     await verifyEmailReceiptValidation(fixture,checked);
     await verifyEmailRawAndGrants(fixture,checked);
     await verifyEmailReceiptAtomicity(fixture,checked);
-    await verifyEmailAudit(intake,repo,checked,'Final 0132 prior intake audit');
+    await verifyEmailAudit(intake,repo,checked,'Final 0133 prior intake audit');
     await verifyEmailAuditAnomalies(fixture,repo,checked);
   } finally { await intake.close(); }
 }

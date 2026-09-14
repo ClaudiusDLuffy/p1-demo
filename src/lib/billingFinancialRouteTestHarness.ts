@@ -22,7 +22,7 @@ export const validBillingRequest = () => ({
   lines: [{ type: "Labor", desc: "Synthetic work", qty: 1, rate: 10, isTaxable: false }],
 });
 type Row = Record<string, unknown>;
-type PortResult = { data: unknown; error: { code: string; message: string } | null };
+type PortResult = { data: unknown; error: unknown };
 type Handler = (request: Request) => Promise<Response>;
 export function billingRouteHarness(options: { controller?: boolean; auditFailure?: boolean; contractor?: boolean;
   active?: boolean; role?: string; externalRoot?: string; commandResultOverride?: Row;

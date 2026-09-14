@@ -8,8 +8,8 @@ import { applyFixtureMigration, initializeLifecycleActors, actorTransactions } f
 
 export async function verifyStagedLifecycleRelease(input) {
   const { db, as, files, repo, statements, check, contractor } = input;
-  const expansion = files.find(name => name.startsWith('0122_'));
-  const contraction = files.find(name => name.startsWith('0123_'));
+  const expansion = files.find(name => name.startsWith('0123_'));
+  const contraction = files.find(name => name.startsWith('0124_'));
   assert.ok(expansion, 'Batch 1B expansion migration is required');
   assert.ok(contraction, 'Batch 1B contraction migration is required');
   async function apply(name) {
@@ -88,7 +88,7 @@ export async function verifyStagedLifecycleRelease(input) {
     }
     assert.equal((await db.query('select count(*)::int count from public.work_order_lifecycle_transition_guards')).rows[0].count, 0);
   });
-  const auditSource = readFileSync(`${repo}/supabase/audits/0123_authoritative_work_order_lifecycle_verification.sql`, 'utf8');
+  const auditSource = readFileSync(`${repo}/supabase/audits/0124_authoritative_work_order_lifecycle_verification.sql`, 'utf8');
   await check('new lifecycle verification audit runs read-only and separates legacy review from structural protection', async () => {
     const audited = await db.transaction(async tx => {
       await tx.exec('set transaction read only');
@@ -104,7 +104,7 @@ export async function verifyStagedLifecycleRelease(input) {
   const clean = await input.createDatabase();
   try {
     await check('second clean synthetic engine applies all migrations through contraction before workflow fixtures', async () => {
-      for (const name of files.filter(name => Number(name.match(/^\d+/)[0]) <= 123)) {
+      for (const name of files.filter(name => Number(name.match(/^\d+/)[0]) <= 124)) {
         await applyFixtureMigration({ db: clean, repo, name, statements });
       }
     });

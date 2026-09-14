@@ -1,9 +1,10 @@
+import { readMigrationInventory } from "./migration-inventory.mjs";
 // Isolated, in-memory regression checks. No Docker, Supabase connection,
 // environment-file loading, or production data. See the release runbook.
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { reproduceLegacyLifecycleFindings } from './lifecycle-test-support/legacy-reproductions.mjs';
 import { verifyStagedLifecycleRelease } from './lifecycle-test-support/staged-acceptance.mjs';
@@ -42,10 +43,10 @@ function statements(sql) {
   return parts;
 }
 
-const files = readdirSync(`${repo}/supabase/migrations`).filter(f => /^\d+.*\.sql$/.test(f)).sort();
+const files = readMigrationInventory(repo).filter(f => /^\d+.*\.sql$/.test(f)).sort();
 // The historical positive controls and vulnerability reproductions run against
 // the committed baseline before later expansion/contraction stages are applied.
-const legacyFiles = files.filter(name => Number(name.match(/^\d+/)[0]) <= 121);
+const legacyFiles = files.filter(name => Number(name.match(/^\d+/)[0]) <= 122);
 for (const name of legacyFiles) {
   try {
     await applyFixtureMigration({ db, repo, name, statements });

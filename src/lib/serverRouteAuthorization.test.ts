@@ -74,7 +74,7 @@ test("contractor notifications stay bound to validated contractor identities", (
   assert.match(dispatchRoute, /auth\.caller\.rpc\("get_receiving_dispatch_current_v1"/);
   assert.match(dispatchRoute, /p_assignment_version: wo\.contractor_assignment_version/);
   assert.doesNotMatch(dispatchRoute, /sendEmail|sendDispatchNotification/);
-  const receivingBoundary = read("supabase/migrations/0134_receiving_dispatch_staff_closeout.sql");
+  const receivingBoundary = read("supabase/migrations/0135_receiving_dispatch_staff_closeout.sql");
   assert.match(receivingBoundary, /perform public\.require_assignable_contractor\(v\.recipient_profile_id\)/);
 
   const attentionRoute = read(
@@ -107,7 +107,7 @@ test("contractor notifications stay bound to validated contractor identities", (
   );
   assert.match(reviewRoute, /get_financial_notification_review_compatibility_v1/);
   assert.doesNotMatch(reviewRoute, /sendEmail|sendInvoiceReviewNotification/);
-  const financialBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+  const financialBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
   assert.match(financialBoundary, /p\.role='contractor' and p\.active/);
   assert.match(financialBoundary, /public\.contractor_account_id_for_profile\(p\.id\)=p\.id/);
   assert.match(financialBoundary, /not public\.financial_notification_recipient_valid\(d\)[\s\S]*RECIPIENT_NOT_DELIVERABLE/);

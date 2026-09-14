@@ -6,7 +6,7 @@ export async function verifyAssignmentAudit(db,repo,check,label,contracted=true)
   await check(`${label}: read-only assignment consistency audit executes and reports expected enforcement`,async()=>{
     const results=await db.transaction(async tx=>{
       await tx.exec('set transaction read only');
-      return tx.exec(readFileSync(`${repo}/supabase/audits/0127_authoritative_assignment_archive_verification.sql`,'utf8'));
+      return tx.exec(readFileSync(`${repo}/supabase/audits/0128_authoritative_assignment_archive_verification.sql`,'utf8'));
     });
     assert.equal(results[0].rows[0].all_checks_pass,contracted,JSON.stringify(results[0].rows[0]));
     assert.ok(results.length>1,'Structural checks and historical anomalies must remain separate');
@@ -17,7 +17,7 @@ export async function verifyHybridAssignmentAudit(db,repo,check,label) {
   await check(`${label}: hybrid transfer audit executes in a read-only transaction`,async()=>{
     const results=await db.transaction(async tx=>{
       await tx.exec('set transaction read only');
-      return tx.exec(readFileSync(`${repo}/supabase/audits/0128_hybrid_assignment_transfer_verification.sql`,'utf8'));
+      return tx.exec(readFileSync(`${repo}/supabase/audits/0129_hybrid_assignment_transfer_verification.sql`,'utf8'));
     });
     assert.ok(results.length>1);
     assert.equal(results[0].rows[0].all_checks_pass,true,JSON.stringify(results[0].rows[0]));
@@ -88,19 +88,19 @@ export async function verifyAssignmentReleasePaths({ createDatabase,applyNumber,
       await applyBaseline(db);
       // Clean path finishes every forward migration before introducing current
       // workflow actors/data; staged path has supported existing assigned data.
-      if(!staged) for(const number of [122,123,124,125,126,127,128]) await applyNumber(db,number);
+      if(!staged) for(const number of [123,124,125,126,127,128,129]) await applyNumber(db,number);
       const actors=await initializeActors(db);const as=asFor(db);
       let financialUpgrade;
       const id=staged?'WOT9780001':'WOT9780002';
       await db.query("insert into public.work_orders(id,status,functional_status) values($1,'unassigned','New')",[id]);
-      if(staged) for(const number of [122,123,124,125]) await applyNumber(db,number);
+      if(staged) for(const number of [123,124,125,126]) await applyNumber(db,number);
       if(staged) financialUpgrade=await preparePreAssignmentFinancialReplay({ db,as,actors });
-      if(staged) await check('staged upgrade before0126 lacks new assignment RPC, preserves old guarded assignment surface',async()=>{
+      if(staged) await check('staged upgrade before0127 lacks new assignment RPC, preserves old guarded assignment surface',async()=>{
         assert.equal((await db.query("select to_regprocedure('public.transition_work_order_contractor_v1(text,uuid,integer,integer,bigint,uuid)') is null absent")).rows[0].absent,true);
         const result=(await as('authenticated',actors.mgr,tx=>tx.query('select public.transition_work_order_contractor($1,$2,$3) result',[id,actors.contractor,0]))).rows[0].result;
         assert.equal(result.applied,true);
       });
-      if(staged) await applyNumber(db,126);
+      if(staged) await applyNumber(db,127);
       if(staged) {
         await verifyAssignmentAudit(db,repo,check,'Expansion-only',false);
         await check('assignment expansion preserves old rejection/duplicate signatures and old assigned-create caller until cutover',async()=>{
@@ -113,9 +113,9 @@ export async function verifyAssignmentReleasePaths({ createDatabase,applyNumber,
         });
       }
       if(staged) {
-        await applyNumber(db,127);
-        const verifyReplay=await preparePreHybridReplay({ db,as,actors,financial:financialUpgrade.financial });
         await applyNumber(db,128);
+        const verifyReplay=await preparePreHybridReplay({ db,as,actors,financial:financialUpgrade.financial });
+        await applyNumber(db,129);
         await financialUpgrade.verify(check);
         await verifyReplay(check);
       }

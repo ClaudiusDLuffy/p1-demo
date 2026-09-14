@@ -100,5 +100,5 @@ export async function verifyAssignmentCommands(fixture,check) {
     await reject(()=>command('transition',actors.mgr,args,actors.contractor));assert.deepEqual(await snapshot(),after);
   });
   // Active-visit assignment is covered by the checkout-first / explicit
-  // administrative-transfer acceptance module after forward migration 0128.
+  // administrative-transfer acceptance module after forward migration 0129.
 }

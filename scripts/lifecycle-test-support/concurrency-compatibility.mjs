@@ -64,8 +64,8 @@ export async function verifyLifecycleInterleavings(fixture, check) {
     const id = await workOrder();
     await command('start', actors.contractor, await context(id));
     const oldContext = await context(id);
-    // 0128's approved hybrid policy requires a real checkout before an ordinary
-    // transfer. Keep this positive control valid both before and after 0128;
+    // 0129's approved hybrid policy requires a real checkout before an ordinary
+    // transfer. Keep this positive control valid both before and after 0129;
     // the assignment harness separately proves active-visit denial/override.
     await command('pause', actors.contractor, await context(id));
     const reassigned = (await as('authenticated', actors.mgr, tx => tx.query(

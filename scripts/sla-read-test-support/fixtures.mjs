@@ -45,17 +45,17 @@ export async function reproduceSlaReadDivergence(f, check) {
   const at = hours => new Date(now.getTime() + hours * 3_600_000).toISOString();
   const legacy = await f.workOrder({ dispatched_at: at(-10) });
   const responded = await f.workOrder({ response_breach_at: at(-1), resolution_breach_at: at(5), start_time: at(-2) });
-  await check('pre0141 navigation omits breached legacy fallback despite canonical display', async () => {
+  await check('pre0142 navigation omits breached legacy fallback despite canonical display', async () => {
     const result = await f.summary();
     assert.equal(result.result.slaBreachedCount, 0);
     assert.equal(f.model(legacy, result.evaluated_at).breached, true);
   });
-  await check('pre0141 table marks completed response overdue despite future resolution', async () => {
+  await check('pre0142 table marks completed response overdue despite future resolution', async () => {
     const result = await f.page({ overdue: true });
     assert.ok(result.result.items.some(row => row.id === responded.id));
     assert.equal(f.model(responded, result.evaluated_at).breached, false);
   });
-  await check('pre0141 both live pagination RPCs sort missing legacy deadlines behind stored deadlines', async () => {
+  await check('pre0142 both live pagination RPCs sort missing legacy deadlines behind stored deadlines', async () => {
     for (const read of [f.page, f.legacyPage]) {
       const result = await read();
       assert.equal(result.result.items[0].id, responded.id);

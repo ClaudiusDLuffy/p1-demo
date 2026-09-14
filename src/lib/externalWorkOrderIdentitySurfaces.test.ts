@@ -16,7 +16,7 @@ const contractorInvoiceCreate = read("src/features/invoices/InvoiceCreateModal.t
 const contractorInvoiceList = read("src/features/invoices/InvoiceList.tsx");
 const contractorInvoiceDetail = read("src/features/invoices/InvoiceDetail.tsx");
 const contractorInvoiceHook = read("src/features/invoices/useInvoices.ts");
-const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+const notificationBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
 const notificationWorker = read("src/lib/server/financialNotificationWorker.ts");
 
 test("the 7-Eleven dashboard queue copies the canonical work-order root", () => {
@@ -66,7 +66,7 @@ test("invoice review and payment-hold surfaces preserve both work-order identiti
   assert.match(notificationBoundary, /'workOrderId',i\.work_order_id,'externalWorkOrderId',coalesce\(w\.duplicate_root_work_order_id,w\.id\)/);
   assert.match(notificationWorker, /createInvoiceReviewNotificationPlan\(\{ recipients, invoice: \{ \.\.\.message\.invoice, workOrderId: message\.invoice\.workOrderId/);
   assert.match(invoiceHoldsRoute, /list_contractor_invoice_payment_holds_page_v1/);
-  const holdPage = read("supabase/migrations/0142_bounded_payment_hold_history.sql");
+  const holdPage = read("supabase/migrations/0143_bounded_payment_hold_history.sql");
   assert.match(holdPage, /'externalWorkOrderId', coalesce\(nullif\(w\.duplicate_root_work_order_id, ''\), nullif\(w\.id, ''\), p\.work_order_id\)/);
   assert.match(controllerExportPanel, /hold\.externalWorkOrderId \|\| hold\.workOrderId/);
   assert.match(controllerExportPanel, /P1 portal reassignment:/);

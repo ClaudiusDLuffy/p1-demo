@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { QUICKBOOKS_EQUIPMENT_TAGS } from "./quickBooksEquipmentTags";
-import { normalizeStaffBillingLineType } from "./staffBilling";
+import { isValidStaffBillingRate, normalizeStaffBillingLineType } from "./staffBilling";
 
 export const FINANCIAL_BODY_BYTES = 256 * 1024;
 export const FINANCIAL_MAX_LINES = 1000;
@@ -29,7 +29,7 @@ const optionalUuid = z.string().uuid().nullable().optional().transform(value => 
 export const StaffFinancialLineSchema = z.object({
   type: text(80).min(1), desc: text(4000).optional(), description: text(4000).optional(),
   qty: money.refine(value => value > 0, "Quantity must be positive"),
-  rate: money.refine(value => value > 0, "Rate must be positive"),
+  rate: money,
   isTaxable: z.boolean().default(false),
   // Explicit UI-only field; never authorizes or changes persisted tax policy.
   taxTreatmentManual: z.boolean().optional(),
@@ -37,6 +37,9 @@ export const StaffFinancialLineSchema = z.object({
   sourceUnitCost: money.nullable().optional().transform(value => value ?? null),
   markupPercent: decimal(999, 1).nullable().optional().transform(value => value ?? null),
 }).strict().superRefine((line, context) => {
+  if (!isValidStaffBillingRate(line.type, line.rate)) {
+    context.addIssue({ code: "custom", path: ["rate"], message: "A zero rate is allowed only for Warranty" });
+  }
   if (line.desc !== undefined && line.description !== undefined && line.desc !== line.description) {
     context.addIssue({ code: "custom", path: ["description"], message: "Conflicting descriptions" });
   }

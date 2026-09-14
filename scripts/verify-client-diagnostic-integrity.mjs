@@ -11,15 +11,15 @@ const db = await createDatabase();
 let passed = 0;
 const check = async (name, run) => { await run(); passed++; console.log(`PASS ${name}`); };
 try {
-  await applyThrough(db, 139);
-  await check('pre0140 diagnostics has no durable admission command or cross-instance limiter bucket', async () => {
+  await applyThrough(db, 140);
+  await check('pre0141 diagnostics has no durable admission command or cross-instance limiter bucket', async () => {
     const row = (await db.query('select to_regprocedure($1) command,to_regclass($2) ledger', [signature, `public.${bucketTable}`])).rows[0];
     assert.equal(row.command, null);
     assert.equal(row.ledger, null);
   });
   if (!process.argv.includes('--baseline-only')) {
-    await check('diagnostic forward upgrade 0139 to 0140 installs service-only limiter', () => applyThrough(db, 140, 140));
-    await check('diagnostic final0141 schema preserves admission while adding read-only SLA parity', () => applyThrough(db, 141, 141));
+    await check('diagnostic forward upgrade 0140 to 0141 installs service-only limiter', () => applyThrough(db, 141, 141));
+    await check('diagnostic final0142 schema preserves admission while adding read-only SLA parity', () => applyThrough(db, 142, 142));
     const f = await diagnosticFixtures(db);
     await verifyDiagnosticAdmission(f, check);
     await verifyDiagnosticSecurity(f, check);

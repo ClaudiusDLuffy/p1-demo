@@ -17,18 +17,18 @@ assert.ok(process.argv.slice(2).every(argument => argument === '--baseline-only'
 const db = await createDatabase();
 let passed = 0;
 try {
-  await applyThrough(db, 134);
+  await applyThrough(db, 135);
   const fixture = await financialNotificationFixtures(db);
   const check = async (name, run) => { await run(); passed++; console.log(`PASS ${name}`); };
   await reproduceFinancialNotificationLoss(fixture, check);
   console.log(`Financial notification baseline SQL: ${passed} passed; 0 failed. This reproduces pre-fix gaps, not remediation acceptance.`);
   if (!process.argv.includes('--baseline-only')) {
-    await applyThrough(db, 135, 135);
+    await applyThrough(db, 136, 136);
     const candidate = candidateFixtures(fixture);
     await verifyFinancialExpansionCompatibility(candidate, check);
     await verifyFinancialIntentTransactions(candidate, check);
-    await applyThrough(db, 136, 136);
     await applyThrough(db, 137, 137);
+    await applyThrough(db, 138, 138);
     await verifyFinancialNotificationAuthorization(candidate, check);
     await verifyFinancialNotificationRecipients(candidate, check);
     await verifyFinancialNotificationWorkerActions(candidate, check);

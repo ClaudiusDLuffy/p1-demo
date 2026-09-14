@@ -14,7 +14,7 @@ const invoiceHook = read("src/features/invoices/useInvoices.ts");
 const database = read("src/lib/db.ts");
 const portalShell = read("src/components/PortalShell.tsx");
 const notificationCommands = read("src/lib/financialNotificationCommands.ts");
-const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+const notificationBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
 
 test("batch review is transactional and delegates every row to the guarded lifecycle", () => {
   assert.match(migration, /^begin;/m);

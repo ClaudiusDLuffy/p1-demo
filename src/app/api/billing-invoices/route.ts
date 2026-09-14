@@ -20,6 +20,8 @@ export const OPTIONS = apiMethodBoundary.OPTIONS;
  * continues to call list_staff_invoices_page, loadChunkedRows, chunkArray,
  * mapChunksWithConcurrency and deterministic invoice-line ordering. Financial
  * commands remain atomic and use save_staff_billing_invoice_v4.
+ * Warranty validation and finalization failures are handled by the focused
+ * contracts and application service, never by duplicate route orchestration.
  * Legacy characterization anchors: profile = await auth.sb.auth.getUser();
  * const profileRow = await auth.sb.from("profiles").select("id, role, name, active");
  * if (!profile?.active) return unauthorized(); STAFF_ROLES.has(profile.role);

@@ -15,7 +15,7 @@ export async function verifyStorageUpgrade({db,fixture,applyNumber,check}) {
     [legacy.map(item=>item.objectId)])).rows;
   const photoMetadataBefore=(await db.query('select to_jsonb(p) photo from public.photos p where id=any($1::uuid[]) order by id',
     [legacy.map(item=>item.photoId)])).rows;
-  await applyNumber(131);
+  await applyNumber(132);
   await check('expansion keeps legitimate legacy formats and reads unchanged',async()=>{
     for(const row of legacy) assert.equal((await objectRows(actors.contractor,'photos',row.path)).length,1);
     assert.equal((await db.query('select enforced from public.private_object_control')).rows[0].enforced,false);
@@ -30,7 +30,7 @@ export async function verifyStorageUpgrade({db,fixture,applyNumber,check}) {
     assert.equal((await db.query('select id from storage.objects where bucket_id=$1 and name=$2',[intent.bucket,intent.objectPath])).rows.length,1);
   });
   await check('unreviewed legacy records stop contraction without changing existing policy/control state',async()=>{
-    await expectSqlDenial(()=>applyNumber(132),['23514']);
+    await expectSqlDenial(()=>applyNumber(133),['23514']);
     await db.exec('rollback');
     assert.equal((await db.query('select enforced from public.private_object_control')).rows[0].enforced,false);
     for(const row of legacy) assert.equal((await objectRows(actors.contractor,'photos',row.path)).length,1);
@@ -50,7 +50,7 @@ export async function verifyStorageUpgrade({db,fixture,applyNumber,check}) {
       assert.equal(first.bindingId,again.bindingId);
     }
   });
-  await applyNumber(132);
+  await applyNumber(133);
   await check('reviewed legacy HEIC/HEIF/BMP remain readable after contraction without rewriting or decoding existing objects',async()=>{
     assert.equal((await db.query('select enforced from public.private_object_control')).rows[0].enforced,true);
     for(const row of legacy) assert.equal((await objectRows(actors.contractor,'photos',row.path)).length,1);

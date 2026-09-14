@@ -120,7 +120,7 @@ export async function bootPhotoFixture({ report, phase, sampleRef, databaseOptio
     await import(pathToFileURL(join(root, 'scripts/query-performance-test-support/fixtures.mjs')));
   const realDb = await createTimedDatabase(report, phase, databaseOptions);
   const db = makeObservedDatabase(realDb, report.phases, sampleRef);
-  await phase('migration_apply_through_144_ms', () => applyThrough(db, 144));
+  await phase('migration_apply_through_144_ms', () => applyThrough(db, 145));
   const fixture = await phase('historical_fixture_load_including_scoped_analyze_ms',
     () => seedPerformanceFixture(db, { workOrders: 50000, largeDirectories: true }));
   const selectedNames = ['historicalSupplement', 'photoId', 'bindingId', 'objectId', 'photoPath', 'cases', 'casePath',
@@ -132,7 +132,7 @@ export async function bootPhotoFixture({ report, phase, sampleRef, databaseOptio
     'syntheticId', 'workOrderId', `${selected}\nreturn { historicalSupplement, seedPhotoCases, photoId, cases };`)(
     assert, db, fixture, report, root, ts, readFileSync, join, sha256, syntheticId, workOrderId);
   await phase('historical_invoice_fixture_supplement_ms', () => helpers.historicalSupplement());
-  await phase('migration_apply_145_146_ms', () => applyThrough(db, 146, 145));
+  await phase('migration_apply_145_146_ms', () => applyThrough(db, 147, 146));
   await phase('official_photo_fixture_load_including_scoped_analyze_ms', () => helpers.seedPhotoCases());
   // Owner-only counts may warm relation data buffers, as the frozen runner does.
   // They do not execute the photo RPC/RLS helper or prime that function's plan.

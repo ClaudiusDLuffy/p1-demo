@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const migration = readFileSync(new URL("../supabase/migrations/0133_receiving_contractor_dispatch_outbox.sql", import.meta.url), "utf8");
-const audit = readFileSync(new URL("../supabase/audits/0133_receiving_contractor_dispatch_integrity_verification.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../supabase/migrations/0134_receiving_contractor_dispatch_outbox.sql", import.meta.url), "utf8");
+const audit = readFileSync(new URL("../supabase/audits/0134_receiving_contractor_dispatch_integrity_verification.sql", import.meta.url), "utf8");
 const route = readFileSync(new URL("../src/app/api/notifications/dispatch/route.ts", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../src/lib/server/receivingDispatchWorker.ts", import.meta.url), "utf8");
 let passed = 0;

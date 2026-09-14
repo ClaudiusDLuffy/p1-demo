@@ -26,13 +26,13 @@ import { verifyPartsRecurrenceActionsHistory } from '../parts-sms-recurrence-tes
 
 // Call unchanged prior assertions against the final schema. Never rewrite old
 // assertions to make new code pass or modify historical scripts/migrations.
-export async function verifyPriorPaginationSchema(check, maximum = 143) {
-  assert.ok([143, 144, 146].includes(maximum));
+export async function verifyPriorPaginationSchema(check, maximum = 145) {
+  assert.ok([144, 145, 147, 149].includes(maximum));
   const label = String(maximum).padStart(4, '0');
   await verifyPriorBatchesOnFinalStorageSchema({ createDatabase,
     applyThrough: db => applyThrough(db, maximum),
     repo: fileURLToPath(new URL('../../', import.meta.url)),
-    check: (name, run) => check(name.replaceAll('Final 0132', `Final ${label}`).replaceAll('final 0132', `final ${label}`), run),
+    check: (name, run) => check(name.replaceAll('Final 0133', `Final ${label}`).replaceAll('final 0133', `final ${label}`), run),
   });
   const storage = await createDatabase();
   try {
@@ -71,18 +71,18 @@ export async function verifyPriorPaginationSchema(check, maximum = 143) {
   } finally { await financial.close(); }
   const parts = await createDatabase();
   try {
-    await applyThrough(parts, 137);
+    await applyThrough(parts, 138);
     const base = await partsSmsFixtures(parts);
     const priorCheck = (name, run) => check(`Prior parts reproduction: ${name}`, run);
     await reproduceLegacyPartsSms(base, priorCheck);
     await verifyLegacyPartsSms(base, priorCheck);
     base.legacyBefore = (await parts.query('select * from public.p1_parts_alert_deliveries order by id')).rows;
-    await applyThrough(parts, maximum, 138);
+    await applyThrough(parts, maximum, 139);
     const f = recurrenceFixtures(base);
     const finalCheck = (name, run) => check(`Final ${label} Parts: ${name}`, run);
     await verifyPartsSmsDelivery(f, (name, run) => {
       if (name === 'parts SMS real procurement request A then B then ordering B can recur original exact A signature') {
-        console.log('POLICY REPLACEMENT (not a pass): pre0139 blocked-recurrence assertion remains in original 0138 harness; approved recurrence suite runs on final schema.');
+        console.log('POLICY REPLACEMENT (not a pass): pre0140 blocked-recurrence assertion remains in original 0139 harness; approved recurrence suite runs on final schema.');
         return Promise.resolve();
       }
       return finalCheck(name, run);

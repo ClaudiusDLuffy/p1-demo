@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readdirSync } from 'node:fs';
+import { readMigrationInventory } from '../migration-inventory.mjs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +34,7 @@ export async function createDatabase() {
 }
 
 export async function applyThrough(db, maximum, minimum = 0) {
-  const names = readdirSync(`${repo}/supabase/migrations`).filter(name => /^\d+.*\.sql$/.test(name))
+  const names = readMigrationInventory(repo)
     .filter(name => { const number = Number(name.match(/^\d+/)[0]); return number <= maximum && number >= minimum; }).sort();
   assert.ok(names.some(name => Number(name.match(/^\d+/)[0]) === maximum));
   for (const name of names) await applyFixtureMigration({ db, repo, name, statements: migrationStatements });

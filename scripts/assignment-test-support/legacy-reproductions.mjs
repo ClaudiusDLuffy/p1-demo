@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 export const ASSIGNMENT_EVENT_KEYS = ['work_order_assignment', 'work_order_reassigned',
   'work_order_unassigned', 'work_order_rejected', 'work_order_duplicated'];
 
-// These reproduce the actual effective 0125 baseline, not an assumed old audit.
+// These reproduce the actual effective 0126 baseline, not an assumed old audit.
 // Every unsafe test is rolled back so later upgrade checks never repair fixtures.
 export async function reproduceAssignmentBaseline({ db, actors, check }) {
   const inactiveContractor='74000000-0000-4000-8000-000000000001';

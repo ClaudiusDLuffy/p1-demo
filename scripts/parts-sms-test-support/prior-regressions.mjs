@@ -11,15 +11,15 @@ import { candidateFixtures } from '../financial-notification-test-support/candid
 import { verifyFinancialNotificationWorkerActions } from '../financial-notification-test-support/worker-actions.mjs';
 import { verifyFinancialHoldPolicy } from '../financial-notification-test-support/hold-policy.mjs';
 
-export async function verifyPriorPartsSmsSchema(check, maximum = 138) {
-  assert.ok([138, 139].includes(maximum));
+export async function verifyPriorPartsSmsSchema(check, maximum = 140) {
+  assert.ok([139, 140].includes(maximum));
   const label = String(maximum).padStart(4, '0');
   // Existing checks execute unchanged against the final migration target. The
   // original source files and their assertions remain untouched.
   await verifyPriorBatchesOnFinalStorageSchema({ createDatabase,
     applyThrough: db => applyThrough(db, maximum),
     repo: fileURLToPath(new URL('../../', import.meta.url)),
-    check: (name, run) => check(name.replaceAll('Final 0132', `Final ${label}`).replaceAll('final 0132', `final ${label}`), run),
+    check: (name, run) => check(name.replaceAll('Final 0133', `Final ${label}`).replaceAll('final 0133', `final ${label}`), run),
   });
   const storage = await createDatabase();
   try {

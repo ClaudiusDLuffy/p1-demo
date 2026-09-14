@@ -11,17 +11,17 @@ export async function verifyPriorFinancialNotificationSchema(f,check) {
   // Existing prior suites run unchanged. Only the injected migration target and
   // output label move forward; no prior assertion or role grant is weakened.
   await verifyPriorBatchesOnFinalStorageSchema({createDatabase,
-    applyThrough:(db)=>applyThrough(db,137),
+    applyThrough:(db)=>applyThrough(db,138),
     repo:fileURLToPath(new URL('../../',import.meta.url)),
-    check:(name,run)=>check(name.replaceAll('Final 0132','Final 0137').replaceAll('final 0132','final 0137'),run)});
+    check:(name,run)=>check(name.replaceAll('Final 0133','Final 0138').replaceAll('final 0133','final 0138'),run)});
   const storage=await createDatabase();
   try {
-    await applyThrough(storage,137);
+    await applyThrough(storage,138);
     const actors=await initializeLifecycleActors(storage);
     const fixture=await createStoragePhotoFixtures({db:storage,as:actorTransactions(storage),actors});
-    await verifyCanonicalObjectCommands(fixture,(name,run)=>check(`Final 0137 Storage: ${name}`,run));
+    await verifyCanonicalObjectCommands(fixture,(name,run)=>check(`Final 0138 Storage: ${name}`,run));
   } finally {await storage.close();}
-  await check('final0137 receiving assignment intent, worker unknown quarantine, safe status and explicit resolution remain compatible',async()=>{
+  await check('final0138 receiving assignment intent, worker unknown quarantine, safe status and explicit resolution remain compatible',async()=>{
     const target=await f.create();
     assert.ok(target.delivery);
     const receivingRpc=(name,args,actor=null,role='service_role')=>f.as(role,actor,

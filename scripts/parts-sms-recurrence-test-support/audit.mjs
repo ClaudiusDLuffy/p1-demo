@@ -5,15 +5,15 @@ import { createDatabase, applyThrough, partsSmsFixtures } from '../parts-sms-tes
 import { recurrenceFixtures } from './fixtures.mjs';
 
 const source = name => readFileSync(new URL(`../../supabase/audits/${name}`, import.meta.url), 'utf8');
-const audit = source('0139_unsent_parts_sms_source_recurrence_verification.sql');
-const historicalAudit = source('0138_bounded_parts_sms_integrity_verification.sql');
+const audit = source('0140_unsent_parts_sms_source_recurrence_verification.sql');
+const historicalAudit = source('0139_bounded_parts_sms_integrity_verification.sql');
 
 export async function verifyPartsRecurrenceAudit(check) {
   const withoutComments = audit.replace(/--[^\n]*/g, '').replace(/'(?:''|[^'])*'/g, "''");
   assert.doesNotMatch(withoutComments, /\b(insert|update|delete|truncate|alter|drop|grant|revoke)\b/i);
   const db = await createDatabase();
   try {
-    await applyThrough(db, 139);
+    await applyThrough(db, 140);
     const f = recurrenceFixtures(await partsSmsFixtures(db));
     const target = await f.begin();
     const away = await f.depart(target);

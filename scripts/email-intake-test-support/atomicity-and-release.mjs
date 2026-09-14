@@ -59,7 +59,7 @@ export async function verifyEmailExpansion(fixture,check) {
 }
 
 export async function verifyEmailAudit(db,repo,check,label) {
-  const path=`${repo}/supabase/audits/0130_active_authorization_intake_provenance_verification.sql`;
+  const path=`${repo}/supabase/audits/0131_active_authorization_intake_provenance_verification.sql`;
   await check(`${label}: read-only intake authorization/provenance audit executes`,async()=>{
     const source=readFileSync(path,'utf8');
     const output=await db.transaction(async tx=>{
@@ -76,7 +76,7 @@ export async function verifyEmailAudit(db,repo,check,label) {
 }
 
 export async function verifyEmailAuditAnomalies(fixture,repo,check) {
-  const source=readFileSync(`${repo}/supabase/audits/0130_active_authorization_intake_provenance_verification.sql`,'utf8');
+  const source=readFileSync(`${repo}/supabase/audits/0131_active_authorization_intake_provenance_verification.sql`,'utf8');
   await check('Read-only audit reports bounded legacy/identity anomalies and distinguishes repeated outcomes from legitimate source history',async()=>{
     await fixture.rolledBack(async tx=>{
       const counts=async()=>new Map((await tx.exec(source)).flatMap(result=>result.rows)
@@ -112,24 +112,24 @@ export async function verifyEmailAuditAnomalies(fixture,repo,check) {
 export async function verifyEmailReleasePaths({createDatabase,applyThrough,applyNumber,repo,check}) {
   const clean=await createDatabase();
   try {
-    await applyThrough(clean,130);
+    await applyThrough(clean,131);
     const actors=await initializeLifecycleActors(clean);
     const fixture=await createEmailSecurityFixtures({db:clean,as:actorTransactions(clean),actors});
     await verifyEmailReceipts(fixture,check);
     await verifyEmailRawAndGrants(fixture,check);
-    await verifyEmailAudit(clean,repo,check,'Fresh numeric 001–0130 synthetic install');
+    await verifyEmailAudit(clean,repo,check,'Fresh numeric 001–0131 synthetic install');
   } finally { await clean.close(); }
   const upgrade=await createDatabase();
   try {
-    await applyThrough(upgrade,128);
+    await applyThrough(upgrade,129);
     const actors=await initializeLifecycleActors(upgrade);
     const fixture=await createEmailSecurityFixtures({db:upgrade,as:actorTransactions(upgrade),actors});
     const legacyBefore=await fixture.snapshot();
-    await applyNumber(upgrade,129);await verifyEmailExpansion(fixture,check);
+    await applyNumber(upgrade,130);await verifyEmailExpansion(fixture,check);
     const {payload,command}=receiptTools(fixture);
     const event=randomUUID(),source='synthetic-upgrade-replay',input=payload();
     const accepted=await command(event,source,input);
-    await applyNumber(upgrade,130);
+    await applyNumber(upgrade,131);
     await check('Populated upgrade preserves accepted expansion event replay and original legacy content',async()=>{
       const replay=await command(event,source,input);
       assert.equal(replay.reason,'already_recorded');assert.equal(replay.logId,accepted.logId);
@@ -143,6 +143,6 @@ export async function verifyEmailReleasePaths({createDatabase,applyThrough,apply
     });
     await verifyActiveEmailAuthorization(fixture,check);
     await verifyEmailRawAndGrants(fixture,check);
-    await verifyEmailAudit(upgrade,repo,check,'Supported populated 0128→0129→0130 upgrade');
+    await verifyEmailAudit(upgrade,repo,check,'Supported populated 0129→0130→0131 upgrade');
   } finally { await upgrade.close(); }
 }

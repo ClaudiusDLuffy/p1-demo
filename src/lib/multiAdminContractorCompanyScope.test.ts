@@ -16,7 +16,7 @@ const profileSecurityMigration = read(
 const notificationRoute = read(
   "src/app/api/notifications/invoice-review/route.ts",
 );
-const notificationBoundary = read("supabase/migrations/0135_expand_financial_notification_delivery.sql");
+const notificationBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
 
 test("company admins are company-wide only behind the exact contractor wall", () => {
   assert.match(

@@ -382,7 +382,7 @@ export async function verifyFinancialHoldPolicy(f, check) {
     const { target, event } = await make(); const claims = await take(event, { start: false });
     assert.ok(claims.length > 1);
     let release;
-    // Owner-only synthetic reproduction of rows created under 0136, before its
+    // Owner-only synthetic reproduction of rows created under 0137, before its
     // forward policy trigger existed. No production debug option is introduced.
     await f.db.exec('alter table public.financial_notification_events disable trigger financial_notification_hold_supersession');
     try { release = await change(target, 'release'); }
@@ -479,7 +479,7 @@ export async function verifyFinancialHoldPolicy(f, check) {
     await take(secondHold, { outcome: 'sent' });
   });
   await check('hold policy read-only latest-state audit executes without mutations or recipient/provider payload', async () => {
-    const audit = readFileSync(fileURLToPath(new URL('../../supabase/audits/0137_latest_effective_payment_hold_integrity_verification.sql', import.meta.url)), 'utf8');
+    const audit = readFileSync(fileURLToPath(new URL('../../supabase/audits/0138_latest_effective_payment_hold_integrity_verification.sql', import.meta.url)), 'utf8');
     await f.db.transaction(async tx => { await tx.exec('set transaction read only'); await tx.exec(audit); });
   });
 }

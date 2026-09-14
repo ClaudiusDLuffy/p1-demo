@@ -7,9 +7,9 @@ import { partsSmsCandidateFixtures } from './candidate-fixtures.mjs';
 export async function verifyPartsSmsAudit(check) {
   const db = await createDatabase();
   try {
-    await applyThrough(db, 138);
+    await applyThrough(db, 139);
     const f = partsSmsCandidateFixtures(await partsSmsFixtures(db));
-    const sql = readFileSync(new URL('../../supabase/audits/0138_bounded_parts_sms_integrity_verification.sql', import.meta.url), 'utf8');
+    const sql = readFileSync(new URL('../../supabase/audits/0139_bounded_parts_sms_integrity_verification.sql', import.meta.url), 'utf8');
     const withoutComments = sql.replace(/--[^\n]*/g, '').replace(/'(?:''|[^'])*'/g, "''");
     assert.doesNotMatch(withoutComments, /\b(insert|update|delete|truncate|alter|drop|grant|revoke)\b/i);
     await check('parts SMS clean filename-order install and read-only empty audit expose missed heartbeat without mutation', async () => {

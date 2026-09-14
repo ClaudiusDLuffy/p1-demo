@@ -9,6 +9,16 @@ const entry = (message: string, status: number, retry: RetryClass, recovery: Rec
   refreshSession: recovery === "sign_in", mutationReplayRequired: retry !== "never",
 });
 export const coreErrorCodes = Object.freeze({
+  BILLING_VISIT_TIME_REVIEW_REQUIRED: entry("An open visit could not be checked out. Its check-in time or checkout details need review before billing can continue. Contact support to correct the visit record.", 409, "never", "contact_support"),
+  BILLING_PRIOR_WORKFLOW: entry("This invoice cannot close the current reopened follow-up because its creation date is missing or predates reopening. Review the billing history with your billing team.", 409, "never", "refresh_record"),
+  BILLING_NOT_READY: entry("This invoice is not ready for 7-Eleven. Refresh it and review its current status.", 409, "never", "refresh_record"),
+  BILLING_WORKFLOW_REVIEW_REQUIRED: entry("The reopened work order's history is incomplete. Contact support before making another billing change.", 409, "never", "contact_support"),
+  BILLING_AUDIT_REVIEW_REQUIRED: entry("The billing history and invoice status do not match. Contact support before making another billing change.", 409, "never", "contact_support"),
+  BILLING_WORK_ORDER_CLOSED: entry("This work order was closed without additional billing. Review it with your billing team before making another billing change.", 409, "never", "refresh_record"),
+  BILLING_CAPITAL_LINK_REQUIRED: entry("This capital quote is not linked to an active capital work order. Review the work order before submitting.", 409, "never", "refresh_record"),
+  BILLING_FORBIDDEN: entry("You do not have permission to finalize this billing invoice.", 403, "never", "contact_admin"),
+  BILLING_NOT_FOUND: entry("Billing invoice not found. Refresh the billing list.", 404, "never", "refresh_record"),
+  BILLING_FINALIZATION_UNCONFIRMED: entry("Unable to confirm the billing update. Refresh the invoice before trying again. If this continues, contact support.", 500, "never", "reconcile"),
   AUTH_REQUIRED: entry("Please sign in again.", 401, "never", "sign_in"),
   SESSION_EXPIRED: entry("Your session expired. Please sign in again.", 401, "never", "sign_in"),
   AUTH_INVALID: entry("Your sign-in could not be verified. Please sign in again.", 401, "never", "sign_in"),

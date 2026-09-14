@@ -1,8 +1,9 @@
+import { readMigrationInventory } from "./migration-inventory.mjs";
 // Disposable SQL metadata/RLS characterization only. No Storage gateway or
 // document bytes are used, and no remote database or credentials are read.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeSupabaseFixtureDatabase, applyFixtureMigration,
@@ -26,9 +27,9 @@ const { PGlite } = requireEngine('@electric-sql/pglite');
 const { pg_trgm } = requireEngine('@electric-sql/pglite/contrib/pg_trgm');
 const { pgcrypto } = requireEngine('@electric-sql/pglite/contrib/pgcrypto');
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const migrations = readdirSync(`${repo}/supabase/migrations`)
-  .filter(name => /^\d+.*\.sql$/.test(name) && Number(name.match(/^\d+/)[0]) <= 130).sort();
-assert.ok(migrations.some(name => name.startsWith('0130_')));
+const migrations = readMigrationInventory(repo)
+  .filter(name => /^\d+.*\.sql$/.test(name) && Number(name.match(/^\d+/)[0]) <= 131).sort();
+assert.ok(migrations.some(name => name.startsWith('0131_')));
 let passed = 0;
 let reviewGates = 0;
 async function check(name, run) {
@@ -64,8 +65,8 @@ try {
   if (!process.argv.includes('--baseline-only')) {
     await db.close(); db = new PGlite({ extensions:{ pg_trgm,pgcrypto } });
     await initializeStorage(db);
-    for (const name of readdirSync(`${repo}/supabase/migrations`)
-      .filter(name => /^\d+.*\.sql$/.test(name) && Number(name.match(/^\d+/)[0]) <= 132).sort()) {
+    for (const name of readMigrationInventory(repo)
+      .filter(name => /^\d+.*\.sql$/.test(name) && Number(name.match(/^\d+/)[0]) <= 133).sort()) {
       await applyFixtureMigration({ db,repo,name,statements:migrationStatements });
     }
     const finalActors = await initializeLifecycleActors(db);
@@ -84,7 +85,7 @@ try {
     });
     await db.transaction(async tx=>{
       await tx.exec('set transaction read only');
-      const statements=migrationStatements(readFileSync(`${repo}/supabase/audits/0132_canonical_storage_photo_integrity_verification.sql`,'utf8'));
+      const statements=migrationStatements(readFileSync(`${repo}/supabase/audits/0133_canonical_storage_photo_integrity_verification.sql`,'utf8'));
       assert.ok(statements.length>=5);
       for(const statement of statements) await tx.query(statement);
     });
@@ -96,13 +97,13 @@ try {
     const upgradeFixture=await createStoragePhotoFixtures({db,as:actorTransactions(db),actors:upgradeActors});
     await verifyStorageUpgrade({db,fixture:upgradeFixture,
       applyNumber:async number=>{
-        const name=readdirSync(`${repo}/supabase/migrations`).find(name=>Number(name.match(/^\d+/)?.[0])===number);
+        const name=readMigrationInventory(repo).find(name=>Number(name.match(/^\d+/)?.[0])===number);
         assert.ok(name);await applyFixtureMigration({db,repo,name,statements:migrationStatements});
       },check:async(name,run)=>{await run();passed++;console.log(`PASS UPGRADE ${name}`);}});
     await verifyPriorBatchesOnFinalStorageSchema({repo,
       createDatabase:async()=>{const engine=new PGlite({extensions:{pg_trgm,pgcrypto}});await initializeStorage(engine);return engine;},
       applyThrough:async(engine,number)=>{
-        for(const name of readdirSync(`${repo}/supabase/migrations`)
+        for(const name of readMigrationInventory(repo)
           .filter(name=>/^\d+.*\.sql$/.test(name)&&Number(name.match(/^\d+/)[0])<=number).sort()) {
           await applyFixtureMigration({db:engine,repo,name,statements:migrationStatements});
         }

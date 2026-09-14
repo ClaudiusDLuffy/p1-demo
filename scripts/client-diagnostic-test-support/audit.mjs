@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { bucketTable, guardTable } from './fixtures.mjs';
 
-const sql = readFileSync(new URL('../../supabase/audits/0140_bounded_client_diagnostic_admission_verification.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('../../supabase/audits/0141_bounded_client_diagnostic_admission_verification.sql', import.meta.url), 'utf8');
 
 export async function verifyDiagnosticAudit(f, check) {
   await check('diagnostic audit executes under actual READ ONLY and returns no sensitive bucket keys', async () => {

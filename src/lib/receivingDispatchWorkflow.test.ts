@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const migration = readFileSync("supabase/migrations/0133_receiving_contractor_dispatch_outbox.sql", "utf8");
+const migration = readFileSync("supabase/migrations/0134_receiving_contractor_dispatch_outbox.sql", "utf8");
 const route = readFileSync("src/app/api/notifications/dispatch/route.ts", "utf8");
 const worker = readFileSync("src/lib/server/receivingDispatchWorker.ts", "utf8");
 const intake = readFileSync("src/lib/emailIntakeProcessor.ts", "utf8");

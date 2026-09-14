@@ -4,11 +4,24 @@ import type { AuthorizedBillingSaveContext } from "./billingMutationContext";
 import { mapBillingSaveResult, mapBillingUpdateActionResult } from "./billingSaveResultMapper";
 import { refreshCommittedBillingInvoice } from "./billingPostCommitResult";
 import type { BillingUpdateCommandRepository } from "./billingUpdateCommandRepository";
+import { BillingCommandRejection, BillingCommandUnconfirmed } from "./billingCommandReconciliation";
+import { FinancialRequestError } from "../../lib/financialHttpBoundary";
+import { staffBillingFinalizationFailure } from "../../lib/staffBillingFinalizationError";
 export type ParsedBillingUpdateCommand = z.infer<typeof StaffInvoicePatchSchema>;
 export type BillingUpdateDependencies = { commandRepository: BillingUpdateCommandRepository; loadCommittedInvoice: (id: string) => Promise<unknown> };
 export async function updateBillingInvoice(command: ParsedBillingUpdateCommand, invoiceId: string, context: AuthorizedBillingSaveContext, dependencies: BillingUpdateDependencies) {
   if ("action" in command) {
-    const result = await dependencies.commandRepository.action(command.action, invoiceId, context);
+    const result = await dependencies.commandRepository.action(command.action, invoiceId, context).catch((error: unknown) => {
+      // Only this finalization owner interprets the exact upstream SQL guards.
+      // Preserve cancellation and malformed-receipt handling; never retry an
+      // action that has no operation UUID after an ambiguous transport outcome.
+      if (command.action === "mark_billed" && (error instanceof BillingCommandRejection
+        || (error instanceof BillingCommandUnconfirmed && error.code !== "FINANCIAL_RESULT_INVALID"))) {
+        const safe = staffBillingFinalizationFailure(error.cause);
+        throw new FinancialRequestError(safe.code, safe.error, safe.status);
+      }
+      throw error;
+    });
     const refresh = await refreshCommittedBillingInvoice(invoiceId, context.signal, dependencies.loadCommittedInvoice);
     return mapBillingUpdateActionResult(command.action, invoiceId, result, refresh);
   }

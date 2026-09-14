@@ -31,7 +31,7 @@ let db, phase = 'engine', checks = 0;
 const check = (value, label) => { assert.ok(value, label); checks++; };
 const same = (actual, expected, label) => { assert.deepEqual(actual, expected, label); checks++; };
 const bytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8');
-const migrationPath = new URL('../supabase/migrations/0146_compact_invoice_reads_and_line_pages.sql', import.meta.url);
+const migrationPath = new URL('../supabase/migrations/0147_compact_invoice_reads_and_line_pages.sql', import.meta.url);
 const migrationHash = () => createHash('sha256').update(readFileSync(migrationPath)).digest('hex');
 const distribution = values => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -58,7 +58,7 @@ try {
   const { normalizeUnknownError } = await tsImport('../src/lib/errors/normalizeUnknown.ts', import.meta.url);
   same(normalizeUnknownError({ code: 'PT413', message: 'PAYLOAD_TOO_LARGE' }).code, 'PAYLOAD_TOO_LARGE',
     'Oversized legacy item maps to the existing safe non-retryable public error');
-  db = await createDatabase(); phase = 'schema'; await applyThrough(db, 144);
+  db = await createDatabase(); phase = 'schema'; await applyThrough(db, 145);
   phase = 'fixture';
   const f = await seedPerformanceFixture(db, { workOrders: contractsOnly ? 100 : 50000, largeDirectories: !contractsOnly });
   report.scale = f.scale;
@@ -102,11 +102,11 @@ try {
   };
   phase = 'measurement';
   for (const actor of ['manager', 'contractor', 'controller', 'companyAdmin', 'invoiceMember', 'technician']) {
-    const first = await measure('contractor_invoice_first', '0144', actor, 'select public.list_contractor_invoices_rows_v1() result');
-    if (first.hasMore) await measure('contractor_invoice_continuation', '0144', actor,
+    const first = await measure('contractor_invoice_first', '0145', actor, 'select public.list_contractor_invoices_rows_v1() result');
+    if (first.hasMore) await measure('contractor_invoice_continuation', '0145', actor,
       'select public.list_contractor_invoices_rows_v1(p_cursor=>$1) result', [first.nextCursor]);
   }
-  await measure('staff_invoice_first', '0144', 'manager', 'select public.list_staff_invoices_rows_v1() result', [], { role: 'service_role' });
+  await measure('staff_invoice_first', '0145', 'manager', 'select public.list_staff_invoices_rows_v1() result', [], { role: 'service_role' });
   if (!contractsOnly) for (const actor of ['manager', 'contractor', 'companyAdmin'])
     await captureBodyPlan('p1_read_contracts', 'contractor_invoices_v1', actor, 'BEFORE');
 
@@ -177,8 +177,8 @@ try {
     (select md5(string_agg(to_jsonb(line)::text,'' order by line.id)) from public.invoice_lines line) lines,
     (select md5(string_agg(to_jsonb(source)::text,'' order by source.id)) from public.staff_invoice_sources source) sources`)).rows[0];
   const beforeFinancial = await financialFingerprint();
-  const hasNavigationMigration = readdirSync(new URL('../supabase/migrations/', import.meta.url)).some(name => /^0145_.*\.sql$/.test(name));
-  if (hasNavigationMigration) await applyThrough(db, 145, 145);
+  const hasNavigationMigration = readdirSync(new URL('../supabase/migrations/', import.meta.url)).some(name => /^0146_.*\.sql$/.test(name));
+  if (hasNavigationMigration) await applyThrough(db, 146, 146);
   const oldDefinitions = (await db.query(`select oid::regprocedure::text signature,pg_get_functiondef(oid) definition
     from pg_proc where pronamespace='public'::regnamespace order by oid`)).rows;
   const policySnapshot = async () => (await db.query(`select polrelid::regclass::text relation,polname,polcmd,polpermissive,polroles,
@@ -186,9 +186,9 @@ try {
     from pg_policy order by polrelid,polname`)).rows;
   const policies = await policySnapshot();
   const indexes = (await db.query("select indexname,indexdef from pg_indexes where schemaname='public' order by indexname")).rows;
-  phase = 'schema'; report.migrationSha256AtApply = migrationHash(); await applyThrough(db, 146, 146);
-  same(await financialFingerprint(), beforeFinancial, '0146 changes no financial header, line, or source');
-  same(await policySnapshot(), policies, '0146 changes no RLS policy');
+  phase = 'schema'; report.migrationSha256AtApply = migrationHash(); await applyThrough(db, 147, 147);
+  same(await financialFingerprint(), beforeFinancial, '0147 changes no financial header, line, or source');
+  same(await policySnapshot(), policies, '0147 changes no RLS policy');
   same((await db.query("select indexname,indexdef from pg_indexes where schemaname='public' order by indexname")).rows, indexes, 'No speculative invoice index');
   for (const previous of oldDefinitions) same((await db.query('select pg_get_functiondef(to_regprocedure($1)) definition', [previous.signature])).rows[0].definition,
     previous.definition, 'Every previous public function remains byte-identical');
@@ -450,21 +450,21 @@ try {
 
   phase = 'measurement';
   for (const actor of ['manager', 'contractor', 'controller', 'companyAdmin', 'invoiceMember', 'technician']) {
-    const next = await measure('contractor_invoice_first', '0146', actor, 'select public.list_contractor_invoices_rows_v2() result');
-    if (next.hasMore) await measure('contractor_invoice_continuation', '0146', actor,
+    const next = await measure('contractor_invoice_first', '0147', actor, 'select public.list_contractor_invoices_rows_v2() result');
+    if (next.hasMore) await measure('contractor_invoice_continuation', '0147', actor,
       'select public.list_contractor_invoices_rows_v2(p_cursor=>$1) result', [next.nextCursor]);
   }
-  await measure('staff_invoice_first', '0146', 'manager', 'select public.list_staff_invoices_rows_v2() result', [], { role: 'service_role' });
+  await measure('staff_invoice_first', '0147', 'manager', 'select public.list_staff_invoices_rows_v2() result', [], { role: 'service_role' });
   for (const actor of ['manager', 'contractor']) {
-    await measure('compact_invoice_detail', '0146', actor, 'select public.get_invoice_summary_v1($1) result', [high]);
-    const page = await measure('invoice_lines_first', '0146', actor, 'select public.list_invoice_lines_page_v1($1) result', [high]);
-    await measure('invoice_lines_continuation', '0146', actor, 'select public.list_invoice_lines_page_v1($1,50,$2,8) result', [high, page.nextCursor]);
+    await measure('compact_invoice_detail', '0147', actor, 'select public.get_invoice_summary_v1($1) result', [high]);
+    const page = await measure('invoice_lines_first', '0147', actor, 'select public.list_invoice_lines_page_v1($1) result', [high]);
+    await measure('invoice_lines_continuation', '0147', actor, 'select public.list_invoice_lines_page_v1($1,50,$2,8) result', [high, page.nextCursor]);
   }
-  await measure('staff_compact_detail', '0146', 'manager', 'select public.get_invoice_summary_v1($1) result', [staff]);
-  await measure('maximum_valid_text_line_page', '0146', 'manager', 'select public.list_invoice_lines_page_v1($1,100) result', [maximumText]);
+  await measure('staff_compact_detail', '0147', 'manager', 'select public.get_invoice_summary_v1($1) result', [staff]);
+  await measure('maximum_valid_text_line_page', '0147', 'manager', 'select public.list_invoice_lines_page_v1($1,100) result', [maximumText]);
   const sourceIds = (await db.query("select id from public.invoices where invoice_type='contractor' and deleted_at is null order by id limit 100")).rows.map(row => row.id);
   for (const actor of ['manager', 'controller', 'contractor'])
-    await measure('source_summary_batch_100', '0146', actor, 'select public.get_invoice_source_summaries_v1($1) result', [sourceIds]);
+    await measure('source_summary_batch_100', '0147', actor, 'select public.get_invoice_source_summaries_v1($1) result', [sourceIds]);
   if (!contractsOnly) {
     phase = 'plan';
     for (const actor of ['manager', 'contractor', 'companyAdmin'])
@@ -486,9 +486,9 @@ try {
     }
   }
   phase = 'audit';
-  const audit = await db.query(readFileSync(new URL('../supabase/audits/0146_compact_invoice_reads_and_line_pages_verification.sql', import.meta.url), 'utf8'));
+  const audit = await db.query(readFileSync(new URL('../supabase/audits/0147_compact_invoice_reads_and_line_pages_verification.sql', import.meta.url), 'utf8'));
   report.audit = audit.rows; save();
-  check(audit.rows.every(row => row.all_checks_pass === true), 'Read-only 0146 catalog audit');
+  check(audit.rows.every(row => row.all_checks_pass === true), 'Read-only 0147 catalog audit');
   report.signatures = (await db.query(`select oid::regprocedure::text signature,prosecdef security_definer,proconfig,
     has_function_privilege('anon',oid,'EXECUTE') anon_execute,has_function_privilege('authenticated',oid,'EXECUTE') authenticated_execute,
     has_function_privilege('service_role',oid,'EXECUTE') service_role_execute from pg_proc
@@ -497,9 +497,9 @@ try {
   report.indexDecision = 'No new invoice index. Existing index catalog unchanged; all candidate decisions require measured plan evidence.';
   report.checks = checks;
   report.migrationSha256AtEnd = migrationHash();
-  same(report.migrationSha256AtEnd, report.migrationSha256AtApply, 'Measured 0146 migration bytes stayed frozen throughout execution');
+  same(report.migrationSha256AtEnd, report.migrationSha256AtApply, 'Measured 0147 migration bytes stayed frozen throughout execution');
   report.checks = checks;
-  report.localBudgetFailures = report.measurements.filter(metric => metric.version === '0146' && metric.budget === 'FAIL')
+  report.localBudgetFailures = report.measurements.filter(metric => metric.version === '0147' && metric.budget === 'FAIL')
     .map(metric => ({ name: metric.name, actor: metric.actorName, p95Ms: metric.databaseRpc.p95Ms, target: metric.targetP95Ms }));
   report.verdict = contractsOnly ? 'CONTRACTS_VERIFIED_PERFORMANCE_NOT_EXECUTED' :
     report.localBudgetFailures.length ? 'REQUIRED_LOCAL_BUDGET_GATE_OPEN' : 'LOCAL_INVOICE_BUDGETS_PASSED';

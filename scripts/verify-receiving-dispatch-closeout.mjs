@@ -19,22 +19,22 @@ const check = async (name, run) => {
 let db;
 try {
   db = await createDatabase();
-  await applyThrough(db, 132);
+  await applyThrough(db, 133);
   const fixture = await createFixtures(db);
   const legacy = await fixture.create();
-  await applyThrough(db, 133, 133);
+  await applyThrough(db, 134, 134);
   const legacyUnknown = await fixture.outcome(await fixture.create());
   const unknownBefore = await fixture.row(legacyUnknown.delivery.id);
   const upgrade = await fixture.create();
   const before = await fixture.row(upgrade.delivery.id);
-  await applyThrough(db, 134, 134);
-  await check('supported 0133 upgrade preserves its event bytes and classifies earlier assignments separately', async () => {
+  await applyThrough(db, 135, 135);
+  await check('supported 0134 upgrade preserves its event bytes and classifies earlier assignments separately', async () => {
     const after = await fixture.row(before.id);
     for (const [key, value] of Object.entries(before)) assert.deepEqual(after[key], value, key);
     assert.equal((await fixture.current(legacy)).kind, 'legacy_untracked');
     assert.equal((await fixture.current(upgrade)).kind, 'current');
   });
-  await check('0133 unknown outcome survives upgrade without automatic retry or invented earlier attempts', async () => {
+  await check('0134 unknown outcome survives upgrade without automatic retry or invented earlier attempts', async () => {
     const after = await fixture.row(unknownBefore.id);
     for (const [key, value] of Object.entries(unknownBefore)) assert.deepEqual(after[key], value, key);
     const history = await fixture.history(after.id);
@@ -49,7 +49,7 @@ try {
   await verifyCloseoutActions(fixture, check);
   await verifyCloseoutWorker(fixture, check);
   await verifyCloseoutPagination(fixture, check);
-  const audit = readdirSync(`${repo}/supabase/audits`).find(name => /^0134_.*\.sql$/.test(name));
+  const audit = readdirSync(`${repo}/supabase/audits`).find(name => /^0135_.*\.sql$/.test(name));
   assert.ok(audit, 'Closeout must provide a separate read-only audit');
   await check('closeout integrity and grants audit executes with transaction READ ONLY', async () => {
     const source = readFileSync(`${repo}/supabase/audits/${audit}`, 'utf8');
@@ -60,8 +60,8 @@ try {
   });
   await db.close();
   db = await createDatabase();
-  await applyThrough(db, 134);
-  await check('clean combined installation executes every migration through 0134 in filename order', async () => {
+  await applyThrough(db, 135);
+  await check('clean combined installation executes every migration through 0135 in filename order', async () => {
     assert.equal((await db.query("select to_regclass('public.receiving_dispatch_operations') is not null present")).rows[0].present, true);
   });
   console.log(`Receiving-dispatch closeout SQL: ${passed} passed; 0 failed. All assertions executed in disposable PGlite.`);

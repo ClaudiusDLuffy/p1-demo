@@ -1,4 +1,4 @@
-// Synthetic-only 0145 characterization and parity. Uses the existing approved
+// Synthetic-only 0146 characterization and parity. Uses the existing approved
 // engine; no environment credentials, remote databases, or provider calls.
 import './pagination-test-support/syntheticSqlPrivacy.mjs';
 import assert from 'node:assert/strict';
@@ -39,7 +39,7 @@ try {
   }
   db = await createDatabase(); phase = 'schema';
   console.log(JSON.stringify({ phase, output }));
-  await applyThrough(db, 144);
+  await applyThrough(db, 145);
   const protectedFunctions = (await db.query(`select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' identity,
     md5(pg_get_functiondef(p.oid)) hash from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname in ('public','p1_read_contracts') order by 1`)).rows;
@@ -91,11 +91,11 @@ try {
   if (candidateIndex) {
     // Test-only index deferral preserves reproducible before/after evidence
     // without dropping any index or modifying a repository migration file.
-    const migration = readFileSync(new URL('../supabase/migrations/0145_measured_navigation_and_work_order_reads.sql', import.meta.url), 'utf8');
+    const migration = readFileSync(new URL('../supabase/migrations/0146_measured_navigation_and_work_order_reads.sql', import.meta.url), 'utf8');
     assert.equal(migration.split(candidateIndexDdl).length, 2);
     await db.exec(migration.replace(candidateIndexDdl, '-- Measured candidate index is deferred until after baseline.'));
     report.candidateDeferralSourceSha256 = createHash('sha256').update(migration).digest('hex');
-  } else await applyThrough(db, 145, 145);
+  } else await applyThrough(db, 146, 146);
   const afterFunctions = (await db.query(`select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' identity,
     md5(pg_get_functiondef(p.oid)) hash from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname in ('public','p1_read_contracts') order by 1`)).rows;
@@ -330,9 +330,9 @@ try {
     }
   }
   phase = 'audit';
-  const previousAudit = (await db.query(readFileSync(new URL('../supabase/audits/0144_count_independent_page_reads_verification.sql', import.meta.url), 'utf8'))).rows;
+  const previousAudit = (await db.query(readFileSync(new URL('../supabase/audits/0145_count_independent_page_reads_verification.sql', import.meta.url), 'utf8'))).rows;
   assert.ok(previousAudit.every(row => row.all_checks_pass)); count();
-  const currentAudit = (await db.query(readFileSync(new URL('../supabase/audits/0145_measured_navigation_and_work_order_reads_verification.sql', import.meta.url), 'utf8'))).rows;
+  const currentAudit = (await db.query(readFileSync(new URL('../supabase/audits/0146_measured_navigation_and_work_order_reads_verification.sql', import.meta.url), 'utf8'))).rows;
   report.audit = currentAudit;
   assert.ok(currentAudit.every(row => row.all_checks_pass)); count();
   report.contracts = (await db.query(`select p.oid::regprocedure::text signature,p.prosecdef security_definer,
@@ -353,8 +353,8 @@ try {
     phase = 'clean_install';
     const clean = await createDatabase();
     try {
-      await applyThrough(clean, 145);
-      const cleanAudit = (await clean.query(readFileSync(new URL('../supabase/audits/0145_measured_navigation_and_work_order_reads_verification.sql', import.meta.url), 'utf8'))).rows;
+      await applyThrough(clean, 146);
+      const cleanAudit = (await clean.query(readFileSync(new URL('../supabase/audits/0146_measured_navigation_and_work_order_reads_verification.sql', import.meta.url), 'utf8'))).rows;
       assert.deepEqual(cleanAudit, currentAudit); count();
       report.cleanInstall = 'PASS_THROUGH_0145'; report.upgrade = 'PASS_0144_TO_0145';
     } finally { await clean.close(); }

@@ -1,7 +1,7 @@
+import { readMigrationInventory } from "./migration-inventory.mjs";
 // Isolated synthetic SQL only: no environment files, remote URLs or customer data.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeSupabaseFixtureDatabase, applyFixtureMigration, initializeLifecycleActors,
@@ -40,7 +40,7 @@ const { PGlite } = requireEngine('@electric-sql/pglite');
 const { pg_trgm } = requireEngine('@electric-sql/pglite/contrib/pg_trgm');
 const { pgcrypto } = requireEngine('@electric-sql/pglite/contrib/pgcrypto');
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const migrations = readdirSync(`${repo}/supabase/migrations`).filter(name => /^\d+.*\.sql$/.test(name)).sort();
+const migrations = readMigrationInventory(repo).filter(name => /^\d+.*\.sql$/.test(name)).sort();
 let passed = 0;
 let baselineCharacterizations=0;
 let reviewGateCharacterizations=0;
@@ -57,19 +57,19 @@ const db = new PGlite({ extensions: { pg_trgm, pgcrypto } });
 try {
   await initializeSupabaseFixtureDatabase(db);
   let financialBaseline;
-  for (const name of migrations.filter(name => Number(name.match(/^\d+/)[0]) <= 125)) {
+  for (const name of migrations.filter(name => Number(name.match(/^\d+/)[0]) <= 126)) {
     await applyFixtureMigration({ db, repo, name, statements: migrationStatements });
-    if(name.startsWith('0123_')) financialBaseline=await captureFinancialSchemaBaseline(db);
+    if(name.startsWith('0124_')) financialBaseline=await captureFinancialSchemaBaseline(db);
   }
   const actors = await initializeLifecycleActors(db);
   const as = actorTransactions(db);
   await reproduceAssignmentBaseline({ db, as, actors, check });
   if (!process.argv.includes('--baseline-only')) {
     const assignmentBaseline=await captureFinancialSchemaBaseline(db);
-    assert.ok(migrations.some(name => name.startsWith('0126_')), 'Assignment expansion must exist before final acceptance');
-    assert.ok(migrations.some(name => name.startsWith('0127_')), 'Assignment contraction must exist before final acceptance');
-    assert.ok(migrations.some(name => name.startsWith('0128_')), 'Hybrid administrative transfer migration must exist before final acceptance');
-    for (const name of migrations.filter(name=>[126,127,128].includes(Number(name.match(/^\d+/)[0])))) {
+    assert.ok(migrations.some(name => name.startsWith('0127_')), 'Assignment expansion must exist before final acceptance');
+    assert.ok(migrations.some(name => name.startsWith('0128_')), 'Assignment contraction must exist before final acceptance');
+    assert.ok(migrations.some(name => name.startsWith('0129_')), 'Hybrid administrative transfer migration must exist before final acceptance');
+    for (const name of migrations.filter(name=>[127,128,129].includes(Number(name.match(/^\d+/)[0])))) {
       await applyFixtureMigration({ db,repo,name,statements:migrationStatements });
     }
     const fixture=await createAssignmentFixtures({ db,as,actors });
@@ -91,7 +91,7 @@ try {
     await verifyFinancialDeleteAndEvidence(fixture.financial,check);
     const finalSchema=await captureFinancialSchemaBaseline(db);
     // Keep the existing financial grant assertion scoped to routines/tables
-    // created by 0124, while evaluating their current final-0128 permissions.
+    // created by 0125, while evaluating their current final-0129 permissions.
     for(const identity of finalSchema.routines) if(!assignmentBaseline.routines.has(identity)) financialBaseline.routines.add(identity);
     for(const table of finalSchema.tables) if(!assignmentBaseline.tables.has(table)) financialBaseline.tables.add(table);
     await verifyFinancialSecurityAndCompatibility(fixture.financial,check,financialBaseline);
@@ -105,7 +105,7 @@ try {
         await applyFixtureMigration({ db:engine,repo,name,statements:migrationStatements });
       },
       applyBaseline:async engine=>{
-        for(const name of migrations.filter(name=>Number(name.match(/^\d+/)[0])<=121)) {
+        for(const name of migrations.filter(name=>Number(name.match(/^\d+/)[0])<= 122)) {
           await applyFixtureMigration({ db:engine,repo,name,statements:migrationStatements });
         }
       },check,initializeActors:initializeLifecycleActors,asFor:actorTransactions,repo,

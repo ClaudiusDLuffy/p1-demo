@@ -1,8 +1,8 @@
+import { readMigrationInventory } from "./migration-inventory.mjs";
 // Isolated synthetic PostgreSQL execution only. Never reads environment files,
 // provider credentials, customer email, or a remote database connection string.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeSupabaseFixtureDatabase, applyFixtureMigration,
@@ -22,7 +22,7 @@ const { PGlite } = requireEngine('@electric-sql/pglite');
 const { pg_trgm } = requireEngine('@electric-sql/pglite/contrib/pg_trgm');
 const { pgcrypto } = requireEngine('@electric-sql/pglite/contrib/pgcrypto');
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const migrations = readdirSync(`${repo}/supabase/migrations`).filter(name => /^\d+.*\.sql$/.test(name)).sort();
+const migrations = readMigrationInventory(repo).filter(name => /^\d+.*\.sql$/.test(name)).sort();
 let passed = 0;
 let baseline = 0;
 let reviewGates = 0;
@@ -38,18 +38,18 @@ async function check(name, run) {
 const db = new PGlite({ extensions: { pg_trgm, pgcrypto } });
 try {
   await initializeSupabaseFixtureDatabase(db);
-  for (const name of migrations.filter(name => Number(name.match(/^\d+/)[0]) <= 128)) {
+  for (const name of migrations.filter(name => Number(name.match(/^\d+/)[0]) <= 129)) {
     await applyFixtureMigration({ db, repo, name, statements: migrationStatements });
   }
   const actors = await initializeLifecycleActors(db);
   const fixture = await createEmailSecurityFixtures({ db, as: actorTransactions(db), actors });
   await reproduceEmailSecurityBaseline(fixture, check);
   if (!process.argv.includes('--baseline-only')) {
-    for (const number of [129,130]) {
+    for (const number of [130,131]) {
       const name=migrations.find(name=>Number(name.match(/^\d+/)[0])===number);
       assert.ok(name,`Required migration ${number} must exist`);
       await applyFixtureMigration({ db,repo,name,statements:migrationStatements });
-      if(number===129) await verifyEmailExpansion(fixture,check);
+      if(number===130) await verifyEmailExpansion(fixture,check);
     }
     await verifyActiveEmailAuthorization(fixture,check);
     await verifyEmailReceipts(fixture,check);

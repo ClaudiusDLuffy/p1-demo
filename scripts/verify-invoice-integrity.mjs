@@ -1,3 +1,4 @@
+import { readMigrationInventory } from "./migration-inventory.mjs";
 // Synthetic in-memory PostgreSQL checks only. No dotenv, remote URL, gateway,
 // customer fixture, network connection, deployment, or dependency installation.
 import assert from 'node:assert/strict';
@@ -32,7 +33,7 @@ const { PGlite } = requireEngine('@electric-sql/pglite');
 const { pg_trgm } = requireEngine('@electric-sql/pglite/contrib/pg_trgm');
 const { pgcrypto } = requireEngine('@electric-sql/pglite/contrib/pgcrypto');
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const migrationFiles = readdirSync(`${repo}/supabase/migrations`).filter(name => /^\d+.*\.sql$/.test(name)).sort();
+const migrationFiles = readMigrationInventory(repo).filter(name => /^\d+.*\.sql$/.test(name)).sort();
 const migrationNumber = name => Number(name.match(/^\d+/)[0]);
 const baselineOnly = process.argv.includes('--baseline-only');
 const expansionOnly = process.argv.includes('--expansion-only');
@@ -59,7 +60,7 @@ async function applyNumber(db, number) {
 }
 async function verifyReadOnlyFinancialAudit(db,label) {
   await check(`${label}: financial consistency audit executes read-only`, async () => {
-    const name = readdirSync(`${repo}/supabase/audits`).find(name => /^0125_.*invoice.*\.sql$/.test(name));
+    const name = readdirSync(`${repo}/supabase/audits`).find(name => /^0126_.*invoice.*\.sql$/.test(name));
     assert.ok(name, 'Forward financial audit SQL must exist');
     const results = await db.transaction(async tx => {
       await tx.exec('set transaction read only');
@@ -78,27 +79,27 @@ async function verifyCombinedMigrationPaths() {
   for (const staged of [false,true]) {
     const isolated = await createDatabase();
     try {
-      for (const name of migrationFiles.filter(name => migrationNumber(name) <= 121)) await apply(isolated,name);
+      for (const name of migrationFiles.filter(name => migrationNumber(name) <= 122)) await apply(isolated,name);
       const actors = await initializeLifecycleActors(isolated);
       const as = actorTransactions(isolated);
       if (staged) {
         // The release uses normal numeric history, not out-of-order migration
-        // records. After 0122 deploy the final web candidate: lifecycle RPCs
-        // work; financial writes fail safely with 503 until 0124 is present.
-        await applyNumber(isolated,122);
+        // records. After 0123 deploy the final web candidate: lifecycle RPCs
+        // work; financial writes fail safely with 503 until 0125 is present.
+        await applyNumber(isolated,123);
         await check('combined expansion-only lifecycle callers retain old raw ETA compatibility before cutover', async () => {
           await isolated.query("insert into public.work_orders(id,status,functional_status,contractor_id) values ('WOT9330101','assigned','Dispatched',$1)",[actors.contractor]);
           await as('authenticated',actors.contractor,tx => tx.exec("update public.work_orders set eta=now()+interval '1 hour' where id='WOT9330101'"));
         });
-        await applyNumber(isolated,123);
+        await applyNumber(isolated,124);
         await check('pre-financial-expansion schema intentionally has no versioned financial RPC', async () => {
           assert.equal((await isolated.query("select to_regprocedure('public.save_staff_billing_invoice_v4(uuid,text,integer,integer,uuid,bigint,uuid,jsonb)') is null absent")).rows[0].absent,true);
         });
-        await applyNumber(isolated,124);
-        await verifyLegacyFinancialPositiveControls({ db: isolated,check,actors,as,stage: 'financial expansion-only',prefix: 'WOT933' });
         await applyNumber(isolated,125);
+        await verifyLegacyFinancialPositiveControls({ db: isolated,check,actors,as,stage: 'financial expansion-only',prefix: 'WOT933' });
+        await applyNumber(isolated,126);
       } else {
-        for (const number of [122,123,124,125]) await applyNumber(isolated,number);
+        for (const number of [123,124,125,126]) await applyNumber(isolated,number);
       }
       const fixture = await createInvoiceCommandFixtures({ db: isolated,as,actors });
       await check(`${staged ? 'staged upgrade' : 'clean numerical install'} final command and raw denial compatibility`, async () => {
@@ -114,22 +115,22 @@ async function verifyCombinedMigrationPaths() {
 }
 const db = await createDatabase();
 try {
-  for (const name of migrationFiles.filter(name => migrationNumber(name) <= 121)) await apply(db, name);
+  for (const name of migrationFiles.filter(name => migrationNumber(name) <= 122)) await apply(db, name);
   const actors = await initializeLifecycleActors(db);
   const as = actorTransactions(db);
   await reproduceLegacyInvoiceFindings({ db, check, actors, as, stage: '0121', prefix: 'WOT930' });
   await verifyLegacyFinancialPositiveControls({ db, check, actors, as, stage: '0121', prefix: 'WOT930' });
-  for (const name of migrationFiles.filter(name => [122, 123].includes(migrationNumber(name)))) await apply(db, name);
-  await reproduceLegacyInvoiceFindings({ db, check, actors, as, stage: '0123', prefix: 'WOT931' });
-  await verifyLegacyFinancialPositiveControls({ db, check, actors, as, stage: '0123', prefix: 'WOT931' });
+  for (const name of migrationFiles.filter(name => [123, 124].includes(migrationNumber(name)))) await apply(db, name);
+  await reproduceLegacyInvoiceFindings({ db, check, actors, as, stage: '0124', prefix: 'WOT931' });
+  await verifyLegacyFinancialPositiveControls({ db, check, actors, as, stage: '0124', prefix: 'WOT931' });
   assert.equal((await db.query('select contracted from public.work_order_lifecycle_control')).rows[0].contracted, true);
   if (baselineOnly) {
     console.log(`PASS ${passed} baseline characterization checks only; final financial acceptance was explicitly not requested`);
   } else {
     const baseline = await captureFinancialSchemaBaseline(db);
-    await applyNumber(db,124);
-    await reproduceLegacyInvoiceFindings({ db,check,actors,as,stage: '0124 expansion',prefix: 'WOT932' });
-    await verifyLegacyFinancialPositiveControls({ db,check,actors,as,stage: '0124 expansion',prefix: 'WOT932' });
+    await applyNumber(db,125);
+    await reproduceLegacyInvoiceFindings({ db,check,actors,as,stage: '0125 expansion',prefix: 'WOT932' });
+    await verifyLegacyFinancialPositiveControls({ db,check,actors,as,stage: '0125 expansion',prefix: 'WOT932' });
     if (expansionOnly) {
       const fixture = await createInvoiceCommandFixtures({ db,as,actors });
       await verifyFinancialExpansionCommands(fixture,check);
@@ -139,7 +140,7 @@ try {
       // Explicit disposable-fixture activation, not a migration deployment or
       // proof of the still-unreviewed contraction/grants/upgrade sequence.
       await db.exec('update public.invoice_financial_control set contracted=true where singleton');
-    } else await applyNumber(db,125);
+    } else await applyNumber(db,126);
     const fixture = await createInvoiceCommandFixtures({ db,as,actors });
     await verifyContractorFinancialCommands(fixture,check);
     await verifyStaffFinancialCommands(fixture,check);
@@ -147,7 +148,7 @@ try {
     await verifyFinancialSecurityAndCompatibility(fixture,check,baseline,{ guardFixtureOnly });
     await verifyLifecycleInterleavings(fixture.lifecycle,check);
     if (guardFixtureOnly) {
-      console.log(`PASS ${passed} synthetic activated-guard checks; actual0125, contraction grants, combined release paths and final audit remain unverified`);
+      console.log(`PASS ${passed} synthetic activated-guard checks; actual0126, contraction grants, combined release paths and final audit remain unverified`);
     } else {
     await verifyReadOnlyFinancialAudit(db,'Populated supported upgrade');
     await verifyCombinedMigrationPaths();

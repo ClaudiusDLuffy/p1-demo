@@ -262,7 +262,7 @@ test("visible navigation uses the additive optimized read while the legacy datab
     && statement.name?.text === "loadPortalNavigationSummary");
   assert.ok(fn && ts.isFunctionDeclaration(fn) && fn.body);
   assert.ok(fn.body.getText(file).includes('boundedReadRpc("get_portal_navigation_summary_v2", {}, signal)'));
-  assert.ok(readFileSync("supabase/migrations/0141_read_only_sla_policy_compatibility.sql", "utf8")
+  assert.ok(readFileSync("supabase/migrations/0142_read_only_sla_policy_compatibility.sql", "utf8")
     .includes("create or replace function public.get_portal_navigation_summary()"));
 });
 

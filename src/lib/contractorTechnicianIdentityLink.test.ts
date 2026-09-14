@@ -17,7 +17,7 @@ const aliasRepairAudit = read(
   "supabase/audits/0107_raymon_rush_alias_repair_verification.sql",
 );
 const bootstrap = read("scripts/bootstrap.ts");
-const directoryMigration = read("supabase/migrations/0143_bounded_role_scoped_directories.sql");
+const directoryMigration = read("supabase/migrations/0144_bounded_role_scoped_directories.sql");
 const directorySelect = read("src/features/directory/DirectorySelect.tsx");
 const technicianPicker = read("src/features/work-orders/WorkOrderTechnicianPicker.tsx");
 const workOrderDetail = read(

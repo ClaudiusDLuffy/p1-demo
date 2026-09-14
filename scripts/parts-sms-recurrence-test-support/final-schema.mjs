@@ -19,7 +19,7 @@ import { verifyPartsSmsBoundsCompatibility } from '../parts-sms-test-support/bou
 export async function verifyPartsSmsSourceRecurrence(check) {
   const db = await createDatabase();
   try {
-    await applyThrough(db, 138);
+    await applyThrough(db, 139);
     const f = recurrenceFixtures(await partsSmsFixtures(db));
     const target = await reproduceBlockedPartsRecurrence(f, check);
     await applyPartsRecurrenceMigration(db);
@@ -36,18 +36,18 @@ export async function verifyPartsSmsSourceRecurrence(check) {
 export async function verifyPartsSmsOriginalChecksOnFinalSchema(check) {
   const db = await createDatabase();
   try {
-    await applyThrough(db, 137);
+    await applyThrough(db, 138);
     const base = await partsSmsFixtures(db);
-    const finalCheck = (name, run) => check(`Final 0139: ${name}`, run);
+    const finalCheck = (name, run) => check(`Final 0140: ${name}`, run);
     await reproduceLegacyPartsSms(base, finalCheck);
     await verifyLegacyPartsSms(base, finalCheck);
     base.legacyBefore = (await db.query('select * from public.p1_parts_alert_deliveries order by id')).rows;
-    await applyThrough(db, 138, 138);
+    await applyThrough(db, 139, 139);
     await applyPartsRecurrenceMigration(db);
     const f = recurrenceFixtures(base);
     await verifyPartsSmsDelivery(f, (name, run) => {
       if (name === 'parts SMS real procurement request A then B then ordering B can recur original exact A signature') {
-        console.log('POLICY REPLACEMENT (not a pass): original 0138 blocked-recurrence assertion executed before migration; final 0139 uses the approved narrow recurrence acceptance suite.');
+        console.log('POLICY REPLACEMENT (not a pass): original 0139 blocked-recurrence assertion executed before migration; final 0140 uses the approved narrow recurrence acceptance suite.');
         return Promise.resolve();
       }
       return finalCheck(name, run);
