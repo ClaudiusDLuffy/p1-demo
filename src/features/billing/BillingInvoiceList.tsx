@@ -283,7 +283,7 @@ export default function BillingInvoiceList(props: any) {
     ? sortKey
     : "created";
   const readyQuery = useWorkOrdersPageQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn, tableSortDirection: sortDirection, limit: 20, cursor: positions.ready.cursor }, queryEnabled && !controller && expanded.ready !== false, currentUser, { countEnabled: false });
-  const readyCount = useWorkOrdersCountQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn }, queryEnabled && !controller, currentUser);
+  const readyCount = useWorkOrdersCountQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn }, queryEnabled && !controller && readyQuery.isSuccess && !readyQuery.isPlaceholderData, currentUser);
 
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, any>();

@@ -118,8 +118,9 @@ for (const mode of ['clean', 'canonical-upstream-populated', 'stabilization-popu
       await apply('0122_allow_zero_rate_staff_warranty_lines.sql');
       await apply('0148_bridge_authoritative_staff_warranty_lines.sql');
       await apply('0149_harden_application_table_capabilities.sql');
+      await apply('0150_restore_multi_admin_private_object_access.sql');
     }
-    assert.equal(applied.length, 150);
+    assert.equal(applied.length, 151);
     assert.deepEqual(applied.filter(name => name.startsWith('0029_')), ['0029_add_p5_priority.sql', '0029_invoice_type.sql']);
     const observedCatalog = await catalog(db);
     if (expectedCatalog) assert.deepEqual(observedCatalog, expectedCatalog, `${mode}: final functions/policies/indexes/grants differ`);

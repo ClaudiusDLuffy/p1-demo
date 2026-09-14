@@ -105,8 +105,9 @@ async function injectFailure(table, operation, run) {
 try {
   await check('whole merged inventory pins the exact historical 0029 bytes and every other version uniquely', () => {
     const names = assertWarrantyMigrationOrder(migrationPlan.sources);
-    assert.equal(names.length, 150);
-    assert.equal(names.at(-1), WARRANTY_BRIDGE_NAME);
+    assert.equal(names.length, 151);
+    assert.equal(names.at(-1), '0150_restore_multi_admin_private_object_access.sql');
+    assert.ok(names.includes(WARRANTY_BRIDGE_NAME));
   });
   await check('migration ordering rejects new duplicate 0122, third 0029, hash edits and sequence gaps', () => {
     for (const name of ['0122_collision.sql', '0029_unrelated_change.sql']) {

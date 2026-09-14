@@ -126,9 +126,11 @@ for (const domain of ["work", "invoice"] as const) {
       const page = (cursor: string | null = null) => h.render(() => domain === "work"
         ? h.work.useWorkOrdersPageQuery({ scope: "active", cursor, limit: 25 })
         : h.invoices.useInvoicesPageQuery({ state: "active", cursor, limit: 25 }));
-      page(); assert.equal(h.calls.filter(call => call.kind === "count").length, 1);
+      page(); assert.equal(h.calls.filter(call => call.kind === "count").length, domain === "work" ? 0 : 1);
       h.calls.find(call => call.kind === "rows")?.resolve(rows()); await tick();
-      let value = page(); assert.equal(value.data?.items.length, 1); assert.equal(value.data?.totalCount, null);
+      let value = page();
+      if (domain === "work") await tick();
+      assert.equal(value.data?.items.length, 1); assert.equal(value.data?.totalCount, null);
       h.calls.find(call => call.kind === "count")?.resolve({ totalCount: 1001 }); await tick();
       value = page(); assert.equal(value.data?.totalCount, 1001);
       page("next"); h.calls.at(-1)?.resolve(rows("second", "third")); await tick();
@@ -155,8 +157,9 @@ test("count failure leaves bounded rows usable and never synthesizes zero", asyn
   const h = harness();
   try {
     const page = () => h.render(() => h.work.useWorkOrdersPageQuery({ scope: "active" }));
-    page(); h.calls.find(call => call.kind === "count")?.reject(new AppError("FORBIDDEN"));
-    h.calls.find(call => call.kind === "rows")?.resolve(rows()); await tick();
+    page(); h.calls.find(call => call.kind === "rows")?.resolve(rows()); await tick();
+    page(); await tick();
+    h.calls.find(call => call.kind === "count")?.reject(new AppError("FORBIDDEN")); await tick();
     const value = page(); assert.equal(value.isSuccess, true); assert.equal(value.data?.totalCount, null); assert.equal(value.countQuery.isError, true);
     assert.equal(h.calls.length, 2);
   } finally { h.close(); }
@@ -172,11 +175,19 @@ test("account switch cancels old count/row requests; late results cannot populat
   const h = harness();
   try {
     const page = () => h.render(() => h.work.useWorkOrdersPageQuery({ scope: "active" }));
-    page(); const previous = [...h.calls]; h.context.actor = { ...actor, id: "new-identity", contractorAccountId: "company-b" };
-    let value = page(); assert.ok(previous.every(call => call.signal.aborted)); assert.equal(value.data, undefined);
+    page(); h.calls.find(call => call.kind === "rows")?.resolve(rows("old")); await tick();
+    page(); await tick();
+    const previous = [...h.calls];
+    assert.equal(previous.filter(call => call.kind === "count").length, 1);
+    h.context.actor = { ...actor, id: "new-identity", contractorAccountId: "company-b" };
+    let value = page();
+    assert.ok(previous.filter(call => call.kind === "count").every(call => call.signal.aborted));
+    assert.equal(value.data, undefined);
     previous.forEach(call => call.resolve(call.kind === "rows" ? rows("old") : { totalCount: 999 })); await tick();
     value = page(); assert.equal(value.data, undefined);
-    h.calls.slice(2).forEach(call => call.resolve(call.kind === "rows" ? rows("new") : { totalCount: 1 })); await tick();
+    h.calls.slice(previous.length).filter(call => call.kind === "rows").forEach(call => call.resolve(rows("new"))); await tick();
+    page(); await tick();
+    h.calls.slice(previous.length).filter(call => call.kind === "count").forEach(call => call.resolve({ totalCount: 1 })); await tick();
     value = page(); assert.equal(value.data?.items[0].id, "new"); assert.equal(value.data?.totalCount, 1);
   } finally { h.close(); }
 });

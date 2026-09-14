@@ -106,9 +106,9 @@ test("financial request body has an actual byte limit and rejects malformed JSON
 });
 
 function authorizationHarness(configurationError?: ConfigurationError) {
-  let role = "manager"; let active = true; let missing = false; let invalid = false;
+  let role = "manager"; let active = true; let missing = false; let identityError: unknown = null;
   let permissions: string[] = []; let dbError = false;
-  const caller = { auth: { getUser: async () => ({ error: invalid ? {} : null, data: { user: invalid ? null : { id: randomUUID() } } }) } };
+  const caller = { auth: { getUser: async () => ({ error: identityError, data: { user: identityError ? null : { id: randomUUID() } } }) } };
   const sb = { from: (table: string) => {
     const result = () => ({ error: dbError ? { message: "private SQL" } : null,
       data: table === "profiles" ? missing ? null : { id: randomUUID(), role, active } : permissions.map(permission => ({ permission })) });
@@ -124,7 +124,9 @@ function authorizationHarness(configurationError?: ConfigurationError) {
   }, { process: { env: {} } });
   const call = (allowController = false, bearer = "Bearer synthetic") => http.authorizeFinancialRequest(new NextRequest("http://localhost/test", { headers: { authorization: bearer } }), allowController);
   return { call, role: (value: string) => { role = value; }, inactive: () => { active = false; }, missing: () => { missing = true; },
-    invalid: () => { invalid = true; }, permissions: (values: string[]) => { permissions = values; }, dbError: () => { dbError = true; } };
+    invalid: () => { identityError = { status: 401, code: "bad_jwt" }; },
+    identityFailure: (error: unknown) => { identityError = error; },
+    permissions: (values: string[]) => { permissions = values; }, dbError: () => { dbError = true; } };
 }
 test("financial authorization preserves configuration failures for the safe outer boundary", async () => {
   const error = new ConfigurationError("CONFIG_INCOMPLETE", "supabase_public");
@@ -141,6 +143,21 @@ for (const mode of ["anonymous", "invalid", "missing", "inactive", "contractor",
     assert.ok("error" in result); assert.equal(result.error?.status, mode === "anonymous" || mode === "invalid" ? 401 : 403);
   });
 }
+test("financial authorization keeps identity provider failures retryable", async () => {
+  for (const failure of [
+    { name: "TimeoutError" },
+    { name: "AuthRetryableFetchError", status: 0 },
+    { status: 503, code: "unexpected_failure" },
+  ]) {
+    const h = authorizationHarness(); h.identityFailure(failure);
+    const result = await h.call();
+    assert.ok("error" in result); assert.equal(result.error?.status, 503);
+    assert.deepEqual(await result.error?.json(), {
+      code: "RESULT_UNCONFIRMED",
+      error: "Account authorization is temporarily unavailable.",
+    });
+  }
+});
 for (const role of ["manager", "dispatcher", "back_office"]) {
   test(`financial active ${role} allowed; controller permission limits review but not hold reads`, async () => {
     const h = authorizationHarness(); h.role(role); assert.ok("caller" in await h.call());
