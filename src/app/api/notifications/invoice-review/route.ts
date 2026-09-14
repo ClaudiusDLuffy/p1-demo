@@ -1,239 +1,48 @@
-import { createClient } from "@supabase/supabase-js";
+import { createApiMethodBoundary } from "../../../../lib/server/apiMethodBoundary";
+
+const apiMethodBoundary = createApiMethodBoundary("/api/notifications/invoice-review", ["POST"]);
+export const GET = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const DELETE = apiMethodBoundary.methodNotAllowed;
+export const HEAD = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { runRequestOperation } from "../../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../../lib/errors/httpBoundary";
 import { NextRequest, NextResponse } from "next/server";
-import { sendInvoiceReviewNotification } from "../../../../lib/notificationService";
-import { createServerClient } from "../../../../lib/supabase/server";
-import {
-  isInvoiceControllerProfile,
-  loadStaffPermissions,
-  STAFF_ROLES,
-} from "../../../../lib/server/staffAuthorization";
-import type { Database } from "../../../../lib/supabase/database.types";
+import { z } from "zod";
+import { authorizeFinancialRequest, financialHttpError, financialRpcError, readFinancialRequest } from "../../../../lib/server/financialNotificationHttp";
 
-const jsonError = (message: string, status: number) =>
-  NextResponse.json({ error: message }, { status });
-
-const anonClient = () =>
-  createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-
-const bearerToken = (request: NextRequest) => {
-  const match = (request.headers.get("authorization") || "").match(
-    /^Bearer\s+(.+)$/i,
-  );
-  return match?.[1] || "";
-};
-
-async function requireStaff(request: NextRequest) {
-  const token = bearerToken(request);
-  if (!token) return { error: jsonError("Unauthorized", 401) };
-
-  const auth = anonClient();
-  const { data, error } = await auth.auth.getUser(token);
-  if (error || !data.user) return { error: jsonError("Unauthorized", 401) };
-
-  const sb = createServerClient();
-  const { data: profile, error: profileError } = await sb
-    .from("profiles")
-    .select("id,email,role,active")
-    .eq("id", data.user.id)
-    .maybeSingle();
-
-  if (profileError) return { error: jsonError(profileError.message, 500) };
-  if (!profile?.active || !STAFF_ROLES.has(profile.role || "")) {
-    return { error: jsonError("Forbidden", 403) };
-  }
-
-  let staffPermissions: string[];
-  try {
-    staffPermissions = await loadStaffPermissions(sb, profile.id);
-  } catch (permissionError) {
-    return { error: jsonError(permissionError instanceof Error ? permissionError.message : "Permission lookup failed", 500) };
-  }
-  if (isInvoiceControllerProfile({ staffPermissions })) {
-    return { error: jsonError("Forbidden", 403) };
-  }
-
-  return { sb };
-}
+export const runtime = "nodejs";
+const requestSchema = z.strictObject({ invoiceId: z.uuid(), event: z.enum(["rejected", "retraction"]) });
+const resultSchema = z.object({ success: z.literal(true), recipientCount: z.number().int().nonnegative(),
+  notification: z.object({ eventId: z.uuid(), status: z.enum(["queued", "processing", "sent", "unknown", "not_deliverable", "superseded", "failed", "manually_resolved"]) }) });
 
 export async function POST(request: NextRequest) {
-  const auth = await requireStaff(request);
-  if ("error" in auth) return auth.error;
-
-  let body: Record<string, unknown>;
+  const context = createRequestContext(request, "/api/notifications/invoice-review");
   try {
-    body = await request.json() as Record<string, unknown>;
-  } catch {
-    return jsonError("Invalid JSON body", 400);
-  }
-
-  const invoiceId = String(body.invoiceId || "").trim();
-  const event = String(body.event || "").trim();
-  if (!invoiceId || !["rejected", "retraction"].includes(event)) {
-    return jsonError("invoiceId and a valid event are required", 400);
-  }
-
-  const sb = auth.sb;
-  const { data: invoice, error: invoiceError } = await sb
-    .from("invoices")
-    .select("id,num,state,rejection_reason,work_order_id,store_number,contractor_id,created_by,review_revision,deleted_at")
-    .eq("id", invoiceId)
-    .eq("invoice_type", "contractor")
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (invoiceError) return jsonError(invoiceError.message, 500);
-  if (!invoice) return jsonError("Contractor invoice not found", 404);
-
-  const { data: workOrderIdentity, error: workOrderIdentityError } = await sb
-    .from("work_orders")
-    .select("id,duplicate_root_work_order_id")
-    .eq("id", invoice.work_order_id)
-    .maybeSingle();
-  if (workOrderIdentityError) {
-    return jsonError(workOrderIdentityError.message, 500);
-  }
-  if (!workOrderIdentity) {
-    return jsonError("Invoice work order not found", 409);
-  }
-
-  if (event === "rejected") {
-    if (invoice.state !== "rejected" || !invoice.rejection_reason) {
-      return jsonError("Invoice is not currently rejected", 409);
-    }
-  } else {
-    if (invoice.state !== "approved") {
-      return jsonError("Invoice rejection has not been retracted", 409);
-    }
-  }
-
-  const reviewEventKey = event === "rejected"
-    ? "invoice_rejected"
-    : "invoice_rejection_retracted";
-  const { data: reviewEvent, error: reviewEventError } = await sb
-    .from("activities")
-    .select("id,event_data")
-    .eq("work_order_id", invoice.work_order_id)
-    .eq("event_key", reviewEventKey)
-    .contains("event_data", {
-      invoiceId: invoice.id,
-      revision: invoice.review_revision,
-    })
-    .is("deleted_at", null)
-    .limit(1)
-    .maybeSingle();
-  if (reviewEventError) return jsonError(reviewEventError.message, 500);
-  if (!reviewEvent) {
-    return jsonError("Matching invoice review activity was not found", 409);
-  }
-
-  const contractorId = invoice.contractor_id || invoice.created_by;
-  if (!contractorId) return jsonError("Contractor profile was not recorded", 409);
-
-  const { data: contractor, error: contractorError } = await sb
-    .from("profiles")
-    .select("id,name,email,company,role,active,contractor_organization_id")
-    .eq("id", contractorId)
-    .maybeSingle();
-
-  if (contractorError) return jsonError(contractorError.message, 500);
-  if (!contractor) return jsonError("Contractor profile not found", 404);
-  if (contractor.role !== "contractor" || !contractor.active) {
-    return jsonError("Contractor account is inactive or invalid", 409);
-  }
-
-  let canonicalContractorId = contractor.id;
-  if (contractor.contractor_organization_id) {
-    const { data: organization, error: organizationError } = await sb
-      .from("organizations")
-      .select("canonical_contractor_id")
-      .eq("id", contractor.contractor_organization_id)
-      .eq("active", true)
-      .maybeSingle();
-    if (organizationError) return jsonError(organizationError.message, 500);
-    if (
-      !organization?.canonical_contractor_id
-      || organization.canonical_contractor_id !== contractor.id
-    ) {
-      return jsonError("Contractor company identity is invalid", 409);
-    }
-    canonicalContractorId = organization.canonical_contractor_id;
-  }
-
-  const recipientEmails: string[] = contractor.email ? [contractor.email] : [];
-  if (invoice.created_by && invoice.created_by !== contractor.id) {
-    const { data: creator, error: creatorError } = await sb
-      .from("profiles")
-      .select("id,email,role,active,contractor_tier,contractor_access_level,contractor_organization_id")
-      .eq("id", invoice.created_by)
-      .maybeSingle();
-    if (creatorError) return jsonError(creatorError.message, 500);
-    const belongsToInvoiceCompany = creator?.id === contractor.id
-      || (
-        contractor.contractor_organization_id
-        && creator?.contractor_organization_id
-          === contractor.contractor_organization_id
-    );
-    let creatorCanInvoice = false;
-    if (creator?.contractor_organization_id) {
-      creatorCanInvoice = creator.contractor_access_level === "company_admin";
-      if (
-        !creatorCanInvoice
-        && creator.contractor_access_level === "invoice"
-      ) {
-        const { data: technicianLink, error: technicianLinkError } = await sb
-          .from("contractor_technicians")
-          .select("id")
-          .eq("profile_id", creator.id)
-          .eq("contractor_id", canonicalContractorId)
-          .eq("is_active", true)
-          .limit(1)
-          .maybeSingle();
-        if (technicianLinkError) {
-          return jsonError(technicianLinkError.message, 500);
-        }
-        creatorCanInvoice = Boolean(technicianLink);
-      }
-    } else {
-      creatorCanInvoice = creator?.id === canonicalContractorId
-        && (creator.contractor_tier || "direct") === "direct";
-    }
-    if (
-      creator?.role === "contractor"
-      && creator.active
-      && creator.email
-      && belongsToInvoiceCompany
-      && creatorCanInvoice
-    ) {
-      recipientEmails.push(creator.email);
-    }
-  }
-
+    return await runRequestOperation(context, async () => {
+  const auth = await authorizeFinancialRequest(request, false);
+  if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
+  let body: unknown;
+  try { body = await readFinancialRequest(request); }
+  catch { return await finalizeApiResponse(await financialHttpError("VALIDATION_FAILED", "A valid invoice notification request is required.", 400), context); }
+  const input = requestSchema.safeParse(body);
+  if (!input.success) return await finalizeApiResponse(await financialHttpError("VALIDATION_FAILED", "A valid invoice notification request is required.", 400), context);
   try {
-    await sendInvoiceReviewNotification({
-      event: event as "rejected" | "retraction",
-      recipients: recipientEmails,
-      invoice: {
-        num: invoice.num,
-        workOrderId: invoice.work_order_id,
-        externalWorkOrderId: workOrderIdentity.duplicate_root_work_order_id
-          || workOrderIdentity.id,
-        storeNumber: invoice.store_number,
-        rejectionReason: invoice.rejection_reason,
-      },
+    // Compatibility only: the financial command already owns intent. This RPC
+    // derives the current immutable review event; it never creates or sends one.
+    const { data, error } = await auth.caller.rpc("get_financial_notification_review_compatibility_v1", {
+      p_invoice_id: input.data.invoiceId, p_event: input.data.event,
+    }).abortSignal(AbortSignal.timeout(5_000));
+    if (error) return await finalizeApiResponse(await financialRpcError(error), context);
+    const result = resultSchema.safeParse(data);
+    if (!result.success) return await finalizeApiResponse(await financialHttpError("RESULT_UNCONFIRMED", "Notification status could not be confirmed.", 503), context);
+    return await finalizeApiResponse(await NextResponse.json(result.data, { headers: { "Cache-Control": "no-store" } }), context);
+  } catch (error) { return await finalizeApiResponse(await financialRpcError(error), context); }
+
     });
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Notification send failed",
-      500,
-    );
-  }
-
-  return NextResponse.json({
-    success: true,
-    recipientCount: [...new Set(recipientEmails.map(email => email.toLowerCase()))].length,
-  });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

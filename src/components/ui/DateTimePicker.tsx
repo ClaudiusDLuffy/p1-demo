@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DayPicker } from "react-day-picker";
 import { format, parseISO } from "date-fns";
@@ -8,6 +8,8 @@ import "react-day-picker/style.css";
 import { T } from "../../lib/constants";
 import { getFloatingPanelPosition, type FloatingPanelPosition } from "../../lib/floatingPanel";
 import { Sel } from "./Sel";
+import { useModalPortalHost } from "./Modal";
+import { FieldContext, useFieldControl, type FieldControlProps } from "./fieldContext";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const toDateValue = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -48,8 +50,12 @@ const toTimeValue = (hour12: number, minute: number, period: string) => {
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const yearOptions = Array.from({ length: 41 }, (_, i) => new Date().getFullYear() - 20 + i);
+const focusPicker = (panel: HTMLDivElement | null) => {
+  const target = panel?.querySelector<HTMLElement>('[data-active="true"]') || panel?.querySelector<HTMLElement>("button");
+  target?.focus({ preventScroll: true });
+};
 
-type DatePickerFieldProps = {
+type DatePickerFieldProps = FieldControlProps & {
   value?: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -57,12 +63,14 @@ type DatePickerFieldProps = {
   mobileYOffset?: number;
   desktopYOffset?: number;
   avoidDesktopBottomCut?: boolean;
+  disabled?: boolean;
 };
 
-type TimePickerFieldProps = {
+type TimePickerFieldProps = FieldControlProps & {
   value?: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 };
 
 const pickerCss = `
@@ -125,8 +133,13 @@ const pickerCss = `
 }
 `;
 
-export function DatePickerField({ value, onChange, placeholder = "Select date", placement = "bottom", mobileYOffset = 0, desktopYOffset = 0 }: DatePickerFieldProps) {
+export function DatePickerField({ value, onChange, placeholder = "Select date", placement = "bottom", mobileYOffset = 0, desktopYOffset = 0, disabled, ...fieldProps }: DatePickerFieldProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const association = useFieldControl(fieldProps);
+  const portalHost = useModalPortalHost();
+  const focusPanel = focusPicker;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<FloatingPanelPosition | null>(null);
   const selected = parseDateValue(value);
@@ -166,9 +179,16 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
   }, [open, placement, mobileYOffset, desktopYOffset]);
 
   return (
-    <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}>
+    <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}
+      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}>
       <style>{pickerCss}</style>
       <button
+        {...association}
+        ref={trigger}
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={panelId}
         type="button"
         onClick={() => {
           if (!open && selected) setMonth(selected);
@@ -198,9 +218,16 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
         </span>
         <span style={{ color: T.accent, fontSize: 15 }}>Cal</span>
       </button>
-      {open && pos && createPortal(
+      {open && !disabled && pos && createPortal(
+        <FieldContext.Provider value={null}>
         <div
+          ref={focusPanel}
+          id={panelId}
+          role="dialog"
+          aria-modal="false"
+          aria-label="Choose date"
           className="p1-picker-popover p1-date-picker"
+          onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
             width: pos.width,
@@ -219,6 +246,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
             <Sel
+              aria-label="Month"
               value={String(month.getMonth())}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => setMonth(new Date(month.getFullYear(), Number(e.target.value), 1))}
               optionAlign="center"
@@ -228,6 +256,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
               {monthNames.map((name, i) => <option key={name} value={String(i)}>{name}</option>)}
             </Sel>
             <Sel
+              aria-label="Year"
               value={String(month.getFullYear())}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => setMonth(new Date(Number(e.target.value), month.getMonth(), 1))}
               optionAlign="center"
@@ -246,6 +275,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
               if (!date) return;
               onChange(toDateValue(date));
               setOpen(false);
+              trigger.current?.focus();
             }}
           />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -253,13 +283,19 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
             <button type="button" className="btn-soft" style={{ flex: 1, padding: "8px 10px", minHeight: 38 }} onClick={() => { onChange(""); setOpen(false); }}>Clear</button>
           </div>
         </div>
-      , document.body)}
+        </FieldContext.Provider>
+      , portalHost || document.body)}
     </div>
   );
 }
 
-export function TimePickerField({ value, onChange, placeholder = "Select time" }: TimePickerFieldProps) {
+export function TimePickerField({ value, onChange, placeholder = "Select time", disabled, ...fieldProps }: TimePickerFieldProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const association = useFieldControl(fieldProps);
+  const portalHost = useModalPortalHost();
+  const focusPanel = focusPicker;
   const hourListRef = useRef<HTMLDivElement | null>(null);
   const minuteListRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -314,8 +350,15 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
   }, [open, hour12, minute]);
 
   return (
-    <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}>
+    <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}
+      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}>
       <button
+        {...association}
+        ref={trigger}
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={panelId}
         type="button"
         onClick={() => setOpen(v => !v)}
         style={{
@@ -340,9 +383,16 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
         <span>{displayValue || placeholder}</span>
         <span style={{ color: T.accent, fontSize: 15 }}>Time</span>
       </button>
-      {open && pos && createPortal(
+      {open && !disabled && pos && createPortal(
+        <FieldContext.Provider value={null}>
         <div
+          ref={focusPanel}
+          id={panelId}
+          role="dialog"
+          aria-modal="false"
+          aria-label="Choose time"
           className="p1-picker-popover"
+          onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
             width: pos.width,
@@ -364,7 +414,7 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
               <div style={{ fontSize: 10, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>Hour</div>
               <div ref={hourListRef} style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 4, scrollbarGutter: "stable both-edges" }}>
                 {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
-                  <button key={h} type="button" data-active={h === hour12 ? "true" : undefined} onClick={() => updatePart({ hour12: h })} style={{ minHeight: 34, padding: 0, borderRadius: 9, border: "none", background: h === hour12 ? T.accentSoft : T.surfaceSoft, color: h === hour12 ? T.accent : T.ink, fontSize: 13, fontWeight: h === hour12 ? 700 : 500, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>{h}</button>
+                  <button key={h} type="button" aria-label={`Hour ${h}`} aria-pressed={h === hour12} data-active={h === hour12 ? "true" : undefined} onClick={() => updatePart({ hour12: h })} style={{ minHeight: 34, padding: 0, borderRadius: 9, border: "none", background: h === hour12 ? T.accentSoft : T.surfaceSoft, color: h === hour12 ? T.accent : T.ink, fontSize: 13, fontWeight: h === hour12 ? 700 : 500, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>{h}</button>
                 ))}
               </div>
             </div>
@@ -372,7 +422,7 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
               <div style={{ fontSize: 10, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>Minute</div>
               <div ref={minuteListRef} style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 4, scrollbarGutter: "stable both-edges" }}>
                 {Array.from({ length: 60 }, (_, i) => i).map(m => (
-                  <button key={m} type="button" data-active={m === minute ? "true" : undefined} onClick={() => updatePart({ minute: m })} style={{ minHeight: 34, padding: 0, borderRadius: 9, border: "none", background: m === minute ? T.accentSoft : T.surfaceSoft, color: m === minute ? T.accent : T.ink, fontSize: 13, fontWeight: m === minute ? 700 : 500, fontFamily: "inherit", fontVariantNumeric: "tabular-nums", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>{pad(m)}</button>
+                  <button key={m} type="button" aria-label={`Minute ${pad(m)}`} aria-pressed={m === minute} data-active={m === minute ? "true" : undefined} onClick={() => updatePart({ minute: m })} style={{ minHeight: 34, padding: 0, borderRadius: 9, border: "none", background: m === minute ? T.accentSoft : T.surfaceSoft, color: m === minute ? T.accent : T.ink, fontSize: 13, fontWeight: m === minute ? 700 : 500, fontFamily: "inherit", fontVariantNumeric: "tabular-nums", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>{pad(m)}</button>
                 ))}
               </div>
             </div>
@@ -380,13 +430,14 @@ export function TimePickerField({ value, onChange, placeholder = "Select time" }
               <div style={{ fontSize: 10, fontWeight: 700, color: T.subtle, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>Period</div>
               <div style={{ display: "grid", gap: 6 }}>
                 {["AM", "PM"].map(p => (
-                  <button key={p} type="button" onClick={() => updatePart({ period: p })} style={{ minHeight: 42, padding: 0, borderRadius: 10, border: "none", background: p === period ? T.accent : T.surfaceSoft, color: p === period ? "#fff" : T.ink, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>{p}</button>
+                  <button key={p} type="button" aria-label={`Period ${p}`} aria-pressed={p === period} onClick={() => updatePart({ period: p })} style={{ minHeight: 42, padding: 0, borderRadius: 10, border: "none", background: p === period ? T.accent : T.surfaceSoft, color: p === period ? "#fff" : T.ink, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>{p}</button>
                 ))}
               </div>
             </div>
           </div>
         </div>
-      , document.body)}
+        </FieldContext.Provider>
+      , portalHost || document.body)}
     </div>
   );
 }

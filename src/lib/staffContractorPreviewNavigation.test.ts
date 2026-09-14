@@ -70,6 +70,10 @@ function harness() {
         useStaffContractorPreviewWorkOrdersQuery: () => query,
         useStaffContractorPreviewInvoicesQuery: () => ({ ...query, data: { ...query.data, items: [] } }),
       };
+      if (name === "../directory/DirectorySelect") return { DirectorySelect: "select" };
+      if (name === "../directory/queries") return {
+        useDirectorySelection: () => ({ data: { id: "synthetic-company", company: "Synthetic contractor" } }),
+      };
       if (name === "../../lib/useCursorPagination") return {
         useCursorPagination: () => ({ position: { page: 1, cursor: null }, previous: () => {}, next: () => {} }),
       };
@@ -80,7 +84,7 @@ function harness() {
   const component = exports.default;
   const render = (page = "contractor_preview") => {
     cursor = 0;
-    return component({ page, contractors: [{ id: "synthetic-company", company: "Synthetic contractor" }],
+    return component({ page,
       onOpenWorkOrder: id => opened.push(id) });
   };
   const selectCompany = () => {

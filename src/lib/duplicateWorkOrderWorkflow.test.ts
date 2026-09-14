@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { assertCanonicalControllerIdentity } from "./controller-export-test-support/regressionAssertions";
+import { createWorkOrderReadHarness, record, respond } from "./work-order-read-test-support/harness";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read(
@@ -10,7 +12,6 @@ const migration = read(
 const audit = read(
   "supabase/audits/0112_duplicate_work_order_for_reassignment_verification.sql",
 );
-const dataLayer = read("src/lib/db.ts");
 const databaseTypes = read("src/lib/supabase/database.types.ts");
 const hook = read("src/features/work-orders/useWorkOrders.ts");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
@@ -18,7 +19,6 @@ const shell = read("src/components/PortalShell.tsx");
 const activityPanels = read(
   "src/features/work-orders/WorkOrderActivityPanels.tsx",
 );
-const controllerExports = read("src/app/api/controller-exports/route.ts");
 const invoiceCsv = read("src/lib/invoiceCsv.ts");
 const notificationRoute = read("src/app/api/notifications/dispatch/route.ts");
 const notificationService = read("src/lib/notificationService.ts");
@@ -253,16 +253,13 @@ test("the RPC result and execution grants match the future app contract", () => 
   );
 });
 
-test("the P1-only portal action confirms and opens the new unassigned copy", () => {
-  assert.match(
-    dataLayer,
-    /rpc\([\s\S]*"duplicate_work_order_for_reassignment_notified"[\s\S]*p_source_work_order_id: workOrderId/,
-  );
+test("the P1-only portal action confirms and opens the new unassigned copy", async () => {
+  const { exerciseAssignmentFacade } = await import("./assignment-test-support/facade");
+  await exerciseAssignmentFacade("duplicate");
   assert.match(
     databaseTypes,
     /duplicate_work_order_for_reassignment_notified:[\s\S]*p_source_work_order_id: string[\s\S]*Returns: Json/,
   );
-  assert.match(hook, /await duplicateWorkOrderForReassignment\(woId\)/);
   assert.match(hook, /setSelectedWO\(result\.workOrderId\)/);
   assert.match(hook, /setPage\("wo_detail"\)/);
   assert.match(detail, /canDuplicateWorkOrderForReassignment/);
@@ -274,8 +271,22 @@ test("the P1-only portal action confirms and opens the new unassigned copy", () 
   assert.match(shell, /await doDuplicateForReassignment\(woData\.id\)/);
 });
 
-test("outbound systems use the canonical WOT while portal records keep the suffix", () => {
-  assert.match(dataLayer, /externalWorkOrderId: w\.duplicate_root_work_order_id \|\| w\.id/);
+test("outbound systems use the canonical WOT while portal records keep the suffix", async () => {
+  const harness = createWorkOrderReadHarness([respond({
+    id: "WOT900001-2",
+    duplicate_root_work_order_id: "WOT900001",
+    duplicate_sequence: 2,
+    summary: "Store 42 HVAC Repair",
+    status: "assigned",
+    priority: "p2",
+  })]);
+  const workOrder = record(await harness.loadExact("WOT900001-2"));
+  assert.equal(workOrder.id, "WOT900001-2");
+  assert.equal(workOrder.externalWorkOrderId, "WOT900001");
+  assert.equal(workOrder.summary, "Store 42 HVAC Repair");
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.calls[0].name, "get_portal_work_order");
+  assert.deepEqual(harness.calls[0].args, { p_work_order_id: "WOT900001-2" });
   assert.match(detail, /canonicalSevenElevenWorkOrderId\(woData\)/);
   assert.match(activityPanels, /Copy 7-Eleven WOT/);
   assert.match(
@@ -284,12 +295,7 @@ test("outbound systems use the canonical WOT while portal records keep the suffi
   );
   assert.match(notificationService, /workOrder\.externalWorkOrderId/);
   assert.match(invoiceCsv, /invoice\.externalWorkOrderId/);
-  assert.match(
-    controllerExports,
-    /select\("id,duplicate_root_work_order_id(?:,[^"]+)?"\)/,
-  );
-  assert.match(controllerExports, /externalWorkOrderIdById/);
-  assert.match(controllerExports, /externalWorkOrderIdFor\(invoice\.work_order_id\)/);
+  await assertCanonicalControllerIdentity();
   assert.match(shell, /externalWorkOrderId = canonicalSevenElevenWorkOrderId/);
   assert.match(
     emailIntakeProcessor,

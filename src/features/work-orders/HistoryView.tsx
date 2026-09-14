@@ -2,6 +2,9 @@
 // @ts-nocheck
 
 import { T } from "../../lib/constants";
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import { useDirectoryLabels } from "../directory/queries";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Sel } from "../../components/ui/Sel";
@@ -13,7 +16,7 @@ import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function HistoryView(props: any) {
-  const { page, isManager, currentUser, canReopen, onRequestReopen, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, contractorsOnly, setSelectedWO, setAiNote, getUser, fmt } = props;
+  const { page, isManager, currentUser, canReopen, onRequestReopen, selectedWO, histFrom, setHistFrom, histTo, setHistTo, histSearch, setHistSearch, histContractor, setHistContractor, histReso, setHistReso, invoices, closedWOs, setSelectedWO, setAiNote, fmt } = props;
   const contractorId = !isManager
     ? currentUser?.contractorAccountId || currentUser?.id || null
     : null;
@@ -70,6 +73,7 @@ export default function HistoryView(props: any) {
     return true;
   });
   const filteredClosedWOs = historyPageQuery.data?.items || fallbackClosedWOs;
+  const { getUser } = useDirectoryLabels(filteredClosedWOs.map((workOrder: { contractor?: string }) => workOrder.contractor), page === "history" && !selectedWO);
 
   // Multi-invoice safe: sum every non-draft, non-rejected invoice on the WO.
   // The legacy work_orders.invoice_total column (w.invoiceTotal) was the
@@ -85,8 +89,8 @@ export default function HistoryView(props: any) {
   };
   const totalClosedValue = historyPageQuery.data?.aggregates?.invoiceTotal
     ?? filteredClosedWOs.reduce((sum: number, w: any) => sum + invTotalFor(w.id), 0);
-  const totalCount = historyPageQuery.data?.totalCount ?? filteredClosedWOs.length;
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const totalCount = historyPageQuery.data?.totalCount ?? null;
+  const totalPages = totalCount === null ? null : Math.max(1, Math.ceil(totalCount / pageSize));
 
   if (page !== "history" || selectedWO) return null;
 
@@ -105,7 +109,7 @@ export default function HistoryView(props: any) {
               {isContractorHistory ? "Closed jobs" : "History"}
             </h1>
             <div style={{ fontSize: 13, color: T.muted, marginTop: 6 }}>
-              {totalCount} closed work order{totalCount === 1 ? "" : "s"} - {fmt(totalClosedValue)}
+              <span title={COUNT_FRESHNESS_DESCRIPTION}>{totalCount ?? "—"} closed work order{totalCount === 1 ? "" : "s"}</span> - {fmt(totalClosedValue)}{historyPageQuery.data?.aggregates?.invoiceTotal === undefined ? " (loaded page value)" : ""}
             </div>
             {isContractorHistory && (
               <div role="status" style={{ fontSize: 11, color: T.subtle, marginTop: 5 }}>
@@ -115,18 +119,16 @@ export default function HistoryView(props: any) {
           </div>
           <div className="filter-bar" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
+              aria-label={isContractorHistory ? "Search closed jobs" : "Search work-order history"}
               value={histSearch}
               onChange={(e: any) => setHistSearch(e.target.value)}
               placeholder={isContractorHistory ? "Search closed jobs..." : "Search history..."}
               style={{ minWidth: 220, padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
             />
             {isManager && (
-              <Sel value={histContractor} onChange={(e: any) => setHistContractor(e.target.value)} style={{ width: 220, padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}>
-                <option value="all">All contractors</option>
-                {contractorsOnly.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </Sel>
+              <DirectorySelect aria-label="Filter history by contractor" domain="contractor_filter" emptyValue="all" emptyLabel="All contractors" value={histContractor} onChange={e => setHistContractor(e.target.value)} style={{ width: 220 }} />
             )}
-            <Sel value={histReso} onChange={(e: any) => setHistReso(e.target.value)} style={{ width: 170, padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}>
+            <Sel aria-label="Filter history by resolution" value={histReso} onChange={e => setHistReso(e.target.value)} style={{ width: 170, padding: "10px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}>
               <option value="all">All resolutions</option>
               <option value="Repaired">Repaired</option>
               <option value="Temporary fix">Temporary fix</option>
@@ -134,10 +136,10 @@ export default function HistoryView(props: any) {
               <option value="unknown">Unknown</option>
             </Sel>
             <div className="filter-date-field" style={{ width: 150, minWidth: 150 }}>
-              <DatePickerField value={histFrom} onChange={setHistFrom} placeholder="From date" />
+              <DatePickerField aria-label="History from date" value={histFrom} onChange={setHistFrom} placeholder="From date" />
             </div>
             <div className="filter-date-field" style={{ width: 150, minWidth: 150 }}>
-              <DatePickerField value={histTo} onChange={setHistTo} placeholder="To date" />
+              <DatePickerField aria-label="History to date" value={histTo} onChange={setHistTo} placeholder="To date" />
             </div>
             <WorkOrderSortControls
               column={sortColumn}
@@ -295,10 +297,10 @@ export default function HistoryView(props: any) {
             </div>
           )}
         </div>
-        {totalCount > 0 && (
+        {(filteredClosedWOs.length > 0 || effectiveCursor.page > 1 || historyPageQuery.data?.hasMore) && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12, color: T.muted }}>
-              Page {effectiveCursor.page} of {totalPages}
+              Page {effectiveCursor.page}{totalPages !== null ? ` of ${totalPages}` : ""}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
               <button

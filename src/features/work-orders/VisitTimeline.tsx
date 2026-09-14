@@ -10,6 +10,7 @@ import {
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
 import { correctWorkOrderVisit } from "../../lib/db";
+import { requiresVisitDurationReview, VISIT_DURATION_REVIEW_MESSAGE } from "../../lib/visitDurationReview";
 import {
   WORK_ORDER_BY_ID_KEY,
   WORK_ORDER_PAGES_KEY,
@@ -58,7 +59,7 @@ export default function VisitTimeline({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const displayedTotal = totalCount ?? visits.length;
+  const displayedTotal: number | null = typeof totalCount === "number" ? totalCount : null;
 
   const orderedVisits = useMemo(
     () => [...visits].sort((left: any, right: any) =>
@@ -118,7 +119,7 @@ export default function VisitTimeline({
     <div className="card" style={{ padding: 18, marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 750, color: T.ink }}>Field visit timeline · {displayedTotal}</div>
+          <div title="Total is exact at the last count refresh." style={{ fontSize: 13, fontWeight: 750, color: T.ink }}>Field visit timeline · {displayedTotal ?? `${visits.length} loaded`}</div>
           <div style={{ fontSize: 10, color: T.subtle, marginTop: 3 }}>
             Technician check-in and check-out times for this work order are shown in the store time zone ({timeZone}). Corrections require a reason and are audited.
           </div>
@@ -140,7 +141,7 @@ export default function VisitTimeline({
             <div key={visit.id} style={{ padding: "10px 12px", border: `1px solid ${T.borderSoft}`, borderRadius: 9, background: T.surfaceSoft }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0 }}>
-                  <strong style={{ fontSize: 11, color: T.ink }}>Visit {displayedTotal - index}</strong>
+                  <strong style={{ fontSize: 11, color: T.ink }}>{displayedTotal !== null && displayedTotal > index ? `Visit ${displayedTotal - index}` : `Loaded visit ${index + 1}`}</strong>
                   <div style={{ marginTop: 3, fontSize: 11, color: T.muted }}>
                     {formatVisitTime(visit.checkInAt, timeZone)} → {formatVisitTime(visit.checkOutAt, timeZone)}
                   </div>
@@ -152,6 +153,9 @@ export default function VisitTimeline({
                 )}
               </div>
 
+              {requiresVisitDurationReview(visit) && (
+                <div role="note" style={{ marginTop: 8, fontSize: 11, color: T.warn }}>{VISIT_DURATION_REVIEW_MESSAGE} Correcting times does not approve this duration.</div>
+              )}
               {editing && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "grid", gap: 10 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -195,7 +199,7 @@ export default function VisitTimeline({
 
       {hasMore && (
         <button type="button" className="btn-soft" disabled={loadingMore} onClick={onLoadMore} style={{ width: "100%", justifyContent: "center", marginTop: 10, display: "flex", alignItems: "center", gap: 6 }}>
-          {loadingMore ? <><BtnSpinnerDark />Loading visits...</> : `Load older visits (${visits.length} of ${displayedTotal})`}
+          {loadingMore ? <><BtnSpinnerDark />Loading visits...</> : `Load older visits (${visits.length} loaded${displayedTotal === null ? "" : ` of ${displayedTotal} at last refresh`})`}
         </button>
       )}
     </div>

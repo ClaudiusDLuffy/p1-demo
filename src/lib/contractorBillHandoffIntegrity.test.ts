@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { assertArchiveRpcReconciliation, assertAmbiguousStageRetention, assertExclusionChunking,
+  assertMalformedBatchRequests, assertLargePrivateZipResponse } from "./controller-export-test-support/regressionAssertions";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/0117_immutable_contractor_bill_handoff_packages.sql");
@@ -9,7 +11,6 @@ const audit = read("supabase/audits/0117_immutable_contractor_bill_handoff_packa
 const contractMigration = read("supabase/migrations/0118_contract_immutable_contractor_bill_handoff.sql");
 const contractAudit = read("supabase/audits/0118_contract_immutable_contractor_bill_handoff_verification.sql");
 const rolloutDocs = read("docs/quickbooks-sandbox.md");
-const route = read("src/app/api/controller-exports/route.ts");
 
 const definition = (name: string, source = migration) => source.match(
   new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\n\\$\\$;`),
@@ -92,50 +93,22 @@ test("0117 expands compatibly and 0118 contracts only after the rollback window"
   assert.match(rolloutDocs, /five-second timeout[\s\S]*no contract changes commit/);
 });
 
-test("archive staging reconciles every RPC failure before cleanup", () => {
-  assert.match(route, /try \{[\s\S]*stageResult = await auth\.sb\.rpc\([\s\S]*stageFailure = stageResult\.error;[\s\S]*\} catch \(error\) \{[\s\S]*stageFailure = error;/);
-  assert.match(route, /archive_sha256,archive_bytes,archive_format/);
-  assert.match(route, /fingerprintMatches/);
-  assert.match(route, /if \(recoveryError\)[\s\S]*retained for recovery/);
-  assert.match(route, /if \(cleanupError\)[\s\S]*orphaned archive could not be removed/);
-  assert.match(route, /The archive was discarded and no invoices were changed/);
+test("archive staging reconciles every RPC failure before cleanup", async () => {
+  await assertArchiveRpcReconciliation();
 });
 
-test("transport-ambiguous staging never deletes the uploaded archive", () => {
-  assert.match(route, /let stageOutcomeAmbiguous = false/);
-  assert.match(
-    route,
-    /stageFailure = stageResult\.error;[\s\S]*stageOutcomeAmbiguous = Boolean\(stageFailure\)[\s\S]*!hasDefinitiveDatabaseErrorCode\(stageFailure\)/,
-  );
-  assert.match(route, /catch \(error\) \{[\s\S]*stageFailure = error;[\s\S]*stageOutcomeAmbiguous = true;/);
-  assert.match(
-    route,
-    /if \(stageOutcomeAmbiguous\) \{[\s\S]*archive was retained for safe reconciliation and was not deleted[\s\S]*\}[\s\S]*let cleanupError/,
-  );
+test("transport-ambiguous staging never deletes the uploaded archive", async () => {
+  await assertAmbiguousStageRetention();
 });
 
-test("500-item and accumulated exclusion lookups stay below one URL-sized chunk", () => {
-  assert.match(route, /controller_invoice_export_batches!inner\(status\)/);
-  assert.match(route, /for \(const ids of chunk\(\[\.\.\.excludedIds\]\)\)/);
-  assert.match(route, /for \(const ids of chunk\(requestedIds\)\)/);
-  assert.match(route, /for \(const ids of chunk\(contractorIds\)\)/);
-  assert.match(route, /for \(const ids of chunk\(workOrderIds\)\)/);
-  assert.doesNotMatch(route, /\.not\("id", "in"/);
-  assert.doesNotMatch(route, /\.in\("id", requestedIds\)/);
-  assert.doesNotMatch(route, /\.in\("id", contractorIds\)/);
-  assert.doesNotMatch(route, /\.in\("id", workOrderIds\)/);
-  assert.doesNotMatch(route, /\.in\("batch_id", batchIds\)/);
+test("500-item and accumulated exclusion lookups stay below one URL-sized chunk", async () => {
+  await assertExclusionChunking();
 });
 
-test("malformed or shape-invalid batch requests fail closed", () => {
-  assert.match(route, /const body = await request\.json\(\) as \{ invoiceIds\?: unknown \}/);
-  assert.match(route, /body\.invoiceIds !== undefined && !Array\.isArray\(body\.invoiceIds\)/);
-  assert.doesNotMatch(route, /request\.json\(\)\.catch\(\(\) => \(\{\}\)\)/);
-  assert.match(route, /return jsonError\("Invalid JSON body", 400\)/);
+test("malformed or shape-invalid batch requests fail closed", async () => {
+  await assertMalformedBatchRequests();
 });
 
-test("large private ZIPs bypass the function response body", () => {
-  assert.match(route, /zipArchiveByteLength\(entries\)/);
-  assert.match(route, /createSignedUrl\(objectPath, 120/);
-  assert.doesNotMatch(route, /new NextResponse\(Buffer\.from\(archive\)/);
+test("large private ZIPs bypass the function response body", async () => {
+  await assertLargePrivateZipResponse();
 });

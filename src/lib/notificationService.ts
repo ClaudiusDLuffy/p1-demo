@@ -1,4 +1,7 @@
 import { getAccessToken, sendEmail } from "./graphClient";
+import { getPortalOrigin } from "./config/server/appEnvironment";
+import { getNotificationOwnerEmails } from "./config/server/graph";
+import { logIntakeOutcome } from "./server/logIntakeOutcome";
 import {
   isWorkOrderPriority,
   type WorkOrderPriority,
@@ -81,7 +84,7 @@ export type WorkOrderPriorityEscalationNotificationInput = {
 const SERVICE_INBOX = "service@p1pros.com";
 
 const ownerEmails = () =>
-  (process.env.NOTIFY_OWNER_EMAILS || "")
+  getNotificationOwnerEmails()
     .split(",")
     .map(email => email.trim())
     .filter(Boolean);
@@ -95,8 +98,7 @@ const isProOpsAssignment = (
     String(contractorEmail || "").trim().toLowerCase(),
   );
 
-const portalUrl = () =>
-  process.env.PORTAL_URL || "https://www.p1prosportal.com";
+const portalUrl = getPortalOrigin;
 
 const priorityLabel = (priority?: string | null) => {
   const normalized = String(priority || "").toLowerCase();
@@ -162,6 +164,15 @@ Issue: ${issueLabel(workOrder)}
 Log in to view details:
 ${portalUrl()}`;
 
+export function createReceivingDispatchNotification(input: DispatchNotificationInput) {
+  const plan = createDispatchNotificationPlan({ ...input, contractorAssigned: true });
+  return {
+    recipients: plan.contractorRecipients,
+    subject: plan.contractorSubject,
+    body: buildContractorBody(input.workOrder),
+  };
+}
+
 const buildOwnerBody = (
   workOrder: DispatchNotificationInput["workOrder"],
   contractorAssigned: boolean,
@@ -218,7 +229,7 @@ export const createDispatchNotificationPlan = (
 export async function sendDispatchNotification(input: DispatchNotificationInput) {
   const accessToken = await getAccessToken();
   if (!accessToken) {
-    console.error("Dispatch notification skipped: missing Graph access token");
+    logIntakeOutcome("dispatch_token_unavailable");
     return;
   }
 

@@ -50,8 +50,12 @@ export function buildStoreWorkOrderHistory(
 export function storeWorkOrderHistoryTotal(
   visibleRows: StoreHistoryWorkOrder[],
   authorizedQueryTotal: number | null | undefined,
-): number {
-  const queryTotal = Number(authorizedQueryTotal);
+): number | null {
+  // A compact preview is not proof of a full authorized total. Keep the
+  // pinned-row safeguard only when a real separate count has been received.
+  if (typeof authorizedQueryTotal !== "number" || !Number.isSafeInteger(authorizedQueryTotal)
+    || authorizedQueryTotal < 0) return null;
+  const queryTotal = authorizedQueryTotal;
   return Math.max(
     visibleRows.length,
     Number.isFinite(queryTotal) && queryTotal >= 0 ? queryTotal : 0,

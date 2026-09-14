@@ -1,7 +1,9 @@
 "use client";
 
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import {
   useEffect,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -9,11 +11,12 @@ import {
 import { Ico } from "../../components/ui/Ico";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
-import {
-  getPhotoUrl,
-  loadAllWorkOrderPhotoPaths,
-  loadPhotoBlob,
-} from "../../lib/db";
+import { loadAllWorkOrderPhotoPaths } from "../../lib/db";
+import { getPhotoUrl, loadPhotoBlob, loadPhotoPreviewBlob } from "./browserPhotoStorageAdapter";
+import { createPhotoArchiveObjectUrl, createPhotoObjectUrl, revokePhotoObjectUrl } from "./browserPhotoFileAdapter";
+import { PHOTO_ACCEPTED_FORMAT_GUIDANCE, PHOTO_IMAGE_FORMATS, PHOTO_INPUT_ACCEPT } from "../../lib/photoContentPolicy";
+import { PHOTO_UPLOAD_MAX_FILES, type PhotoUploadItem } from "./photoUploadController";
+import { PhotoUploadProgress, type PhotoUploadProgressProps } from "./PhotoUploadProgress";
 
 type PhotoGalleryProps = {
   woId: string;
@@ -30,9 +33,14 @@ type PhotoGalleryProps = {
   fire?: (message: string) => void;
   loadingStates?: Record<string, boolean>;
   readOnly?: boolean;
+  uploadItems?: readonly PhotoUploadItem[];
+  cancelUploads?: PhotoUploadProgressProps["cancelUploads"];
+  retryUploads?: PhotoUploadProgressProps["retryUploads"];
+  deleteError?: string;
+  retryDeletion?: () => void | Promise<unknown>;
 };
 
-export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, fire, loadingStates = {}, readOnly = false }: PhotoGalleryProps) {
+export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, fire, loadingStates = {}, readOnly = false, uploadItems = [], cancelUploads, retryUploads, deleteError = "", retryDeletion }: PhotoGalleryProps) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -45,10 +53,33 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
     total: number;
   } | null>(null);
   const [archiveError, setArchiveError] = useState("");
-  const adding = !!loadingStates["addPhotos_" + woId];
+  const selectingFiles = useRef(false);
+  const adding = !!loadingStates["addPhotos_" + woId]
+    || uploadItems.some(item => ["queued", "authorizing", "uploading", "validating", "finalizing"].includes(item.status));
   const removing = !!loadingStates["removePhoto_" + woId];
   const archiveBusy = archiveProgress !== null;
-  const photoCount = Math.max(photos.length, Number(totalCount || 0));
+  const photoCount = totalCount ?? null;
+  const hasPhotos = photos.length > 0 || (photoCount !== null && photoCount > 0);
+
+  const selectFiles = async (input: HTMLInputElement) => {
+    if (adding || selectingFiles.current) return;
+    const files = input.files;
+    if (!files?.length) return;
+    if (files.length > PHOTO_UPLOAD_MAX_FILES) {
+      fire?.(`Choose up to ${PHOTO_UPLOAD_MAX_FILES} photos at a time.`);
+      input.value = "";
+      return;
+    }
+    selectingFiles.current = true;
+    try {
+      await doAddPhotos?.(woId, files);
+    } catch {
+      fire?.("Some photos could not be confirmed. Check their upload status before trying again.");
+    } finally {
+      input.value = "";
+      selectingFiles.current = false;
+    }
+  };
 
   useEffect(() => {
     setSelectedPaths(previous => {
@@ -97,9 +128,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
         loadPhotoBlob,
         progress => setArchiveProgress({ mode, ...progress }),
       );
-      const archiveBytes = new Uint8Array(result.archive.byteLength);
-      archiveBytes.set(result.archive);
-      objectUrl = URL.createObjectURL(new Blob([archiveBytes.buffer], { type: "application/zip" }));
+      objectUrl = createPhotoArchiveObjectUrl(result.archive);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
       anchor.download = photoArchiveFilename(woId);
@@ -113,13 +142,13 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
       fire?.(`Downloaded ${result.downloadedCount} photo${result.downloadedCount === 1 ? "" : "s"}.${skipped}`);
       if (mode === "selected") finishSelecting();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Photo download failed";
+      const message = safeErrorMessage(error);
       setArchiveError(message);
       fire?.(`Photo download failed: ${message}`);
     } finally {
       if (objectUrl) {
         const completedObjectUrl = objectUrl;
-        window.setTimeout(() => URL.revokeObjectURL(completedObjectUrl), 0);
+        window.setTimeout(() => revokePhotoObjectUrl(completedObjectUrl), 0);
       }
       setArchiveProgress(null);
     }
@@ -128,14 +157,17 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
   const downloadPhoto = async (path: string, url: string, index: number) => {
     if (!url || downloadingPath) return;
     setDownloadingPath(path);
-    const extension = String(path).split("?")[0].match(/\.([a-z0-9]{2,5})$/i)?.[1] || "jpg";
-    const filename = `${woId}-photo-${index + 1}.${extension}`;
+    const legacyExtension = String(path).split(/[?#]/)[0].match(/\.([a-z0-9]{2,5})$/i)?.[1];
+    const filenameBase = `${woId}-photo-${index + 1}`;
+    let filename = `${filenameBase}${legacyExtension ? `.${legacyExtension}` : ""}`;
     let objectUrl: string | null = null;
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Photo download failed (${response.status})`);
-      objectUrl = URL.createObjectURL(await response.blob());
+      const downloadBlob = await loadPhotoPreviewBlob(url);
+      const canonicalExtension = Object.values(PHOTO_IMAGE_FORMATS)
+        .find(format => format.mimeType === downloadBlob.type.split(";")[0].trim().toLowerCase())?.extension;
+      if (canonicalExtension) filename = `${filenameBase}.${canonicalExtension}`;
+      objectUrl = createPhotoObjectUrl(downloadBlob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
       anchor.download = filename;
@@ -152,7 +184,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
       anchor.click();
       anchor.remove();
     } finally {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) revokePhotoObjectUrl(objectUrl);
       setDownloadingPath(null);
     }
   };
@@ -185,13 +217,13 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
         setSignedUrls(urls);
         setResolving(false);
       } else {
-        for (const url of objectUrls) URL.revokeObjectURL(url);
+        for (const url of objectUrls) revokePhotoObjectUrl(url);
       }
     };
     resolve();
     return () => {
       mounted = false;
-      for (const url of objectUrls) URL.revokeObjectURL(url);
+      for (const url of objectUrls) revokePhotoObjectUrl(url);
     };
   }, [expanded, photos]);
 
@@ -200,9 +232,9 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                     {/* Photos */}
                     <div className="card" style={{ padding: 22, marginBottom: 16 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos{photoCount > 0 ? ` (${photoCount})` : ""}</div>
+                        <div title="Total is exact at the last count refresh." style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>Photos ({photoCount ?? `${photos.length} loaded`})</div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          {photoCount > 0 && (
+                          {hasPhotos && (
                             <button
                               type="button"
                               className="btn-soft"
@@ -214,7 +246,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                               {archiveBusy && archiveProgress?.mode === "all" ? "Preparing..." : "Download all"}
                             </button>
                           )}
-                          {photoCount > 1 && !selecting && (
+                          {(photos.length > 1 || (photoCount !== null && photoCount > 1)) && !selecting && (
                             <button
                               type="button"
                               className="btn-soft"
@@ -235,17 +267,24 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                               <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
                                 <Ico d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" size={13} />
                                 {adding ? <><BtnSpinnerDark />Uploading...</> : "Take photo"}
-                                <input type="file" accept="image/*" capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos?.(woId, e.target.files); e.target.value = ""; }} />
+                                <input type="file" accept={PHOTO_INPUT_ACCEPT} capture="environment" disabled={adding} style={{ display: "none" }} onChange={e => void selectFiles(e.target)} />
                               </label>
                               <label className="btn-soft" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: adding ? "default" : "pointer", padding: "8px 12px", opacity: adding ? 0.7 : 1 }}>
                                 <Ico d="M4 5h16v14H4zM4 15l4-4 4 4 2-2 6 6M15 9h.01" size={13} />
                                 Choose photos
-                                <input type="file" accept="image/*" multiple disabled={adding} style={{ display: "none" }} onChange={e => { if (adding) return; doAddPhotos?.(woId, e.target.files); e.target.value = ""; }} />
+                                <input type="file" accept={PHOTO_INPUT_ACCEPT} multiple disabled={adding} style={{ display: "none" }} onChange={e => void selectFiles(e.target)} />
                               </label>
                             </>
                           )}
                         </div>
                       </div>
+                      {!readOnly && doAddPhotos && <p style={{ margin: "0 0 12px", fontSize: 11, color: T.muted }}>{PHOTO_ACCEPTED_FORMAT_GUIDANCE} Choose up to {PHOTO_UPLOAD_MAX_FILES} photos per batch.</p>}
+                      <PhotoUploadProgress items={uploadItems} cancelUploads={readOnly ? undefined : cancelUploads} retryUploads={readOnly ? undefined : retryUploads} />
+                      {deleteError && <div role="alert" style={{ marginBottom: 12, fontSize: 12, color: T.danger }}>
+                        <p>{deleteError}</p>
+                        {!readOnly && retryDeletion && <button type="button" className="btn-soft" disabled={removing}
+                          onClick={() => void retryDeletion()} style={{ padding: "8px 10px" }}>Retry photo removal</button>}
+                      </div>}
                       {(photos || []).length === 0
                         ? <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: T.subtle, background: T.surfaceSoft, borderRadius: 10, border: `1px dashed ${T.border}` }}>No photos yet. Add site pics, asset tags, part numbers, completed work.</div>
                         : !expanded
@@ -377,7 +416,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                                   disabled={loadingMore}
                                   onClick={() => onLoadMore?.()}
                                   style={{ width: "100%", justifyContent: "center", marginTop: 12 }}
-                                >{loadingMore ? <><BtnSpinnerDark />Loading photos...</> : `Load more photos (${photos.length} of ${totalCount || "many"})`}</button>
+                                >{loadingMore ? <><BtnSpinnerDark />Loading photos...</> : `Load more photos (${photos.length} loaded${totalCount == null ? "" : ` of ${totalCount} at last refresh`})`}</button>
                               )}
                             </>
                           )}

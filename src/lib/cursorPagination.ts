@@ -5,7 +5,8 @@ export type CursorPage<T> = {
   items: T[];
   nextCursor: string | null;
   hasMore: boolean;
-  totalCount: number;
+  /** Null when rows were fetched without an independently requested count. */
+  totalCount: number | null;
   aggregates?: Record<string, number>;
 };
 

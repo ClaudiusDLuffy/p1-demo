@@ -1,34 +1,38 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import test from "node:test";
+import { billingRouteHarness, financialTestIds } from "./billingFinancialRouteTestHarness";
 
-const contractorRoute = readFileSync(
-  resolve(process.cwd(), "src/app/api/contractor-invoices/route.ts"),
-  "utf8",
-);
-const billingRoute = readFileSync(
-  resolve(process.cwd(), "src/app/api/billing-invoices/route.ts"),
-  "utf8",
-);
-const db = readFileSync(resolve(process.cwd(), "src/lib/db.ts"), "utf8");
-
-test("contractor invoice deletion is authenticated staff-only server work", () => {
-  assert.match(contractorRoute, /auth\.auth\.getUser\(token\)/);
-  assert.match(contractorRoute, /STAFF_ROLES\.has/);
-  assert.match(contractorRoute, /eq\("invoice_type", "contractor"\)/);
-  assert.match(db, /\/api\/contractor-invoices\?id=/);
+const command = () => ({ operationId: financialTestIds.operation, expectedInvoiceVersion: 1,
+  expectedAssignmentVersion: 0, expectedWorkflowCycle: 0 });
+test("contractor invoice deletion is authenticated active operational staff-only server work", async () => {
+  for (const options of [{ controller: true }, { active: false }, { role: "contractor" }]) {
+    const h = billingRouteHarness({ ...options, contractor: true });
+    const response = await h.handlers.DELETE(h.request("DELETE", command(), "?id=" + financialTestIds.invoice));
+    assert.equal(response.status, 403);
+    assert.ok(!h.calls.some(call => call.name === "rpc:delete_invoice_admin_v1"));
+  }
+  const h = billingRouteHarness({ contractor: true });
+  const request = h.request("DELETE", command(), "?id=" + financialTestIds.invoice);
+  request.headers.delete("authorization");
+  assert.equal((await h.handlers.DELETE(request)).status, 401);
+  assert.deepEqual(h.calls, []);
 });
-
-test("deletion reports linked billing invoices and verifies the updated row", () => {
-  assert.match(contractorRoute, /is used by billing invoice/);
-  assert.match(contractorRoute, /select\("id, num, work_order_id, deleted_at"\)/);
-  assert.match(contractorRoute, /Invoice changed before it could be deleted/);
+test("deletion respects a transaction-owned linked-source conflict without a raw update", async () => {
+  const h = billingRouteHarness({ contractor: true, commandError: { code: "55000", message: "Synthetic active staff-source restriction" } });
+  const response = await h.handlers.DELETE(h.request("DELETE", command(), "?id=" + financialTestIds.invoice));
+  assert.equal(response.status, 409);
+  assert.equal(h.invoice.deleted_at, null);
+  assert.ok(!h.calls.some(call => call.name.startsWith("update:")));
 });
-
-test("audit outages do not turn completed deletes into false UI failures", () => {
-  assert.match(contractorRoute, /Contractor invoice delete audit failed/);
-  assert.match(billingRoute, /Billing invoice delete audit failed/);
-  assert.match(billingRoute, /Billing invoice changed before it could be deleted/);
+test("an audit failure cannot be reported as a successful financial deletion", async () => {
+  for (const contractor of [false, true]) {
+    const h = billingRouteHarness({ contractor, auditFailure: true });
+    const response = await h.handlers.DELETE(h.request("DELETE", command(), "?id=" + financialTestIds.invoice));
+    assert.equal(response.status, 422);
+    assert.equal(h.invoice.deleted_at, null);
+    assert.equal(h.calls.filter(call => call.name === "rpc:delete_invoice_admin_v1").length, 1);
+    assert.ok(!h.calls.some(call => call.name === "insert:activities"));
+  }
+  // Actual transaction rollback (not the synthetic port's behavior) is also
+  // executed by scripts/verify-invoice-integrity.mjs against isolated Postgres.
 });
-

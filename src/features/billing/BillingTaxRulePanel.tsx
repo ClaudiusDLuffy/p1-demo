@@ -1,5 +1,6 @@
 "use client";
 
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -144,7 +145,7 @@ export default function BillingTaxRulePanel({
       fire?.(editingId === "new" ? "Tax rule added" : "Tax rule updated");
       stopEditing();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Tax rule could not be saved");
+      setFormError(safeErrorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -160,7 +161,7 @@ export default function BillingTaxRulePanel({
       await qc.invalidateQueries({ queryKey: BILLING_TAX_RULES_KEY });
       fire?.(`${rule.name} ${rule.active ? "disabled" : "enabled"}`);
     } catch (error) {
-      fire?.(`Tax rule update failed: ${error instanceof Error ? error.message : error}`);
+      fire?.(`Tax rule update failed: ${safeErrorMessage(error)}`);
     }
   };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { useDirectoryLabels } from "../directory/queries";
 import { Badge } from "../../components/ui/Badge";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { T, PRIORITY, STATUS } from "../../lib/constants";
@@ -24,14 +25,13 @@ export default function StoreWorkOrderHistory({
   totalCount,
   loading = false,
   failed = false,
-  getUser,
   onOpenWorkOrder,
   onViewAll,
 }: {
   currentWorkOrderId: string;
   storeNumber: string;
   rows: StoreHistoryWorkOrder[];
-  totalCount: number;
+  totalCount: number | null;
   loading?: boolean;
   failed?: boolean;
   getUser?: (profileId: string) => { name?: string | null } | null | undefined;
@@ -39,6 +39,7 @@ export default function StoreWorkOrderHistory({
   onViewAll?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { getUser } = useDirectoryLabels(rows.map(workOrder => workOrder.contractor), expanded);
   const contentId = useId();
 
   return (
@@ -46,7 +47,7 @@ export default function StoreWorkOrderHistory({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: expanded ? 12 : 0 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>
-            Store work-order history · {totalCount}
+            Store work-order history · {totalCount ?? "—"}
           </div>
           <div style={{ fontSize: 10, color: T.subtle, marginTop: 3, lineHeight: 1.45 }}>
             Current and previous calls for Store #{storeNumber}. Review prior equipment and contractor details before assigning.

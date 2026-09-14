@@ -1,97 +1,36 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { resolve } from "node:path";
-import { runInNewContext } from "node:vm";
 import test from "node:test";
-import ts from "typescript";
+import { billingRouteHarness, financialTestIds } from "./billingFinancialRouteTestHarness";
 
 type Row = Record<string, unknown>;
-type QueryResult = { data: Row[]; error: unknown };
-type RequestPort = { headers: Headers; nextUrl: URL; json(): Promise<unknown> };
-const invoiceId = "00000000-0000-4000-8000-000000000001";
-const actorId = "00000000-0000-4000-8000-000000000002";
+const invoiceId = financialTestIds.invoice;
 
-// Execute the real route. Only Auth/PostgREST IO is fake; no provider, customer
-// record, environment file, or deployed database is used.
+// Exercise the thin route AND its real application/command boundaries. Only
+// authenticated database IO is synthetic; incomplete legacy receipts are not
+// substituted for the strict authoritative finalization contract.
 function routeHarness(options: {
-  rpcError?: unknown;
-  rpcThrows?: boolean;
-  reloadError?: unknown;
-  missingAfterBilling?: boolean;
-  active?: boolean;
-  role?: string;
-  controller?: boolean;
-  finalization?: Row;
+  rpcError?: unknown; rpcThrows?: boolean; reloadError?: unknown;
+  missingAfterBilling?: boolean; active?: boolean; role?: string;
+  controller?: boolean; finalization?: Row;
 } = {}) {
-  const calls: string[] = [];
-  const invoice: Row = { id: invoiceId, invoice_type: "staff", document_kind: "invoice",
-    num: "P1-SYNTHETIC", state: "approved", work_order_id: null, deleted_at: null,
-    invoice_date: "2026-09-10", total: 0 };
-  const rowsFor = (table: string): Row[] => {
-    if (table === "profiles") return [{ id: actorId, role: options.role ?? "back_office",
-      active: options.active ?? true, name: "Synthetic staff" }];
-    if (table === "invoices") return options.missingAfterBilling ? [] : [invoice];
-    if (table === "invoice_lines" || table === "staff_invoice_sources") return [];
-    throw new Error(`Unexpected fixture table: ${table}`);
-  };
-  class Query implements PromiseLike<QueryResult> {
-    private filters: Array<(row: Row) => boolean> = [];
-    constructor(private readonly table: string) {}
-    select() { return this; }
-    eq(field: string, value: unknown) { this.filters.push(row => row[field] === value); return this; }
-    is(field: string, value: unknown) { return this.eq(field, value); }
-    order() { return this; }
-    range() { return this; }
-    private result(): QueryResult {
-      calls.push(this.table);
-      return { data: rowsFor(this.table).filter(row => this.filters.every(filter => filter(row))),
-        error: this.table === "invoices" ? options.reloadError ?? null : null };
-    }
-    async maybeSingle() { const result = this.result(); return { ...result, data: result.data[0] ?? null }; }
-    then<A = QueryResult, B = never>(yes?: ((value: QueryResult) => A | PromiseLike<A>) | null,
-      no?: ((reason: unknown) => B | PromiseLike<B>) | null): Promise<A | B> {
-      return Promise.resolve(this.result()).then(yes, no);
-    }
-  }
-  const database = {
-    from: (table: string) => new Query(table),
-    rpc: async (name: string, args: Row) => {
-      calls.push(name);
-      assert.equal(name, "mark_staff_invoice_billed");
-      assert.equal(args.p_invoice_id, invoiceId);
-      assert.equal(args.p_actor_id, actorId);
-      if (options.rpcThrows) throw options.rpcError;
-      return { data: options.rpcError ? null : options.finalization ?? {
-        applied: true, invoiceId, transitioned: true, workOrderClosed: true,
-      }, error: options.rpcError ?? null };
+  const h = billingRouteHarness({
+    active: options.active, role: options.role, controller: options.controller,
+    commandResultOverride: options.finalization,
+    compactRpc: (name, args) => {
+      if (name === "mark_staff_invoice_billed") {
+        assert.equal(args.p_invoice_id, invoiceId);
+        assert.equal(args.p_actor_id, financialTestIds.actor);
+        if (options.rpcThrows) throw options.rpcError;
+        if (options.rpcError) return { data: null, error: options.rpcError };
+      }
+      if (name === "get_invoice_summary_v1" && (options.reloadError || options.missingAfterBilling)) {
+        return { data: null, error: options.reloadError ?? null };
+      }
+      return undefined;
     },
-  };
-  const filename = resolve("src/app/api/billing-invoices/route.ts");
-  const requireHere = createRequire(import.meta.url);
-  const exports: { PATCH?: (request: RequestPort) => Promise<Response> } = {};
-  runInNewContext(ts.transpileModule(readFileSync(filename, "utf8"), { compilerOptions: {
-    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
-  } }).outputText, { exports, Error, process: { env: {
-    NEXT_PUBLIC_SUPABASE_URL: "https://synthetic.invalid", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "synthetic",
-  } }, require: (name: string): unknown => {
-    if (name === "next/server") return { NextResponse: Response };
-    if (name === "@supabase/supabase-js") return { createClient: () => ({ auth: {
-      getUser: async () => ({ data: { user: { id: actorId } }, error: null }),
-    } }) };
-    if (name === "../../../lib/supabase/server") return { createServerClient: () => database };
-    if (name === "../../../lib/server/staffAuthorization") return {
-      STAFF_ROLES: new Set(["manager", "dispatcher", "back_office"]),
-      loadStaffPermissions: async () => [], isInvoiceControllerProfile: () => options.controller ?? false,
-    };
-    return requireHere(name.startsWith(".") ? resolve(filename, "..", name) : name);
-  } }, { filename });
-  assert.ok(exports.PATCH);
-  const patch = exports.PATCH;
-  return { calls, request: () => patch({ headers: new Headers({ authorization: "Bearer synthetic" }),
-    nextUrl: new URL(`https://synthetic.invalid/api/billing-invoices?id=${invoiceId}`),
-    json: async () => ({ action: "mark_billed" }),
-  }) };
+  });
+  return { get calls() { return h.calls.map(call => call.name.replace(/^rpc:/, "")); },
+    request: () => h.handlers.PATCH!(h.request("PATCH", { action: "mark_billed" }, `?id=${invoiceId}`)) };
 }
 
 const guards = [
@@ -116,7 +55,9 @@ for (const [code, message, publicCode, status, safeMessage] of guards) {
     assert.equal(body.code, publicCode);
     assert.match(body.error, safeMessage);
     assert.doesNotMatch(JSON.stringify(body), /PRIVATE-SYNTHETIC/);
-    assert.deepEqual(h.calls, ["profiles", "mark_staff_invoice_billed"]);
+    assert.equal(h.calls.filter(call => call === "mark_staff_invoice_billed").length, 1);
+    assert.ok(h.calls.includes("from:profiles"));
+    assert.ok(!h.calls.includes("get_invoice_summary_v1"));
   });
 }
 
@@ -142,15 +83,17 @@ test("a successful transaction followed by reload failure is not reported as a f
   for (const options of [
     { reloadError: { message: "PRIVATE-SYNTHETIC-READ-FAILURE" } },
     { missingAfterBilling: true },
-    { reloadError: { message: "PRIVATE-SYNTHETIC-READ-FAILURE" }, finalization: { applied: false, reason: "already_billed" } },
-    { reloadError: { message: "PRIVATE-SYNTHETIC-READ-FAILURE" }, finalization: { applied: false, reason: "already_submitted" } },
+    { reloadError: { message: "PRIVATE-SYNTHETIC-READ-FAILURE" }, finalization: { applied: false, reason: "already_billed", transitioned: false, visitsClosed: 0 } },
+    { reloadError: { message: "PRIVATE-SYNTHETIC-READ-FAILURE" }, finalization: { applied: false, reason: "already_submitted", documentKind: "capital_quote", transitioned: false, visitsClosed: 0 } },
   ]) {
     const h = routeHarness(options);
     const response = await h.request();
-    assert.equal(response.status, 500);
+    assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.code, "BILLING_REFRESH_REQUIRED");
-    assert.match(body.error, /confirmed.*refresh/i);
+    assert.equal(body.refresh.status, "unavailable");
+    assert.equal(body.invoice.projection, "receipt");
+    assert.equal(body.finalization.invoiceId, invoiceId);
+    assert.match(body.refresh.warning, /refresh/i);
     assert.doesNotMatch(JSON.stringify(body), /PRIVATE-SYNTHETIC/);
     assert.equal(h.calls.filter(call => call === "mark_staff_invoice_billed").length, 1);
   }
@@ -159,15 +102,16 @@ test("a successful transaction followed by reload failure is not reported as a f
 test("normal, capital and replay billing success retain the invoice/finalization response", async () => {
   for (const finalization of [
     { applied: true, workOrderClosed: true, pendingCapitalCompletion: false },
-    { applied: true, workOrderClosed: false, pendingCapitalCompletion: true },
-    { applied: false, reason: "already_billed", workOrderClosed: false },
+    { applied: true, reason: "submitted", documentKind: "capital_quote", workOrderClosed: false, pendingCapitalCompletion: true, workOrderStatus: "pending_capital_completion" },
+    { applied: false, reason: "already_billed", workOrderClosed: false, transitioned: false, visitsClosed: 0 },
   ]) {
     const h = routeHarness({ finalization });
     const response = await h.request();
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.invoice.id, invoiceId);
-    assert.deepEqual(body.finalization, finalization);
+    for (const [key, value] of Object.entries(finalization)) assert.equal(body.finalization[key], value);
+    assert.equal(body.finalization.invoiceId, invoiceId);
   }
 });
 
@@ -175,6 +119,7 @@ test("billing error handling does not broaden active operational staff authoriza
   for (const options of [{ active: false }, { role: "contractor" }, { controller: true }]) {
     const h = routeHarness(options);
     assert.equal((await h.request()).status, 403);
-    assert.deepEqual(h.calls, ["profiles"]);
+    assert.ok(h.calls.includes("from:profiles"));
+    assert.ok(!h.calls.includes("mark_staff_invoice_billed"));
   }
 });

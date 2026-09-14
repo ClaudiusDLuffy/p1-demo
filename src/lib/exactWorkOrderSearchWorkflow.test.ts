@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { workOrderFamilyKey } from "./counts/queryKeys";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const list = read("src/features/work-orders/WorkOrderList.tsx");
@@ -57,8 +58,6 @@ test("suffixed exact references do not expand into another assignment family", (
 });
 
 test("exact results refresh with the existing work-order invalidation boundary", () => {
-  assert.match(
-    queries,
-    /workOrderFamilyKey[\s\S]*?\.\.\.WORK_ORDER_BY_ID_KEY, "family", workOrderId/,
-  );
+  assert.deepEqual(workOrderFamilyKey("synthetic", "actor-scope"), ["work-order-by-id", "family", "synthetic", "actor-scope"]);
+  assert.ok(/queryKey: workOrderFamilyKey\(id, directoryActorScope\(actor\)\)/.test(queries));
 });

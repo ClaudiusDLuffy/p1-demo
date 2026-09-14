@@ -1,102 +1,52 @@
-import { NextRequest, NextResponse } from "next/server";
+import { createApiMethodBoundary } from "../../../../lib/server/apiMethodBoundary";
 
+const apiMethodBoundary = createApiMethodBoundary("/api/invoice-pdf/parse-total", ["POST"]);
+export const GET = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const DELETE = apiMethodBoundary.methodNotAllowed;
+export const HEAD = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { runRequestOperation } from "../../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../../lib/errors/httpBoundary";
+import { type NextRequest, NextResponse } from "next/server";
 import { extractInvoiceDataFromPdf } from "../../../../lib/invoicePdfParser";
+import { InvoicePdfError } from "../../../../lib/pdf/invoicePdfBudget";
+import { requireInvoicePdfActor } from "../../../../lib/server/invoicePdfAuthorization";
+import { InvoicePdfRequestError, readUploadedInvoicePdf } from "../../../../lib/server/invoicePdfRequest";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+const headers = { "Cache-Control": "no-store" };
 
-const MAX_PDF_BYTES = 5 * 1024 * 1024;
-
-const jsonError = (message: string, status: number) =>
-  NextResponse.json({ error: message }, { status });
-
-const getBearerToken = (req: NextRequest) => {
-  const authorization = req.headers.get("authorization") || "";
-  return authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
-};
-
-const getJwtSubject = (token: string) => {
+export async function POST(request: NextRequest) {
+  const context = createRequestContext(request, "/api/invoice-pdf/parse-total");
   try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return "";
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf8"),
-    ) as { sub?: unknown };
-    const subject = typeof payload.sub === "string" ? payload.sub : "";
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(subject)
-      ? subject
-      : "";
-  } catch {
-    return "";
-  }
-};
-
-async function isAuthenticated(req: NextRequest) {
-  const token = getBearerToken(req);
-  const subject = getJwtSubject(token);
-  const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!subject || !projectUrl || !publishableKey) return false;
-
+    return await runRequestOperation(context, async () => {
   try {
-    const profileUrl = new URL("/rest/v1/profiles", projectUrl);
-    profileUrl.searchParams.set("select", "id");
-    profileUrl.searchParams.set("id", `eq.${subject}`);
-    profileUrl.searchParams.set("limit", "1");
-
-    const response = await fetch(profileUrl, {
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        apikey: publishableKey,
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!response.ok) {
-      console.error("Invoice PDF authentication rejected", {
-        status: response.status,
-      });
-      return false;
+    // No multipart body is read before the current actor is authorized.
+    await requireInvoicePdfActor(request);
+    const bytes = await readUploadedInvoicePdf(request);
+    const result = await extractInvoiceDataFromPdf(bytes, { signal: request.signal });
+    if (request.signal.aborted) throw new InvoicePdfRequestError("REQUEST_ABORTED");
+    return await finalizeApiResponse(await NextResponse.json(result, { headers }), context);
+  } catch (error: unknown) {
+    if (error instanceof InvoicePdfRequestError) {
+      return await finalizeApiResponse(await NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers }), context);
     }
-
-    const profiles = await response.json() as Array<{ id?: unknown }>;
-    return profiles.some((profile) => profile.id === subject);
-  } catch (error) {
-    console.error("Invoice PDF authentication failed", error);
-    return false;
-  }
-}
-
-async function extractPdfResponse(bytes: Uint8Array) {
-  try {
-    const result = await extractInvoiceDataFromPdf(bytes);
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("Invoice PDF extraction failed", error);
-    return jsonError("The PDF text could not be read", 422);
-  }
-}
-
-async function parseUploadedInvoice(req: NextRequest) {
-  if (!(await isAuthenticated(req))) return jsonError("Unauthorized", 401);
-
-  let formData: FormData;
-  try {
-    formData = await req.formData();
-  } catch {
-    return jsonError("Invalid multipart form data", 400);
+    if (error instanceof InvoicePdfError) {
+      const status = error.code === "PDF_INVALID_SIGNATURE" ? 415
+        : ["REQUEST_ABORTED", "PDF_PARSE_TIMEOUT"].includes(error.code) ? 408
+          : error.code === "PDF_PARSE_BUSY" ? 503
+            : ["PDF_PARSE_FAILED", "PDF_CLEANUP_FAILED"].includes(error.code) ? 500
+              : ["PDF_TOO_LARGE", "PDF_PAGE_LIMIT", "PDF_ITEM_LIMIT", "PDF_TEXT_LIMIT", "PDF_OUTPUT_LIMIT"].includes(error.code) ? 413 : 422;
+      return await finalizeApiResponse(await NextResponse.json({ error: error.message, code: error.code }, { status, headers }), context);
+    }
+    return await finalizeApiResponse(await NextResponse.json({ error: "The PDF text could not be read", code: "PDF_PARSE_FAILED" }, { status: 500, headers }), context);
   }
 
-  const file = formData.get("file");
-  if (!(file instanceof File)) return jsonError("PDF file is required", 400);
-  if (file.size === 0) return jsonError("PDF file is empty", 400);
-  if (file.size > MAX_PDF_BYTES) return jsonError("PDF must be 5 MB or smaller", 413);
-  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-    return jsonError("File must be a PDF", 415);
-  }
-
-  return extractPdfResponse(new Uint8Array(await file.arrayBuffer()));
-}
-
-export async function POST(req: NextRequest) {
-  return parseUploadedInvoice(req);
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

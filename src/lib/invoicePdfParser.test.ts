@@ -6,7 +6,8 @@ import {
   extractInvoiceDataFromPdf,
   findInvoiceNumber,
 } from "./invoicePdfParser";
-import { parseInvoicePdf } from "./invoicePdfParserClient";
+import "./pdf/test-fixtures/prepareInvoicePdfRuntime";
+import { createNodeBrowserPdfParity } from "./pdf/test-fixtures/browserPdfHarness";
 import { generateStaffInvoiceCsv } from "./invoiceCsv";
 import { normalizeInvoiceLineNumbers } from "./invoiceMath";
 
@@ -209,7 +210,7 @@ test("keeps continued service charges before a later materials header on the sam
 
   const pdf = document.output("arraybuffer");
   const direct = await extractInvoiceDataFromPdf(new Uint8Array(pdf.slice(0)));
-  const uploaded = await parseInvoicePdf(new File([pdf], "continued.pdf", { type: "application/pdf" }));
+  const uploaded = await (await createNodeBrowserPdfParity()).client.parse(new File([pdf], "continued.pdf", { type: "application/pdf" }));
   for (const parsed of [direct, uploaded]) {
     assert.deepEqual(
       parsed.lines.map(({ desc, qty, rate, amount }) => ({ desc, qty, rate, amount })),
@@ -325,7 +326,9 @@ test("parses an uploaded invoice without calling the protected parser API", asyn
   }) as typeof fetch;
 
   try {
-    const parsed = await parseInvoicePdf(file);
+    // Exercise the actual File facade/modern loader through an explicit
+    // Node-only worker fixture; no production fake-worker fallback exists.
+    const parsed = await (await createNodeBrowserPdfParity()).client.parse(file);
     assert.equal(parsed.invoiceNumber, "INV-300");
     assert.equal(parsed.total, 236);
     assert.deepEqual(parsed.lines.map(line => line.desc), ["Travel"]);

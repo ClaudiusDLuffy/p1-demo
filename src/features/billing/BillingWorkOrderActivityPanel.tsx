@@ -11,8 +11,9 @@ import {
   visibleBillingActivities,
 } from "../../lib/billingActivity";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
+import { requiresVisitDurationReview, VISIT_DURATION_REVIEW_MESSAGE, type VisitDurationReview } from "../../lib/visitDurationReview";
 
-type BillingVisit = {
+type BillingVisit = VisitDurationReview & {
   id?: string;
   checkInAt?: string | null;
   checkOutAt?: string | null;
@@ -94,7 +95,7 @@ export default function BillingWorkOrderActivityPanel({ currentUser, workOrder }
       }
       setResolvedPhotos({
         key: photoKey,
-        urls: Object.fromEntries(entries.filter(([, url]) => !!url)),
+        urls: Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => typeof entry[1] === "string" && entry[1].length > 0)),
       });
     });
     return () => {
@@ -164,6 +165,7 @@ export default function BillingWorkOrderActivityPanel({ currentUser, workOrder }
                     <strong style={{ color: T.ink }}>Visit {index + 1}</strong>
                     <div style={{ color: T.muted }}>In: {localDateTime(visit.checkInAt, timeZone)}</div>
                     <div style={{ color: T.muted }}>Out: {localDateTime(visit.checkOutAt, timeZone)}</div>
+                    {requiresVisitDurationReview(visit) && <div role="note" style={{ color: T.warn }}>{VISIT_DURATION_REVIEW_MESSAGE}</div>}
                   </div>
                 ))}
               </section>

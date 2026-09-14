@@ -9,17 +9,22 @@ const modal = read("src/features/billing/BillingInvoiceCreateModal.tsx");
 const drawer = read("src/features/billing/SourceContractorInvoiceDrawer.tsx");
 const preview = read("src/features/billing/PrivatePdfCanvasPreview.tsx");
 const nextConfig = read("next.config.ts");
+const summaryRead = read("src/features/invoices/invoiceReads.ts");
+const billingReads = read("src/features/billing/billingReads.ts");
 
 const loadStart = db.indexOf("export async function loadInvoiceById");
 const loadEnd = db.indexOf("export async function loadInvoices", loadStart);
 const exactInvoiceLoader = db.slice(loadStart, loadEnd);
 
-test("source preview reloads one live contractor invoice through existing RLS", () => {
+test("source preview reloads one compact authorized invoice and paged lines without a complete-document collector", () => {
   assert.ok(loadStart >= 0);
-  assert.match(exactInvoiceLoader, /\.eq\("id", invoiceId\)/);
-  assert.match(exactInvoiceLoader, /\.eq\("invoice_type", "contractor"\)/);
-  assert.match(exactInvoiceLoader, /\.is\("deleted_at", null\)/);
-  assert.match(drawer, /useInvoiceByIdQuery\(invoiceId/);
+  assert.match(exactInvoiceLoader, /readInvoiceDocument\(invoiceId, "edit"/);
+  assert.match(summaryRead, /get_invoice_summary_v1/);
+  assert.match(summaryRead, /list_invoice_lines_page_v1/);
+  assert.match(drawer, /useBillingSourceInvoiceByIdQuery\(invoiceId/);
+  assert.match(drawer, /useInvoiceLinePage/);
+  assert.match(billingReads, /contract=compact-v1&invoiceId=/);
+  assert.doesNotMatch(drawer, /readCompleteInvoiceDocument|readInvoiceDocument/);
 });
 
 test("source reference stays read-only and outside the editable modal viewport", () => {

@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   initializeWarrantyDatabase, warrantyMigrationSources, applyWarrantyFixtureMigration, asWarrantyActor, migrationStatements,
-  assertWarrantyMigrationOrder, WARRANTY_MIGRATION_NAME,
+  assertWarrantyMigrationOrder, WARRANTY_BRIDGE_NAME,
 } from './warranty-billing-test-support.mjs';
 
 if (!process.env.P1_SQL_TEST_ENGINE_DIR) throw new Error('Set P1_SQL_TEST_ENGINE_DIR to the approved existing isolated PGlite installation.');
@@ -15,9 +15,10 @@ const { PGlite } = requireEngine('@electric-sql/pglite');
 const { pg_trgm } = requireEngine('@electric-sql/pglite/contrib/pg_trgm');
 const { pgcrypto } = requireEngine('@electric-sql/pglite/contrib/pgcrypto');
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const stabilizationRef = process.argv.find(arg => arg.startsWith('--stabilization-ref='))?.split('=')[1];
+const canonicalUpstream = process.argv.includes('--canonical-upstream');
+assert.ok(process.argv.slice(2).every(arg => ['--canonical-upstream', '--baseline-only'].includes(arg)));
 const baselineOnly = process.argv.includes('--baseline-only');
-const migrationPlan = warrantyMigrationSources(repo, stabilizationRef);
+const migrationPlan = warrantyMigrationSources(repo, canonicalUpstream);
 const db = new PGlite({ extensions: { pg_trgm, pgcrypto } });
 let passed = 0;
 const check = async (name, run) => { await run(); passed++; console.log(`PASS ${name}`); };
@@ -102,32 +103,34 @@ async function injectFailure(table, operation, run) {
 }
 
 try {
-  const localNames = [...migrationPlan.base.map(([name]) => name), migrationPlan.warranty[0]];
-  await check('dev adds only sequential Warranty 0122; the exact pre-existing historical 0029 pair is preserved', () => {
-    assertWarrantyMigrationOrder(localNames);
-    assert.equal(migrationPlan.warranty[0], WARRANTY_MIGRATION_NAME);
-    assert.equal(migrationPlan.base.some(([name]) => Number.parseInt(name, 10) > 121), false);
+  await check('whole merged inventory pins the exact historical 0029 bytes and every other version uniquely', () => {
+    const names = assertWarrantyMigrationOrder(migrationPlan.sources);
+    assert.equal(names.length, 150);
+    assert.equal(names.at(-1), WARRANTY_BRIDGE_NAME);
   });
-  await check('migration ordering rejects a new duplicate 0122 or a newly introduced sequence gap', () => {
-    assert.throws(() => assertWarrantyMigrationOrder([...localNames, '0122_expand_authoritative_work_order_lifecycle.sql']), /duplicate migration version 122/);
-    assert.throws(() => assertWarrantyMigrationOrder(localNames.filter(name => !name.startsWith('0121_'))), /sequential 0122/);
-    assert.throws(() => assertWarrantyMigrationOrder([...localNames, '0029_unrelated_change.sql']), /duplicate migration version 29/);
+  await check('migration ordering rejects new duplicate 0122, third 0029, hash edits and sequence gaps', () => {
+    for (const name of ['0122_collision.sql', '0029_unrelated_change.sql']) {
+      const changed = new Map(migrationPlan.sources); changed.set(name, 'select 1;');
+      assert.throws(() => assertWarrantyMigrationOrder(changed));
+    }
+    const gap = new Map(migrationPlan.sources); gap.delete('0121_atomic_repeat_dispatch_refresh.sql');
+    assert.notEqual(gap.size, migrationPlan.sources.size);
+    assert.throws(() => assertWarrantyMigrationOrder(gap), /contiguous/);
+    for (const name of ['0029_add_p5_priority.sql', '0029_invoice_type.sql']) {
+      const changed = new Map(migrationPlan.sources); changed.set(name, changed.get(name) + '\n-- changed');
+      assert.throws(() => assertWarrantyMigrationOrder(changed), /Historical migration hash changed/);
+    }
   });
-  if (migrationPlan.stabilization.length) {
-    await check('preserved stabilization definitions are isolated from the dev release sequence, not sorted into a duplicate-0122 installation', () => {
-      assert.equal(migrationPlan.stabilization.some(([name]) => name === WARRANTY_MIGRATION_NAME), false);
-      assert.equal(migrationPlan.stabilization[0][0].startsWith('0122_'), true);
-      assert.throws(() => assertWarrantyMigrationOrder([
-        ...localNames, ...migrationPlan.stabilization.map(([name]) => name),
-      ]), /duplicate migration version 122/);
-    });
-    console.log('DEFINITION-COMPATIBILITY FIXTURE ONLY: dev base <=0121 + unchanged preserved stabilization 0122–0132, then Warranty SQL. This is NOT a merged filename-order or Supabase-ledger installation. Future resequencing and a post-financial-expansion bridge are required.');
-  }
-  console.log('Historical note: committed dev already has two 0029 files; this harness preserves them and does not certify a clean Supabase migration ledger.');
   await initializeWarrantyDatabase(db);
-  for (const [name, source] of [...migrationPlan.base, ...migrationPlan.stabilization]) {
+  const applied = [];
+  for (const [name, source] of migrationPlan.base) {
     await applyWarrantyFixtureMigration(db, name, source);
+    applied.push(name);
   }
+  await check('both grandfathered 0029 files execute exactly once in deterministic filename order', () => {
+    assert.deepEqual(applied.filter(name => name.startsWith('0029_')), ['0029_add_p5_priority.sql', '0029_invoice_type.sql']);
+    assert.equal(new Set(applied).size, applied.length);
+  });
   stabilized = (await db.query("select to_regprocedure('public.normalize_staff_invoice_payload(jsonb)') is not null present")).rows[0].present;
   await db.query('insert into auth.users(id,email) values ($1,$2)', [manager, 'warranty-manager@example.invalid']);
   await db.query("update public.profiles set role='manager',active=true,name='Synthetic manager' where id=$1", [manager]);
@@ -142,7 +145,7 @@ try {
     const before = await routineMetadata();
     const originalDefinitions = (await db.query(`select proname,pg_get_functiondef(oid) definition from pg_proc
       where pronamespace='public'::regnamespace and proname in ('save_staff_billing_invoice','normalize_staff_invoice_payload')`)).rows;
-    await check(`${migrationPlan.stabilization.length ? 'Warranty definition patch' : 'sequential 0122 forward migration'} applies and preserves function identity, grants, owner, search paths and security mode`, async () => {
+    await check(`${migration[0]} applies and preserves function identity, grants, owner, search paths and security mode`, async () => {
       await applyWarrantyFixtureMigration(db, ...migration);
       assert.deepEqual(await routineMetadata(), before);
     });
@@ -162,10 +165,10 @@ try {
           ) : row.definition;
           await tx.exec(modified);
         }
-        const patchBlock = migrationStatements(migration[1]).find(statement => /do \$warranty_lines\$/.test(statement));
+        const patchBlock = migrationStatements(migration[1]).find(statement => /do \$(?:staff_warranty_bridge|warranty_lines)\$/.test(statement));
         assert.ok(patchBlock);
         await tx.exec(patchBlock);
-      }), error => error.code === 'P0001' && /Unexpected staff billing function shape/.test(error.message));
+      }), error => error.code === 'P0001' && /Unexpected staff (?:billing function|invoice normalizer) shape/.test(error.message));
       const definitionsAfter = (await db.query(`select oid,pg_get_functiondef(oid) definition from pg_proc
         where pronamespace='public'::regnamespace and proname in ('save_staff_billing_invoice','normalize_staff_invoice_payload') order by oid`)).rows;
       assert.deepEqual(definitionsAfter, definitionsBefore);
@@ -280,5 +283,5 @@ try {
       });
     }
   }
-  console.log(`Warranty SQL ${baselineOnly ? 'baseline' : 'verification'} (${stabilized ? 'definition compatibility against preserved 0122–0132; NOT a deployable merged migration sequence' : 'dev 0121 → sequential Warranty 0122'}): ${passed} passed. SQL-only synthetic execution; no gateway or parallel-session claim.`);
+  console.log(`Warranty SQL ${baselineOnly ? 'baseline' : 'verification'} (${stabilized ? 'merged filename order through 0148' : 'canonical upstream 0121 → 0122'}): ${passed} passed. SQL-only synthetic execution; no gateway or parallel-session claim.`);
 } finally { await db.close(); }

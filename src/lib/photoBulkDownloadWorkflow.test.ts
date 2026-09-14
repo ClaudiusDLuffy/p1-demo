@@ -6,6 +6,7 @@ import test from "node:test";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const db = read("src/lib/db.ts");
 const gallery = read("src/features/photos/PhotoGallery.tsx");
+const storage = read("src/features/photos/browserPhotoStorageAdapter.ts");
 
 const allPhotosStart = db.indexOf("export async function loadAllWorkOrderPhotoPaths");
 const visitsStart = db.indexOf("export async function loadWorkOrderVisitsPage", allPhotosStart);
@@ -22,7 +23,9 @@ test("download all traverses the authorized photo cursor instead of only loaded 
 });
 
 test("bulk downloads retain the existing RLS-enforced storage boundary", () => {
-  assert.match(db, /export async function loadPhotoBlob[\s\S]*storage\.from\("photos"\)\.download\(path\)/);
+  assert.match(db, /export async function loadPhotoBlob[\s\S]*return readPhotoBlob\(path\)/);
+  assert.match(storage, /storage\.from\("photos"\)\.download\(path\)/);
+  assert.match(gallery, /from "\.\/browserPhotoStorageAdapter"/);
   assert.match(gallery, /loadAllWorkOrderPhotoPaths\(woId\)/);
   assert.match(gallery, /buildPhotoArchive\([\s\S]*loadPhotoBlob/);
   assert.match(gallery, /await import\("\.\.\/\.\.\/lib\/photoArchive"\)/);

@@ -14,7 +14,7 @@ test("ordinary sign-out is local and surfaces SDK failures", () => {
   const body = db.slice(start, db.indexOf("export async function getSession", start));
   assert.match(body, /scope:\s*SignOutScope\s*=\s*"local"/);
   assert.match(body, /auth\.signOut\(\{\s*scope\s*\}\)/);
-  assert.match(body, /if \(error\) throw error/);
+  assert.match(body, /if \(error\) throw normalizeUnknownError\(error\)/);
 });
 
 test("password login gates old profile queries without signing out first", () => {

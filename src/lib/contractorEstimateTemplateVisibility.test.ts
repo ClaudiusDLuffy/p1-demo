@@ -76,6 +76,9 @@ function harness() {
       },
     };
     if (name === "@tanstack/react-query") return { useQueryClient: () => ({ invalidateQueries: denyMutation }) };
+    if (name === "../../lib/forms/useUnsavedChangesGuard") return {
+      useUnsavedChangesGuard: () => ({ requestClose: denyMutation, dialog: null }),
+    };
     if (name === "./queries") return {
       CONTRACTOR_ESTIMATES_KEY: ["contractor-estimates"],
       useContractorEstimatesQuery: (_id: string, active: boolean) => { enabled.push(active); return estimates; },

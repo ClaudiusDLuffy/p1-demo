@@ -8,19 +8,20 @@ import {
 import ControllerExportPanel from "../invoices/ControllerExportPanel";
 import DashboardWorkBuckets from "./DashboardWorkBuckets";
 import PartsAlertSettings from "./PartsAlertSettings";
+import PartsSmsOperations from "../parts-sms/PartsSmsOperations";
 import type {
   DashboardInvoice,
   DashboardPart,
   DashboardWorkOrder,
 } from "./workBuckets";
-import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import { useWorkOrdersCountQuery } from "../work-orders/queries";
 
 type DashboardProps = {
   page: string;
   isManager: boolean;
   workOrders: DashboardWorkOrder[];
-  p1Unassigned: number;
-  slaBreached: number;
+  p1Unassigned: number | null;
+  slaBreached: number | null;
   nav: (page: string) => void;
   onViewUnassigned: () => void;
   doAutoAssign: () => void | Promise<void>;
@@ -33,31 +34,24 @@ type DashboardProps = {
   search: string;
   setSearch: (search: string) => void;
   woParts?: DashboardPart[];
-  staffProfiles?: Array<{
-    id: string;
-    name: string;
-    email?: string | null;
-    active?: boolean | null;
-  }>;
 };
 
 export default function Dashboard(props: DashboardProps) {
-  const { page, isManager, workOrders, p1Unassigned, slaBreached, nav, onViewUnassigned, doAutoAssign, invoices, currentUser, getUser, setSelectedWO, setAiNote, setPage, search, setSearch, woParts = [], staffProfiles = [] } = props;
+  const { page, isManager, workOrders, slaBreached, nav, onViewUnassigned, doAutoAssign, invoices, currentUser, getUser, setSelectedWO, setAiNote, setPage, search, setSearch, woParts = [] } = props;
   const controller = isInvoiceController(currentUser);
-  const unassignedQuery = useWorkOrdersPageQuery(
-    { scope: "dashboard_unassigned", limit: 1 },
+  const unassignedQuery = useWorkOrdersCountQuery(
+    { scope: "dashboard_unassigned" },
     page === "dashboard" && isManager && !controller,
   );
-  const p1UnassignedQuery = useWorkOrdersPageQuery(
-    { scope: "active", status: "unassigned", priority: "p1", limit: 1 },
+  const p1UnassignedQuery = useWorkOrdersCountQuery(
+    { scope: "active", status: "unassigned", priority: "p1" },
     page === "dashboard" && isManager && !controller,
   );
-  const unassignedCount = unassignedQuery.data?.totalCount
-    ?? workOrders.filter(workOrder => workOrder.status === "unassigned").length;
-  const exactP1Unassigned = p1UnassignedQuery.data?.totalCount ?? p1Unassigned;
-  const hasUnassignedWork = unassignedCount > 0;
-  const unassignedColor = hasUnassignedWork ? T.danger : T.success;
-  const unassignedBackground = hasUnassignedWork ? T.dangerSoft : T.successSoft;
+  const unassignedCount = unassignedQuery.data?.totalCount ?? null;
+  const exactP1Unassigned = p1UnassignedQuery.data?.totalCount ?? null;
+  const hasUnassignedWork = unassignedCount !== null && unassignedCount > 0;
+  const unassignedColor = unassignedCount === null ? T.muted : hasUnassignedWork ? T.danger : T.success;
+  const unassignedBackground = unassignedCount === null ? T.surface : hasUnassignedWork ? T.dangerSoft : T.successSoft;
   return (
     <>
           {/* ═════ DASHBOARD ═════ */}
@@ -90,19 +84,19 @@ export default function Dashboard(props: DashboardProps) {
                       fontWeight: 850,
                     }}
                   >
-                    {hasUnassignedWork ? "!" : "✓"}
+                    {unassignedCount === null ? "—" : hasUnassignedWork ? "!" : "✓"}
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ color: T.ink, fontSize: 13, fontWeight: 850 }}>
                       Unassigned work orders
                     </div>
                     <div style={{ marginTop: 3, color: unassignedColor, fontSize: 18, fontWeight: 900 }}>
-                      {unassignedCount} waiting
+                      {unassignedCount ?? "—"} waiting
                     </div>
                     <div style={{ marginTop: 3, color: T.muted, fontSize: 10, lineHeight: 1.45 }}>
-                      {hasUnassignedWork
-                        ? `${exactP1Unassigned > 0 ? `${exactP1Unassigned} P1 critical. ` : ""}Includes all priorities and states that still need a contractor assignment.`
-                        : "Every active work order currently has an assignment."}
+                      {unassignedCount === null ? "Count is unavailable; open the queue to view work orders." : hasUnassignedWork
+                        ? `${exactP1Unassigned !== null && exactP1Unassigned > 0 ? `${exactP1Unassigned} P1 critical. ` : ""}Includes all priorities and states that still need a contractor assignment.`
+                        : "Every active work order had an assignment at the last refresh."}
                     </div>
                   </div>
                   <div className="dashboard-unassigned-summary-actions">
@@ -114,7 +108,7 @@ export default function Dashboard(props: DashboardProps) {
                     >
                       View unassigned →
                     </button>
-                    {exactP1Unassigned > 0 && (
+                    {exactP1Unassigned !== null && exactP1Unassigned > 0 && (
                       <button type="button" onClick={doAutoAssign} className="btn-accent dashboard-unassigned-summary-action">
                         Auto-dispatch
                       </button>
@@ -123,7 +117,7 @@ export default function Dashboard(props: DashboardProps) {
                 </section>
               )}
               {/* Only the legacy controller-only role hides operational work. */}
-              {!controller && slaBreached > 0 && (
+              {!controller && slaBreached !== null && slaBreached > 0 && (
                 <div className="card" style={{ background: T.dangerSoft, border: `1px solid ${T.danger}33`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: T.danger, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, animation: "pulse 1.6s infinite" }}>!</div>
                   <div style={{ flex: 1 }}>
@@ -155,7 +149,8 @@ export default function Dashboard(props: DashboardProps) {
                       setPage("work_orders");
                     }}
                   />
-                  <PartsAlertSettings staffProfiles={staffProfiles} />
+                  <PartsAlertSettings />
+                  <PartsSmsOperations profile={currentUser} />
                 </>
               )}
             </div>

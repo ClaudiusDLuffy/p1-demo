@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { validateMigrationInventory } from './migration-inventory.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 
 // Same isolated platform stand-ins used by the existing lifecycle harness.
@@ -42,62 +42,23 @@ export function migrationStatements(sql) {
 }
 
 export const WARRANTY_MIGRATION_NAME = '0122_allow_zero_rate_staff_warranty_lines.sql';
-const HISTORICAL_DUPLICATE_0029 = ['0029_add_p5_priority.sql', '0029_invoice_type.sql'];
+export const WARRANTY_BRIDGE_NAME = '0148_bridge_authoritative_staff_warranty_lines.sql';
 
-export function assertWarrantyMigrationOrder(names) {
-  const versions = new Map();
-  for (const name of names) {
-    assert.match(name, /^\d{4}_.*\.sql$/, 'Unexpected migration filename');
-    const version = Number.parseInt(name, 10);
-    const matches = versions.get(version) ?? [];
-    matches.push(name);
-    versions.set(version, matches);
-  }
-  for (const [version, matches] of versions) {
-    if (matches.length === 1) continue;
-    // This exact duplicate pair predates the hotfix in committed dev. It is
-    // preserved, not certified as a deployable clean Supabase migration ledger.
-    assert.deepEqual(matches.slice().sort(), HISTORICAL_DUPLICATE_0029,
-      `Unexpected duplicate migration version ${version}; do not merge fixture histories into a release sequence`);
-  }
-  assert.deepEqual([...versions.keys()].sort((a, b) => a - b),
-    Array.from({ length: 122 }, (_, index) => index + 1),
-    'Expected current dev through 0121 and the sequential 0122 Warranty migration only');
-  assert.deepEqual(versions.get(122), [WARRANTY_MIGRATION_NAME],
-    'The next dev migration must uniquely be the Warranty change');
+// Validate the entire merged filename/hash inventory before selecting either
+// the canonical upstream hotfix characterization or final bridge acceptance.
+export function assertWarrantyMigrationOrder(sources) {
+  return validateMigrationInventory(sources);
 }
 
-export function warrantyMigrationSources(repo, stabilizationRef) {
+export function warrantyMigrationSources(repo, canonicalUpstream = false) {
   const sources = new Map(readdirSync(`${repo}/supabase/migrations`)
-    .filter(name => /^\d+.*\.sql$/.test(name))
+    .filter(name => name.endsWith('.sql'))
     .map(name => [name, readFileSync(`${repo}/supabase/migrations/${name}`, 'utf8')]));
-  assertWarrantyMigrationOrder([...sources.keys()]);
-  const base = [...sources].filter(([name]) => Number.parseInt(name, 10) <= 121)
-    .sort(([a], [b]) => a.localeCompare(b));
-  const warranty = [WARRANTY_MIGRATION_NAME, sources.get(WARRANTY_MIGRATION_NAME)];
-  const stabilization = [];
-  if (stabilizationRef) {
-    assert.match(stabilizationRef, /^[a-f0-9]{7,40}$/, 'Only an immutable local commit ID is accepted');
-    const tree = `${stabilizationRef}^3`;
-    const names = execFileSync('git', ['ls-tree', '-r', '--name-only', tree, '--', 'supabase/migrations'], {
-      cwd: repo, encoding: 'utf8',
-    }).trim().split('\n').filter(path => /\/01(?:2[2-9]|3[0-2])_.*\.sql$/.test(path));
-    names.sort();
-    assert.deepEqual(names.map(path => Number.parseInt(path.split('/').at(-1), 10)),
-      Array.from({ length: 11 }, (_, index) => index + 122),
-      'Expected exactly the preserved, uniquely numbered stabilization migrations 0122 through 0132');
-    for (const path of names) {
-      const name = path.split('/').at(-1);
-      const content = execFileSync('git', ['show', `${tree}:${path}`], { cwd: repo, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
-      stabilization.push([name, content]);
-    }
-  }
-  // These are distinct histories. Never combine/sort Warranty 0122 alongside
-  // stabilization 0122 and call that a valid migration/ledger installation.
-  // The optional fixture checks definitions through old 0132, then applies the
-  // Warranty SQL body in isolation. A future real merge needs resequencing of
-  // unapplied stabilization files and a post-financial-expansion forward bridge.
-  return { base, warranty, stabilization };
+  const ordered = assertWarrantyMigrationOrder(sources);
+  const target = canonicalUpstream ? WARRANTY_MIGRATION_NAME : WARRANTY_BRIDGE_NAME;
+  const maximum = canonicalUpstream ? 121 : 147;
+  const base = ordered.filter(name => Number.parseInt(name, 10) <= maximum).map(name => [name, sources.get(name)]);
+  return { base, warranty: [target, sources.get(target)], sources, canonicalUpstream };
 }
 
 export async function applyWarrantyFixtureMigration(db, name, source) {

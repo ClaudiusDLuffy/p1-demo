@@ -8,6 +8,7 @@ import { Input } from "../../components/ui/Input";
 import { Modal } from "../../components/ui/Modal";
 import { Sel } from "../../components/ui/Sel";
 import { TA } from "../../components/ui/TA";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import {
   convertContractorEstimateToInvoice,
   downloadContractorEstimateAttachment,
@@ -122,6 +123,13 @@ const editorFromEstimate = (estimate: ContractorEstimate): EditorState => ({
   attachments: estimate.attachments || [],
 });
 
+// Attachments are already independently committed, not an unsaved document
+// field. Dismissing the editor never claims to roll their mutations back.
+const estimateDraftSignature = (editor: EditorState | null) => editor ? JSON.stringify({
+  quoteDate: editor.quoteDate, validUntil: editor.validUntil, terms: editor.terms,
+  notes: editor.notes, salesTax: editor.salesTax, lines: editor.lines,
+}) : "";
+
 const statusStyle = (state: ContractorEstimateState) => {
   if (state === "converted") return { color: T.success, background: T.successSoft };
   if (state === "submitted") return { color: T.accent, background: T.accentSoft };
@@ -155,6 +163,7 @@ export default function ContractorEstimatePanel({
   const [templateBusy, setTemplateBusy] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState("");
   const [confirmAction, setConfirmAction] = useState<"submit" | "convert" | null>(null);
+  const [baseline, setBaseline] = useState("");
   const operationLock = useRef(false);
   const access = useMemo(() => ({
     isManager,
@@ -178,6 +187,10 @@ export default function ContractorEstimatePanel({
   const editable = editor
     ? canEditContractorEstimate({ state: editor.state }, access)
     : false;
+  const dismissal = useUnsavedChangesGuard({ enabled: Boolean(editor),
+    dirty: editable && estimateDraftSignature(editor) !== baseline,
+    busy: Boolean(busy || attachmentBusy),
+    onClose: () => { setEditor(null); setError(""); setConfirmAction(null); } });
 
   const invalidateEstimateWorkflow = async () => {
     await Promise.all([
@@ -198,7 +211,9 @@ export default function ContractorEstimatePanel({
   const openEstimate = (estimate: ContractorEstimate) => {
     setError("");
     setConfirmAction(null);
-    setEditor(editorFromEstimate(estimate));
+    const nextEditor = editorFromEstimate(estimate);
+    setBaseline(estimateDraftSignature(nextEditor));
+    setEditor(nextEditor);
   };
 
   const updateLine = (
@@ -416,7 +431,9 @@ export default function ContractorEstimatePanel({
               onClick={() => {
                 setError("");
                 setConfirmAction(null);
-                setEditor(emptyEditor());
+                const nextEditor = emptyEditor();
+                setBaseline(estimateDraftSignature(nextEditor));
+                setEditor(nextEditor);
               }}
               style={{ padding: "7px 12px", fontSize: 11 }}
             >+ New estimate</button>
@@ -514,12 +531,8 @@ export default function ContractorEstimatePanel({
           title={editor.quoteNum ? `Estimate #${editor.quoteNum}` : "Create estimate"}
           width={900}
           closeOnBackdrop={false}
-          onClose={() => {
-            if (busy || attachmentBusy) return;
-            setEditor(null);
-            setError("");
-            setConfirmAction(null);
-          }}
+          onRequestClose={dismissal.requestClose}
+          dismissDisabled={Boolean(busy || attachmentBusy)}
         >
           <style>{`
             .estimate-line-grid {
@@ -647,21 +660,21 @@ export default function ContractorEstimatePanel({
               <div className="estimate-line-grid" key={`${editor.id || "new"}-${index}`}>
                 <div>
                   <span className="estimate-mobile-label">Type</span>
-                  <Sel value={line.type} disabled={!editable} onChange={(event: { target: { value: string } }) => updateLine(index, { type: event.target.value as ContractorEstimateLineType })}>
+                  <Sel aria-label={`Estimate line ${index + 1} type`} value={line.type} disabled={!editable} onChange={(event: { target: { value: string } }) => updateLine(index, { type: event.target.value as ContractorEstimateLineType })}>
                     {CONTRACTOR_ESTIMATE_LINE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
                   </Sel>
                 </div>
                 <div className="estimate-line-description">
                   <span className="estimate-mobile-label">Description</span>
-                  <Input value={line.description} disabled={!editable} maxLength={CONTRACTOR_ESTIMATE_MAX_DESCRIPTION_LENGTH} onChange={event => updateLine(index, { description: event.target.value })} placeholder={line.type === "Truck Charge" ? "Optional" : "Required when submitted"} />
+                  <Input aria-label={`Estimate line ${index + 1} description`} value={line.description} disabled={!editable} maxLength={CONTRACTOR_ESTIMATE_MAX_DESCRIPTION_LENGTH} onChange={event => updateLine(index, { description: event.target.value })} placeholder={line.type === "Truck Charge" ? "Optional" : "Required when submitted"} />
                 </div>
                 <div>
                   <span className="estimate-mobile-label">Qty</span>
-                  <Input type="number" inputMode="decimal" min="0.01" step="0.01" value={line.qty} disabled={!editable} onChange={event => updateLine(index, { qty: event.target.value })} />
+                  <Input aria-label={`Estimate line ${index + 1} quantity`} type="number" inputMode="decimal" min="0.01" step="0.01" value={line.qty} disabled={!editable} onChange={event => updateLine(index, { qty: event.target.value })} />
                 </div>
                 <div>
                   <span className="estimate-mobile-label">Rate</span>
-                  <Input type="number" inputMode="decimal" min="0" step="0.01" value={line.rate} disabled={!editable} onChange={event => updateLine(index, { rate: event.target.value })} placeholder="0.00" />
+                  <Input aria-label={`Estimate line ${index + 1} rate`} type="number" inputMode="decimal" min="0" step="0.01" value={line.rate} disabled={!editable} onChange={event => updateLine(index, { rate: event.target.value })} placeholder="0.00" />
                 </div>
                 <div className="estimate-line-amount">
                   <span className="estimate-mobile-label">Amount</span>
@@ -677,7 +690,7 @@ export default function ContractorEstimatePanel({
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, color: T.muted }}><span>Subtotal</span><span className="mono">{fmt(totals?.subtotal || 0)}</span></div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", alignItems: "center", gap: 12 }}>
                 <span style={{ fontSize: 12, color: T.muted }}>Sales tax</span>
-                <Input type="number" inputMode="decimal" min="0" step="0.01" value={editor.salesTax} disabled={!editable} onChange={event => setEditor({ ...editor, salesTax: event.target.value })} placeholder="0.00" style={{ textAlign: "right" }} />
+                <Input aria-label="Estimate sales tax" type="number" inputMode="decimal" min="0" step="0.01" value={editor.salesTax} disabled={!editable} onChange={event => setEditor({ ...editor, salesTax: event.target.value })} placeholder="0.00" style={{ textAlign: "right" }} />
               </div>
               <div style={{ paddingTop: 9, borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14, fontWeight: 800, color: T.ink }}><span>Estimate total</span><span className="mono">{fmt(totals?.total || 0)}</span></div>
             </div>
@@ -708,7 +721,7 @@ export default function ContractorEstimatePanel({
               {editor.state === "draft" ? "Drafts and submitted estimates do not appear in invoice totals." : CONTRACTOR_ESTIMATE_STATE_LABELS[editor.state]}
             </div>
             <div className="estimate-footer-actions" style={{ display: "flex", gap: 8 }}>
-              <button type="button" className="btn-soft" disabled={Boolean(busy || attachmentBusy)} onClick={() => setEditor(null)}>{editable ? "Cancel" : "Close"}</button>
+              <button type="button" className="btn-soft" disabled={Boolean(busy || attachmentBusy)} onClick={() => dismissal.requestClose("cancel_button")}>{editable ? "Cancel" : "Close"}</button>
               {editable && (
                 <>
                   <button type="button" className="btn-soft" disabled={Boolean(busy || attachmentBusy)} onClick={() => void save(false)}>
@@ -729,6 +742,7 @@ export default function ContractorEstimatePanel({
           </div>
         </Modal>
       )}
+      {dismissal.dialog}
     </>
   );
 }

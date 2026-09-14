@@ -5,23 +5,29 @@ export const assignmentBoundaryPatch = (
   transition: {
     contractorId: string | null;
     assignmentVersion: number;
+    workflowCycle?: number;
+    lifecycleVersion?: number;
     assignmentStartedAt: string | null;
     dispatchedAt: string | null;
     status: string;
     functionalStatus: string | null;
     isCapital: boolean;
     capitalStatus: string | null;
+    receivingVisitRequired?: boolean;
   },
 ): Record<string, unknown> => {
   const patch: Record<string, unknown> = {
     contractor: transition.contractorId,
     contractorAssignmentVersion: transition.assignmentVersion,
+    ...(transition.workflowCycle !== undefined ? { workflowCycle: transition.workflowCycle } : {}),
+    ...(transition.lifecycleVersion !== undefined ? { lifecycleVersion: transition.lifecycleVersion } : {}),
     contractorAssignmentStartedAt: transition.assignmentStartedAt,
     dispatchedAt: transition.dispatchedAt,
     status: transition.status,
     functionalStatus: transition.functionalStatus,
     isCapital: transition.isCapital,
     capitalStatus: transition.capitalStatus,
+    ...(transition.receivingVisitRequired !== undefined ? { assignmentTransferPendingVisit: transition.receivingVisitRequired } : {}),
   };
 
   if (!workOrder.contractor) return patch;

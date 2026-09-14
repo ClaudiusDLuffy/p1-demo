@@ -40,5 +40,7 @@ test("store history is bounded and does not render without an exact store", () =
 test("authorized server totals can exceed the compact visible preview", () => {
   const rows = buildStoreWorkOrderHistory(current, [], 5);
   assert.equal(storeWorkOrderHistoryTotal(rows, 18), 18);
-  assert.equal(storeWorkOrderHistoryTotal(rows, Number.NaN), 1);
+  for (const unknown of [Number.NaN, null, undefined, -1, 1.5]) {
+    assert.equal(storeWorkOrderHistoryTotal(rows, unknown), null);
+  }
 });

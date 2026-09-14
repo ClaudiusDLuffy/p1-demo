@@ -1,24 +1,13 @@
-// SLA windows by 7-Eleven priority code. Two deadlines per priority:
-//   responseHours   — contractor must ARRIVE on site within this window
-//   resolutionHours — job must be RESOLVED within this window
-//
-// Numbers are seeded from samples we observed in real 7-Eleven dispatch
-// emails (P1 Critical: response ~2h, resolution 4h). Adjust once Jeremy
-// shares the official priority matrix.
+import { evaluateSla } from "./sla/evaluation";
+import { SLA_WINDOWS, type Priority } from "./sla/policy";
 
-export const SLA_WINDOWS = {
-  p1: { responseHours: 2,  resolutionHours: 4 },    // P1 Critical
-  p2: { responseHours: 4,  resolutionHours: 8 },    // P2 Emergency
-  p3: { responseHours: 24, resolutionHours: 48 },   // P3 Standard / Rush
-  p4: { responseHours: 48, resolutionHours: 72 },   // P4 Minor
-  p5: null,                                         // P5 Preventative / PM work has no SLA deadline
-} as const;
-
-export type Priority = keyof typeof SLA_WINDOWS;
+// Existing creation/escalation API; compatibility values are not an approved
+// contractual matrix. The single policy source documents their provenance.
+export { SLA_WINDOWS, type Priority } from "./sla/policy";
 
 export function computeSlaBreaches(priority: Priority, startedAt: Date) {
   const win = SLA_WINDOWS[priority];
-  if (!win) {
+  if (!win || !Number.isFinite(startedAt.getTime())) {
     return {
       responseBreachAt: null,
       resolutionBreachAt: null,
@@ -57,43 +46,28 @@ export function computeSlaState(
   responseMetAtIso: string | null = null,
   now: Date = new Date(),
 ): SlaState | null {
-  if (!responseBreachAtIso || !resolutionBreachAtIso) return null;
-  const responseBreachAt = new Date(responseBreachAtIso);
-  const resolutionBreachAt = new Date(resolutionBreachAtIso);
-  const responseRemainingHours = (responseBreachAt.getTime() - now.getTime()) / 3600000;
-  const resolutionRemainingHours = (resolutionBreachAt.getTime() - now.getTime()) / 3600000;
-  const responseMetAt = responseMetAtIso ? new Date(responseMetAtIso) : null;
-  const responseMet = !!responseMetAt && !Number.isNaN(responseMetAt.getTime());
-  const responseWasLate = responseMet
-    ? responseMetAt.getTime() > responseBreachAt.getTime()
-    : false;
-  // Once the contractor has checked in, the response obligation is complete.
-  // Keep responseWasLate for audit/display, but do not leave an active breach
-  // warning across the work order after work has started.
-  const responseBreached = !responseMet && responseRemainingHours <= 0;
-  const resolutionBreached = resolutionRemainingHours <= 0;
-  let headline: "response" | "resolution";
-  if (responseMet) headline = "resolution";
-  else if (responseBreached && !resolutionBreached) headline = "resolution";
-  else if (responseBreached && resolutionBreached) headline = "resolution";
-  else headline = responseRemainingHours <= resolutionRemainingHours ? "response" : "resolution";
+  const state = evaluateSla({ responseBreachAt: responseBreachAtIso, resolutionBreachAt: resolutionBreachAtIso, startTimeRaw: responseMetAtIso }, now);
+  if (state.responseTime === null || state.resolutionTime === null
+    || state.responseRemainingHours === null || state.resolutionRemainingHours === null
+    || state.remainingHours === null || (state.headline !== "response" && state.headline !== "resolution")) return null;
   return {
-    responseRemainingHours,
-    resolutionRemainingHours,
-    responseBreached,
-    responseMet,
-    responseMetAt: responseMet ? responseMetAt : null,
-    responseWasLate,
-    resolutionBreached,
-    responseBreachAt,
-    resolutionBreachAt,
-    headline,
-    headlineRemainingHours: headline === "response" ? responseRemainingHours : resolutionRemainingHours,
+    responseRemainingHours: state.responseRemainingHours,
+    resolutionRemainingHours: state.resolutionRemainingHours,
+    responseBreached: state.responseBreached,
+    responseMet: state.responseMet,
+    responseMetAt: state.responseMetTime === null ? null : new Date(state.responseMetTime),
+    responseWasLate: state.responseWasLate,
+    resolutionBreached: state.resolutionBreached,
+    responseBreachAt: new Date(state.responseTime),
+    resolutionBreachAt: new Date(state.resolutionTime),
+    headline: state.headline,
+    headlineRemainingHours: state.remainingHours,
   };
 }
 
 // Format a remaining-hours value into a tight, glanceable countdown.
 export function formatRemaining(hours: number): string {
+  if (!Number.isFinite(hours)) return "Not set";
   if (hours <= 0) {
     const past = -hours;
     if (past < 1) return `${Math.round(past * 60)}m past`;

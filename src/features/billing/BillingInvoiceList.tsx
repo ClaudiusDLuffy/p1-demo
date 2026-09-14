@@ -13,10 +13,10 @@ import {
 } from "../../lib/invoiceSort";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import { useCursorBuckets } from "../../lib/useCursorPagination";
-import { useInvoicesPageQuery } from "../invoices/queries";
-import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import { useInvoicesCountQuery, useInvoicesPageQuery } from "../invoices/queries";
+import { useWorkOrdersCountQuery, useWorkOrdersPageQuery } from "../work-orders/queries";
 import BillingTaxRulePanel from "./BillingTaxRulePanel";
-import { useBillingInvoicePageQuery } from "./queries";
+import { useBillingInvoiceCountQuery, useBillingInvoicePageQuery } from "./queries";
 
 type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
 
@@ -28,6 +28,10 @@ const BILLING_PAGE_KEYS = [
   "sent",
   "recently_approved",
 ] as const;
+
+const countLabel = (query: { data?: { totalCount: number }; isError: boolean }) =>
+  query.data === undefined ? "—" : `${query.data.totalCount}${query.isError ? " (stale)" : ""}`;
+const countFreshness = "Exact when fetched; informational totals are cached for up to 30 seconds. Refresh for current data.";
 
 function BillingDocumentBadge({ invoice }: { invoice: any }) {
   if (invoice.documentKind === "capital_quote") {
@@ -133,9 +137,9 @@ function BillingInvoiceRows({
                         P1 portal reassignment: {invoice.wot}
                       </div>
                     )}
-                    {(invoice.sourceInvoices || []).length > 0 && (
+                    {(invoice.sourceCount ?? (invoice.sourceInvoices || []).length) > 0 && (
                       <div style={{ fontSize: 10, color: T.subtle, marginTop: 3 }}>
-                        {invoice.sourceInvoices.length} contractor invoice{invoice.sourceInvoices.length === 1 ? "" : "s"}
+                        {invoice.sourceCount ?? invoice.sourceInvoices?.length} contractor invoice{(invoice.sourceCount ?? invoice.sourceInvoices?.length) === 1 ? "" : "s"}
                       </div>
                     )}
                   </td>
@@ -264,15 +268,22 @@ export default function BillingInvoiceList(props: any) {
     next: nextBucketPage,
   } = useCursorBuckets(pagingSignature, BILLING_PAGE_KEYS);
   const queryEnabled = page === "billing";
-  const allQuery = useBillingInvoicePageQuery({ queue: "all", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.all.cursor }, queryEnabled);
-  const draftQuery = useBillingInvoicePageQuery({ queue: "draft", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.draft.cursor }, queryEnabled);
-  const submittedQuery = useBillingInvoicePageQuery({ queue: "submitted", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.submitted.cursor }, queryEnabled);
-  const sentQuery = useBillingInvoicePageQuery({ queue: "sent", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.sent.cursor }, queryEnabled);
-  const approvedQuery = useInvoicesPageQuery({ state: "approved", search: deferredSearch, sort: contractorSort, direction: sortDirection, limit: 20, cursor: positions.recently_approved.cursor }, queryEnabled);
+  const allQuery = useBillingInvoicePageQuery({ queue: "all", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.all.cursor }, queryEnabled && expanded.all !== false);
+  const draftQuery = useBillingInvoicePageQuery({ queue: "draft", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.draft.cursor }, queryEnabled && expanded.draft !== false);
+  const submittedQuery = useBillingInvoicePageQuery({ queue: "submitted", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.submitted.cursor }, queryEnabled && expanded.submitted !== false);
+  const sentQuery = useBillingInvoicePageQuery({ queue: "sent", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.sent.cursor }, queryEnabled && expanded.sent !== false);
+  const approvedQuery = useInvoicesPageQuery({ state: "approved", search: deferredSearch, sort: contractorSort, direction: sortDirection, limit: 20, cursor: positions.recently_approved.cursor }, queryEnabled && expanded.recently_approved !== false, currentUser, { countEnabled: false });
+  // Collapsed headers show totals, but never load their invoice rows/lines.
+  const allCount = useBillingInvoiceCountQuery({ queue: "all", search: deferredSearch }, queryEnabled);
+  const draftCount = useBillingInvoiceCountQuery({ queue: "draft", search: deferredSearch }, queryEnabled);
+  const submittedCount = useBillingInvoiceCountQuery({ queue: "submitted", search: deferredSearch }, queryEnabled);
+  const sentCount = useBillingInvoiceCountQuery({ queue: "sent", search: deferredSearch }, queryEnabled);
+  const approvedCount = useInvoicesCountQuery({ state: "approved", search: deferredSearch }, queryEnabled, currentUser);
   const readySortColumn = sortKey === "work_order" || sortKey === "store" || sortKey === "status"
     ? sortKey
     : "created";
-  const readyQuery = useWorkOrdersPageQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn, tableSortDirection: sortDirection, limit: 20, cursor: positions.ready.cursor }, queryEnabled && !controller);
+  const readyQuery = useWorkOrdersPageQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn, tableSortDirection: sortDirection, limit: 20, cursor: positions.ready.cursor }, queryEnabled && !controller && expanded.ready !== false, currentUser, { countEnabled: false });
+  const readyCount = useWorkOrdersCountQuery({ scope: "ready_to_bill", search: deferredSearch, sort: "newest", tableSortColumn: readySortColumn }, queryEnabled && !controller, currentUser);
 
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, any>();
@@ -288,12 +299,12 @@ export default function BillingInvoiceList(props: any) {
   }, [approvedQuery.data?.items, invoices]);
 
   const buckets = useMemo(() => [
-    { id: "all", label: "All", description: "P1 billing documents still being prepared or waiting to be sent.", color: "#2563EB", kind: "staff", query: allQuery },
-    { id: "draft", label: "Drafts", description: "Billing documents that still need to be completed.", color: "#6B7280", kind: "staff", query: draftQuery },
-    { id: "submitted", label: "Please send to 7-Eleven", description: "Completed billing documents waiting for the 7-Eleven submission step.", color: "#B8478A", kind: "staff", query: submittedQuery },
-    { id: "sent", label: "Sent to 7-Eleven", description: "Finished submissions, retained here without cluttering All.", color: "#2F7D4A", kind: "staff", query: sentQuery },
-    { id: "recently_approved", label: "Recently Approved", description: "Approved contractor invoices available as sources for P1 billing.", color: "#B86B32", kind: "contractor", query: approvedQuery },
-  ], [allQuery, approvedQuery, draftQuery, sentQuery, submittedQuery]);
+    { id: "all", label: "All", description: "P1 billing documents still being prepared or waiting to be sent.", color: "#2563EB", kind: "staff", query: allQuery, count: allCount },
+    { id: "draft", label: "Drafts", description: "Billing documents that still need to be completed.", color: "#6B7280", kind: "staff", query: draftQuery, count: draftCount },
+    { id: "submitted", label: "Please send to 7-Eleven", description: "Completed billing documents waiting for the 7-Eleven submission step.", color: "#B8478A", kind: "staff", query: submittedQuery, count: submittedCount },
+    { id: "sent", label: "Sent to 7-Eleven", description: "Finished submissions, retained here without cluttering All.", color: "#2F7D4A", kind: "staff", query: sentQuery, count: sentCount },
+    { id: "recently_approved", label: "Recently Approved", description: "Approved contractor invoices available as sources for P1 billing.", color: "#B86B32", kind: "contractor", query: approvedQuery, count: approvedCount },
+  ], [allQuery, approvedQuery, draftQuery, sentQuery, submittedQuery, allCount, approvedCount, draftCount, sentCount, submittedCount]);
   const visibleReadyWorkOrders = useMemo(() => {
     const localById = new Map<string, any>(readyWorkOrders.map((workOrder: any) => [workOrder.id, workOrder]));
     const finalInvoiceByWorkOrder = new Map<string, any>();
@@ -380,7 +391,7 @@ export default function BillingInvoiceList(props: any) {
       <BillingTaxRulePanel enabled={!controller} fire={fire} />
 
       <div style={{ display: "grid", gap: 12 }}>
-        {!controller && (readyQuery.isPending || (readyQuery.data?.totalCount || 0) > 0 || Boolean(deferredSearch)) && (
+        {!controller && (readyCount.data === undefined || readyCount.data.totalCount > 0 || visibleReadyWorkOrders.length > 0 || Boolean(deferredSearch)) && (
           <article className="card" style={{ overflow: "hidden" }}>
             <button
               type="button"
@@ -396,8 +407,8 @@ export default function BillingInvoiceList(props: any) {
                   <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3 }}>Every work order pending 7-Eleven submission, including legacy rows.</span>
                 </span>
               </span>
-              <span style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: T.accentSoft, color: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
-                {readyQuery.data?.totalCount || 0}
+              <span title={countFreshness} style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: T.accentSoft, color: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
+                {countLabel(readyCount)}
               </span>
             </button>
             {expanded.ready !== false && (
@@ -450,7 +461,7 @@ export default function BillingInvoiceList(props: any) {
                 )}
                 <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 10, color: T.subtle }}>
-                    {readyQuery.isFetching ? "Loading..." : `${readyQuery.data?.totalCount || 0} work order${readyQuery.data?.totalCount === 1 ? "" : "s"} · page ${positions.ready.page}`}
+                    {readyQuery.isFetching ? "Loading..." : `${countLabel(readyCount)} work orders · page ${positions.ready.page}`}
                   </span>
                   <div style={{ display: "flex", gap: 7 }}>
                     <button type="button" className="btn-soft" disabled={positions.ready.page <= 1 || readyQuery.isFetching} onClick={() => previousBucketPage("ready")} style={{ padding: "6px 9px", fontSize: 10 }}>Previous</button>
@@ -472,7 +483,7 @@ export default function BillingInvoiceList(props: any) {
           const isExpanded = expanded[bucket.id] !== false;
           const contractorBucket = bucket.kind === "contractor";
           const invoiceRows = bucket.query.data?.items || [];
-          const totalCount = bucket.query.data?.totalCount || 0;
+          const totalCount = countLabel(bucket.count);
           const position = positions[bucketId];
           return (
             <article key={bucket.id} className="card" style={{ overflow: "hidden" }}>
@@ -490,7 +501,7 @@ export default function BillingInvoiceList(props: any) {
                     <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3 }}>{bucket.description}</span>
                   </span>
                 </span>
-                <span style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: `${bucket.color}18`, color: bucket.color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
+                <span title={countFreshness} style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: `${bucket.color}18`, color: bucket.color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
                   {totalCount}
                 </span>
               </button>
@@ -510,7 +521,7 @@ export default function BillingInvoiceList(props: any) {
                   />
                   <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 10, color: T.subtle }}>
-                      {bucket.query.isFetching ? "Loading..." : `${totalCount} record${totalCount === 1 ? "" : "s"} · page ${position.page}`}
+                      {bucket.query.isFetching ? "Loading..." : `${totalCount} records · page ${position.page}`}
                     </span>
                     <div style={{ display: "flex", gap: 7 }}>
                       <button

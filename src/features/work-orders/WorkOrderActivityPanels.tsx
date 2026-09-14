@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
+import { isReservedLifecycleEvent } from "../../lib/workOrderLifecycleContracts";
 
 export type WorkOrderActivityChannel =
   | "field_note"
@@ -25,6 +26,7 @@ export type WorkOrderActivity = {
   isStaffOverride?: boolean;
   requiresContractorAttention?: boolean;
   contractorAcknowledgedAt?: string | null;
+  eventKey?: string | null;
 };
 
 type ActivityViewer = {
@@ -103,12 +105,13 @@ function ActivityEntryList({
     const activityChannel = channelForWorkOrderActivity(activity);
     const canDelete = !readOnly
       && !!activity.id
+      && !isReservedLifecycleEvent(activity.eventKey)
       && activityChannel !== "system_event"
       && activity.type !== "system"
       && !!activity.authorId
       && (isManager || activity.authorId === currentUser?.id);
     const menuOpen = activityMenuId === activity.id;
-    const staffEntered = ["manager", "dispatcher", "back_office"].includes(activity.enteredByRole);
+    const staffEntered = ["manager", "dispatcher", "back_office"].includes(activity.enteredByRole || "");
     const originLabel = activity.isStaffOverride
       ? "Staff override"
       : staffEntered
@@ -182,7 +185,7 @@ function ActivityEntryList({
                 type="checkbox"
                 checked={!!activity.syncedToSevenElevenAt}
                 disabled={isLoading("sync711_" + activity.id)}
-                onChange={event => doMarkSevenElevenSynced(workOrderId, activity.id, event.target.checked)}
+                onChange={event => { if (activity.id) doMarkSevenElevenSynced(workOrderId, activity.id, event.target.checked); }}
                 style={{ width: 14, height: 14, accentColor: T.success, cursor: "inherit" }}
               />
               {activity.syncedToSevenElevenAt ? "Updated in 7-Eleven" : "Needs 7-Eleven update"}
@@ -197,7 +200,7 @@ function ActivityEntryList({
                   type="checkbox"
                   checked={!!activity.requiresContractorAttention}
                   disabled={isLoading("contractorAttention_" + activity.id)}
-                  onChange={event => doMarkContractorAttention(workOrderId, activity.id, event.target.checked)}
+                  onChange={event => { if (activity.id) doMarkContractorAttention(workOrderId, activity.id, event.target.checked); }}
                   style={{ width: 14, height: 14, accentColor: "#16A34A", cursor: "inherit" }}
                 />
                 {activity.contractorAcknowledgedAt
@@ -213,7 +216,7 @@ function ActivityEntryList({
                 type="checkbox"
                 checked={!!activity.contractorAcknowledgedAt}
                 disabled={!!activity.contractorAcknowledgedAt || isLoading("contractorAck_" + activity.id)}
-                onChange={event => doAcknowledgeContractorAttention(workOrderId, activity.id, event.target.checked)}
+                onChange={event => { if (activity.id) doAcknowledgeContractorAttention(workOrderId, activity.id, event.target.checked); }}
                 style={{ width: 14, height: 14, accentColor: "#16A34A", cursor: "inherit" }}
               />
               {activity.contractorAcknowledgedAt ? "Reviewed" : "Needs your attention"}
@@ -224,7 +227,7 @@ function ActivityEntryList({
           <div style={{ position: "relative", flexShrink: 0 }}>
             <button
               type="button"
-              onClick={() => setActivityMenuId(menuOpen ? null : activity.id)}
+              onClick={() => setActivityMenuId(menuOpen ? null : activity.id || null)}
               aria-label="Activity actions"
               style={{ width: 36, height: 36, padding: 0, borderRadius: 6, border: "none", background: menuOpen ? T.bgWarm : "transparent", color: T.subtle, cursor: "pointer", fontSize: 16, lineHeight: 1, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" }}
             >…</button>
@@ -235,6 +238,7 @@ function ActivityEntryList({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!activity.id) return;
                       setActivityMenuId(null);
                       setPendingDelete({ woId: workOrderId, activityId: activity.id });
                       setModal("deleteActivity");
@@ -535,7 +539,7 @@ export default function WorkOrderActivityPanels({
         >
           {loadingMore
             ? <><BtnSpinnerDark />Loading activity...</>
-            : `Load older activity (${activities.length} of ${totalCount ?? activities.length})`}
+            : `Load older activity (${activities.length} loaded${totalCount == null ? "" : ` of ${totalCount} at last refresh`})`}
         </button>
       )}
     </section>

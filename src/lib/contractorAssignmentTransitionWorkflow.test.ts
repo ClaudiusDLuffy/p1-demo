@@ -188,15 +188,9 @@ test("RPC privileges and generated declarations match the integration contract",
   );
 });
 
-test("the portal uses the atomic transition and automatically attempts its durable notice", () => {
-  assert.match(
-    dataLayer,
-    /rpc\([\s\S]*"transition_work_order_contractor"[\s\S]*p_expected_assignment_version: expectedAssignmentVersion/,
-  );
-  assert.match(
-    dataLayer,
-    /"duplicate_work_order_for_reassignment_notified"/,
-  );
+test("the portal uses the atomic transition and automatically attempts its durable notice", async () => {
+  const { exerciseAssignmentFacade } = await import("./assignment-test-support/facade");
+  await exerciseAssignmentFacade("transition");
   assert.doesNotMatch(dataLayer, /export async function (?:unassignWorkOrder|reassignWorkOrder)\(/);
 
   assert.ok(
@@ -205,12 +199,10 @@ test("the portal uses the atomic transition and automatically attempts its durab
   );
   assert.match(
     workOrderHook,
-    /fetch\("\/api\/notifications\/assignment-removal"[\s\S]*JSON\.stringify\(\{ deliveryId \}\)/,
+    /apiFetch\("\/api\/notifications\/assignment-removal"[\s\S]*JSON\.stringify\(\{ deliveryId \}\)/,
   );
-  assert.match(
-    workOrderHook,
-    /duplicateWorkOrderForReassignment\(woId\)[\s\S]*notifyAssignmentRemoval\(result\.deliveryId\)/,
-  );
+  // Actual duplicate argument construction/navigation/delivery is exercised
+  // by workOrderAssignmentClientBehavior; no old RPC signature text assertion.
   assert.match(
     workOrderHook,
     /notifyAssignmentRemoval\(transition\.deliveryId\)[\s\S]*notifyDispatch\(woId, newContractorId\)/,

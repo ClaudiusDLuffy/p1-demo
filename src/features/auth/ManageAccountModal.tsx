@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import { useState } from "react";
+import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import dynamic from "next/dynamic";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -32,7 +33,7 @@ export default function ManageAccountModal(props: any) {
     register,
     handleSubmit,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<ChangePasswordForm>({
     resolver: zodResolver(ChangePasswordSchema),
     defaultValues: {
@@ -40,6 +41,11 @@ export default function ManageAccountModal(props: any) {
       confirm: "",
     },
   });
+  const dismissal = useUnsavedChangesGuard({ dirty: showPasswordForm && isDirty, busy: isSubmitting,
+    onClose: reason => {
+      reset(); setSubmitError(null); setShowPasswordForm(false);
+      if (reason !== "cancel_button") onClose();
+    } });
 
   const rows = [
     ["Name", currentUser.name],
@@ -62,7 +68,8 @@ export default function ManageAccountModal(props: any) {
   };
 
   return (
-    <Modal onClose={onClose} title="Manage Account" width={440}>
+    <Modal onRequestClose={dismissal.requestClose} dismissDisabled={isSubmitting} title="Manage Account" width={440}>
+      {dismissal.dialog}
       <div style={{ display: "grid", gap: 18 }}>
         <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, background: T.surfaceSoft, overflow: "hidden" }}>
           {rows.map(([label, value], i) => (
@@ -82,18 +89,16 @@ export default function ManageAccountModal(props: any) {
           ) : (
             <form onSubmit={handleSubmit(onSubmit)}>
               <div style={{ display: "grid", gap: 14 }}>
-                <Field label="New password">
+                <Field label="New password" required error={errors.password?.message}>
                   <Input type="password" {...register("password")} />
-                  {errors.password && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.password.message}</span>}
                 </Field>
-                <Field label="Confirm new password">
+                <Field label="Confirm new password" required error={errors.confirm?.message}>
                   <Input type="password" {...register("confirm")} />
-                  {errors.confirm && <span style={{ fontSize: 11, color: T.danger, marginTop: 4 }}>{errors.confirm.message}</span>}
                 </Field>
               </div>
               {submitError && <div style={{ fontSize: 12, color: T.danger, marginTop: 14 }}>{submitError}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "center" }}>
-                <button type="button" onClick={() => { reset(); setSubmitError(null); setShowPasswordForm(false); }} className="btn-soft">Cancel</button>
+                <button type="button" disabled={isSubmitting} onClick={() => dismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="btn-primary" style={{ opacity: isSubmitting ? 0.6 : 1 }}>{isSubmitting ? "Saving..." : "Save"}</button>
               </div>
             </form>

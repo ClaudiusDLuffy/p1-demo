@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase/client";
 import type { Database } from "../../lib/supabase/database.types";
 import type { StaffNotificationRead, StaffWorkTodo } from "./workQueue";
+import { useDirectoryActor } from "../directory/queries";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
 
 export const STAFF_WORK_TODOS_KEY = ["staff-work-todos"] as const;
 export const STAFF_NOTIFICATION_READS_KEY = ["staff-notification-reads"] as const;
@@ -47,20 +49,22 @@ export async function loadStaffNotificationReads(): Promise<StaffNotificationRea
 }
 
 export function useStaffWorkTodosQuery(enabled = true) {
+  const actor = useDirectoryActor();
   return useQuery({
-    queryKey: STAFF_WORK_TODOS_KEY,
+    queryKey: [...STAFF_WORK_TODOS_KEY, directoryActorScope(actor)],
     queryFn: loadStaffWorkTodos,
     staleTime: 15_000,
-    enabled,
+    enabled: enabled && actor?.active === true,
   });
 }
 
 export function useStaffNotificationReadsQuery(enabled = true) {
+  const actor = useDirectoryActor();
   return useQuery({
-    queryKey: STAFF_NOTIFICATION_READS_KEY,
+    queryKey: [...STAFF_NOTIFICATION_READS_KEY, directoryActorScope(actor)],
     queryFn: loadStaffNotificationReads,
     staleTime: 15_000,
-    enabled,
+    enabled: enabled && actor?.active === true,
   });
 }
 

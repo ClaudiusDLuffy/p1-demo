@@ -1,3 +1,15 @@
+import { createApiMethodBoundary } from "../../../../lib/server/apiMethodBoundary";
+
+const apiMethodBoundary = createApiMethodBoundary("/api/quickbooks/connection", ["GET", "DELETE"]);
+export const POST = apiMethodBoundary.methodNotAllowed;
+export const PUT = apiMethodBoundary.methodNotAllowed;
+export const PATCH = apiMethodBoundary.methodNotAllowed;
+export const OPTIONS = apiMethodBoundary.OPTIONS;
+
+import { legacyErrorResponse } from "../../../../lib/errors/legacyResponse";
+import { runRequestOperation } from "../../../../lib/server/requestOperation";
+import { createRequestContext } from "../../../../lib/observability/requestContext";
+import { errorResponse, finalizeApiResponse } from "../../../../lib/errors/httpBoundary";
 import { randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -16,11 +28,7 @@ import {
 
 export const runtime = "nodejs";
 
-const jsonError = (message: string, status: number) =>
-  NextResponse.json({ error: message }, {
-    status,
-    headers: { "Cache-Control": "no-store" },
-  });
+const jsonError = legacyErrorResponse;
 
 const authorize = async (request: NextRequest) => {
   const auth = await requireStaffRequest(request, { allowInvoiceController: true });
@@ -46,11 +54,14 @@ const sandboxConfiguration = () => {
 };
 
 export async function GET(request: NextRequest) {
+  const context = createRequestContext(request, "/api/quickbooks/connection");
+  try {
+    return await runRequestOperation(context, async () => {
   const auth = await authorize(request);
-  if ("error" in auth) return auth.error;
+  if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
 
   const { configuration, error: environmentError } = sandboxConfiguration();
-  if (environmentError) return environmentError;
+  if (environmentError) return await finalizeApiResponse(await environmentError, context);
 
   const { data: connection, error } = await auth.sb
     .from("quickbooks_connections")
@@ -58,7 +69,7 @@ export async function GET(request: NextRequest) {
     .eq("environment", "sandbox")
     .in("status", ["active", "disconnecting"])
     .maybeSingle();
-  if (error) return jsonError("QuickBooks connection status could not be loaded", 500);
+  if (error) return await finalizeApiResponse(await jsonError("QuickBooks connection status could not be loaded", 500), context);
 
   const refreshExpiry = connection?.refresh_token_expires_at
     ? new Date(connection.refresh_token_expires_at).getTime()
@@ -75,7 +86,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({
+  return await finalizeApiResponse(await NextResponse.json({
     environment: "sandbox",
     configured: configuration.configured,
     configurationError: configuration.error,
@@ -95,7 +106,10 @@ export async function GET(request: NextRequest) {
     billWritesEnabled: false,
   }, {
     headers: { "Cache-Control": "no-store" },
-  });
+  }), context);
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }
 
 type DisconnectClaim = {
@@ -113,11 +127,14 @@ type DisconnectClaim = {
 };
 
 export async function DELETE(request: NextRequest) {
+  const context = createRequestContext(request, "/api/quickbooks/connection");
+  try {
+    return await runRequestOperation(context, async () => {
   const auth = await authorize(request);
-  if ("error" in auth) return auth.error;
+  if ("error" in auth) return await finalizeApiResponse(await auth.error, context);
 
   const { configuration, error: environmentError } = sandboxConfiguration();
-  if (environmentError) return environmentError;
+  if (environmentError) return await finalizeApiResponse(await environmentError, context);
 
   const { data: connection, error } = await auth.sb
     .from("quickbooks_connections")
@@ -125,13 +142,13 @@ export async function DELETE(request: NextRequest) {
     .eq("environment", "sandbox")
     .in("status", ["active", "disconnecting"])
     .maybeSingle();
-  if (error) return jsonError("QuickBooks connection could not be loaded", 500);
+  if (error) return await finalizeApiResponse(await jsonError("QuickBooks connection could not be loaded", 500), context);
   // DELETE is idempotent. This also recovers cleanly when Intuit revocation and
   // the final database transaction succeeded but the HTTP response was lost.
   if (!connection) {
-    return NextResponse.json({ disconnected: true }, {
+    return await finalizeApiResponse(await NextResponse.json({ disconnected: true }, {
       headers: { "Cache-Control": "no-store" },
-    });
+    }), context);
   }
 
   const requestedClaimId = randomUUID();
@@ -145,25 +162,25 @@ export async function DELETE(request: NextRequest) {
     },
   );
   if (claimError) {
-    return jsonError(
+    return await finalizeApiResponse(await jsonError(
       claimError.code === "PT409"
         ? "QuickBooks connection changed; refresh before disconnecting"
         : "QuickBooks disconnect could not be claimed safely",
       claimError.code === "PT409" ? 409 : 500,
-    );
+    ), context);
   }
 
   const claim = (claimData || {}) as DisconnectClaim;
   if (claim.alreadyDisconnected) {
-    return NextResponse.json({ disconnected: true }, {
+    return await finalizeApiResponse(await NextResponse.json({ disconnected: true }, {
       headers: { "Cache-Control": "no-store" },
-    });
+    }), context);
   }
   if (claim.inProgress) {
     const retryAfter = Number.isSafeInteger(claim.retryAfterSeconds)
       ? Math.max(1, claim.retryAfterSeconds!)
       : 60;
-    return NextResponse.json({
+    return await finalizeApiResponse(await NextResponse.json({
       error: "QuickBooks disconnect is already in progress; retry shortly",
     }, {
       status: 409,
@@ -171,7 +188,7 @@ export async function DELETE(request: NextRequest) {
         "Cache-Control": "no-store",
         "Retry-After": String(retryAfter),
       },
-    });
+    }), context);
   }
   if (
     claim.connectionId !== connection.id
@@ -182,7 +199,7 @@ export async function DELETE(request: NextRequest) {
     || !claim.tokenKeyFingerprint
     || !claim.claimId
   ) {
-    return jsonError("QuickBooks disconnect claim was incomplete", 500);
+    return await finalizeApiResponse(await jsonError("QuickBooks disconnect claim was incomplete", 500), context);
   }
 
   const releasePreflightClaim = async () => {
@@ -220,12 +237,12 @@ export async function DELETE(request: NextRequest) {
   } else {
     if (!configuration.configured) {
       const released = await releasePreflightClaim();
-      return jsonError(
+      return await finalizeApiResponse(await jsonError(
         released
           ? "QuickBooks configuration must be restored before authorization can be revoked safely"
           : "QuickBooks disconnect is locked for safe recovery; restore the server configuration and retry",
         409,
-      );
+      ), context);
     }
 
     let config;
@@ -243,12 +260,12 @@ export async function DELETE(request: NextRequest) {
       );
     } catch {
       const released = await releasePreflightClaim();
-      return jsonError(
+      return await finalizeApiResponse(await jsonError(
         released
           ? "The stored QuickBooks encryption key is unavailable or does not match"
           : "QuickBooks disconnect is locked for safe recovery; restore the stored encryption key and retry",
         409,
-      );
+      ), context);
     }
 
     try {
@@ -257,10 +274,10 @@ export async function DELETE(request: NextRequest) {
       // Do not release the claim after an external request: a network failure can
       // mean Intuit processed the revocation but the response was lost. Keeping
       // the claim blocks reconnects and makes a later DELETE safely resume it.
-      return jsonError(
+      return await finalizeApiResponse(await jsonError(
         "QuickBooks revocation could not be confirmed. The connection is locked safely; retry disconnect.",
         502,
-      );
+      ), context);
     }
   }
 
@@ -282,13 +299,16 @@ export async function DELETE(request: NextRequest) {
     }
   }
   if (!finalized) {
-    return jsonError(
+    return await finalizeApiResponse(await jsonError(
       "Intuit access was revoked, but local cleanup is pending. Retry disconnect to finish safely.",
       502,
-    );
+    ), context);
   }
 
-  return NextResponse.json({ disconnected: true }, {
+  return await finalizeApiResponse(await NextResponse.json({ disconnected: true }, {
     headers: { "Cache-Control": "no-store" },
-  });
+  }), context);
+
+    });
+  } catch (boundaryError: unknown) { return errorResponse(boundaryError, context); }
 }

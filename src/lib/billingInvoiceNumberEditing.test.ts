@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { StaffInvoiceSaveSchema } from "./staffInvoiceContracts";
+import { billingRouteHarness, validBillingRequest } from "./billingFinancialRouteTestHarness";
 
 const modal = readFileSync(
   resolve(process.cwd(), "src/features/billing/BillingInvoiceCreateModal.tsx"),
-  "utf8",
-);
-const route = readFileSync(
-  resolve(process.cwd(), "src/app/api/billing-invoices/route.ts"),
   "utf8",
 );
 const atomicSaveMigration = readFileSync(
@@ -58,28 +56,31 @@ test("staff invoice allocation reconciles counters with persisted numbers", () =
 });
 
 test("the server validates the requested number and preserves lifecycle locks", () => {
-  assert.match(route, /const suppliedNum = String\(body\.num \|\| ""\)\.trim\(\)/);
-  assert.match(route, /const requestedNum = userTypedNum[\s\S]*?suppliedNum[\s\S]*?nextStaffInvoiceNum\(auth\.sb, auth\.user\.id\)/);
-  assert.match(route, /const userTypedNum = !!body\.userTypedNum && Boolean\(suppliedNum\)/);
-  assert.match(route, /const desiredNum = String\(body\.num \|\| ""\)\.trim\(\)/);
-  assert.match(route, /Invoice number is invalid/);
-  assert.match(route, /!\["draft", "submitted"\]\.includes\(existing\.state\)/);
-  assert.match(route, /existing\.qbo_invoice_id \|\| existing\.qbo_synced_at/);
-  assert.match(route, /error\?\.code !== "23505"/);
+  for (const num of ["x".repeat(81), `INV${String.fromCharCode(0)}BAD`, `INV${String.fromCharCode(10)}BAD`]) {
+    assert.equal(StaffInvoiceSaveSchema.safeParse({ ...validBillingRequest(), num }).success, false);
+  }
+  assert.equal(StaffInvoiceSaveSchema.safeParse({ ...validBillingRequest(), userTypedNum: "false" }).success, false);
   assert.match(atomicSaveMigration, /v_existing\.state not in \('draft', 'submitted'\)/);
   assert.match(atomicSaveMigration, /v_existing\.qbo_invoice_id is not null/);
 });
-
-test("quote conversion can atomically allocate a staff invoice number", () => {
-  assert.match(route, /\.rpc\("next_staff_invoice_num", \{ p_actor_id: actorId \}\)/);
-  assert.doesNotMatch(route, /if \(!requestedNum\) return jsonError\("Invoice number is required"/);
-  assert.match(route, /const tax = await resolveTax[\s\S]*?const requestedNum = userTypedNum/);
+test("quote conversion delegates number allocation inside the atomic financial save", async () => {
+  const h = billingRouteHarness();
+  const response = await h.handlers.POST(h.request("POST", { ...validBillingRequest(), num: "", userTypedNum: false }));
+  assert.equal(response.status, 200);
+  const saves = h.calls.filter(call => call.name === "rpc:save_staff_billing_invoice_v4");
+  assert.equal(saves.length, 1);
+  assert.ok(!h.calls.some(call => call.name === "rpc:next_staff_invoice_num"));
+  const args = saves[0].payload as { p_payload: { userTypedNum: boolean; num: string } };
+  assert.equal(args.p_payload.userTypedNum, false);
+  assert.equal(args.p_payload.num, "");
 });
-
-test("new invoices preserve an edited number and only auto-retry untouched suggestions", () => {
-  assert.match(route, /let desiredNum = requestedNum/);
-  assert.match(route, /error\?\.code !== "23505" \|\| userTypedNum/);
-  assert.match(route, /Invoice number \$\{desiredNum\} already exists/);
+test("edited invoice numbers are preserved and number conflicts are not retried outside the transaction", async () => {
+  const h = billingRouteHarness({ commandError: { code: "23505", message: "Synthetic duplicate number" } });
+  const response = await h.handlers.POST(h.request("POST", { ...validBillingRequest(), num: "MANUAL-123", userTypedNum: true }));
+  assert.equal(response.status, 409);
+  const saves = h.calls.filter(call => call.name === "rpc:save_staff_billing_invoice_v4");
+  assert.equal(saves.length, 1);
+  assert.equal((saves[0].payload as { p_payload: { num: string } }).p_payload.num, "MANUAL-123");
 });
 
 test("renumbering records the old and new values in staff-only activity", () => {

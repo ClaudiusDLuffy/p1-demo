@@ -1,5 +1,8 @@
 {
   "crons": [
+    { "path": "/api/notifications/dispatch/drain", "schedule": "*/3 * * * *" },
+    { "path": "/api/notifications/financial/drain", "schedule": "1-59/3 * * * *" },
+    { "path": "/api/notifications/parts-order", "schedule": "2-59/3 * * * *" },
     {
       "path": "/api/email-intake",
       "schedule": "*/3 * * * *"

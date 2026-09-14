@@ -1,11 +1,15 @@
 "use client";
 
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { useEffect, useState } from "react";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
 import { downloadInvoicePdfBlob } from "../../lib/db";
-import { useInvoiceByIdQuery } from "../invoices/queries";
+import { useBillingSourceInvoiceByIdQuery } from "./queries";
+import { useInvoiceLinePage } from "../invoices/invoiceLineQueries";
+import InvoiceLinePagination from "../invoices/InvoiceLinePagination";
 import PrivatePdfCanvasPreview from "./PrivatePdfCanvasPreview";
+import { ModalPortal } from "../../components/ui/Modal";
 
 type SourceContractorInvoiceLine = {
   id?: string;
@@ -18,6 +22,10 @@ type SourceContractorInvoiceLine = {
 };
 
 type SourceContractorInvoice = {
+  id?: string;
+  projection?: string;
+  invoiceVersion?: number;
+  lineCount?: number;
   num: string;
   wot?: string | null;
   invoiceDate?: string | null;
@@ -39,7 +47,7 @@ export default function SourceContractorInvoiceDrawer({
   onClose: () => void;
   fmt: (value: number) => string;
 }) {
-  const query = useInvoiceByIdQuery(invoiceId, Boolean(invoiceId));
+  const query = useBillingSourceInvoiceByIdQuery(invoiceId, Boolean(invoiceId));
   const [pdfState, setPdfState] = useState<{
     storagePath: string;
     blob: Blob | null;
@@ -48,6 +56,8 @@ export default function SourceContractorInvoiceDrawer({
   } | null>(null);
   const invoice = query.data as unknown as SourceContractorInvoice | null | undefined;
   const storagePath = invoice?.pdfStoragePath || null;
+  const lineQuery = useInvoiceLinePage({ ...invoice, staff: true, source: true }, Boolean(invoiceId && invoice && !storagePath));
+  const lines = invoice?.projection === "summary" ? lineQuery.lines : invoice?.lines || [];
   const currentPdfState = storagePath && pdfState?.storagePath === storagePath
     ? pdfState
     : null;
@@ -75,7 +85,7 @@ export default function SourceContractorInvoiceDrawer({
           storagePath,
           blob: null,
           url: null,
-          error: error instanceof Error ? error.message : "Original PDF could not be loaded",
+          error: safeErrorMessage(error),
         });
       });
     return () => {
@@ -95,7 +105,7 @@ export default function SourceContractorInvoiceDrawer({
   if (!invoiceId) return null;
 
   return (
-    <div
+    <ModalPortal><div
       role="presentation"
       style={{
         position: "fixed",
@@ -198,10 +208,11 @@ export default function SourceContractorInvoiceDrawer({
             )}
 
             {!invoice.pdfStoragePath && <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, overflow: "hidden" }}>
+              {invoice.projection === "summary" && <InvoiceLinePagination query={lineQuery} total={invoice.lineCount ?? 0} />}
               <div style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr) 60px 90px 100px", gap: 8, padding: "9px 10px", background: T.surfaceSoft, fontSize: 9, color: T.subtle, fontWeight: 800, textTransform: "uppercase" }}>
                 <span>Type</span><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span>
               </div>
-              {(invoice.lines || []).map((line: SourceContractorInvoiceLine, index: number) => (
+              {lines.map((line: SourceContractorInvoiceLine, index: number) => (
                 <div key={line.id || index} style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr) 60px 90px 100px", gap: 8, padding: "10px", borderTop: `1px solid ${T.borderSoft}`, fontSize: 11, alignItems: "start" }}>
                   <span style={{ color: T.muted }}>{line.type || "Other"}</span>
                   <span style={{ color: T.ink, whiteSpace: "pre-wrap" }}>{line.desc || line.description || "—"}</span>
@@ -210,7 +221,7 @@ export default function SourceContractorInvoiceDrawer({
                   <span className="mono" style={{ fontWeight: 700 }}>{fmt(Number(line.amount ?? Number(line.qty || 0) * Number(line.rate || 0)))}</span>
                 </div>
               ))}
-              {(invoice.lines || []).length === 0 && (
+              {(invoice.lineCount ?? lines.length) === 0 && (
                 <div style={{ padding: 18, color: T.subtle, fontSize: 12 }}>No structured line items were saved on this invoice.</div>
               )}
             </div>}
@@ -223,6 +234,6 @@ export default function SourceContractorInvoiceDrawer({
           </>
         )}
       </aside>
-    </div>
+    </div></ModalPortal>
   );
 }

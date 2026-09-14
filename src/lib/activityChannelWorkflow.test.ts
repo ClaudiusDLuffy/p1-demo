@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { createActivityVisitReadHarness, rawPage, record, respond } from "./activity-visit-read-test-support/harness";
+import { ACTIVITY_PARENT, activityFixture } from "./activity-visit-read-test-support/activity-fixtures";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const migration = read("supabase/migrations/0095_activity_channels.sql");
@@ -50,12 +52,19 @@ test("internal conversation is database-private and cannot request contractor ac
   );
 });
 
-test("legacy workflow events are classified server-side without trusting the browser", () => {
+test("legacy workflow events are classified server-side without trusting the browser", async () => {
   assert.match(migration, /create or replace function public\.stamp_activity_actor_audit/);
   assert.match(migration, /select role::text into actor_role[\s\S]*from public\.profiles/);
   assert.match(migration, /new\.type = 'system'[\s\S]*requested_channel := 'system_event'/);
   assert.match(migration, /Only staff can reclassify activity/);
-  assert.match(db, /activityChannel: a\.activity_channel/);
+  const harness = createActivityVisitReadHarness([respond(rawPage([activityFixture({
+    activity_channel: "system_event", type: "system", event_key: "priority_changed",
+  })]))]);
+  const page = record(await harness.loadActivities({ id: ACTIVITY_PARENT }));
+  assert.ok(Array.isArray(page.items));
+  assert.equal(record(page.items[0]).activityChannel, "system_event");
+  assert.equal(record(page.items[0]).eventKey, "priority_changed");
+  assert.equal(harness.calls.length, 1);
   assert.match(db, /activity_channel: audit\.activityChannel \|\| "legacy"/);
 });
 

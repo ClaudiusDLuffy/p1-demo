@@ -1,7 +1,10 @@
 "use client";
 // @ts-nocheck
 
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
+
 import { Badge } from "../../components/ui/Badge";
+import { useDirectoryLabels } from "../directory/queries";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { Ico } from "../../components/ui/Ico";
@@ -17,7 +20,7 @@ import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
 export default function CapitalProjects(props: any) {
-  const { page, isManager, capitalCount, setSelectedWO, setPage, setAiNote, getUser } = props;
+  const { page, isManager, setSelectedWO, setPage, setAiNote } = props;
   const [position, setPosition] = useState(firstCursorPosition);
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -31,7 +34,8 @@ export default function CapitalProjects(props: any) {
     cursor: position.cursor,
   }, page === "capital" && isManager);
   const capitalWOs: any[] = (capitalQuery.data?.items || []) as any[];
-  const exactCapitalCount = capitalQuery.data?.totalCount ?? capitalCount;
+  const { getUser } = useDirectoryLabels(capitalWOs.map(workOrder => workOrder.contractor), page === "capital" && isManager);
+  const exactCapitalCount = capitalQuery.data?.totalCount ?? "—";
   return (
     <>
           {/* ═════ CAPITAL ═════ */}
@@ -40,7 +44,7 @@ export default function CapitalProjects(props: any) {
               <div className="card mobile-alert" style={{ background: T.violetSoft, border: `1px solid ${T.violet}33`, padding: "14px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
                 <div className="mobile-alert-icon" style={{ width: 40, height: 40, borderRadius: 10, background: T.violet, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#fff" /></div>
                 <div className="mobile-alert-body">
-                  <div style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
+                  <div title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
                   <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Focused capital view — these calls also remain searchable in Work orders</div>
                 </div>
               </div>

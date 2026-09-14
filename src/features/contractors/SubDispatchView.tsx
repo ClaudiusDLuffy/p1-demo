@@ -1,12 +1,17 @@
 "use client";
 // @ts-nocheck
 
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
+
 import { useDeferredValue, useMemo, useState } from "react";
 import { Badge } from "../../components/ui/Badge";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
-import { Sel } from "../../components/ui/Sel";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import { useDirectoryLabels } from "../directory/queries";
+import { loadDirectorySelection } from "../directory/api";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { T, STATUS } from "../../lib/constants";
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
@@ -17,9 +22,6 @@ export default function SubDispatchView(props: any) {
   const {
     page,
     currentUser,
-    USERS,
-    technicians = [],
-    workOrders,
     setSelectedWO,
     setPage,
     setAiNote,
@@ -27,49 +29,22 @@ export default function SubDispatchView(props: any) {
     doReassign,
     doSetTechnician,
     doAssignPortalTechnician,
-    getUser,
     loadingStates = {},
   } = props;
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [savingWo, setSavingWo] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const companyMode = !!currentUser?.canManageTeam;
   const contractorAccountId = currentUser?.contractorAccountId || currentUser?.id;
 
-  const legacyTeam = useMemo(
-    () => USERS.filter((user: any) => user.dispatcherId === currentUser?.id),
-    [USERS, currentUser?.id],
-  );
-  const legacyTeamIds = useMemo(
-    () => legacyTeam.map((user: any) => user.id),
-    [legacyTeam],
-  );
-  const companyMembers = useMemo(
-    () => currentUser?.contractorOrganizationId
-      ? USERS.filter((user: any) =>
-          user.contractorOrganizationId === currentUser.contractorOrganizationId,
-        )
-      : [],
-    [USERS, currentUser?.contractorOrganizationId],
-  );
-  const companyTechnicians = useMemo(
-    () => technicians.filter((technician: any) =>
-      technician.contractorId === contractorAccountId && technician.isActive,
-    ),
-    [contractorAccountId, technicians],
-  );
-  const teamContractorIds = useMemo(
-    () => companyMode
-      ? [contractorAccountId].filter(Boolean)
-      : [currentUser?.id, ...legacyTeamIds].filter(Boolean),
-    [companyMode, contractorAccountId, currentUser?.id, legacyTeamIds],
-  );
   const deferredSearch = useDeferredValue(search.trim());
   const paginationSignature = JSON.stringify({
     search: deferredSearch,
-    contractorIds: teamContractorIds,
+    actorId: currentUser?.id,
+    contractorId: contractorAccountId,
     sortColumn,
     sortDirection,
   });
@@ -81,23 +56,25 @@ export default function SubDispatchView(props: any) {
   const teamWorkOrdersQuery = useWorkOrdersPageQuery({
     scope: "active",
     search: deferredSearch,
-    contractorIds: teamContractorIds,
+    // The existing database work-order scope is canonical-account based.
+    // A directory page must never define the work-order authorization set.
+    contractorId: contractorAccountId,
     sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT,
     tableSortColumn: sortColumn,
     tableSortDirection: sortDirection,
     limit: 25,
     cursor: position.cursor,
   }, page === "team_dispatch" && currentUser?.role === "contractor");
-  const visibleWorkOrders = teamWorkOrdersQuery.data?.items || workOrders;
   const myTeamWOs = useMemo(
-    () => companyMode
-      ? visibleWorkOrders.filter((workOrder: any) => workOrder.contractor === contractorAccountId)
-      : visibleWorkOrders.filter((workOrder: any) =>
-          workOrder.contractor === currentUser?.id
-          || legacyTeamIds.includes(workOrder.contractor),
-        ),
-    [companyMode, contractorAccountId, currentUser?.id, legacyTeamIds, visibleWorkOrders],
+    // The legacy page adapter returns UI-shaped records, despite its database
+    // row annotation. Check that boundary rather than asserting a full row.
+    () => (teamWorkOrdersQuery.data?.items || []).filter((value: unknown): value is Record<string, unknown> =>
+      typeof value === "object" && value !== null && "contractor" in value
+      && value.contractor === contractorAccountId),
+    [contractorAccountId, teamWorkOrdersQuery.data?.items],
   );
+  const labels = useDirectoryLabels(myTeamWOs.map(workOrder =>
+    "contractor" in workOrder && typeof workOrder.contractor === "string" ? workOrder.contractor : null), page === "team_dispatch");
 
   const hasTeamAccess = companyMode || currentUser?.contractorTier === "mr_freeze";
   if (page !== "team_dispatch" || currentUser?.role !== "contractor" || !hasTeamAccess) {
@@ -134,8 +111,7 @@ export default function SubDispatchView(props: any) {
       {companyMode && (
         <div style={{ marginBottom: 14, color: T.muted, fontSize: 12 }}>
           {currentUser.contractorOrganizationName || currentUser.company || "Company"}
-          {companyMembers.length > 0 ? ` · ${companyMembers.length} portal account${companyMembers.length === 1 ? "" : "s"}` : ""}
-          {companyTechnicians.length > 0 ? ` · ${companyTechnicians.length} technicians on file` : ""}
+          {" · Search team members when assigning a technician"}
         </div>
       )}
       <input
@@ -146,6 +122,11 @@ export default function SubDispatchView(props: any) {
         aria-label="Search team work orders"
         style={{ width: "100%", maxWidth: 420, marginBottom: 14, minHeight: 40, padding: "9px 11px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink }}
       />
+      {saveError && <div role="alert" style={{ color: T.danger, marginBottom: 10 }}>{saveError}</div>}
+      {teamWorkOrdersQuery.isError && <div role="alert" style={{ color: T.danger, marginBottom: 10 }}>
+        {safeErrorMessage(teamWorkOrdersQuery.error)}{" "}
+        <button type="button" onClick={() => void teamWorkOrdersQuery.refetch()}>Retry team work</button>
+      </div>}
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="table-scroll" style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -172,20 +153,17 @@ export default function SubDispatchView(props: any) {
             </thead>
             <tbody>
               {myTeamWOs.map((workOrder: any) => {
-                const matchingLegacyTechnician = companyTechnicians.find(
-                  (technician: any) => !technician.profileId && technician.name === workOrder.technicianOnJob,
-                );
                 const currentTarget = workOrder.assignedTechnicianProfileId
-                  || (matchingLegacyTechnician ? `legacy:${matchingLegacyTechnician.id}` : "");
-                const target = targets[workOrder.id] ?? currentTarget;
+                  || (workOrder.technicianOnJob ? `snapshot:${workOrder.id}` : "");
+                const targetKey = `${currentUser.id}:${contractorAccountId}:${workOrder.id}`;
+                const target = targets[targetKey] ?? (companyMode ? currentTarget : workOrder.contractor || "");
                 const assigned = companyMode
                   ? workOrder.technicianOnJob || "Not set"
-                  : getUser(workOrder.contractor)?.name || workOrder.technicianOnJob || "Unassigned";
+                  : labels.getUser(workOrder.contractor)?.name || workOrder.technicianOnJob || "Unassigned";
                 const actionKey = workOrder.contractor ? `reassign_${workOrder.id}` : `assign_${workOrder.id}`;
                 const actionLoading = companyMode
                   ? savingWo === workOrder.id
                   : !!loadingStates[actionKey];
-                const options = companyMode ? companyTechnicians : legacyTeam;
                 return (
                   <tr key={workOrder.id} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
                     <td style={{ padding: "14px 16px" }}>
@@ -213,35 +191,32 @@ export default function SubDispatchView(props: any) {
                     </td>
                     <td style={{ padding: "14px 16px" }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <Sel
+                        <DirectorySelect
+                          domain={companyMode ? "company_technicians" : "legacy_team"}
+                          contractorId={companyMode ? contractorAccountId : null}
+                          technicianValues={companyMode}
                           value={target}
-                          onChange={(event: any) => setTargets(previous => ({ ...previous, [workOrder.id]: event.target.value }))}
+                          selectedLabel={target === currentTarget ? assigned : undefined}
+                          emptyLabel={companyMode ? "Not set" : "Select team member"}
+                          onChange={event => setTargets(previous => ({ ...previous, [targetKey]: event.target.value }))}
                           style={{ width: 190, padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, fontFamily: "inherit" }}
-                        >
-                          <option value="">{companyMode ? "Not set" : "Select team member"}</option>
-                          {options.map((option: any) => (
-                            <option
-                              key={option.id}
-                              value={companyMode
-                                ? option.profileId || `legacy:${option.id}`
-                                : option.id}
-                            >
-                              {option.name}
-                              {companyMode && !option.profileId
-                                ? " — record only (no portal login)"
-                                : ""}
-                            </option>
-                          ))}
-                        </Sel>
+                        />
                         <button
                           onClick={async () => {
                             if (companyMode) {
                               setSavingWo(workOrder.id);
+                              setSaveError(null);
                               try {
-                                const selectedTechnician = companyTechnicians.find(
-                                  (technician: any) => technician.profileId === target
-                                    || `legacy:${technician.id}` === target,
-                                );
+                                if (target.startsWith("snapshot:")) return;
+                                const selectedTechnician = target ? await loadDirectorySelection(
+                                  target.startsWith("legacy:") ? "company_technicians" : "technician_profile",
+                                  target.startsWith("legacy:") ? target.slice(7) : target,
+                                  contractorAccountId,
+                                ) : null;
+                                if (target && !selectedTechnician) {
+                                  setSaveError("This technician is no longer available. Choose a current team member.");
+                                  return;
+                                }
                                 if (!target) {
                                   if (workOrder.assignedTechnicianProfileId) {
                                     await doAssignPortalTechnician(workOrder.id, null, null);
@@ -260,6 +235,8 @@ export default function SubDispatchView(props: any) {
                                   }
                                   await doSetTechnician(workOrder.id, selectedTechnician.name);
                                 }
+                              } catch (error: unknown) {
+                                setSaveError(safeErrorMessage(error));
                               } finally {
                                 setSavingWo(null);
                               }
@@ -269,7 +246,7 @@ export default function SubDispatchView(props: any) {
                             if (workOrder.contractor) doReassign(workOrder.id, target);
                             else doAssign(workOrder.id, target);
                           }}
-                          disabled={actionLoading || (!companyMode && !target)}
+                          disabled={actionLoading || target.startsWith("snapshot:") || (!companyMode && !target)}
                           className="btn-soft"
                           style={{ padding: "8px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 6, opacity: actionLoading ? 0.7 : 1, cursor: actionLoading ? "default" : "pointer" }}
                         >
@@ -284,10 +261,10 @@ export default function SubDispatchView(props: any) {
                   </tr>
                 );
               })}
-              {myTeamWOs.length === 0 && (
+              {myTeamWOs.length === 0 && !teamWorkOrdersQuery.isError && (
                 <tr>
                   <td colSpan={5} style={{ padding: 28, textAlign: "center", color: T.subtle, fontSize: 13 }}>
-                    No team work orders found.
+                    {teamWorkOrdersQuery.isPending ? "Loading team work…" : "No team work orders found."}
                   </td>
                 </tr>
               )}
@@ -296,10 +273,10 @@ export default function SubDispatchView(props: any) {
         </div>
       </div>
       <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 11, color: T.muted }}>
+        <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontSize: 11, color: T.muted }}>
           {teamWorkOrdersQuery.isFetching
             ? "Loading team work…"
-            : `${teamWorkOrdersQuery.data?.totalCount || 0} work orders · page ${position.page}`}
+            : `${teamWorkOrdersQuery.data?.totalCount ?? "—"} work orders · page ${position.page}`}
         </span>
         <span style={{ display: "flex", gap: 8 }}>
           <button type="button" className="btn-soft" disabled={position.page <= 1 || teamWorkOrdersQuery.isFetching} onClick={previousPage}>Previous</button>

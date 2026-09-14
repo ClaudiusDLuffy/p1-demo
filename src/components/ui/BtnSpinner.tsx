@@ -1,6 +1,8 @@
 export function BtnSpinner() {
   return (
     <span
+      aria-hidden="true"
+      className="p1-button-spinner"
       style={{
         display: "inline-block",
         width: 12,
@@ -19,6 +21,8 @@ export function BtnSpinner() {
 export function BtnSpinnerDark() {
   return (
     <span
+      aria-hidden="true"
+      className="p1-button-spinner"
       style={{
         display: "inline-block",
         width: 12,

@@ -1,7 +1,12 @@
 "use client";
 // @ts-nocheck
 
+import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
+
 import { useDeferredValue, useMemo, useState } from "react";
+import { DirectorySelect } from "../directory/DirectorySelect";
+import { DirectoryProfileName } from "../directory/DirectoryProfileName";
+import { useDirectoryLabels } from "../directory/queries";
 import { Badge } from "../../components/ui/Badge";
 import { Sel } from "../../components/ui/Sel";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
@@ -41,17 +46,17 @@ export default function WorkOrderList(props: any) {
     isManager,
     filterC,
     setFilterC,
-    contractorsOnly,
     filterP,
     setFilterP,
     filterStatus,
     setFilterStatus,
     filteredWOs,
     slaLabel,
+    slaNow,
     setSelectedWO,
     setAiNote,
     setPage,
-    getUser,
+    getUser: providedGetUser,
     storeView,
     onClearStoreView,
   } = props;
@@ -97,15 +102,17 @@ export default function WorkOrderList(props: any) {
         && (viewMode !== "needs_action" || workOrderNeedsAction(w, isManager)),
       ),
       sortBy,
+      slaNow,
     );
 
     return filterAndSortWorkOrderTable(
       sorted,
       deferredColumnFilters,
       tableSort,
-      contractorId => contractorId ? getUser(contractorId)?.name || "" : "",
+      contractorId => contractorId ? providedGetUser(contractorId)?.name || "" : "",
+      slaNow,
     );
-  }, [deferredColumnFilters, fallbackStateFilteredWOs, getUser, hideClosed, isManager, sortBy, tableSort, viewMode]);
+  }, [deferredColumnFilters, fallbackStateFilteredWOs, providedGetUser, hideClosed, isManager, slaNow, sortBy, tableSort, viewMode]);
 
   const cursorSignature = JSON.stringify(exactWorkOrderId
     ? { exactWorkOrderId }
@@ -169,14 +176,15 @@ export default function WorkOrderList(props: any) {
   const paginatedWOs = exactWorkOrderId
     ? exactWorkOrderQuery.data || []
     : serverPage?.items || fallbackTableWOs.slice(0, pageSize);
+  const { getUser } = useDirectoryLabels(exactWorkOrderId ? [] : paginatedWOs.map(workOrder => (workOrder as unknown as { contractor?: string }).contractor), listQueryEnabled);
   const totalRows = exactWorkOrderId
     ? exactWorkOrderQuery.data?.length || 0
-    : serverPage?.totalCount ?? fallbackTableWOs.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    : serverPage?.totalCount ?? null;
+  const totalPages = totalRows === null ? null : Math.max(1, Math.ceil(totalRows / pageSize));
   const safePage = exactWorkOrderId ? 1 : effectiveCursor.page;
   const startIndex = (safePage - 1) * pageSize;
-  const showingStart = totalRows === 0 ? 0 : startIndex + 1;
-  const showingEnd = Math.min(startIndex + paginatedWOs.length, totalRows);
+  const showingStart = paginatedWOs.length === 0 ? 0 : startIndex + 1;
+  const showingEnd = startIndex + paginatedWOs.length;
 
   const pagingBusy = !exactWorkOrderId && workOrderPageQuery.isFetching
     ? pagingDirection
@@ -294,7 +302,7 @@ export default function WorkOrderList(props: any) {
     );
   };
 
-  const renderPaginationControls = () => !exactWorkOrderId && totalRows > 0 && (
+  const renderPaginationControls = () => !exactWorkOrderId && (paginatedWOs.length > 0 || safePage > 1 || serverPage?.hasMore) && (
     <div
       className="work-order-pagination"
       style={{
@@ -307,7 +315,7 @@ export default function WorkOrderList(props: any) {
       }}
     >
       <div style={{ fontSize: 12, color: T.muted }}>
-        Showing <span style={{ color: T.ink, fontWeight: 700 }}>{showingStart}-{showingEnd}</span> of <span style={{ color: T.ink, fontWeight: 700 }}>{totalRows}</span>
+        Showing <span style={{ color: T.ink, fontWeight: 700 }}>{showingStart}-{showingEnd}</span> of <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ color: T.ink, fontWeight: 700 }}>{totalRows ?? "—"}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <button
@@ -323,7 +331,7 @@ export default function WorkOrderList(props: any) {
           {pagingBusy === "prev" ? <><BtnSpinnerDark />Loading</> : "Previous"}
         </button>
         <span style={{ fontSize: 12, color: T.muted, minWidth: 72, textAlign: "center" }}>
-          Page {safePage} of {totalPages}
+          Page {safePage}{totalPages !== null ? ` of ${totalPages}` : ""}
         </span>
         <button
           type="button"
@@ -394,10 +402,7 @@ export default function WorkOrderList(props: any) {
               style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, width: 300, fontFamily: "inherit", background: T.surface }}
             />
             {isManager && (
-              <Sel value={filterC} onChange={(e: any) => setFilterC(e.target.value)} style={{ width: 220, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
-                <option value="all">All contractors</option>
-                {contractorsOnly.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </Sel>
+              <DirectorySelect aria-label="Filter work orders by contractor" domain="contractor_filter" emptyValue="all" emptyLabel="All contractors" value={filterC} onChange={e => setFilterC(e.target.value)} style={{ width: 220 }} />
             )}
             <Sel
               value={filterStatus}
@@ -419,11 +424,11 @@ export default function WorkOrderList(props: any) {
               <option value="TX">Texas</option>
               <option value="FL">Florida</option>
             </Sel>
-            <Sel value={filterP} onChange={(e: any) => setFilterP(e.target.value)} style={{ width: 180, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+            <Sel aria-label="Filter work orders by priority" value={filterP} onChange={e => setFilterP(e.target.value)} style={{ width: 180, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
               <option value="all">All priorities</option>
               {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
             </Sel>
-            <Sel value={sortPresetValue} onChange={(e: any) => { if (e.target.value !== "custom") applySortPreset(e.target.value as WorkOrderSortKey); }} style={{ width: 190, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+            <Sel aria-label="Sort work orders" value={sortPresetValue} onChange={e => { if (e.target.value !== "custom") applySortPreset(e.target.value as WorkOrderSortKey); }} style={{ width: 190, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
               {sortPresetValue === "custom" && <option value="custom">Custom column sort</option>}
               <option value="sla_due">SLA due soonest</option>
               <option value="newest">Newest to oldest</option>
@@ -534,7 +539,7 @@ export default function WorkOrderList(props: any) {
                         </td>
                         <td style={{ padding: "10px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "-"}</td>
                         <td style={{ padding: "10px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.inkSoft }}>{wo.summary || "-"}</td>
-                        <td style={{ padding: "10px", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.muted }}>{wo.contractor ? getUser(wo.contractor)?.name : "-"}</td>
+                        <td style={{ padding: "10px", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.muted }}>{wo.contractor ? exactWorkOrderId ? <DirectoryProfileName id={wo.contractor} /> : getUser(wo.contractor)?.name || "Assigned contractor" : "-"}</td>
                         <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 115 }}>{dates.created}</td>
                         <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 115 }}>{dates.updated}</td>
                         <td style={{ padding: "10px" }}>
@@ -627,7 +632,7 @@ export default function WorkOrderList(props: any) {
                   </div>
                   <div className="mobile-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11 }}>
                     <span style={{ color: T.muted }}>
-                      {wo.contractor ? getUser(wo.contractor)?.name || "Assigned" : "Unassigned"}
+                      {wo.contractor ? exactWorkOrderId ? <DirectoryProfileName id={wo.contractor} /> : getUser(wo.contractor)?.name || "Assigned" : "Unassigned"}
                     </span>
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       {hasNewSla

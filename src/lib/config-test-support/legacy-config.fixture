@@ -1,0 +1,19 @@
+// Frozen pre-Batch3D configuration excerpts. Synthetic environment only.
+// Sources: twilioPartsSms.ts partsSmsProviderConfiguration; quickBooksOnlineCore.ts
+// redirect validation; notificationService.ts/partsSmsWorker.ts origin selection.
+export const legacyTwilioCredentials = (env) => {
+  const read = key => env[key]?.trim() ?? "";
+  const accountSid = read("TWILIO_ACCOUNT_SID");
+  const apiKeySid = read("TWILIO_API_KEY_SID");
+  const apiKeySecret = read("TWILIO_API_KEY_SECRET");
+  return { username: apiKeySid && apiKeySecret ? apiKeySid : accountSid,
+    password: apiKeySid && apiKeySecret ? apiKeySecret : read("TWILIO_AUTH_TOKEN") };
+};
+export const legacyRedirectAllowed = raw => {
+  const parsed = new URL(raw);
+  const localHttp = parsed.protocol === "http:" && parsed.hostname === "localhost";
+  return parsed.protocol === "https:" || localHttp;
+};
+export const legacyGraphOrigin = env => env.PORTAL_URL || "https://production.example.invalid";
+export const legacySmsOrigin = env => env.NEXT_PUBLIC_APP_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : "");
+export const legacyGraphConfigured = env => ["OUTLOOK_TENANT_ID", "OUTLOOK_CLIENT_ID", "OUTLOOK_CLIENT_SECRET", "OUTLOOK_USER_EMAIL"].every(key => Boolean(env[key]?.trim()));
