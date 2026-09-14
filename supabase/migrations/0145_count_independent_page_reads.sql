@@ -142,10 +142,13 @@ begin
       l.lanname into strict v_proc from pg_proc p join pg_language l on l.oid=p.prolang
       where p.oid=to_regprocedure(v_spec.signature);
     if v_proc.prosecdef or v_proc.lanname<>'sql' or v_proc.provolatile<>'s'
-      or md5(v_proc.prosrc)<>v_spec.body_md5 then
+      or md5(replace(v_proc.prosrc,chr(13),''))<>v_spec.body_md5 then
       raise exception 'Known page definition drifted: %; review before generating read contracts',v_spec.signature;
     end if;
-    v_body:=v_proc.prosrc;
+    -- PostgreSQL preserves CRLF when a migration is pasted from a Windows
+    -- checkout. Normalize the transport-only carriage returns before checking
+    -- and transforming the reviewed LF source.
+    v_body:=replace(v_proc.prosrc,chr(13),'');
     v_select:=strpos(v_body,E'\n  select jsonb_build_object(');
     v_count:=strpos(v_body,E'\n    ''totalCount'',');
     if v_select=0 or v_count<=v_select or v_body !~ '\);[[:space:]]*$' then
@@ -280,10 +283,10 @@ begin
   select p.*,l.lanname into strict v_proc from pg_proc p join pg_language l on l.oid=p.prolang
     where p.oid='public.get_portal_navigation_summary()'::regprocedure;
   if v_proc.prosecdef or v_proc.lanname<>'sql' or v_proc.provolatile<>'s'
-    or md5(v_proc.prosrc)<>'57b63f843bb1f894d450e2036337c078' then
+    or md5(replace(v_proc.prosrc,chr(13),''))<>'57b63f843bb1f894d450e2036337c078' then
     raise exception 'Known navigation count definition drifted; review before read optimization';
   end if;
-  v_body:=replace(v_proc.prosrc,'public.is_staff()','(select public.is_staff())');
+  v_body:=replace(replace(v_proc.prosrc,chr(13),''),'public.is_staff()','(select public.is_staff())');
   -- Excluded activity rows contribute to none of the three aggregates. A
   -- missing left-joined group keeps the same existing NULL/zero semantics.
   v_body:=replace(v_body,'where activity.deleted_at is null',

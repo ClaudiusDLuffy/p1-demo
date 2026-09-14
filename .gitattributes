@@ -1,0 +1,3 @@
+# PostgreSQL preserves function-body line endings in pg_proc.prosrc. Keep
+# migration SQL LF-canonical so reviewed source hashes are platform-independent.
+supabase/**/*.sql text eol=lf

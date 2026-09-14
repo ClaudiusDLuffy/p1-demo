@@ -29,6 +29,28 @@ export function financialRpcError(error: unknown) {
   return financialHttpError(safe.code, safe.message, status);
 }
 
+const definitiveIdentityStatuses = new Set([400, 401, 403, 422]);
+const definitiveIdentityCodes = new Set([
+  "bad_jwt",
+  "session_not_found",
+  "user_banned",
+  "user_not_found",
+]);
+
+function financialIdentityError(error: unknown) {
+  const parsed = z.object({
+    status: z.number().int().optional(),
+    code: z.string().optional(),
+  }).safeParse(error);
+  const status = parsed.success ? parsed.data.status : undefined;
+  const code = parsed.success ? parsed.data.code?.toLowerCase() : undefined;
+  const isDefinitiveDenial = (status !== undefined && definitiveIdentityStatuses.has(status))
+    || (code !== undefined && definitiveIdentityCodes.has(code));
+  return isDefinitiveDenial
+    ? financialHttpError("AUTH_REQUIRED", "Sign in again.", 401)
+    : financialHttpError("RESULT_UNCONFIRMED", "Account authorization is temporarily unavailable.", 503);
+}
+
 export async function authorizeFinancialRequest(request: NextRequest, allowController: boolean) {
   const token = request.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1];
   if (!token) return { error: financialHttpError("AUTH_REQUIRED", "Sign in again.", 401) };
@@ -45,7 +67,11 @@ export async function authorizeFinancialRequest(request: NextRequest, allowContr
       },
     });
     const { data: identity, error: identityError } = await caller.auth.getUser(token);
-    if (identityError || !identity.user) return { error: financialHttpError("AUTH_REQUIRED", "Sign in again.", 401) };
+    // GoTrue returns definitive invalid-session failures with a 4xx status.
+    // Network and deadline failures have no such status (or a 5xx status), so
+    // keep them retryable instead of logging a valid user out during an outage.
+    if (identityError) return { error: financialIdentityError(identityError) };
+    if (!identity.user) return { error: financialHttpError("AUTH_REQUIRED", "Sign in again.", 401) };
     const sb = createServerClient();
     const { data: profile, error } = await sb.from("profiles").select("id,role,active")
       .eq("id", identity.user.id).abortSignal(deadline).maybeSingle();

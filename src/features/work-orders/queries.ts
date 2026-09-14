@@ -123,7 +123,6 @@ export function useWorkOrdersPageQuery(
 ) {
   const actor = useReadActor(actorOverride);
   const scope = directoryActorScope(actor);
-  const countQuery = useWorkOrdersCountQuery(params, enabled && options.countEnabled !== false, actor);
   const query = useQuery({
     queryKey: workOrderPagesKey(scope, params),
     queryFn: ({ signal }) => loadWorkOrdersPage(params, signal),
@@ -131,6 +130,15 @@ export function useWorkOrdersPageQuery(
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope ? previous : undefined,
     enabled: enabled && !!actor?.id && actor.active === true,
   });
+  // Exact totals are secondary information. Starting a second full filtered
+  // scan beside the row query multiplied database load during busy portal
+  // opens. Preserve the exact count contract, but give the visible row read
+  // priority and only start its count after those rows are usable.
+  const countQuery = useWorkOrdersCountQuery(
+    params,
+    enabled && options.countEnabled !== false && query.isSuccess && !query.isPlaceholderData,
+    actor,
+  );
   const data = useMemo(() => query.data ? { ...query.data,
     totalCount: countQuery.data?.totalCount ?? null,
     aggregates: countQuery.data?.aggregates } : undefined, [query.data, countQuery.data]);

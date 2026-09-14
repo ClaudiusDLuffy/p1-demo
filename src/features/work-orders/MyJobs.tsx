@@ -32,10 +32,13 @@ export default function MyJobs(props: any) {
   } = useCursorPagination(JSON.stringify({ search: deferredSearch, sortColumn, sortDirection }));
   const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
-  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled);
-  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, enabled);
-  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, enabled);
-  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled);
+  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled, undefined, { countEnabled: false });
+  // Badge counts are exact but deliberately sequenced behind the visible page
+  // and each other. Four simultaneous scans from every My Jobs open were able
+  // to exhaust the database statement deadline under normal concurrency.
+  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, enabled && jobsQuery.isSuccess && !jobsQuery.isPlaceholderData);
+  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, enabled && activeCountQuery.isSuccess);
+  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled && pendingCountQuery.isSuccess);
   const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
   const resultDiagnosticRef = useRef<string | null>(null);
   const jobsError = safeErrorMessage(jobsQuery.error);
@@ -89,13 +92,12 @@ export default function MyJobs(props: any) {
     position.page,
   ]);
   const retryJobs = () => {
-    void Promise.all([
-      jobsQuery.refetch(),
-      jobsQuery.countQuery.refetch(),
-      activeCountQuery.refetch(),
-      pendingCountQuery.refetch(),
-      capitalCountQuery.refetch(),
-    ]);
+    void (async () => {
+      await jobsQuery.refetch();
+      await activeCountQuery.refetch();
+      await pendingCountQuery.refetch();
+      await capitalCountQuery.refetch();
+    })();
   };
   const jobCounts = {
     active: activeCountQuery.data?.totalCount ?? "—",
