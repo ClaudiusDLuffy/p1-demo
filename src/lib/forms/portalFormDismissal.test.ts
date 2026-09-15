@@ -101,3 +101,14 @@ test("failed ETA/start/pause commands do not close the authored shell form", () 
   const source = readFileSync("src/components/PortalShell.tsx", "utf8");
   for (const result of ["saved", "started", "paused"]) assert.match(source, new RegExp(`if \\(${result}\\) setModal\\(null\\)`));
 });
+
+test("a rejected start is visible inside the native dialog and remains retryable", () => {
+  const source = readFileSync("src/components/PortalShell.tsx", "utf8");
+  const start = source.indexOf('{modal === "startWork"');
+  const modal = source.slice(start, source.indexOf('{modal === "pauseWork"', start));
+  assert.match(source, /const \[startWorkError, setStartWorkError\] = useState\(""\)/);
+  assert.match(modal, /role="alert" aria-live="assertive"/);
+  assert.match(modal, /doStartWork\(woData\.id, startNotesInput, setStartWorkError\)/);
+  assert.match(modal, /else setStartWorkError/);
+  assert.match(modal, /catch \{/);
+});

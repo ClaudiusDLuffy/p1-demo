@@ -1325,6 +1325,7 @@ export default function PortalShell() {
   // populated from woData when the modal opens, diffed on save.
   const [editWoForm, setEditWoForm] = useState<any>(EMPTY_EDIT_WO);
   const [startNotesInput, setStartNotesInput] = useState("");
+  const [startWorkError, setStartWorkError] = useState("");
   const [pauseReasonInput, setPauseReasonInput] = useState("");
   const [partDescInput, setPartDescInput] = useState("");
   const [partNumInput, setPartNumInput] = useState("");
@@ -1977,6 +1978,7 @@ export default function PortalShell() {
       setStartDateInput(storeNow.date);
       setStartTimeInput(storeNow.time);
       setStartNotesInput("");
+      setStartWorkError("");
     }
     if (modal === "pauseWork") {
       initial.pauseDateInput = storeNow.date; initial.pauseTimeInput = storeNow.time;
@@ -4116,19 +4118,29 @@ export default function PortalShell() {
             {woData.assignmentTransferPendingVisit ? (
               <div role="note" style={{ fontSize: 12, color: T.muted }}>Start a new visit now for the receiving assignment. The previous administratively closed visit is not inherited. Any later actual-time correction requires a reason and audit evidence.</div>
             ) : <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Arrival date"><DatePickerField value={startDateInput} onChange={setStartDateInput} /></Field>
-              <Field label="Arrival time"><TimePickerField value={startTimeInput} onChange={setStartTimeInput} /></Field>
+              <Field label="Arrival date"><DatePickerField value={startDateInput} onChange={(value: string) => { setStartDateInput(value); setStartWorkError(""); }} /></Field>
+              <Field label="Arrival time"><TimePickerField value={startTimeInput} onChange={(value: string) => { setStartTimeInput(value); setStartWorkError(""); }} /></Field>
             </div>}
-            <Field label="Initial notes"><TA rows={2} value={startNotesInput} onChange={(e: any) => setStartNotesInput(e.target.value)} placeholder="What are you seeing on site?" /></Field>
+            <Field label="Initial notes"><TA rows={2} value={startNotesInput} onChange={(e: any) => { setStartNotesInput(e.target.value); setStartWorkError(""); }} placeholder="What are you seeing on site?" /></Field>
           </div>
+          {startWorkError && (
+            <div role="alert" aria-live="assertive" style={{ color: T.danger, background: T.dangerSoft, borderRadius: 9, padding: "10px 12px", fontSize: 12, lineHeight: 1.5, marginTop: 16 }}>
+              {startWorkError}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
+            <button type="button" onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
+              type="button"
               onClick={async () => {
+                setStartWorkError("");
                 setModalLoading(true);
                 try {
-                  const started = await doStartWork(woData.id, startNotesInput);
+                  const started = await doStartWork(woData.id, startNotesInput, setStartWorkError);
                   if (started) setModal(null);
+                  else setStartWorkError((current) => current || "Start work could not be confirmed. Refresh the work order and try again.");
+                } catch {
+                  setStartWorkError("Start work could not be confirmed. Refresh the work order and try again.");
                 } finally {
                   setModalLoading(false);
                 }
