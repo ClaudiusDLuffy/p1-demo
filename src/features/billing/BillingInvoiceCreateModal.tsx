@@ -86,6 +86,8 @@ import {
   QUICKBOOKS_EQUIPMENT_TAGS,
   resolveQuickBooksEquipmentTag,
 } from "../../lib/quickBooksEquipmentTags";
+import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
+import { firstValidationIssue } from "../../lib/forms/validationErrors";
 
 const BillingLineSchema = z.object({
   type: z.string().min(1),
@@ -270,6 +272,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   const previousTerms = useRef("");
   const previousWorkOrderId = useRef("");
   const skipRestoredWorkOrderHydration = useRef<string | null>(null);
+  const hydratedWorkOrderId = useRef<string | null>(null);
+  const workOrderSelectionAuthored = useRef(false);
   const draftHydrated = useRef(false);
   useEffect(() => () => {
     editorSession.current = { ...editorSession.current, generation: editorSession.current.generation + 1 };
@@ -278,6 +282,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, []);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const numberEditedRef = useRef(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const [validationNotice, setValidationNotice] = useState("");
   const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
   const p1PartsHydratedFor = useRef<string | null>(null);
   const isEditing = !!editingInvoice?.id;
@@ -298,6 +304,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     formState: { errors, isDirty },
   } = useForm({
     resolver: zodResolver(BillingInvoiceSchema),
+    shouldFocusError: false,
     defaultValues: {
       num: "",
       invoiceDate: initialToday,
@@ -862,6 +869,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     previousInvoiceDate.current = String(formToLoad.invoiceDate || initialInvoiceDate);
     previousTerms.current = String(formToLoad.terms || "");
     previousWorkOrderId.current = String(formToLoad.workOrderId || resolvedInitialWorkOrderId);
+    hydratedWorkOrderId.current = null;
+    workOrderSelectionAuthored.current = false;
     reset(formToLoad as any);
     setWoSearch("");
     setSelectedSourceIds(restoredDraft?.selectedSourceIds || (
@@ -1092,21 +1101,25 @@ export default function BillingInvoiceCreateModal(props: any) {
     if (!selectedWorkOrderId) return;
     if (skipRestoredWorkOrderHydration.current === selectedWorkOrderId) {
       skipRestoredWorkOrderHydration.current = null;
+      hydratedWorkOrderId.current = selectedWorkOrderId;
       return;
     }
+    if (hydratedWorkOrderId.current === selectedWorkOrderId) return;
     const wo = selectedWorkOrder;
     if (!wo) return;
-    setValue("storeNumber", wo.store || "", { shouldDirty: true, shouldValidate: true });
-    setValue("storeAddress", wo.addr || "", { shouldDirty: true });
+    hydratedWorkOrderId.current = selectedWorkOrderId;
+    const shouldDirty = workOrderSelectionAuthored.current;
+    setValue("storeNumber", wo.store || "", { shouldDirty, shouldValidate: true });
+    setValue("storeAddress", wo.addr || "", { shouldDirty });
     const storeState = stateCodeFromWorkOrder(wo);
-    setValue("taxState", storeState, { shouldDirty: true });
+    setValue("taxState", storeState, { shouldDirty });
     setValue("territory", territoryFromState(storeState), {
-      shouldDirty: true,
+      shouldDirty,
       shouldValidate: true,
     });
     if (!isEditing || editingInvoice?.wot !== wo.id || !editingInvoice?.equipmentTag) {
       setValue("equipmentTag", resolveQuickBooksEquipmentTag(wo), {
-        shouldDirty: true,
+        shouldDirty,
         shouldValidate: true,
       });
     }
@@ -1121,7 +1134,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       timezoneForWorkOrder(wo),
     );
     if (clockOutDate && (!isEditing || editingInvoice?.wot !== wo.id || !editingInvoice?.serviceDateRaw)) {
-      setValue("serviceDate", clockOutDate, { shouldDirty: true });
+      setValue("serviceDate", clockOutDate, { shouldDirty });
     }
     clearErrors("storeNumber");
   }, [
@@ -1180,6 +1193,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     previousTerms.current = "";
     previousWorkOrderId.current = "";
     skipRestoredWorkOrderHydration.current = null;
+    hydratedWorkOrderId.current = null;
+    workOrderSelectionAuthored.current = false;
     p1PartsHydratedFor.current = null;
     reset({
       num: "",
@@ -1209,6 +1224,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     setDraftState("idle");
     setDraftSavedAt(null);
     setDraggingLine(null);
+    setValidationNotice("");
     return removed;
   };
 
@@ -1227,6 +1243,36 @@ export default function BillingInvoiceCreateModal(props: any) {
   const fieldAria = (name: HeaderField) => ({ "aria-invalid": errors[name] ? true : undefined,
     "aria-describedby": errors[name] ? `${formId}-${name}-error` : undefined });
   const headerError = (name: HeaderField) => errors[name] ? <span id={`${formId}-${name}-error`} role="alert" style={{ display: "block", fontSize: 11, color: T.danger }}>{String(errors[name]?.message || "Review this field.")}</span> : null;
+  const handleInvalid = (invalidErrors: Record<string, unknown>) => {
+    const issue = firstValidationIssue(invalidErrors, [
+      "num", "invoiceDate", "serviceDate", "dueDate", "workOrderId", "storeNumber",
+      "territory", "equipmentTag", "terms", "cme", "taxState", "taxRateOverride",
+      "salesTaxOverride", "lines",
+    ]);
+    const message = issue?.message || "Review the highlighted invoice fields.";
+    setValidationNotice(`Invoice was not saved. ${message}`);
+    if (!issue) return;
+    window.requestAnimationFrame(() => {
+      const form = formRef.current;
+      if (!form) return;
+      const explicit = Array.from(form.querySelectorAll<HTMLElement>("[data-validation-control]"))
+        .find(control => control.dataset.validationControl === issue.path
+          || control.dataset.validationControl === issue.path.split(".")[0]);
+      const named = form.elements.namedItem(issue.path) as HTMLElement | RadioNodeList | null;
+      const namedControl = named && "focus" in named ? named as HTMLElement : null;
+      const visibleNamedControl = namedControl?.getAttribute?.("type") === "hidden"
+        ? namedControl.parentElement?.querySelector<HTMLElement>("button, input:not([type=hidden]), textarea, select")
+        : namedControl;
+      const control = explicit || visibleNamedControl;
+      if (!control) return;
+      scrollWithinContainer(control.closest<HTMLElement>(".modal-inner"), control);
+      control.focus({ preventScroll: true });
+    });
+  };
+  const submitValidInvoice = (state: "draft" | "submitted") => handleSubmit(data => {
+    setValidationNotice("");
+    return submit(data, state);
+  }, handleInvalid);
 
   if (modal !== "createBillingInvoice") return null;
   if (editingInvoice?.projection && editingInvoice.projection !== "complete_document") return <Modal title="Invoice not ready to edit" onClose={onClose} width={420}>
@@ -1414,7 +1460,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         width={1240}
         closeOnBackdrop={false}
       >
-      <form onSubmit={handleSubmit(data => submit(data, "submitted"))}>
+      <form ref={formRef} onSubmit={submitValidInvoice("submitted")}>
         <fieldset disabled={submitting || pullingLines} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
           {isCapitalQuote
@@ -1473,6 +1519,8 @@ export default function BillingInvoiceCreateModal(props: any) {
                     role="option"
                     aria-selected={selectedWorkOrderId === wo.id}
                     onClick={() => {
+                      workOrderSelectionAuthored.current = true;
+                      hydratedWorkOrderId.current = null;
                       setValue("workOrderId", wo.id, { shouldDirty: true, shouldValidate: true });
                       setWoSearch("");
                     }}
@@ -1486,7 +1534,10 @@ export default function BillingInvoiceCreateModal(props: any) {
                 ))}
               </div>
             )}
-            <Sel aria-label="Invoice work order" {...fieldAria("workOrderId")} {...register("workOrderId")} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
+            <Sel aria-label="Invoice work order" {...fieldAria("workOrderId")} {...register("workOrderId", { onChange: () => {
+              workOrderSelectionAuthored.current = true;
+              hydratedWorkOrderId.current = null;
+            } })} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
               <option value="">Standalone invoice</option>
               {workOrderOptions.map((wo: any) => (
                 <option key={wo.id} value={wo.id}>{wo.id} - Store #{wo.store || "-"} - {wo.summary || "No summary"}{isCapitalWorkOrder(wo) ? " · Capital" : ""}</option>
@@ -1512,6 +1563,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 });
               }}
               aria-label="Invoice territory"
+              data-validation-control="territory"
               aria-required="true"
               {...fieldAria("territory")}
               style={{ width: "100%", minWidth: 0, padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
@@ -1525,7 +1577,6 @@ export default function BillingInvoiceCreateModal(props: any) {
                 {...register("territory")}
                 aria-label="Custom invoice territory"
                 {...fieldAria("territory")}
-                autoFocus
                 placeholder="Territory name"
                 style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 8, border: `1px solid ${errors.territory ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 12 }}
               />
@@ -1947,7 +1998,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
         <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>Warranty items may be billed at $0. Other line types require a positive rate.</div>
         {errors.lines && <div id={`${formId}-lines-error`} role="alert" style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a positive quantity and a valid rate ($0 is allowed only for Warranty). Descriptions are optional only for travel.</div>}
-        <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <div data-validation-control="lines" tabIndex={-1} style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           {QUICK_ADD_LINES.map(item => (
             <button
               key={item.label}
@@ -2139,6 +2190,11 @@ export default function BillingInvoiceCreateModal(props: any) {
           </div>
         </div>
 
+        {validationNotice && (
+          <div role="alert" style={{ marginTop: 18, padding: "10px 12px", borderRadius: 9, border: `1px solid ${T.danger}55`, background: T.dangerSoft, color: T.danger, fontSize: 12, fontWeight: 700 }}>
+            {validationNotice} The first invalid field has been selected.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
           {selectedWorkOrderId && !financialContextReady && financialContextState !== "error" && (
             <span role="status" style={{ alignSelf: "center", color: T.subtle, fontSize: 11 }}>
@@ -2156,7 +2212,7 @@ export default function BillingInvoiceCreateModal(props: any) {
           <button type="button" onClick={discardAndClose} className="btn-soft" style={{ color: T.danger }}>Discard draft</button>
           <button type="button" onClick={closeKeepingDraft} className="btn-soft">Close</button>
           {editingInvoice?.state !== "submitted" && (
-            <button type="button" disabled={submitting || !financialContextReady} onClick={handleSubmit(data => submit(data, "draft"))} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
+            <button type="button" disabled={submitting || !financialContextReady} onClick={submitValidInvoice("draft")} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
               {submitting ? <><BtnSpinner />Saving...</> : isEditing ? "Save Draft" : "Save as Draft"}
             </button>
           )}
@@ -2170,13 +2226,13 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
         </fieldset>
         </form>
+        <SourceContractorInvoiceDrawer
+          invoiceId={sourcePreviewId}
+          onClose={() => setSourcePreviewId(null)}
+          fmt={fmt}
+        />
       </Modal>
       {dismissal.dialog}
-      <SourceContractorInvoiceDrawer
-        invoiceId={sourcePreviewId}
-        onClose={() => setSourcePreviewId(null)}
-        fmt={fmt}
-      />
     </>
   );
 }
