@@ -770,7 +770,8 @@ export default function useWorkOrders({
     partNum: string,
     partEta: string,
     notes: string,
-    partsList?: { description: string; partNumber?: string; qty?: number; expectedReturnDate?: string }[]
+    partsList?: { description: string; partNumber?: string; qty?: number; expectedReturnDate?: string }[],
+    onFailure?: (message: string) => void,
   ) => {
     if (lifecycleInFlight.current.has(woId)) return false;
     lifecycleInFlight.current.add(woId);
@@ -778,7 +779,9 @@ export default function useWorkOrders({
     try {
     const existing = workOrders.find(w => w.id === woId);
     if (existing?.functionalStatus !== "Work in Progress") {
-      fire("Only work in progress can be paused for parts");
+      const message = "Only work in progress can be paused for parts";
+      onFailure?.(message);
+      fire(message);
       return false;
     }
     const timeZone = timezoneForWorkOrder(existing);
@@ -813,8 +816,9 @@ export default function useWorkOrders({
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     const partsSnapshot = qc.getQueryData(WO_PARTS_KEY);
     patchLocalWO(woId, updates, localActivity(text, "note", isManager, "job_paused", true, false, "field_note"));
-    fire("Paused — awaiting parts · 7-Eleven update pending");
-    return await dbCall(async () => {
+    const pauseFailureMessage = (error: unknown) =>
+      `Pause failed: ${safeLifecycleError(error).message}`;
+    const paused = await dbCall(async () => {
       if (reason !== "Awaiting parts" && reason !== "Temporary fix") throw safeLifecycleError({ code: "22023" });
       const result = await pauseWorkOrderForParts({
         ...lifecycleContextFor(existing), checkedOutAt: pauseIso, reason, notes,
@@ -828,10 +832,13 @@ export default function useWorkOrders({
       // Parts were committed with the transition. Refresh the authoritative
       // rows without risking a second mutation or duplicate cache append.
       void qc.invalidateQueries({ queryKey: WO_PARTS_KEY });
-    }, "Pause failed", () => {
+    }, "Pause failed", (error) => {
       restoreWorkOrders(snapshot);
       if (partsSnapshot) qc.setQueryData(WO_PARTS_KEY, partsSnapshot);
-    });
+      onFailure?.(pauseFailureMessage(error));
+    }, undefined, pauseFailureMessage);
+    if (paused) fire("Paused — awaiting parts · 7-Eleven update pending");
+    return paused;
     } finally {
       lifecycleInFlight.current.delete(woId);
       setLoading("pauseWork_" + woId, false);
