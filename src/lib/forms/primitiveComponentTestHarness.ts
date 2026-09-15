@@ -59,6 +59,7 @@ export function primitiveHarness(path: string, mocks: Record<string, unknown> = 
       : name === "react/jsx-runtime" ? { jsx, jsxs: jsx, Fragment: "fragment" }
         : name === "react-dom" ? { createPortal: (children: unknown) => children }
         : name.endsWith("/fieldContext") ? { FieldContext: { Provider: "field-context" }, useFieldControl: (props: object) => ({ id: "field-control", ...props }) }
+          : name.endsWith("/Modal") ? { useModalPortalHost: () => null }
           : name.includes("components/ui/") ? new Proxy({}, { get: (_target, key) => String(key) })
             : nativeRequire(name.startsWith(".") ? resolve(file, "..", name) : name),
   }, { filename: file });

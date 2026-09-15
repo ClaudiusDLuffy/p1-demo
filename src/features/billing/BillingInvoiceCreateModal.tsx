@@ -284,6 +284,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const numberEditedRef = useRef(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const [validationNotice, setValidationNotice] = useState("");
+  const [actionError, setActionError] = useState("");
   const selectAllTaxableRef = useRef<HTMLInputElement | null>(null);
   const p1PartsHydratedFor = useRef<string | null>(null);
   const isEditing = !!editingInvoice?.id;
@@ -766,6 +767,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       initializedFor.current = null;
       financialSnapshot.current = null;
       setFinancialContextState("idle");
+      setActionError("");
       editingVersionSnapshot.current = null;
       draftHydrated.current = false;
       draftLease.current?.close();
@@ -781,6 +783,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       : `create:${initialSourceInvoiceId || ""}:${initialWorkOrderId || ""}`);
     if (initializedFor.current === initializationKey) return;
     initializedFor.current = initializationKey;
+    setActionError("");
     editingVersionSnapshot.current = editingInvoice || null;
     financialSnapshot.current = null;
     draftHydrated.current = false;
@@ -1225,6 +1228,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     setDraftSavedAt(null);
     setDraggingLine(null);
     setValidationNotice("");
+    setActionError("");
     return removed;
   };
 
@@ -1244,6 +1248,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     "aria-describedby": errors[name] ? `${formId}-${name}-error` : undefined });
   const headerError = (name: HeaderField) => errors[name] ? <span id={`${formId}-${name}-error`} role="alert" style={{ display: "block", fontSize: 11, color: T.danger }}>{String(errors[name]?.message || "Review this field.")}</span> : null;
   const handleInvalid = (invalidErrors: Record<string, unknown>) => {
+    setActionError("");
     const issue = firstValidationIssue(invalidErrors, [
       "num", "invoiceDate", "serviceDate", "dueDate", "workOrderId", "storeNumber",
       "territory", "equipmentTag", "terms", "cme", "taxState", "taxRateOverride",
@@ -1271,6 +1276,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   };
   const submitValidInvoice = (state: "draft" | "submitted") => handleSubmit(data => {
     setValidationNotice("");
+    setActionError("");
     return submit(data, state);
   }, handleInvalid);
 
@@ -1378,7 +1384,9 @@ export default function BillingInvoiceCreateModal(props: any) {
   const submit = async (data: z.output<typeof BillingInvoiceSchema>, state: "draft" | "submitted") => {
     if (submittingRef.current) return;
     if (!financialContextReady) {
-      fire?.("Wait for the current work-order version to finish loading, then try again.");
+      const message = "Wait for the current work-order version to finish loading, then try again.";
+      setActionError(`Invoice was not saved. ${message}`);
+      fire?.(message);
       return;
     }
     const taxableAmount = (data.lines || []).reduce(
@@ -1388,7 +1396,9 @@ export default function BillingInvoiceCreateModal(props: any) {
     const hasManualTax = data.salesTaxOverride != null;
     const hasManualTaxRate = data.taxRateOverride != null;
     if (taxableAmount > 0 && !activeTaxRate && !hasManualTax && !hasManualTaxRate) {
-      fire?.(`No configured sales-tax rate for ${data.taxState || "this store state"}`);
+      const message = `No configured sales-tax rate for ${data.taxState || "this store state"}`;
+      setActionError(`Invoice was not saved. ${message}.`);
+      fire?.(message);
       return;
     }
     submittingRef.current = true;
@@ -1431,6 +1441,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       // The server may have accepted the old request. Do not let that result reset or populate another form/session.
       if (!currentAttempt()) return;
       const documentLabel = isCapitalQuote ? "Capital quote" : "Invoice";
+      setActionError("");
       fire?.(`${documentLabel} #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
       // A successful save has its own parent handoff to the exact invoice
       // detail. Do not run the cancel/close callback, which intentionally
@@ -1440,7 +1451,9 @@ export default function BillingInvoiceCreateModal(props: any) {
     } catch (err: unknown) {
       if (!currentAttempt()) return;
       recordStaffFinancialAttemptError(financialAttempt.current, err);
-      fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${safeErrorMessage(err)}`);
+      const detail = safeErrorMessage(err);
+      setActionError(`${state === "draft" ? "Draft" : "Invoice"} was not saved. ${detail}`);
+      fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${detail}`);
     } finally {
       if (currentAttempt()) { submittingRef.current = false; setSubmitting(false); }
     }
@@ -1814,8 +1827,12 @@ export default function BillingInvoiceCreateModal(props: any) {
                   value={line.type}
                   onChange={(event: any) => {
                     if (isP1PurchasedPart) return;
-                    void typeRegistration.onChange(event);
                     const nextType = normalizeStaffBillingLineType(event.target.value);
+                    setValue(`lines.${i}.type` as const, nextType, {
+                      shouldDirty: true,
+                      shouldTouch: true,
+                      shouldValidate: true,
+                    });
                     setValue(
                       `lines.${i}.isTaxable` as const,
                       taxabilityForLine(nextType, line.desc).taxable,
@@ -2193,6 +2210,11 @@ export default function BillingInvoiceCreateModal(props: any) {
         {validationNotice && (
           <div role="alert" style={{ marginTop: 18, padding: "10px 12px", borderRadius: 9, border: `1px solid ${T.danger}55`, background: T.dangerSoft, color: T.danger, fontSize: 12, fontWeight: 700 }}>
             {validationNotice} The first invalid field has been selected.
+          </div>
+        )}
+        {actionError && (
+          <div role="alert" style={{ marginTop: 18, padding: "10px 12px", borderRadius: 9, border: `1px solid ${T.danger}55`, background: T.dangerSoft, color: T.danger, fontSize: 12, fontWeight: 700 }}>
+            {actionError}
           </div>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
