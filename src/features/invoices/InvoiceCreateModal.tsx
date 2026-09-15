@@ -456,9 +456,20 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       setPdfLinesReviewed(false);
     }
   };
+  const stopPendingPdfRead = () => {
+    if (!pdfParseController.current) return;
+    pdfParseAttempt.current += 1;
+    pdfParseController.current.abort();
+    pdfParseController.current = null;
+    pdfParsingFile.current = null;
+    setPdfParseStatus("manual");
+    setPdfLineStatus("none");
+    setPdfLinesReviewed(false);
+    setPdfError("");
+  };
   const onSubmit = async (data: CreateInvoiceForm) => {
     if (submitLockRef.current) return;
-    if (pdfParseController.current) return;
+    stopPendingPdfRead();
     if (isRejectedResubmission && replacementPdfNeedsReselection && !pdfFile) {
       setPdfError("Reattach the replacement PDF before resubmitting, or choose Keep current attached PDF.");
       return;
@@ -620,7 +631,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
             Confirm the description, quantity, and rate against the uploaded PDF. You can edit, add, or remove any extracted row.
           </div>
         )}
-        <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
+        <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 12, overflow: "visible", marginBottom: 10 }}>
           <div className="inv-line-head" style={{ display: "grid", gridTemplateColumns: "30px 140px 1fr 70px 90px 90px 28px", gap: 10, padding: "10px 12px", background: T.surfaceSoft, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}` }}>
             <div>#</div><div>Type</div><div>Description</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Rate</div><div style={{ textAlign: "right" }}>Amount</div><div></div>
           </div>
@@ -750,10 +761,20 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
                     : pdfParseStatus === "manual"
                       ? pdfLineStatus === "detected"
                         ? `${fields.length} line item${fields.length === 1 ? "" : "s"} were detected, but the total was not. Enter the total and review the lines.`
-                        : "The invoice could not be read reliably. Enter the total manually; line items remain optional."
+                        : "Enter the invoice total manually; line items remain optional."
                       : "Enter the final total shown on the uploaded invoice."}
               </div>
             </div>
+            {pdfParseStatus === "reading" && (
+              <button
+                type="button"
+                className="btn-soft"
+                onClick={stopPendingPdfRead}
+                style={{ marginTop: 12, padding: "7px 11px", fontSize: 11 }}
+              >
+                Stop reading and enter total manually
+              </button>
+            )}
             {fields.length === 0 && pdfParseStatus !== "reading" && (
               <button
                 type="button"
@@ -907,9 +928,10 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
           {doSaveDraftInvoice && !isRejectedResubmission && (
             <button
               type="button"
-              disabled={savingDraft || submitting || pdfParseStatus === "reading"}
+              disabled={savingDraft || submitting}
               onClick={async () => {
-                if (!doSaveDraftInvoice || submitLockRef.current || pdfParseController.current) return;
+                if (!doSaveDraftInvoice || submitLockRef.current) return;
+                stopPendingPdfRead();
                 submitLockRef.current = true;
                 setSavingDraft(true);
                 const saveGeneration = hydrationGenerationRef.current;
@@ -936,7 +958,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
                 }
               }}
               className="btn-soft"
-              style={{ opacity: savingDraft || pdfParseStatus === "reading" ? 0.7 : 1, cursor: savingDraft || pdfParseStatus === "reading" ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+              style={{ opacity: savingDraft || submitting ? 0.7 : 1, cursor: savingDraft || submitting ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
             >
               {savingDraft ? <><BtnSpinner />Saving...</> : (existingInvoiceId ? "Save draft" : "Save as draft")}
             </button>
@@ -944,9 +966,10 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
           {isRejectedResubmission && (
             <button
               type="button"
-              disabled={savingDraft || submitting || pdfParseStatus === "reading"}
+              disabled={savingDraft || submitting}
               onClick={() => {
-                if (submitLockRef.current || pdfParseController.current) return;
+                if (submitLockRef.current) return;
+                stopPendingPdfRead();
                 submitLockRef.current = true;
                 setSavingDraft(true);
                 try {
@@ -957,18 +980,18 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
                 }
               }}
               className="btn-soft"
-              style={{ opacity: savingDraft || pdfParseStatus === "reading" ? 0.7 : 1, cursor: savingDraft || pdfParseStatus === "reading" ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+              style={{ opacity: savingDraft || submitting ? 0.7 : 1, cursor: savingDraft || submitting ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
             >
               {savingDraft ? <><BtnSpinner />Saving...</> : "Save correction draft"}
             </button>
           )}
           <button
             type="submit"
-            disabled={submitting || savingDraft || pdfParseStatus === "reading"}
+            disabled={submitting || savingDraft}
             className="btn-accent"
             style={{
-              opacity: submitting || pdfParseStatus === "reading" ? 0.7 : 1,
-              cursor: submitting || pdfParseStatus === "reading" ? "default" : "pointer",
+              opacity: submitting || savingDraft ? 0.7 : 1,
+              cursor: submitting || savingDraft ? "default" : "pointer",
               display: "flex",
               alignItems: "center",
               gap: 6,

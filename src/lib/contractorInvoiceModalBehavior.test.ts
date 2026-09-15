@@ -161,3 +161,9 @@ test("blank rate remains invalid on submit while an explicit zero rate remains s
   assert.equal(CreateInvoiceLineSchema.safeParse({ ...line, rate: -1 }).success, false);
   assert.equal(CreateInvoiceLineSchema.safeParse({ ...line, rate: Number.NaN }).success, false);
 });
+
+test("contractor invoice line container does not clip the line-type dropdown", () => {
+  const source = readFileSync(filename, "utf8");
+  assert.match(source, /borderRadius: 12, overflow: "visible", marginBottom: 10/);
+  assert.doesNotMatch(source, /borderRadius: 12, overflow: "hidden", marginBottom: 10/);
+});

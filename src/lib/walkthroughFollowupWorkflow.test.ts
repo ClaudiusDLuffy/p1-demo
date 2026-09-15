@@ -19,8 +19,10 @@ test("invoice and billing detours return to the originating work order", () => {
   assert.match(shell, /const returnToWorkflowWorkOrder = useCallback/);
   assert.match(shell, /const openContractorInvoiceFromWorkOrder = useCallback/);
   assert.match(shell, /onClose=\{closeBillingInvoiceEditor\}/);
-  assert.match(detail, /Back to previous view/);
-  assert.match(detail, /Back to all work orders/);
+  assert.match(detail, /aria-label="Back to previous view"/);
+  assert.match(detail, /<Ico[^>]+\/> Back/);
+  assert.doesNotMatch(detail, /Back to all work orders/);
+  assert.doesNotMatch(shell, /onBackToAllWorkOrders/);
 });
 
 test("work-order identity uses readable, prominent typography", () => {
