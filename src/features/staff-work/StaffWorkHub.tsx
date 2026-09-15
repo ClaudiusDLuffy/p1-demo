@@ -10,6 +10,7 @@ import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "../work-orders/WorkOrderCollectionNotice";
 import type {
   StaffNotificationRead,
   StaffWorkFilter,
@@ -129,6 +130,13 @@ export default function StaffWorkHub({
       : filterStaffWorkRows(rows, filter),
     [filter, pageRows, rows, workPageQuery.data],
   );
+  const collectionState = resolveWorkOrderCollectionState({
+    itemCount: visibleRows.length,
+    isPending: workPageQuery.isPending,
+    isFetching: workPageQuery.isFetching,
+    isError: workPageQuery.isError,
+  });
+  const retryStaffWork = () => { void workPageQuery.refetch(); };
   const myTodoCount = summaryCounts?.todo ?? null;
   const unreadCount = summaryCounts?.unread ?? null;
   const readyCount = summaryCounts?.ready ?? null;
@@ -205,6 +213,16 @@ export default function StaffWorkHub({
           );
         })}
       </div>
+
+      {collectionState === "error" && visibleRows.length > 0 && (
+        <WorkOrderCollectionNotice
+          state="error"
+          errorMessage="The latest My Work refresh failed. Showing the previously loaded results."
+          onRetry={retryStaffWork}
+          retrying={workPageQuery.isFetching}
+          style={{ marginBottom: 14, padding: "14px 16px" }}
+        />
+      )}
 
       <div style={{ display: "grid", gap: 10 }}>
         {visibleRows.map(row => {
@@ -306,9 +324,15 @@ export default function StaffWorkHub({
         })}
 
         {visibleRows.length === 0 && (
-          <div className="card" style={{ padding: 34, textAlign: "center", color: T.subtle, fontSize: 13 }}>
-            Nothing is waiting in this view.
-          </div>
+          <WorkOrderCollectionNotice
+            state={collectionState}
+            loadingMessage="Loading My Work…"
+            errorMessage="My Work could not be loaded. Please retry the request."
+            emptyMessage="Nothing is waiting in this view."
+            onRetry={retryStaffWork}
+            retrying={workPageQuery.isFetching}
+            className="card"
+          />
         )}
       </div>
       <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>

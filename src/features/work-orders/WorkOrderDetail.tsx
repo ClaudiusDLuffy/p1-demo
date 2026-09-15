@@ -831,13 +831,6 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated - pending 7-Eleven submission"}
                         </button>
                       )}
-                      {/* Multi-invoice: a contractor can keep adding invoices for
-                          follow-up visits until the WO closes. The per-invoice
-                          approve/reject/mark-paid actions are rendered in the
-                          invoice group block below. */}
-                      {!contractorHistoryReadOnly && woData.status !== "closed" && !isManager && canInvoice && (
-                        <button type="button" onClick={() => openCreate(null)} className="btn-accent">Create invoice</button>
-                      )}
                       {/* Staff retain only the explicit no-invoice exception.
                           Invoice-backed work orders close from Billing when staff
                           records Billed to 7-Eleven. */}
@@ -864,6 +857,20 @@ export default function WorkOrderDetail(props: any) {
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
 
                     </div>
+
+                    {!contractorHistoryReadOnly && woData.status !== "closed" && !isManager && canInvoice && (
+                      <div className="card contractor-invoice-cta" style={{ padding: "16px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 750, color: T.ink }}>Create invoice for this work order</div>
+                          <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
+                            Upload your invoice PDF or enter the invoice details directly in the portal.
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => openCreate(null)} className="btn-accent contractor-invoice-cta-button">
+                          {woAllInvoices.length > 0 ? "Create or upload another invoice" : "Create or upload invoice"}
+                        </button>
+                      </div>
+                    )}
 
                     {!contractorHistoryReadOnly && !invoiceController && (isManager || canInvoice) && (
                       <ContractorEstimatePanel
@@ -942,7 +949,7 @@ export default function WorkOrderDetail(props: any) {
                             {woAllInvoices.length} invoice{woAllInvoices.length === 1 ? "" : "s"} on this work order
                           </div>
                           {!isManager && canInvoice && woData.status !== "closed" && (
-                            <button onClick={() => openCreate(null)} className="btn-soft wo-invoice-action" style={{ padding: "6px 12px", fontSize: 11 }}>+ Add invoice</button>
+                            <button onClick={() => openCreate(null)} className="btn-accent wo-invoice-action" style={{ padding: "7px 12px", fontSize: 11 }}>+ Create or upload invoice</button>
                           )}
                         </div>
                         {woAllInvoices
@@ -1032,7 +1039,24 @@ export default function WorkOrderDetail(props: any) {
                                   )}
                                 </div>
                                 <div className="wo-invoice-mobile-actions" style={{ display: "none", position: "relative", flexShrink: 0 }}>
+                                  {inv.state !== "draft" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => doDownloadInvoice && doDownloadInvoice(inv)}
+                                      disabled={pdfBusy}
+                                      className="btn-soft wo-invoice-mobile-primary-action"
+                                    >
+                                      {pdfBusy ? "Preparing..." : "Download"}
+                                    </button>
+                                  )}
+                                  {isMyDraft && !isManager && (
+                                    <button type="button" onClick={() => openCreate(inv)} className="btn-accent wo-invoice-mobile-primary-action">Resume</button>
+                                  )}
+                                  {isMyRejectedInvoice && (
+                                    <button type="button" onClick={() => openCreate(inv)} className="btn-accent wo-invoice-mobile-primary-action">Edit &amp; resubmit</button>
+                                  )}
                                   <button
+                                    type="button"
                                     onClick={() => setInvoiceMenuId(invoiceMenuOpen ? null : invoiceMenuKey)}
                                     aria-label={`Invoice ${inv.num} actions`}
                                     style={{ width: 40, height: 40, borderRadius: 10, border: `1px solid ${T.borderSoft}`, background: T.surface, color: T.ink, cursor: "pointer", fontSize: 20, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}

@@ -95,10 +95,9 @@ test("contractor work-order page failures are reported and remain retryable", ()
   assert.match(myJobs, /jobsQuery\.isError/);
   assert.match(myJobs, /jobsQuery\.refetch\(\)/);
   assert.match(myJobs, /Your work orders are still saved/);
-  assert.match(
-    myJobs,
-    /!jobsQuery\.isLoading && !jobsQuery\.isError && visibleJobs\.length === 0/,
-  );
+  assert.match(myJobs, /resolveWorkOrderCollectionState\(\{/);
+  assert.match(myJobs, /isError:\s*jobsQuery\.isError \|\| !contractorId/);
+  assert.match(myJobs, /state=\{collectionState\}/);
 });
 
 test("contractor active lists request receipt-ordered cursor pages", () => {

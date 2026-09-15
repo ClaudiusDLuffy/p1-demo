@@ -16,6 +16,7 @@ import {
   previousCursorPosition,
 } from "../../lib/cursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
+import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
@@ -36,6 +37,13 @@ export default function CapitalProjects(props: any) {
   const capitalWOs: any[] = (capitalQuery.data?.items || []) as any[];
   const { getUser } = useDirectoryLabels(capitalWOs.map(workOrder => workOrder.contractor), page === "capital" && isManager);
   const exactCapitalCount = capitalQuery.data?.totalCount ?? "—";
+  const collectionState = resolveWorkOrderCollectionState({
+    itemCount: capitalWOs.length,
+    isPending: capitalQuery.isPending,
+    isFetching: capitalQuery.isFetching,
+    isError: capitalQuery.isError,
+  });
+  const retryCapitalProjects = () => { void capitalQuery.refetch(); };
   return (
     <>
           {/* ═════ CAPITAL ═════ */}
@@ -76,6 +84,15 @@ export default function CapitalProjects(props: any) {
                   <button type="button" className="btn-soft" disabled={!capitalQuery.data?.hasMore || capitalQuery.isFetching} onClick={() => setPosition(current => nextCursorPosition(current, capitalQuery.data?.nextCursor || null))}>Next</button>
                 </div>
               </div>
+              {collectionState === "error" && capitalWOs.length > 0 && (
+                <WorkOrderCollectionNotice
+                  state="error"
+                  errorMessage="The latest capital-project refresh failed. Showing the previously loaded results."
+                  onRetry={retryCapitalProjects}
+                  retrying={capitalQuery.isFetching}
+                  style={{ marginTop: 14, padding: "14px 16px" }}
+                />
+              )}
               <div className="capital-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 {capitalWOs.map((wo, i) => (
                   <div key={wo.id} className="card card-hover mobile-card" onClick={() => { setSelectedWO(wo.id); setPage("work_orders"); setAiNote(null); }} style={{ padding: 22, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.06}s both` }}>
@@ -106,6 +123,18 @@ export default function CapitalProjects(props: any) {
                     <div style={{ fontSize: 11, color: T.subtle, marginTop: 10 }}>Contractor: {getUser(wo.contractor)?.name || "Unassigned"}</div>
                   </div>
                 ))}
+                {capitalWOs.length === 0 && (
+                  <WorkOrderCollectionNotice
+                    state={collectionState}
+                    loadingMessage="Loading capital projects…"
+                    errorMessage="Capital projects could not be loaded. Please retry the request."
+                    emptyMessage="No capital projects match the current view."
+                    onRetry={retryCapitalProjects}
+                    retrying={capitalQuery.isFetching}
+                    className="card"
+                    style={{ gridColumn: "1 / -1" }}
+                  />
+                )}
               </div>
             </div>
           )}

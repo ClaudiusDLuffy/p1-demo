@@ -16,6 +16,7 @@ import {
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "./queries";
+import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
@@ -99,6 +100,15 @@ export default function MyJobs(props: any) {
       await capitalCountQuery.refetch();
     })();
   };
+  const collectionState = resolveWorkOrderCollectionState({
+    itemCount: visibleJobs.length,
+    isPending: enabled && jobsQuery.isPending,
+    isFetching: enabled && jobsQuery.isFetching,
+    isError: jobsQuery.isError || !contractorId,
+  });
+  const jobsErrorMessage = contractorId
+    ? "Your work orders are still saved. Retry the secure connection to load them."
+    : "Your contractor account could not be resolved. Refresh the page or contact P1 support.";
   const jobCounts = {
     active: activeCountQuery.data?.totalCount ?? "—",
     pendingInvoice: pendingCountQuery.data?.totalCount ?? "—",
@@ -162,26 +172,26 @@ export default function MyJobs(props: any) {
                   onDirectionChange={setSortDirection}
                 />
               </div>
-              {jobsQuery.isLoading && (
-                <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
-                  Loading work orders...
-                </div>
+              {collectionState === "error" && visibleJobs.length > 0 && (
+                <WorkOrderCollectionNotice
+                  state="error"
+                  errorMessage="The latest work-order refresh failed. Showing the previously loaded results."
+                  onRetry={retryJobs}
+                  retrying={jobsQuery.isFetching}
+                  style={{ marginBottom: 14, padding: "14px 16px" }}
+                />
               )}
-              {jobsQuery.isError && (
-                <div className="card" role="alert" style={{ padding: "24px 20px", textAlign: "center" }}>
-                  <div style={{ color: T.ink, fontWeight: 700, marginBottom: 6 }}>Work orders could not load</div>
-                  <div style={{ color: T.muted, fontSize: 12, marginBottom: 14 }}>
-                    Your work orders are still saved. Retry the secure connection to load them.
-                  </div>
-                  <button type="button" className="btn-soft" onClick={retryJobs} disabled={jobsQuery.isFetching}>
-                    {jobsQuery.isFetching ? "Retrying..." : "Retry"}
-                  </button>
-                </div>
-              )}
-              {!jobsQuery.isLoading && !jobsQuery.isError && visibleJobs.length === 0 && (
-                <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
-                  No matching work orders.
-                </div>
+              {visibleJobs.length === 0 && (
+                <WorkOrderCollectionNotice
+                  state={collectionState}
+                  loadingMessage="Loading your work orders…"
+                  errorMessage={jobsErrorMessage}
+                  emptyMessage={search ? "No work orders match your search." : "No active work orders are assigned to your account."}
+                  onRetry={contractorId ? retryJobs : undefined}
+                  retrying={jobsQuery.isFetching}
+                  className="card"
+                  style={{ marginBottom: 14 }}
+                />
               )}
               {visibleJobs.map((wo, i) => {
                 const sla = slaLabel(wo);

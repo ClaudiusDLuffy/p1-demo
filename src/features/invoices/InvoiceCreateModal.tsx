@@ -17,6 +17,15 @@ import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useWorkOrderPartsQuery } from "../work-orders/queries";
 import { contractorInvoiceSnapshotFor } from "../../lib/contractorInvoiceCommands";
 import type { ContractorInvoiceContext, ContractorInvoiceSnapshot } from "../../lib/contractorInvoiceCommandContracts";
+import { browserDraftSession } from "../../lib/drafts/browserDraftSession";
+import type { DraftLease } from "../../lib/drafts/draftSession";
+import {
+  CONTRACTOR_INVOICE_CORRECTION_DRAFT_MAX_AGE_MS,
+  correctionDraftMatchesSnapshot,
+  createContractorInvoiceCorrectionDraft,
+  validateContractorInvoiceCorrectionDraft,
+  type ContractorInvoiceCorrectionDraft,
+} from "../../lib/contractorInvoiceCorrectionDraft";
 
 type InvoiceModalWorkOrder = {
   id: string; store?: string | number | null; addr?: string | null;
@@ -41,6 +50,8 @@ type InvoiceModalProps = {
   fmt(value: number): string; setModal(value: string | null): void; resetNewInv(): void;
   doSubmitInvoice(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null): Promise<boolean | void>;
   doSaveDraftInvoice?(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null): Promise<boolean | void>;
+  doDownloadInvoice?(invoice: InvoiceModalDraft): Promise<void> | void;
+  pdfBusy?: boolean;
   resumeDraft?: InvoiceModalDraft | null; nextInvNumFromDb?(): Promise<string>; woParts?: readonly unknown[];
   // Existing shell compatibility props are not consumed by this form.
   invSubtotal?: unknown; newInv?: unknown; lineAmount?: unknown; invoices?: unknown; setNewInv?: unknown;
@@ -77,7 +88,8 @@ const initialLines = (): CreateInvoiceForm["lines"] => [];
 export default function InvoiceCreateModal(props: InvoiceModalProps) {
   const formId = useId();
   const pdfUploadInput = useRef<HTMLInputElement>(null);
-  const { modal, woData, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice, resumeDraft, nextInvNumFromDb, woParts: suppliedWoParts = [] } = props;
+  const { modal, woData, currentUser, fmt, setModal, resetNewInv, doSubmitInvoice, doSaveDraftInvoice,
+    doDownloadInvoice, pdfBusy = false, resumeDraft, nextInvNumFromDb, woParts: suppliedWoParts = [] } = props;
   const partsQuery = useWorkOrderPartsQuery(
     woData?.id,
     modal === "createInvoice" && Boolean(woData?.id),
@@ -108,6 +120,11 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
   const snapshotSessionRef = useRef<string | null>(null);
   const hydratedFormSessionRef = useRef<string | null>(null);
   const hydrationGenerationRef = useRef(0);
+  const correctionDraftLeaseRef = useRef<DraftLease<ContractorInvoiceCorrectionDraft> | null>(null);
+  const restoredCorrectionDraftRef = useRef(false);
+  const [correctionDraftState, setCorrectionDraftState] = useState<"idle" | "restored" | "saved" | "error">("idle");
+  const [correctionDraftSavedAt, setCorrectionDraftSavedAt] = useState<string | null>(null);
+  const [replacementPdfNeedsReselection, setReplacementPdfNeedsReselection] = useState(false);
   const existingInvoiceId = resumeDraft?.id || null;
   const isRejectedResubmission = resumeDraft?.state === "rejected";
   // Tracks whether the user has touched the # field — if so we trust their
@@ -148,6 +165,11 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
   const uploadedLinesMatchTotal = uploadedLineDifference <= Math.max(0.05, uploadedTotal * 0.01);
 
   useEffect(() => {
+    if (!isRejectedResubmission || (!isDirty && !pdfFile)) return;
+    setCorrectionDraftState(current => current === "saved" || current === "restored" ? "idle" : current);
+  }, [isDirty, isRejectedResubmission, pdfFile]);
+
+  useEffect(() => {
     if (modal !== "createInvoice") { snapshotSessionRef.current = null; invoiceSnapshotRef.current = null; return; }
     if (!woData?.id) return;
     const session = `${woData.id}:${resumeDraft?.id || "new"}`;
@@ -164,6 +186,8 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     pdfParseController.current?.abort();
     pdfParseController.current = null;
     pdfParsingFile.current = null;
+    correctionDraftLeaseRef.current?.close();
+    correctionDraftLeaseRef.current = null;
   }, [modal, woData?.id, currentUser?.id]);
 
   useEffect(() => {
@@ -187,6 +211,12 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     setPdfError("");
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
+    correctionDraftLeaseRef.current?.close();
+    correctionDraftLeaseRef.current = null;
+    restoredCorrectionDraftRef.current = false;
+    setCorrectionDraftState("idle");
+    setCorrectionDraftSavedAt(null);
+    setReplacementPdfNeedsReselection(false);
     // Resuming an existing draft → hydrate the form from its stored fields
     // (keep its existing number untouched). Otherwise pull the authoritative
     // next-number from the DB so the user sees a non-colliding suggestion
@@ -196,14 +226,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       setNumTouched(true);
       const resumeUploadOnly = !!resumeDraft.pdfStoragePath
         && (!!resumeDraft.pdfIsOriginal || (resumeDraft.lines || []).length === 0);
-      setPdfParseStatus(resumeUploadOnly ? "detected" : "idle");
-      setPdfLineStatus(
-        resumeUploadOnly
-          ? (resumeDraft.lines || []).length > 0 ? "detected" : "none"
-          : "idle",
-      );
-      setPdfLinesReviewed(resumeUploadOnly && (resumeDraft.lines || []).length > 0);
-      reset({
+      const invoiceForm: CreateInvoiceForm = {
         num: resumeDraft.num || "",
         invoiceDate: resumeDraft.invoiceDateRaw || resumeDraft.invoiceDate || todayIso(),
         serviceDate: resumeDraft.serviceDateRaw || resumeDraft.serviceDate || todayIso(),
@@ -215,7 +238,54 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
         lines: (resumeDraft.lines || []).length
           ? (resumeDraft.lines || []).map(l => ({ type: l.type, desc: l.desc || l.description || "", qty: l.qty == null ? 1 : Number(l.qty), rate: Number(l.rate) }))
           : resumeUploadOnly ? [] : initialLines(),
-      });
+      };
+      let formToRestore = invoiceForm;
+      if (resumeDraft.state === "rejected" && currentUser?.id) {
+        try {
+          const snapshot = contractorInvoiceSnapshotFor(woData, resumeDraft);
+          const draftSession = browserDraftSession();
+          let lease = draftSession?.open(
+            "contractor-invoice-correction",
+            `edit:${resumeDraft.id}`,
+            validateContractorInvoiceCorrectionDraft,
+            CONTRACTOR_INVOICE_CORRECTION_DRAFT_MAX_AGE_MS,
+          ) ?? null;
+          const stored = lease?.read() ?? null;
+          if (stored && !correctionDraftMatchesSnapshot(stored, snapshot)) {
+            lease?.discard();
+            lease = draftSession?.open(
+              "contractor-invoice-correction",
+              `edit:${resumeDraft.id}`,
+              validateContractorInvoiceCorrectionDraft,
+              CONTRACTOR_INVOICE_CORRECTION_DRAFT_MAX_AGE_MS,
+            ) ?? null;
+          } else if (stored) {
+            formToRestore = {
+              ...stored.form,
+              lines: stored.form.lines.map(line => ({
+                type: line.type,
+                desc: line.desc,
+                qty: line.qty === "" || line.qty == null ? undefined as unknown as number : Number(line.qty),
+                rate: line.rate === "" || line.rate == null ? undefined : Number(line.rate),
+              })),
+            };
+            restoredCorrectionDraftRef.current = true;
+            setCorrectionDraftState("restored");
+            setCorrectionDraftSavedAt(stored.savedAt);
+            setReplacementPdfNeedsReselection(stored.replacementPdfNeedsReselection);
+          }
+          correctionDraftLeaseRef.current = lease;
+        } catch {
+          setCorrectionDraftState("error");
+        }
+      }
+      const restoredUploadOnly = !!formToRestore.uploadOnly;
+      setPdfParseStatus(restoredUploadOnly ? "detected" : "idle");
+      setPdfLineStatus(restoredUploadOnly
+        ? formToRestore.lines.length > 0 ? "detected" : "none"
+        : "idle");
+      setPdfLinesReviewed(restoredUploadOnly && formToRestore.lines.length > 0);
+      reset(formToRestore);
     } else {
       setPdfParseStatus("idle");
       setPdfLineStatus("idle");
@@ -247,8 +317,58 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
         })();
       }
     }
-  }, [modal, reset, setValue, resumeDraft, nextInvNumFromDb, woData?.id, currentUser?.id]);
+  }, [modal, reset, setValue, resumeDraft, nextInvNumFromDb, woData, currentUser?.id]);
 
+  const currentCorrectionForm = (): CreateInvoiceForm => ({
+    num: watch("num"),
+    invoiceDate: watch("invoiceDate"),
+    serviceDate: watch("serviceDate"),
+    terms: watch("terms"),
+    tax: watch("tax"),
+    cme: watch("cme"),
+    uploadOnly: watch("uploadOnly"),
+    uploadedTotal: watch("uploadedTotal"),
+    lines: watch("lines"),
+  });
+  const persistCorrectionDraft = () => {
+    const lease = correctionDraftLeaseRef.current;
+    const snapshot = invoiceSnapshotRef.current;
+    if (!isRejectedResubmission || !lease || !snapshot) {
+      setCorrectionDraftState("error");
+      return false;
+    }
+    try {
+      const result = lease.save(createContractorInvoiceCorrectionDraft({
+        form: currentCorrectionForm(),
+        snapshot,
+        replacementPdfNeedsReselection: replacementPdfNeedsReselection || Boolean(pdfFile),
+      }));
+      if (result.status !== "persisted") {
+        setCorrectionDraftState("error");
+        return false;
+      }
+      restoredCorrectionDraftRef.current = true;
+      setCorrectionDraftSavedAt(result.savedAt);
+      setCorrectionDraftState("saved");
+      return true;
+    } catch {
+      setCorrectionDraftState("error");
+      return false;
+    }
+  };
+  const discardCorrectionDraft = () => {
+    const lease = correctionDraftLeaseRef.current;
+    if (!lease) return true;
+    const discarded = lease.discard();
+    if (discarded) {
+      correctionDraftLeaseRef.current = null;
+      restoredCorrectionDraftRef.current = false;
+      setCorrectionDraftState("idle");
+      setCorrectionDraftSavedAt(null);
+      setReplacementPdfNeedsReselection(false);
+    }
+    return discarded;
+  };
   const close = () => {
     const today = todayIso();
     hydrationGenerationRef.current += 1;
@@ -256,6 +376,9 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     pdfParseController.current?.abort();
     pdfParseController.current = null;
     pdfParsingFile.current = null;
+    correctionDraftLeaseRef.current?.close();
+    correctionDraftLeaseRef.current = null;
+    restoredCorrectionDraftRef.current = false;
     numTouchedRef.current = false;
     setNumTouched(false);
     reset({
@@ -275,6 +398,9 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     setPdfParseStatus("idle");
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
+    setCorrectionDraftState("idle");
+    setCorrectionDraftSavedAt(null);
+    setReplacementPdfNeedsReselection(false);
     submissionKeyRef.current = "";
     draftOperationKeyRef.current = "";
     invoiceSnapshotRef.current = null;
@@ -282,10 +408,18 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     submitLockRef.current = false;
     setModal(null);
   };
+  const correctionDirty = isRejectedResubmission && (isDirty || Boolean(pdfFile) || restoredCorrectionDraftRef.current);
+  const correctionPersisted = correctionDirty
+    && (correctionDraftState === "saved" || correctionDraftState === "restored")
+    && (correctionDraftLeaseRef.current?.isPersisted() ?? false);
   const dismissal = useUnsavedChangesGuard({
     scopeKey: `${currentUser?.id || ""}:${woData?.id || ""}:${resumeDraft?.id || "new"}`,
-    dirty: isDirty || Boolean(pdfFile), busy: submitting || savingDraft,
+    dirty: correctionDirty || isDirty || Boolean(pdfFile), busy: submitting || savingDraft,
+    persistence: correctionDraftState === "error" ? "persist_failed"
+      : correctionPersisted ? "dirty_persisted" : "dirty_not_persisted",
     enabled: modal === "createInvoice" && Boolean(woData), onClose: close,
+    onDiscard: isRejectedResubmission ? discardCorrectionDraft : undefined,
+    onKeepDraft: isRejectedResubmission ? () => correctionDraftLeaseRef.current?.isPersisted() ?? false : undefined,
   });
   if (modal !== "createInvoice" || !woData) return null;
   if (resumeDraft?.projection && resumeDraft.projection !== "complete_document") return <Modal title="Invoice not ready to edit" onClose={() => setModal(null)} width={420}>
@@ -325,6 +459,10 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
   const onSubmit = async (data: CreateInvoiceForm) => {
     if (submitLockRef.current) return;
     if (pdfParseController.current) return;
+    if (isRejectedResubmission && replacementPdfNeedsReselection && !pdfFile) {
+      setPdfError("Reattach the replacement PDF before resubmitting, or choose Keep current attached PDF.");
+      return;
+    }
     if (data.uploadOnly && (data.lines || []).length > 0 && !pdfLinesReviewed) {
       setPdfError("Review the extracted line items and confirm them before submitting.");
       return;
@@ -344,7 +482,10 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       commandContext: invoiceSnapshotRef.current && { ...invoiceSnapshotRef.current, operationId: submissionKeyRef.current },
       resubmittingRejected: isRejectedResubmission,
     }, existingInvoiceId);
-    if (ok && hydrationGenerationRef.current === submitGeneration) reset();
+    if (ok && hydrationGenerationRef.current === submitGeneration) {
+      discardCorrectionDraft();
+      reset();
+    }
     } finally {
       if (hydrationGenerationRef.current === submitGeneration) {
         submitLockRef.current = false;
@@ -377,6 +518,33 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
             <div style={{ fontSize: 11, fontWeight: 700, color: T.danger, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Correction requested</div>
             <div style={{ fontSize: 12, color: "#8B2C20", lineHeight: 1.5 }}>{resumeDraft.rejectionReason || resumeDraft.reason || "Review the invoice and correct the requested information before resubmitting."}</div>
             <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.5, marginTop: 6 }}>The same invoice record and number will be preserved. Once resubmitted, it will be locked while P1 reviews it again.</div>
+            {resumeDraft.pdfStoragePath && doDownloadInvoice && (
+              <button
+                type="button"
+                className="btn-soft"
+                disabled={pdfBusy}
+                onClick={() => { void doDownloadInvoice(resumeDraft); }}
+                style={{ marginTop: 10, minHeight: 40, opacity: pdfBusy ? 0.65 : 1 }}
+              >
+                {pdfBusy ? "Preparing PDF..." : "Download current PDF"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {isRejectedResubmission && correctionDraftState === "restored" && (
+          <div role="status" style={{ padding: "10px 12px", marginBottom: 14, borderRadius: 10, border: `1px solid ${T.accentRing}`, background: T.accentSoft, color: T.ink, fontSize: 11, lineHeight: 1.5 }}>
+            Your saved correction draft was restored from this device{correctionDraftSavedAt ? ` (${new Date(correctionDraftSavedAt).toLocaleString()})` : ""}.
+          </div>
+        )}
+        {isRejectedResubmission && correctionDraftState === "error" && (
+          <div role="alert" style={{ padding: "10px 12px", marginBottom: 14, borderRadius: 10, border: `1px solid ${T.danger}55`, background: T.dangerSoft, color: T.danger, fontSize: 11, lineHeight: 1.5 }}>
+            This correction draft could not be saved on this device. Keep the form open and try again.
+          </div>
+        )}
+        {isRejectedResubmission && (
+          <div style={{ marginBottom: 14, color: T.muted, fontSize: 11, lineHeight: 1.5 }}>
+            Save correction draft keeps these changes only in this signed-in browser. The invoice remains rejected until you resubmit it, and any replacement PDF must be selected again after reopening.
           </div>
         )}
 
@@ -643,6 +811,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
                     return;
                   }
                   setPdfFile(file);
+                  setReplacementPdfNeedsReselection(false);
                   setPdfError("");
                   setValue("uploadOnly", true, { shouldDirty: true });
                   setValue("uploadedTotal", "", { shouldDirty: true });
@@ -706,6 +875,21 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
             </div>
           </label>
           {pdfError && <div id={`${formId}-pdf-error`} role="alert" style={{ marginTop: 7, color: T.danger, fontSize: 11, fontWeight: 600 }}>{pdfError}</div>}
+          {isRejectedResubmission && replacementPdfNeedsReselection && !pdfFile && (
+            <div style={{ marginTop: 9, padding: "9px 10px", borderRadius: 8, background: T.warnSoft, color: T.warn, fontSize: 11, lineHeight: 1.5 }}>
+              Replacement PDFs cannot be stored in a browser draft. Reattach the replacement before resubmitting.
+              {resumeDraft.pdfStoragePath && (
+                <button
+                  type="button"
+                  className="btn-soft"
+                  onClick={() => { setReplacementPdfNeedsReselection(false); setPdfError(""); }}
+                  style={{ display: "block", marginTop: 8, minHeight: 38 }}
+                >
+                  Keep current attached PDF
+                </button>
+              )}
+            </div>
+          )}
           {pdfFile && (
             <button type="button" onClick={() => {
               clearPendingPdf();
@@ -755,6 +939,27 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
               style={{ opacity: savingDraft || pdfParseStatus === "reading" ? 0.7 : 1, cursor: savingDraft || pdfParseStatus === "reading" ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
             >
               {savingDraft ? <><BtnSpinner />Saving...</> : (existingInvoiceId ? "Save draft" : "Save as draft")}
+            </button>
+          )}
+          {isRejectedResubmission && (
+            <button
+              type="button"
+              disabled={savingDraft || submitting || pdfParseStatus === "reading"}
+              onClick={() => {
+                if (submitLockRef.current || pdfParseController.current) return;
+                submitLockRef.current = true;
+                setSavingDraft(true);
+                try {
+                  if (persistCorrectionDraft()) close();
+                } finally {
+                  submitLockRef.current = false;
+                  setSavingDraft(false);
+                }
+              }}
+              className="btn-soft"
+              style={{ opacity: savingDraft || pdfParseStatus === "reading" ? 0.7 : 1, cursor: savingDraft || pdfParseStatus === "reading" ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              {savingDraft ? <><BtnSpinner />Saving...</> : "Save correction draft"}
             </button>
           )}
           <button
