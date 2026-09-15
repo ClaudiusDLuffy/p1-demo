@@ -2,10 +2,13 @@
 
 import { Children, isValidElement, useEffect, useId, useMemo, useRef, useState, forwardRef, useImperativeHandle,
   type ChangeEvent, type ChangeEventHandler, type ComponentPropsWithoutRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { T } from "../../lib/constants";
 import { useFieldControl } from "./fieldContext";
 import { MAX_SELECT_SEARCH, SELECT_TYPEAHEAD_MS, nextEnabledOption, typeaheadOption, type SelectOption } from "../../lib/forms/selectModel";
 import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
+import { getFloatingPanelPosition, type FloatingPanelPosition } from "../../lib/floatingPanel";
+import { useModalPortalHost } from "./Modal";
 
 const labelText = (value: ReactNode): string => {
   if (Array.isArray(value)) return value.map(labelText).join("");
@@ -40,7 +43,9 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
   const generated = useId();
   const listId = `${generated}-listbox`;
   const association = useFieldControl(p);
+  const portalHost = useModalPortalHost();
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<FloatingPanelPosition | null>(null);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
   const typeahead = useRef({ text: "", at: 0 });
@@ -93,11 +98,40 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!wrapRef.current?.contains(target) && !listRef.current?.contains(target)) {
+        setOpen(false);
+        setPosition(null);
+      }
     };
     if (!open) return;
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger?.isConnected) return;
+      const rect = trigger.getBoundingClientRect();
+      setPosition(getFloatingPanelPosition({
+        trigger: rect,
+        panelWidth: Math.max(rect.width, 180),
+        panelHeight: 260,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        margin: 8,
+        gap: 6,
+      }));
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -115,7 +149,12 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
     return () => cancelAnimationFrame(frame);
   }, [open, activeIndex]);
 
-  const close = (restore = true) => { setOpen(false); setSearch(""); if (restore) triggerRef.current?.focus({ preventScroll: true }); };
+  const close = (restore = true) => {
+    setOpen(false);
+    setPosition(null);
+    setSearch("");
+    if (restore) triggerRef.current?.focus({ preventScroll: true });
+  };
   const selectValue = (nextValue: string) => {
     setInnerValue(nextValue);
     // Preserve the existing select-like onChange contract using a real native
@@ -134,6 +173,7 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
   };
   const openMenu = (direction: "first" | "last" = "first") => {
     if (disabled) return;
+    setPosition(null);
     setSearch("");
     setActiveIndex(selected && !selected.disabled ? selected.index : nextEnabledOption(options, -1, direction));
     setOpen(true);
@@ -154,7 +194,10 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
       const now = event.timeStamp;
       const text = (now - typeahead.current.at > SELECT_TYPEAHEAD_MS ? "" : typeahead.current.text) + event.key;
       typeahead.current = { text: text.slice(-MAX_SELECT_SEARCH), at: now };
-      if (!open) setOpen(true);
+      if (!open) {
+        setPosition(null);
+        setOpen(true);
+      }
       setActiveIndex(typeaheadOption(options, activeIndex, typeahead.current.text));
     }
   };
@@ -307,24 +350,27 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
           v
         </span>
       </button>
-      {open && !disabled && (
+      {open && !disabled && createPortal(
         <div
           ref={listRef}
+          onPointerDown={event => event.stopPropagation()}
           style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            left: 0,
-            right: 0,
+            position: "fixed",
+            top: position?.top ?? 0,
+            left: position?.left ?? 0,
+            width: position?.width ?? 180,
             minWidth: 0,
-            maxWidth: "100%",
+            maxWidth: "calc(100vw - 16px)",
             boxSizing: "border-box",
-            zIndex: 90,
+            zIndex: 220,
             background: T.surface,
             border: `1px solid ${T.border}`,
             borderRadius: 12,
             boxShadow: "0 14px 34px rgba(31,30,28,0.14)",
             padding: 6,
-            maxHeight: 260,
+            maxHeight: position?.maxHeight ?? 260,
+            visibility: position ? "visible" : "hidden",
+            pointerEvents: position ? "auto" : "none",
             overflowY: "auto",
             overflowX: "hidden",
             scrollbarGutter: "stable both-edges",
@@ -426,7 +472,7 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
             </div>
           )}
         </div>
-      )}
+      , portalHost || document.body)}
     </div>
   );
 });
