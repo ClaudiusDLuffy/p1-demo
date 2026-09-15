@@ -711,7 +711,11 @@ export default function useWorkOrders({
     }, "Technician assignment failed", () => restoreWorkOrders(snapshot));
   };
 
-  const doStartWork = async (woId: string, notes: string) => {
+  const doStartWork = async (
+    woId: string,
+    notes: string,
+    onFailure?: (message: string) => void,
+  ) => {
     if (lifecycleInFlight.current.has(woId)) return false;
     lifecycleInFlight.current.add(woId);
     setLoading("startWork_" + woId, true);
@@ -737,13 +741,19 @@ export default function useWorkOrders({
     }
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
     patchLocalWO(woId, patch, localActivity(text, "note", isManager, "check_in", true, false, "field_note"));
-    fire("Work started · 7-Eleven update pending");
-    return await dbCall(async () => {
+    const startFailureMessage = (error: unknown) =>
+      `Start work failed: ${safeLifecycleError(error).message}`;
+    const started = await dbCall(async () => {
       const result = await startWorkOrderVisit({
         ...lifecycleContextFor(existing), checkedInAt: requestedStartIso, notes: notes.trim(),
       }, existing?.status === "parts" || existing?.assignmentTransferPendingVisit === true);
       patchLocalWO(woId, { lifecycleVersion: result.lifecycleVersion, assignmentTransferPendingVisit: false });
-    }, "Start work failed", () => restoreWorkOrders(snapshot));
+    }, "Start work failed", (error) => {
+      restoreWorkOrders(snapshot);
+      onFailure?.(startFailureMessage(error));
+    }, undefined, startFailureMessage);
+    if (started) fire("Work started · 7-Eleven update pending");
+    return started;
     } finally {
       lifecycleInFlight.current.delete(woId);
       setLoading("startWork_" + woId, false);
