@@ -23,6 +23,7 @@ import type { DirectoryActor } from "../directory/contracts";
 import { countReadPolicy, useCountQueryVisibility } from "../../lib/counts/countQueryPolicy";
 import { workOrderCountFilters } from "../../lib/counts/countFilters";
 import { normalizeUnknownError } from "../../lib/errors/normalizeUnknown";
+import { retryWorkOrderRead } from "./workOrderQueryPolicy";
 import { directoryActorScope, workOrderPagesKey, workOrderCountKey, workOrderChildCountKey,
   workOrderByIdKey, workOrderDetailsKey, workOrderFamilyKey, portalNavigationSummaryKey,
   workOrderPartsKey, p1PartCostsKey, billableP1PartsKey } from "../../lib/counts/queryKeys";
@@ -127,6 +128,7 @@ export function useWorkOrdersPageQuery(
     queryKey: workOrderPagesKey(scope, params),
     queryFn: ({ signal }) => loadWorkOrdersPage(params, signal),
     staleTime: 30_000,
+    retry: (failureCount, error) => retryWorkOrderRead(params, failureCount, error),
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope ? previous : undefined,
     enabled: enabled && !!actor?.id && actor.active === true,
   });
@@ -150,7 +152,8 @@ export function useWorkOrdersCountQuery(params: WorkOrderPageParams, enabled = t
   const filters = workOrderCountFilters(params);
   const visible = useCountQueryVisibility(enabled && !!actor?.id && actor.active === true);
   return useQuery({ queryKey: workOrderCountKey(directoryActorScope(actor), filters),
-    queryFn: ({ signal }) => loadWorkOrdersCount(filters, signal), ...countReadPolicy, enabled: visible });
+    queryFn: ({ signal }) => loadWorkOrdersCount(filters, signal), ...countReadPolicy,
+    retry: (failureCount, error) => retryWorkOrderRead(filters, failureCount, error), enabled: visible });
 }
 
 export function useWorkOrderByIdQuery(workOrderId: string | null | undefined, enabled = true, actorOverride?: DirectoryActor | null) {
