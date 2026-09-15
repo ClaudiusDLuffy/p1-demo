@@ -10,6 +10,10 @@ import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
+import {
+  resolveWorkOrderCollectionState,
+  WorkOrderCollectionNotice,
+} from "../work-orders/WorkOrderCollectionNotice";
 import type {
   StaffNotificationRead,
   StaffWorkFilter,
@@ -140,6 +144,13 @@ export default function StaffWorkHub({
     todo: myTodoCount,
     ready: readyCount,
   };
+  const workCollectionState = resolveWorkOrderCollectionState({
+    itemCount: visibleRows.length,
+    isPending: workPageQuery.isPending,
+    isFetching: workPageQuery.isFetching,
+    isError: workPageQuery.isError,
+  });
+  const retryStaffWork = () => { void workPageQuery.refetch(); };
 
   if (page !== "staff_work") return null;
 
@@ -205,6 +216,18 @@ export default function StaffWorkHub({
           );
         })}
       </div>
+
+      {workCollectionState === "error" && visibleRows.length > 0 && (
+        <WorkOrderCollectionNotice
+          state={workCollectionState}
+          loadingMessage="Loading staff work…"
+          errorMessage="Staff work could not load. Previously loaded results may be stale. Retry the secure connection."
+          emptyMessage="Nothing is waiting in this view."
+          onRetry={retryStaffWork}
+          retrying={workPageQuery.isFetching}
+          style={{ marginBottom: 14 }}
+        />
+      )}
 
       <div style={{ display: "grid", gap: 10 }}>
         {visibleRows.map(row => {
@@ -306,9 +329,16 @@ export default function StaffWorkHub({
         })}
 
         {visibleRows.length === 0 && (
-          <div className="card" style={{ padding: 34, textAlign: "center", color: T.subtle, fontSize: 13 }}>
-            Nothing is waiting in this view.
-          </div>
+          <WorkOrderCollectionNotice
+            state={workCollectionState}
+            loadingMessage="Loading staff work…"
+            errorMessage="Staff work could not load. Retry the secure connection."
+            emptyMessage="Nothing is waiting in this view."
+            onRetry={retryStaffWork}
+            retrying={workPageQuery.isFetching}
+            className="card"
+            style={{ padding: 34 }}
+          />
         )}
       </div>
       <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>

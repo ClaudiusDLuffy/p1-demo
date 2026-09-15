@@ -35,6 +35,10 @@ import {
 import { normalizeExactPortalWorkOrderId } from "../../lib/workOrderIdentity";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery } from "./queries";
+import {
+  resolveWorkOrderCollectionState,
+  WorkOrderCollectionNotice,
+} from "./WorkOrderCollectionNotice";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
 export default function WorkOrderList(props: any) {
@@ -190,13 +194,25 @@ export default function WorkOrderList(props: any) {
     ? pagingDirection
     : null;
 
-  const emptyStateMessage = exactWorkOrderId
-    ? exactWorkOrderQuery.isFetching
-      ? `Looking up ${exactWorkOrderId}...`
-      : exactWorkOrderQuery.isError
-        ? `Could not look up ${exactWorkOrderId}. Please try again.`
-        : `No accessible work order found for ${exactWorkOrderId}.`
-    : "No work orders match your filters";
+  const activeWorkOrderQuery = exactWorkOrderId ? exactWorkOrderQuery : workOrderPageQuery;
+  const collectionState = resolveWorkOrderCollectionState({
+    itemCount: paginatedWOs.length,
+    isPending: activeWorkOrderQuery.isPending,
+    isFetching: activeWorkOrderQuery.isFetching,
+    isError: activeWorkOrderQuery.isError,
+  });
+  const collectionMessages = exactWorkOrderId
+    ? {
+        loading: `Looking up ${exactWorkOrderId}…`,
+        error: `Could not look up ${exactWorkOrderId}. Your work orders are still saved. Retry the secure connection.`,
+        empty: `No accessible work order found for ${exactWorkOrderId}.`,
+      }
+    : {
+        loading: "Loading work orders…",
+        error: "Work orders could not load. Your work orders are still saved. Retry the secure connection.",
+        empty: "No work orders match your filters.",
+      };
+  const retryWorkOrders = () => { void activeWorkOrderQuery.refetch(); };
 
   const goToPage = (direction: "prev" | "next") => {
     setPagingDirection(direction);
@@ -474,6 +490,18 @@ export default function WorkOrderList(props: any) {
 
           <WorkOrderStatusLegend />
 
+          {collectionState === "error" && paginatedWOs.length > 0 && (
+            <WorkOrderCollectionNotice
+              state={collectionState}
+              loadingMessage={collectionMessages.loading}
+              errorMessage={collectionMessages.error}
+              emptyMessage={collectionMessages.empty}
+              onRetry={retryWorkOrders}
+              retrying={activeWorkOrderQuery.isFetching}
+              style={{ marginBottom: 14 }}
+            />
+          )}
+
           <div className="desktop-only-table">
             <div className="card table-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>
               <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse", fontSize: 12 }}>
@@ -557,7 +585,15 @@ export default function WorkOrderList(props: any) {
                   {paginatedWOs.length === 0 && (
                     <tr>
                       <td colSpan={tableColumns.length} style={{ padding: "36px 20px", textAlign: "center", color: T.subtle, fontSize: 13 }}>
-                        {emptyStateMessage}
+                        <WorkOrderCollectionNotice
+                          state={collectionState}
+                          loadingMessage={collectionMessages.loading}
+                          errorMessage={collectionMessages.error}
+                          emptyMessage={collectionMessages.empty}
+                          onRetry={retryWorkOrders}
+                          retrying={activeWorkOrderQuery.isFetching}
+                          style={{ padding: 0 }}
+                        />
                       </td>
                     </tr>
                   )}
@@ -646,9 +682,16 @@ export default function WorkOrderList(props: any) {
               );
             })}
             {paginatedWOs.length === 0 && (
-              <div aria-live="polite" className="responsive-grid-empty" style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
-                {emptyStateMessage}
-              </div>
+              <WorkOrderCollectionNotice
+                state={collectionState}
+                loadingMessage={collectionMessages.loading}
+                errorMessage={collectionMessages.error}
+                emptyMessage={collectionMessages.empty}
+                onRetry={retryWorkOrders}
+                retrying={activeWorkOrderQuery.isFetching}
+                className="responsive-grid-empty"
+                style={{ padding: "40px 20px" }}
+              />
             )}
           </div>
 

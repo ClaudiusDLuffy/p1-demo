@@ -12,6 +12,10 @@ import { DatePickerField } from "../../components/ui/DateTimePicker";
 import { useDeferredValue, useState } from "react";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "./queries";
+import {
+  resolveWorkOrderCollectionState,
+  WorkOrderCollectionNotice,
+} from "./WorkOrderCollectionNotice";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
@@ -91,6 +95,16 @@ export default function HistoryView(props: any) {
     ?? filteredClosedWOs.reduce((sum: number, w: any) => sum + invTotalFor(w.id), 0);
   const totalCount = historyPageQuery.data?.totalCount ?? null;
   const totalPages = totalCount === null ? null : Math.max(1, Math.ceil(totalCount / pageSize));
+  const historyCollectionState = resolveWorkOrderCollectionState({
+    itemCount: filteredClosedWOs.length,
+    isPending: historyPageQuery.isPending,
+    isFetching: historyPageQuery.isFetching,
+    isError: historyPageQuery.isError,
+  });
+  const retryHistory = () => { void historyPageQuery.refetch(); };
+  const historyEmptyMessage = isContractorHistory
+    ? "No closed jobs match the current filters."
+    : "No closed work orders match the current filters.";
 
   if (page !== "history" || selectedWO) return null;
 
@@ -161,11 +175,29 @@ export default function HistoryView(props: any) {
           </div>
         </div>
 
+        {historyCollectionState === "error" && filteredClosedWOs.length > 0 && (
+          <WorkOrderCollectionNotice
+            state={historyCollectionState}
+            loadingMessage="Loading closed work orders…"
+            errorMessage="Closed work orders could not load. Previously loaded results may be stale. Retry the secure connection."
+            emptyMessage={historyEmptyMessage}
+            onRetry={retryHistory}
+            retrying={historyPageQuery.isFetching}
+          />
+        )}
+
         <div className="desktop-only-table">
           {filteredClosedWOs.length === 0 ? (
-            <div className="card" style={{ padding: 28, color: T.muted, textAlign: "center" }}>
-              No closed work orders match the current filters.
-            </div>
+            <WorkOrderCollectionNotice
+              state={historyCollectionState}
+              loadingMessage="Loading closed work orders…"
+              errorMessage="Closed work orders could not load. Retry the secure connection."
+              emptyMessage={historyEmptyMessage}
+              onRetry={retryHistory}
+              retrying={historyPageQuery.isFetching}
+              className="card"
+              style={{ padding: 28 }}
+            />
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
               {filteredClosedWOs.map((w: any) => {
@@ -292,9 +324,15 @@ export default function HistoryView(props: any) {
             </div>
           ))}
           {filteredClosedWOs.length === 0 && (
-            <div style={{ textAlign: "center", padding: "40px 20px", color: T.subtle, fontSize: 13 }}>
-              No closed work orders match the current filters.
-            </div>
+            <WorkOrderCollectionNotice
+              state={historyCollectionState}
+              loadingMessage="Loading closed work orders…"
+              errorMessage="Closed work orders could not load. Retry the secure connection."
+              emptyMessage={historyEmptyMessage}
+              onRetry={retryHistory}
+              retrying={historyPageQuery.isFetching}
+              style={{ padding: "40px 20px" }}
+            />
           )}
         </div>
         {(filteredClosedWOs.length > 0 || effectiveCursor.page > 1 || historyPageQuery.data?.hasMore) && (

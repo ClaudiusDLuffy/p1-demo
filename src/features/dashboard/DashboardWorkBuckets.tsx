@@ -15,6 +15,10 @@ import {
 } from "./workBuckets";
 import { useCursorBuckets } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "../work-orders/queries";
+import {
+  resolveWorkOrderCollectionState,
+  WorkOrderCollectionNotice,
+} from "../work-orders/WorkOrderCollectionNotice";
 
 type DashboardIdentityWorkOrder = DashboardWorkOrder & {
   externalWorkOrderId?: string | null;
@@ -131,6 +135,12 @@ export default function DashboardWorkBuckets({
           const isExpanded = expanded[bucket.id] === true;
           const color = BUCKET_COLORS[bucket.id];
           const position = positions[bucket.id];
+          const collectionState = resolveWorkOrderCollectionState({
+            itemCount: visibleRows.length,
+            isPending: bucket.query.isPending,
+            isFetching: bucket.query.isFetching,
+            isError: bucket.query.isError,
+          });
           return (
             <article key={bucket.id} className="card" style={{ overflow: "hidden" }}>
               <button
@@ -154,6 +164,17 @@ export default function DashboardWorkBuckets({
 
               {isExpanded && (
                 <div id={`dashboard-bucket-${bucket.id}`} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
+                  {collectionState === "error" && (
+                    <WorkOrderCollectionNotice
+                      state={collectionState}
+                      loadingMessage={`Loading ${bucket.label.toLowerCase()}…`}
+                      errorMessage={`${bucket.label} could not load. Retry the secure connection.`}
+                      emptyMessage={search ? "No matching work orders in this queue." : "Nothing is waiting in this queue."}
+                      onRetry={() => { void bucket.query.refetch(); }}
+                      retrying={bucket.query.isFetching}
+                      style={{ borderRadius: 0, padding: "16px" }}
+                    />
+                  )}
                   {visibleRows.map((workOrder, index) => {
                     const priority = PRIORITY[workOrder.priority as keyof typeof PRIORITY];
                     const status = STATUS[workOrder.status as keyof typeof STATUS];
@@ -194,10 +215,16 @@ export default function DashboardWorkBuckets({
                       </button>
                     );
                   })}
-                  {visibleRows.length === 0 && (
-                    <div style={{ padding: "18px 16px", color: T.subtle, fontSize: 11, textAlign: "center" }}>
-                      {search ? "No matching work orders in this queue." : "Nothing is waiting in this queue."}
-                    </div>
+                  {visibleRows.length === 0 && collectionState !== "error" && (
+                    <WorkOrderCollectionNotice
+                      state={collectionState}
+                      loadingMessage={`Loading ${bucket.label.toLowerCase()}…`}
+                      errorMessage={`${bucket.label} could not load. Retry the secure connection.`}
+                      emptyMessage={search ? "No matching work orders in this queue." : "Nothing is waiting in this queue."}
+                      onRetry={() => { void bucket.query.refetch(); }}
+                      retrying={bucket.query.isFetching}
+                      style={{ borderRadius: 0, padding: "18px 16px", fontSize: 11 }}
+                    />
                   )}
                   <div style={{ padding: "9px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: T.surfaceSoft, fontSize: 10, color: T.subtle }}>
                     <span>{bucket.query.isFetching ? "Loading..." : `Page ${position.page}`}</span>
