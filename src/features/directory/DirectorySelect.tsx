@@ -5,6 +5,7 @@ import { T } from "../../lib/constants";
 import { directoryItemValue, type DirectoryDomain, type DirectoryItem } from "./contracts";
 import { useDirectoryPage, useDirectorySelection } from "./queries";
 import { useFieldControl, type FieldControlProps } from "../../components/ui/fieldContext";
+import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
 
 export function DirectoryPageControls({ directory }: { directory: ReturnType<typeof useDirectoryPage> }) {
   return <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
@@ -54,6 +55,8 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const formInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => {
     const input = formInput.current;
     if (!input) throw new Error("Directory form control is not mounted");
@@ -78,6 +81,10 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
   }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    searchInput.current?.focus({ preventScroll: true });
+  }, [open]);
   const choose = (nextValue: string, item: DirectoryItem | null) => {
     setInternalValue(nextValue);
     onChange?.({ target: { name, value: nextValue }, currentTarget: { name, value: nextValue }, type: "change" }, item);
@@ -87,7 +94,7 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
   };
   return <div ref={wrapper} style={{ position: "relative", width: style?.width || "100%", minWidth: 0 }}
     onKeyDown={event => {
-      if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); return; }
+      if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true }); return; }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
       if (!open) { if (event.key.startsWith("Arrow")) { event.preventDefault(); setOpen(true); } return; }
       if (event.target instanceof HTMLInputElement && ["Home", "End"].includes(event.key)) return;
@@ -97,7 +104,9 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
       const index = choices.indexOf(document.activeElement as HTMLButtonElement);
       const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1
         : event.key === "ArrowDown" ? Math.min(index + 1, choices.length - 1) : Math.max(index - 1, 0);
-      choices[nextIndex]?.focus();
+      const choice = choices[nextIndex];
+      choice?.focus({ preventScroll: true });
+      scrollWithinContainer(list.current, choice);
     }}>
     <input ref={formInput} type="hidden" name={name} value={selectedValue} disabled={disabled} readOnly />
     <button {...association} ref={trigger} type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} aria-controls={listId}
@@ -109,11 +118,11 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
     {open && !disabled && <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, right: 0, minWidth: 230,
       zIndex: 95, border: `1px solid ${T.border}`, borderRadius: 10, padding: 8, background: T.surface,
       boxShadow: "0 12px 28px #0002" }}>
-      <input type="search" maxLength={200} value={directory.search} onChange={event => directory.setSearch(event.target.value)}
-        aria-label={`Search ${ariaLabel || "directory"}`} placeholder="Search name or company…" autoFocus
+      <input ref={searchInput} type="search" maxLength={200} value={directory.search} onChange={event => directory.setSearch(event.target.value)}
+        aria-label={`Search ${ariaLabel || "directory"}`} placeholder="Search name or company…"
         style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: 8, marginBottom: 6,
           border: `1px solid ${T.border}`, borderRadius: 8 }} />
-      <div role="listbox" id={listId} aria-label={ariaLabel || "Directory choices"} style={{ maxHeight: 240, overflowY: "auto" }}>
+      <div ref={list} role="listbox" id={listId} aria-label={ariaLabel || "Directory choices"} style={{ maxHeight: 240, overflowY: "auto" }}>
         <button type="button" role="option" aria-selected={selectedValue === emptyValue} onClick={() => choose(emptyValue, null)}
           style={{ display: "block", width: "100%", padding: 10, border: 0, textAlign: "left", background: T.surfaceSoft }}>{emptyLabel}</button>
         {directory.items.map(item => {

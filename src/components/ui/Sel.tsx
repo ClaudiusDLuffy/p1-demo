@@ -5,6 +5,7 @@ import { Children, isValidElement, useEffect, useId, useMemo, useRef, useState, 
 import { T } from "../../lib/constants";
 import { useFieldControl } from "./fieldContext";
 import { MAX_SELECT_SEARCH, SELECT_TYPEAHEAD_MS, nextEnabledOption, typeaheadOption, type SelectOption } from "../../lib/forms/selectModel";
+import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
 
 const labelText = (value: ReactNode): string => {
   if (Array.isArray(value)) return value.map(labelText).join("");
@@ -100,20 +101,21 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
   }, [open]);
 
   useEffect(() => {
-    if (open && searchable) searchRef.current?.focus();
+    if (open && searchable) searchRef.current?.focus({ preventScroll: true });
   }, [open, searchable]);
 
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
-      listRef.current
-        ?.querySelector<HTMLElement>(`[data-option-index="${activeIndex}"]`)
-        ?.scrollIntoView({ block: "center" });
+      const list = listRef.current;
+      const option = list
+        ?.querySelector<HTMLElement>(`[data-option-index="${activeIndex}"]`);
+      scrollWithinContainer(list, option);
     });
     return () => cancelAnimationFrame(frame);
   }, [open, activeIndex]);
 
-  const close = (restore = true) => { setOpen(false); setSearch(""); if (restore) triggerRef.current?.focus(); };
+  const close = (restore = true) => { setOpen(false); setSearch(""); if (restore) triggerRef.current?.focus({ preventScroll: true }); };
   const selectValue = (nextValue: string) => {
     setInnerValue(nextValue);
     // Preserve the existing select-like onChange contract using a real native

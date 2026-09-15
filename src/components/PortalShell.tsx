@@ -1211,6 +1211,48 @@ export default function PortalShell() {
   const [noteText, setNoteText] = useState("");
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerPanelRef = useRef<HTMLDivElement | null>(null);
+  const drawerOpenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const closeMobileDrawer = useCallback((restoreFocus = true) => {
+    setDrawerOpen(false);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => drawerOpenButtonRef.current?.focus({ preventScroll: true }));
+    }
+  }, []);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const bodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => drawerCloseButtonRef.current?.focus({ preventScroll: true }));
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMobileDrawer();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = Array.from(drawerPanelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ) || []).filter(control => !control.closest('[inert], [hidden], [aria-hidden="true"]'));
+      if (!controls.length) { event.preventDefault(); drawerPanelRef.current?.focus({ preventScroll: true }); return; }
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus({ preventScroll: true }); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus({ preventScroll: true }); }
+    };
+    const closeAfterDesktopResize = () => {
+      if (window.innerWidth > 1200) closeMobileDrawer(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", closeAfterDesktopResize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", closeAfterDesktopResize);
+      document.body.style.overflow = bodyOverflow;
+    };
+  }, [closeMobileDrawer, drawerOpen]);
   const updatePullDistance = useCallback((distance: number) => {
     pullDistanceRef.current = distance;
     setPullDistance(distance);
@@ -2644,22 +2686,26 @@ export default function PortalShell() {
       <style>{CSS}</style>
       <ClientDiagnostics portalView={page} />
 
+      {drawerOpen && <>
       <div
         className="mobile-only-cards"
-        onClick={() => setDrawerOpen(false)}
+        aria-hidden="true"
+        onClick={() => closeMobileDrawer()}
         style={{
           position: "fixed",
           inset: 0,
           background: "rgba(31,30,28,0.45)",
           zIndex: 200,
-          opacity: drawerOpen ? 1 : 0,
-          pointerEvents: drawerOpen ? "all" : "none",
-          transition: "opacity 0.3s ease",
         }}
       />
 
       <div
+        ref={drawerPanelRef}
         className="mobile-only-cards mobile-drawer-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation menu"
+        tabIndex={-1}
         style={{
           position: "fixed",
           top: 0,
@@ -2669,8 +2715,7 @@ export default function PortalShell() {
           maxWidth: 280,
           background: T.sidebar,
           zIndex: 201,
-          transform: drawerOpen ? "translateX(0)" : "translateX(-100%)",
-          transition: "transform 0.35s cubic-bezier(0.4,0,0.2,1)",
+          transform: "translateX(0)",
           display: "flex",
           flexDirection: "column",
           boxShadow: "4px 0 24px rgba(31,30,28,0.18)",
@@ -2678,7 +2723,8 @@ export default function PortalShell() {
         }}
       >
         <button
-          onClick={() => setDrawerOpen(false)}
+          ref={drawerCloseButtonRef}
+          onClick={() => closeMobileDrawer()}
           aria-label="Close menu"
           style={{
             position: "absolute",
@@ -2729,7 +2775,7 @@ export default function PortalShell() {
                 key={item.id}
                 onClick={() => {
                   nav(item.id);
-                  setDrawerOpen(false);
+                  closeMobileDrawer();
                 }}
                 style={{
                   display: "flex",
@@ -2776,7 +2822,7 @@ export default function PortalShell() {
             <button
               onClick={() => {
                 setModal("addressBook");
-                setDrawerOpen(false);
+                closeMobileDrawer(false);
               }}
               style={{
                 width: "calc(100% - 20px)",
@@ -2798,7 +2844,7 @@ export default function PortalShell() {
           <button
             onClick={() => {
               setModal("manageAccount");
-              setDrawerOpen(false);
+              closeMobileDrawer(false);
             }}
             style={{
               width: "calc(100% - 20px)",
@@ -2818,7 +2864,7 @@ export default function PortalShell() {
           </button>
           <button
             onClick={async () => {
-              setDrawerOpen(false);
+              closeMobileDrawer(false);
               await handleLogout();
             }}
             disabled={logoutLoading}
@@ -2848,9 +2894,10 @@ export default function PortalShell() {
           </button>
         </div>
       </div>
+      </>}
 
       {/* Sidebar */}
-      <div className="desktop-sidebar" style={{ width: 232, background: T.sidebar, color: T.sidebarText, display: "flex", flexDirection: "column", flexShrink: 0, position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30 }}>
+      <div className="desktop-sidebar" inert={drawerOpen ? true : undefined} aria-hidden={drawerOpen || undefined} style={{ width: 232, background: T.sidebar, color: T.sidebarText, display: "flex", flexDirection: "column", flexShrink: 0, position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 30 }}>
         <div style={{ padding: "22px 20px 18px", borderBottom: "1px solid rgba(250,247,242,0.06)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 5, boxSizing: "border-box", flexShrink: 0 }}>
@@ -2965,7 +3012,7 @@ export default function PortalShell() {
       </div>
 
       {/* Mobile bottom nav */}
-      <div className="mobile-bottom-nav" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebar, zIndex: 40, borderTop: "1px solid rgba(250,247,242,0.08)", padding: "6px 8px env(safe-area-inset-bottom, 8px)" }}>
+      <div className="mobile-bottom-nav" inert={drawerOpen ? true : undefined} aria-hidden={drawerOpen || undefined} style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: T.sidebar, zIndex: 40, borderTop: "1px solid rgba(250,247,242,0.08)", padding: "6px 8px env(safe-area-inset-bottom, 8px)" }}>
         {bottomNavItems.map(item => (
           <button key={item.id} onClick={() => nav(item.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "8px 0", gap: 3, cursor: "pointer", color: page === item.id ? T.accent : T.sidebarText, background: "none", border: "none", fontFamily: "inherit" }}>
             <div style={{ width: 4, height: 4, borderRadius: "50%", background: page === item.id ? T.accent : "transparent", marginBottom: 2 }} />
@@ -2976,7 +3023,7 @@ export default function PortalShell() {
       </div>
 
       {/* Main */}
-      <div className="main-wrap" style={{ flex: "0 0 calc(100% - 232px)", marginLeft: 232, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <div className="main-wrap" inert={drawerOpen ? true : undefined} aria-hidden={drawerOpen || undefined} style={{ flex: "0 0 calc(100% - 232px)", marginLeft: 232, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
         {/* Topbar */}
         <div className="topbar-shell" style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
           <div className="desktop-only-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
@@ -3014,6 +3061,7 @@ export default function PortalShell() {
           <div className="mobile-only-header">
             <div className="mobile-header-top">
               <button
+                ref={drawerOpenButtonRef}
                 onClick={() => setDrawerOpen(true)}
                 aria-label="Open menu"
                 style={{

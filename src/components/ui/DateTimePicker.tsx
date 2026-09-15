@@ -10,6 +10,7 @@ import { getFloatingPanelPosition, type FloatingPanelPosition } from "../../lib/
 import { Sel } from "./Sel";
 import { useModalPortalHost } from "./Modal";
 import { FieldContext, useFieldControl, type FieldControlProps } from "./fieldContext";
+import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const toDateValue = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -180,7 +181,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
 
   return (
     <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}
-      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}>
+      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true }); } }}>
       <style>{pickerCss}</style>
       <button
         {...association}
@@ -227,7 +228,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
           aria-modal="false"
           aria-label="Choose date"
           className="p1-picker-popover p1-date-picker"
-          onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}
+          onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true }); } }}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
             width: pos.width,
@@ -275,7 +276,7 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
               if (!date) return;
               onChange(toDateValue(date));
               setOpen(false);
-              trigger.current?.focus();
+              trigger.current?.focus({ preventScroll: true });
             }}
           />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -339,19 +340,23 @@ export function TimePickerField({ value, onChange, placeholder = "Select time", 
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
-      hourListRef.current
-        ?.querySelector<HTMLElement>('[data-active="true"]')
-        ?.scrollIntoView({ block: "center" });
-      minuteListRef.current
-        ?.querySelector<HTMLElement>('[data-active="true"]')
-        ?.scrollIntoView({ block: "center" });
+      const hourList = hourListRef.current;
+      const minuteList = minuteListRef.current;
+      scrollWithinContainer(
+        hourList,
+        hourList?.querySelector<HTMLElement>('[data-active="true"]'),
+      );
+      scrollWithinContainer(
+        minuteList,
+        minuteList?.querySelector<HTMLElement>('[data-active="true"]'),
+      );
     });
     return () => cancelAnimationFrame(frame);
   }, [open, hour12, minute]);
 
   return (
     <div ref={ref} style={{ position: "relative", width: "100%", minWidth: 0 }}
-      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}>
+      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true }); } }}>
       <button
         {...association}
         ref={trigger}
@@ -392,7 +397,7 @@ export function TimePickerField({ value, onChange, placeholder = "Select time", 
           aria-modal="false"
           aria-label="Choose time"
           className="p1-picker-popover"
-          onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); } }}
+          onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true }); } }}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
             width: pos.width,

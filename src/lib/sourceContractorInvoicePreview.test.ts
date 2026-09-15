@@ -27,11 +27,10 @@ test("source preview reloads one compact authorized invoice and paged lines with
   assert.doesNotMatch(drawer, /readCompleteInvoiceDocument|readInvoiceDocument/);
 });
 
-test("source reference stays read-only and outside the editable modal viewport", () => {
-  assert.ok(
-    modal.indexOf("</Modal>")
-      < modal.indexOf("<SourceContractorInvoiceDrawer"),
-  );
+test("source reference stays read-only in the parent dialog layer outside its scrolling viewport", () => {
+  const sourceDrawerIndex = modal.indexOf("<SourceContractorInvoiceDrawer");
+  assert.ok(sourceDrawerIndex > modal.indexOf("</form>"));
+  assert.ok(sourceDrawerIndex < modal.lastIndexOf("</Modal>"));
   assert.doesNotMatch(
     drawer,
     /sourceUnitCost|source_unit_cost|markupPercent|markup_percent|marginPercent|margin_percent|overallMargin|qbo_/i,
