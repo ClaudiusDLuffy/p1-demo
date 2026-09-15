@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { isShellActionForm, shellFormSnapshot } from "./portalFormDismissal";
+import { isShellActionForm, shellFormSnapshot, validatePauseWorkForm } from "./portalFormDismissal";
 
 test("every authored shell action value participates in the dirty snapshot", () => {
   const cases: Readonly<Record<string, readonly string[]>> = {
@@ -110,5 +110,25 @@ test("a rejected start is visible inside the native dialog and remains retryable
   assert.match(modal, /role="alert" aria-live="assertive"/);
   assert.match(modal, /doStartWork\(woData\.id, startNotesInput, setStartWorkError\)/);
   assert.match(modal, /else setStartWorkError/);
+  assert.match(modal, /catch \{/);
+});
+
+test("pause requires a reason and a described part only when awaiting parts", () => {
+  assert.equal(validatePauseWorkForm("", []), "Choose why work is being paused.");
+  assert.equal(validatePauseWorkForm("Awaiting parts", []), "Add at least one part and enter its description before pausing.");
+  assert.equal(validatePauseWorkForm("Awaiting parts", [{ description: "  " }]), "Add at least one part and enter its description before pausing.");
+  assert.equal(validatePauseWorkForm("Awaiting parts", [{ description: "Evaporator coil" }]), null);
+  assert.equal(validatePauseWorkForm("Temporary fix", []), null);
+});
+
+test("a rejected pause is visible inside the native dialog and remains retryable", () => {
+  const source = readFileSync("src/components/PortalShell.tsx", "utf8");
+  const start = source.indexOf('{modal === "pauseWork"');
+  const modal = source.slice(start, source.indexOf('{modal === "closeComplete"', start));
+  assert.match(source, /const \[pauseWorkError, setPauseWorkError\] = useState\(""\)/);
+  assert.match(modal, /validatePauseWorkForm\(pauseReasonInput, pausePartsList\)/);
+  assert.match(modal, /role="alert" aria-live="assertive"/);
+  assert.match(modal, /setPauseWorkError\)/);
+  assert.match(modal, /else setPauseWorkError/);
   assert.match(modal, /catch \{/);
 });

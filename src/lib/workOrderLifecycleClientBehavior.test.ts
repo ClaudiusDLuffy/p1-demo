@@ -104,8 +104,8 @@ for (const scenario of [
     assert.equal(await h.hook[scenario.action]("WOTTEST001", ...scenario.args), false,
       "failed command keeps authored form values mounted for retry");
     assert.ok(h.messages.some(message => message.startsWith(scenario.failure)));
-    if (scenario.action === "doStartWork") assert.ok(!h.messages.includes(scenario.success),
-      "a rejected start must not announce that work started");
+    if (scenario.action === "doStartWork" || scenario.action === "doPauseWork") assert.ok(!h.messages.includes(scenario.success),
+      `a rejected ${scenario.action} must not announce success`);
     assert.equal(h.cache.get(h.keys.WORK_ORDERS_KEY), h.workOrders);
     assert.equal(h.loading.at(-1)?.[`${scenario.loading}_WOTTEST001`], false);
     assert.ok(h.invalidations.includes(h.keys.WORK_ORDER_DETAILS_KEY));
@@ -122,6 +122,24 @@ test("a rejected start reports the safe failure inside its owning modal", async 
   ), false);
   assert.deepEqual(inlineFailures, [
     "Start work failed: The action could not be confirmed. Refresh the work order before trying again.",
+  ]);
+});
+
+test("a rejected pause reports failure inside its owning modal", async () => {
+  const h = harness("wip", true);
+  const inlineFailures: string[] = [];
+  assert.equal(await h.hook.doPauseWork(
+    "WOTTEST001",
+    "Temporary fix",
+    "",
+    "",
+    "",
+    "Synthetic pause",
+    [],
+    (message: string) => inlineFailures.push(message),
+  ), false);
+  assert.deepEqual(inlineFailures, [
+    "Pause failed: The action could not be confirmed. Refresh the work order before trying again.",
   ]);
 });
 

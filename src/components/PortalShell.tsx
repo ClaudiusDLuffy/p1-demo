@@ -22,7 +22,7 @@ import { Modal, requestTopModalClose } from "./ui/Modal";
 import { useUnsavedChangesGuard } from "../lib/forms/useUnsavedChangesGuard";
 import { hasDirtySensitiveForms } from "../lib/forms/dirtyFormRegistry";
 import { hasCurrentSensitiveDrafts } from "../lib/drafts/browserDraftSession";
-import { isShellActionForm, shellFormSnapshot } from "../lib/forms/portalFormDismissal";
+import { isShellActionForm, shellFormSnapshot, validatePauseWorkForm } from "../lib/forms/portalFormDismissal";
 import { Input } from "./ui/Input";
 import { DatePickerField, TimePickerField } from "./ui/DateTimePicker";
 import { Sel } from "./ui/Sel";
@@ -1327,6 +1327,7 @@ export default function PortalShell() {
   const [startNotesInput, setStartNotesInput] = useState("");
   const [startWorkError, setStartWorkError] = useState("");
   const [pauseReasonInput, setPauseReasonInput] = useState("");
+  const [pauseWorkError, setPauseWorkError] = useState("");
   const [partDescInput, setPartDescInput] = useState("");
   const [partNumInput, setPartNumInput] = useState("");
   const [partEtaInput, setPartEtaInput] = useState("");
@@ -1992,6 +1993,7 @@ export default function PortalShell() {
       setPartEtaInput("");
       setPausePartsList([]);
       setPauseNotesInput("");
+      setPauseWorkError("");
     }
     if (modal === "closeComplete") {
       Object.assign(initial, { closeDateInput: storeNow.date, closeTimeInput: storeNow.time,
@@ -4157,7 +4159,7 @@ export default function PortalShell() {
         <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Pause work" width={500}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Why can't the job be completed this trip?</div>
           <div style={{ display: "grid", gap: 14 }}>
-            <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => setPauseReasonInput(e.target.value)}>
+            <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => { setPauseReasonInput(e.target.value); setPauseWorkError(""); }}>
               <option value="">Select...</option>
               <option value="Temporary fix">Temporary fix - equipment partially working</option>
               <option value="Awaiting parts">Awaiting parts - equipment completely down</option>
@@ -4172,7 +4174,7 @@ export default function PortalShell() {
                   <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts on order</div>
                   <button
                     type="button"
-                    onClick={() => setPausePartsList(prev => [...prev, { uiId: crypto.randomUUID(), description: "", partNumber: "", qty: 1, expectedReturnDate: "" }])}
+                    onClick={() => { setPausePartsList(prev => [...prev, { uiId: crypto.randomUUID(), description: "", partNumber: "", qty: 1, expectedReturnDate: "" }]); setPauseWorkError(""); }}
                     className="btn-soft"
                     style={{ padding: "5px 10px", fontSize: 11 }}
                   >+ Add part</button>
@@ -4190,12 +4192,12 @@ export default function PortalShell() {
                         <button
                           type="button"
                           aria-label={`Remove part ${i + 1}`}
-                          onClick={() => setPausePartsList(prev => prev.filter((_, j) => j !== i))}
+                          onClick={() => { setPausePartsList(prev => prev.filter((_, j) => j !== i)); setPauseWorkError(""); }}
                           style={{ background: "transparent", border: "none", color: T.subtle, cursor: "pointer", fontSize: 14, padding: 0 }}
                         >x</button>
                       </div>
                       <div style={{ display: "grid", gap: 8 }}>
-                        <Field label="Description"><Input value={row.description} onChange={(e: any) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, description: e.target.value } : r))} placeholder="e.g. Evaporator coil" /></Field>
+                        <Field label="Description"><Input value={row.description} onChange={(e: any) => { setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, description: e.target.value } : r)); setPauseWorkError(""); }} placeholder="e.g. Evaporator coil" /></Field>
                         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1.4fr 70px", gap: 8 }}>
                           <Field label="Part number"><Input value={row.partNumber} onChange={(e: any) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, partNumber: e.target.value } : r))} placeholder="e.g. BHL136BE" /></Field>
                           <Field label="Qty"><Input type="number" min="1" step="1" value={row.qty} onChange={(e: any) => setPausePartsList(prev => prev.map((r, j) => j === i ? { ...r, qty: Number(e.target.value) || 1 } : r))} /></Field>
@@ -4207,17 +4209,33 @@ export default function PortalShell() {
                 </div>
               </div>
             )}
-            <Field label="Notes"><TA rows={2} value={pauseNotesInput} onChange={(e: any) => setPauseNotesInput(e.target.value)} placeholder="Explain what was done so far..." /></Field>
+            <Field label="Notes"><TA rows={2} value={pauseNotesInput} onChange={(e: any) => { setPauseNotesInput(e.target.value); setPauseWorkError(""); }} placeholder="Explain what was done so far..." /></Field>
           </div>
+          {pauseWorkError && (
+            <div role="alert" aria-live="assertive" style={{ color: T.danger, background: T.dangerSoft, borderRadius: 9, padding: "10px 12px", fontSize: 12, lineHeight: 1.5, marginTop: 16 }}>
+              {pauseWorkError}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
-            <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
+            <button type="button" onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
+              type="button"
               onClick={async () => {
+                setPauseWorkError("");
+                const validationError = validatePauseWorkForm(pauseReasonInput, pausePartsList);
+                if (validationError) {
+                  setPauseWorkError(validationError);
+                  return;
+                }
                 setModalLoading(true);
                 try {
                   const paused = await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput,
-                    pausePartsList.map(({ description, partNumber, qty, expectedReturnDate }) => ({ description, partNumber, qty, expectedReturnDate })));
+                    pausePartsList.map(({ description, partNumber, qty, expectedReturnDate }) => ({ description, partNumber, qty, expectedReturnDate })),
+                    setPauseWorkError);
                   if (paused) setModal(null);
+                  else setPauseWorkError((current) => current || "Pause could not be confirmed. Refresh the work order and try again.");
+                } catch {
+                  setPauseWorkError("Pause could not be confirmed. Refresh the work order and try again.");
                 } finally {
                   setModalLoading(false);
                 }
