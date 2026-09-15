@@ -53,7 +53,12 @@ import { browserDraftSession } from "../../lib/drafts/browserDraftSession";
 import type { DraftLease } from "../../lib/drafts/draftSession";
 import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { invoiceQuantityInputConstraints } from "../../lib/invoiceQuantity";
-import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt, type StaffInvoiceSnapshot } from "../../lib/staffFinancialClient";
+import {
+  captureStaffInvoiceSnapshot,
+  createStaffFinancialAttempt,
+  recordStaffFinancialAttemptError,
+  type StaffInvoiceSnapshot,
+} from "../../lib/staffFinancialClient";
 import { isInvoiceController } from "../../lib/staffPermissions";
 import {
   initialStaffBillingTerms,
@@ -258,6 +263,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   const initializedFor = useRef<string | null>(null);
   const financialAttempt = useRef(createStaffFinancialAttempt());
   const financialSnapshot = useRef<{ key: string; value: StaffInvoiceSnapshot } | null>(null);
+  const [financialContextState, setFinancialContextState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [financialContextReload, setFinancialContextReload] = useState(0);
   const editingVersionSnapshot = useRef<unknown>(null);
   const previousInvoiceDate = useRef("");
   const previousTerms = useRef("");
@@ -318,6 +325,9 @@ export default function BillingInvoiceCreateModal(props: any) {
   const someLinesTaxable = lines.some((line: any) => Boolean(line?.isTaxable));
   const subtotal = lines.reduce((sum: number, line: any) => sum + amount(line), 0);
   const selectedWorkOrderId = watch("workOrderId");
+  const financialContextKey = `${editingInvoice?.id || "new"}:${selectedWorkOrderId || "standalone"}`;
+  const financialContextReady = financialContextState === "ready"
+    && financialSnapshot.current?.key === financialContextKey;
   const territory = String(watch("territory") || "");
   const invoiceDate = watch("invoiceDate");
   const terms = watch("terms");
@@ -339,7 +349,10 @@ export default function BillingInvoiceCreateModal(props: any) {
     sort: "newest",
     limit: 30,
   }, modal === "createBillingInvoice", undefined, { countEnabled: false });
-  const { data: exactWorkOrder } = useWorkOrderByIdQuery(
+  const {
+    data: exactWorkOrder,
+    refetch: refetchExactWorkOrder,
+  } = useWorkOrderByIdQuery(
     requestedWorkOrderId,
     modal === "createBillingInvoice" && Boolean(requestedWorkOrderId),
   );
@@ -745,6 +758,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     if (modal !== "createBillingInvoice") {
       initializedFor.current = null;
       financialSnapshot.current = null;
+      setFinancialContextState("idle");
       editingVersionSnapshot.current = null;
       draftHydrated.current = false;
       draftLease.current?.close();
@@ -891,19 +905,62 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   useEffect(() => {
     if (modal !== "createBillingInvoice") return;
-    const key = `${editingInvoice?.id || "new"}:${selectedWorkOrderId || "standalone"}`;
-    if (financialSnapshot.current?.key === key) return;
-    if (selectedWorkOrderId && selectedWorkOrder?.id !== selectedWorkOrderId) return;
-    try {
-      financialSnapshot.current = { key, value: captureStaffInvoiceSnapshot(
-        editingVersionSnapshot.current, selectedWorkOrderId ? selectedWorkOrder : null,
-      ) };
-    } catch {
-      // Submission gives the recovery message; never fetch a fresh version at
-      // save time and silently overwrite the version the editor was opened on.
-      financialSnapshot.current = null;
+    if (isEditing && financialSnapshot.current?.key === financialContextKey) {
+      setFinancialContextState("ready");
+      return;
     }
-  }, [editingInvoice?.id, modal, selectedWorkOrder, selectedWorkOrderId]);
+
+    let cancelled = false;
+    financialSnapshot.current = null;
+    setFinancialContextState(selectedWorkOrderId ? "loading" : "ready");
+
+    if (!selectedWorkOrderId) {
+      try {
+        financialSnapshot.current = {
+          key: financialContextKey,
+          value: captureStaffInvoiceSnapshot(editingVersionSnapshot.current, null),
+        };
+      } catch {
+        financialSnapshot.current = null;
+        setFinancialContextState("error");
+      }
+      return;
+    }
+
+    void refetchExactWorkOrder()
+      .then(result => {
+        if (cancelled) return;
+        if (result.error) throw result.error;
+        if (!result.data || result.data.id !== selectedWorkOrderId) {
+          throw new Error("The selected work order could not be revalidated.");
+        }
+        financialSnapshot.current = {
+          key: financialContextKey,
+          value: captureStaffInvoiceSnapshot(
+            editingVersionSnapshot.current,
+            result.data,
+          ),
+        };
+        setFinancialContextState("ready");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        financialSnapshot.current = null;
+        setFinancialContextState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    editingInvoice?.id,
+    financialContextKey,
+    financialContextReload,
+    isEditing,
+    modal,
+    refetchExactWorkOrder,
+    selectedWorkOrderId,
+  ]);
 
   useEffect(() => {
     if (
@@ -1274,6 +1331,10 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   const submit = async (data: z.output<typeof BillingInvoiceSchema>, state: "draft" | "submitted") => {
     if (submittingRef.current) return;
+    if (!financialContextReady) {
+      fire?.("Wait for the current work-order version to finish loading, then try again.");
+      return;
+    }
     const taxableAmount = (data.lines || []).reduce(
       (sum: number, line: any) => sum + (line.isTaxable ? amount(line) : 0),
       0,
@@ -1323,10 +1384,6 @@ export default function BillingInvoiceCreateModal(props: any) {
       const payload = await res.json();
       // The server may have accepted the old request. Do not let that result reset or populate another form/session.
       if (!currentAttempt()) return;
-      if (!res.ok) {
-        financialAttempt.current.rejected(res.status);
-        throw new Error(payload.error || "Billing invoice save failed");
-      }
       const documentLabel = isCapitalQuote ? "Capital quote" : "Invoice";
       fire?.(`${documentLabel} #${payload.invoice?.num || data.num} ${state === "draft" ? (isEditing ? "draft updated" : "draft saved") : "ready for 7-Eleven"}`);
       // A successful save has its own parent handoff to the exact invoice
@@ -1334,8 +1391,9 @@ export default function BillingInvoiceCreateModal(props: any) {
       // restores the originating work order.
       resetAfterSaveOrDiscard();
       onCreated?.(payload.invoice);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (!currentAttempt()) return;
+      recordStaffFinancialAttemptError(financialAttempt.current, err);
       fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${safeErrorMessage(err)}`);
     } finally {
       if (currentAttempt()) { submittingRef.current = false; setSubmitting(false); }
@@ -2082,14 +2140,27 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
+          {selectedWorkOrderId && !financialContextReady && financialContextState !== "error" && (
+            <span role="status" style={{ alignSelf: "center", color: T.subtle, fontSize: 11 }}>
+              Confirming the current work-order version…
+            </span>
+          )}
+          {selectedWorkOrderId && financialContextState === "error" && (
+            <span role="alert" style={{ alignSelf: "center", color: T.danger, fontSize: 11 }}>
+              The current work-order version is unavailable.{" "}
+              <button type="button" className="btn-link" onClick={() => setFinancialContextReload(value => value + 1)}>
+                Try again
+              </button>
+            </span>
+          )}
           <button type="button" onClick={discardAndClose} className="btn-soft" style={{ color: T.danger }}>Discard draft</button>
           <button type="button" onClick={closeKeepingDraft} className="btn-soft">Close</button>
           {editingInvoice?.state !== "submitted" && (
-            <button type="button" disabled={submitting} onClick={handleSubmit(data => submit(data, "draft"))} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting ? 0.7 : 1 }}>
+            <button type="button" disabled={submitting || !financialContextReady} onClick={handleSubmit(data => submit(data, "draft"))} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
               {submitting ? <><BtnSpinner />Saving...</> : isEditing ? "Save Draft" : "Save as Draft"}
             </button>
           )}
-          <button type="submit" disabled={submitting} className="btn-accent" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting ? 0.7 : 1 }}>
+          <button type="submit" disabled={submitting || !financialContextReady} className="btn-accent" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
             {submitting
               ? <><BtnSpinner />{isEditing ? "Updating..." : "Submitting..."}</>
               : isEditing

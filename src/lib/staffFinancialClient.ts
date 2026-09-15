@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AppError } from "./errors/AppError";
 import { FinancialDeleteSchema, StaffInvoiceSaveSchema, type FinancialDeleteCommand, type StaffInvoiceSaveCommand } from "./staffInvoiceContracts";
 
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -54,4 +55,15 @@ export function createStaffFinancialAttempt() {
     // and server failures retain the operation until the user reconciles it.
     rejected: (status: number) => { if ([400, 401, 403, 404, 413, 422, 503].includes(status)) pending = null; },
   };
+}
+
+export function recordStaffFinancialAttemptError(
+  attempt: ReturnType<typeof createStaffFinancialAttempt>,
+  cause: unknown,
+): void {
+  // A response parsed by apiFetch is a known server rejection. A transport
+  // failure is RESULT_UNCONFIRMED and must retain the operation for replay.
+  if (cause instanceof AppError && cause.code !== "RESULT_UNCONFIRMED") {
+    attempt.rejected(cause.status);
+  }
 }

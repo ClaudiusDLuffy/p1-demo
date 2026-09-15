@@ -10,6 +10,10 @@ import {
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
 import { correctWorkOrderVisit } from "../../lib/db";
+import {
+  safeVisitCorrectionError,
+  validateVisitCorrection,
+} from "../../lib/visitCorrection";
 import { requiresVisitDurationReview, VISIT_DURATION_REVIEW_MESSAGE } from "../../lib/visitDurationReview";
 import {
   WORK_ORDER_BY_ID_KEY,
@@ -98,18 +102,32 @@ export default function VisitTimeline({
         form.checkOutTime,
         timeZone,
       );
+      const visit = (visits as Array<{
+        id?: string;
+        checkInAt?: string | null;
+        checkOutAt?: string | null;
+      }>).find(candidate => candidate.id === editingId);
+      validateVisitCorrection({
+        checkInAt,
+        checkOutAt,
+        reason: form.reason,
+        originalCheckInAt: visit?.checkInAt,
+        originalCheckOutAt: visit?.checkOutAt,
+      });
       await correctWorkOrderVisit(editingId, checkInAt, checkOutAt, form.reason);
+      setEditingId(null);
+      fire?.("Visit times corrected and recorded in the audit history");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: workOrderDetailsKey(workOrder.id) }),
         queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
         queryClient.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
         queryClient.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
         queryClient.invalidateQueries({ queryKey: ["work-order-visits", "billing", workOrder.id] }),
-      ]);
-      setEditingId(null);
-      fire?.("Visit times corrected and recorded in the audit history");
-    } catch (caught: any) {
-      setError(caught?.message || "Visit times could not be corrected");
+      ]).catch(() => {
+        fire?.("Visit times were corrected, but the refreshed timeline is unavailable. Refresh the work order to see the saved times.");
+      });
+    } catch (caught: unknown) {
+      setError(safeVisitCorrectionError(caught).message);
     } finally {
       setSaving(false);
     }

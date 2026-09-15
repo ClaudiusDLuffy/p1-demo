@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt } from "./staffFinancialClient";
+import { AppError } from "./errors/AppError";
+import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt, recordStaffFinancialAttemptError } from "./staffFinancialClient";
 import { StaffInvoiceSaveSchema, staffInvoiceRpcPayload } from "./staffInvoiceContracts";
 import { financialErrorResponse, parseFinancialRequest } from "./financialHttpBoundary";
 import { financialTestIds, validBillingRequest } from "./billingFinancialRouteTestHarness";
@@ -48,6 +49,23 @@ test("explicit validation rejection allows correction but successful save starts
   assert.notEqual(correction.operationId, first.operationId);
   attempt.confirmed();
   assert.notEqual(attempt.save(validBillingRequest()).operationId, correction.operationId);
+});
+test("the editor releases known API rejections but retains an unconfirmed mutation", () => {
+  const rejected = createStaffFinancialAttempt();
+  const rejectedCommand = rejected.save(validBillingRequest());
+  recordStaffFinancialAttemptError(rejected, new AppError("VALIDATION_FAILED"));
+  assert.notEqual(
+    rejected.save({ ...validBillingRequest(), num: "CORRECTED" }).operationId,
+    rejectedCommand.operationId,
+  );
+
+  const unconfirmed = createStaffFinancialAttempt();
+  unconfirmed.save(validBillingRequest());
+  recordStaffFinancialAttemptError(unconfirmed, new AppError("RESULT_UNCONFIRMED"));
+  assert.throws(
+    () => unconfirmed.save({ ...validBillingRequest(), num: "CHANGED" }),
+    /unconfirmed/,
+  );
 });
 test("source order is normalized but line order and checkbox meaning are preserved", () => {
   const attempt = createStaffFinancialAttempt();
