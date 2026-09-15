@@ -27,6 +27,17 @@ test("same actor/project/environment refresh restores only verified versioned pa
     isolated.activate(user, true); assert.equal(isolated.open("staff-billing", "new:WOT100", validate)?.read(), null);
   }
 });
+test("contractor invoice correction uses the same owner and logout fences as other local drafts", () => {
+  const f = fixture();
+  const lease = f.session.open("contractor-invoice-correction", "edit:invoice-1", validate)!;
+  assert.equal(lease.save({ text: "synthetic correction" }).status, "persisted");
+  lease.close();
+  const refreshed = f.make();
+  refreshed.activate(user, true);
+  assert.deepEqual(refreshed.open("contractor-invoice-correction", "edit:invoice-1", validate)?.read(), { text: "synthetic correction" });
+  refreshed.revoke(user);
+  assert.equal([...f.values.keys()].some(key => key.includes(":contractor-invoice-correction:")), false);
+});
 test("logout tombstone fences cleanup/debounced old callbacks and next identity", () => {
   const f = fixture(); const lease = f.session.open("staff-billing", "new", validate)!; lease.save({ text: "synthetic" });
   const staleTicket = f.session.generation(); f.session.revoke(user);

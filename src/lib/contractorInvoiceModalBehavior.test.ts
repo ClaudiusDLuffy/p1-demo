@@ -70,6 +70,7 @@ function harness(submit: (...args: unknown[]) => Promise<boolean>, rejected = fa
     resetNewInv: () => undefined, setModal: (value: unknown) => calls.push({ name: "setModal", args: [value] }),
     doSubmitInvoice: (...args: unknown[]) => { calls.push({ name: "submit", args }); return submit(...args); },
     doSaveDraftInvoice: (...args: unknown[]) => { calls.push({ name: "save", args }); return Promise.resolve(true); },
+    doDownloadInvoice: (...args: unknown[]) => { calls.push({ name: "download", args }); },
     resumeDraft: draftOverride ?? (rejected ? { id: "74000000-0000-4000-8000-000000000001", state: "rejected", num: "TEST-1", invoiceVersion: 3 } : null),
   });
   return { tree, states, calls, nodes: elements(tree) };
@@ -120,10 +121,22 @@ test("draft save bypasses full form validation and closes only after success", a
   assert.deepEqual(h.calls.at(-1), { name: "setModal", args: [null] });
 });
 
-test("rejected correction retains its invoice number and does not offer Save draft", () => {
+test("rejected correction retains its invoice number and offers safe correction recovery", () => {
   const h = harness(async () => true, true);
   assert.equal(h.nodes.find(node => node.type === "input" && node.props.name === "num")?.props.readOnly, true);
+  assert.equal(h.nodes.some(node => node.type === "button" && text(node) === "Save correction draft"), true);
   assert.equal(h.nodes.some(node => node.type === "button" && /Save (?:as )?draft/.test(text(node))), false);
+});
+
+test("rejected correction exposes its current PDF without requiring resubmission", () => {
+  const h = harness(async () => true, false, {
+    id: "74000000-0000-4000-8000-000000000001", state: "rejected", num: "TEST-1", invoiceVersion: 3,
+    pdfStoragePath: "synthetic/current.pdf", pdfIsOriginal: true,
+  });
+  const download = h.nodes.find(node => node.type === "button" && text(node) === "Download current PDF");
+  assert.ok(download && typeof download.props.onClick === "function");
+  download.props.onClick();
+  assert.equal(h.calls.filter(call => call.name === "download").length, 1);
 });
 
 test("resuming a partial draft retains an explicit zero quantity and rate", () => {

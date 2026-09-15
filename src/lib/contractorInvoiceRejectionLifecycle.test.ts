@@ -82,7 +82,12 @@ test("contractor UI exposes correction only for rejected invoices", () => {
   assert.match(invoiceModal, /resubmittingRejected: isRejectedResubmission/);
   assert.match(invoiceModal, /readOnly=\{isRejectedResubmission\}/);
   assert.match(invoiceModal, /!isRejectedResubmission/);
+  assert.match(invoiceModal, /Save correction draft/);
+  assert.match(invoiceModal, /Download current PDF/);
+  assert.match(invoiceModal, /contractor-invoice-correction/);
   assert.match(invoiceModal, /Resubmit invoice/);
+  assert.match(workOrderDetail, /Create or upload invoice/);
+  assert.match(workOrderDetail, /wo-invoice-mobile-primary-action/);
   assert.match(invoiceHook, /resubmitRejectedContractorInvoice/);
   // The badge now consumes its exact authorized count; it no longer counts a
   // partial selected-invoice cache. Rejection edit authority remains above.

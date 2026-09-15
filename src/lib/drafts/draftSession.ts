@@ -1,7 +1,7 @@
 export const DRAFT_MAX_BYTES = 512 * 1024;
 export const DRAFT_MAX_RECORDS = 16;
 export const DRAFT_SWEEP_LIMIT = 256;
-export type DraftKind = "staff-billing" | "quote-calculator";
+export type DraftKind = "staff-billing" | "quote-calculator" | "contractor-invoice-correction";
 export type DraftScope = { environment: "development" | "test" | "preview" | "production"; project: string };
 export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 export type DraftFailure = "unavailable" | "invalid" | "oversized" | "revoked" | "conflict" | "capacity";
@@ -46,7 +46,8 @@ export function createDraftSession(options: DraftScope & { storage: DraftStorage
   const currentKey = `${base}:draft-current`;
   const sweepKey = `${base}:draft-sweep`;
   const owned = (key: string, userId: string) => key.startsWith(`${base}:draft:${userId}:staff-billing:`)
-    || key.startsWith(`${base}:draft:${userId}:quote-calculator:`);
+    || key.startsWith(`${base}:draft:${userId}:quote-calculator:`)
+    || key.startsWith(`${base}:draft:${userId}:contractor-invoice-correction:`);
   const entries = (userId: string): Entry[] => {
     const value = parse(storage.getItem(indexKey(userId)), 16384);
     if (!object(value) || value.version !== 1 || !Array.isArray(value.entries) || value.entries.length > DRAFT_MAX_RECORDS) return [];
@@ -156,7 +157,7 @@ export function createDraftSession(options: DraftScope & { storage: DraftStorage
     },
     open<T>(kind: DraftKind, entity: string, validate: (payload: unknown) => T | null, maxAgeMs?: number): DraftLease<T> | null {
       if (!actor || closed.size >= DRAFT_MAX_RECORDS || !bounded(entity, 200)
-        || (kind !== "staff-billing" && kind !== "quote-calculator")) return null;
+        || (kind !== "staff-billing" && kind !== "quote-calculator" && kind !== "contractor-invoice-correction")) return null;
       const expected = actor;
       const ticket = generation;
       const key = `${base}:draft:${expected.userId}:${kind}:${encodeURIComponent(entity)}`;
