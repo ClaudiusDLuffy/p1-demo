@@ -685,6 +685,17 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   .wo-invoice-list {
     overflow: visible !important;
   }
+  .contractor-invoice-cta {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+  .contractor-invoice-cta-button {
+    min-height: 48px !important;
+    width: 100% !important;
+    justify-content: center !important;
+    white-space: normal !important;
+    text-align: center !important;
+  }
   .wo-invoice-list-header {
     align-items: flex-start !important;
     gap: 10px !important;
@@ -697,7 +708,7 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   }
   .wo-invoice-row {
     align-items: flex-start !important;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap !important;
     gap: 10px !important;
     padding: 14px !important;
   }
@@ -709,7 +720,18 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     display: none !important;
   }
   .wo-invoice-mobile-actions {
-    display: block !important;
+    display: flex !important;
+    flex: 1 0 100% !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .wo-invoice-mobile-primary-action {
+    flex: 1 1 120px !important;
+    min-height: 44px !important;
+    justify-content: center !important;
+    white-space: normal !important;
+    text-align: center !important;
   }
   .invoice-totals-section {
     margin-top: 16px !important;
@@ -4231,7 +4253,7 @@ export default function PortalShell() {
         </Modal>
       )}
 
-      <InvoiceCreateModal modal={modal} woData={invoiceFormWorkOrder} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
+      <InvoiceCreateModal modal={modal} woData={invoiceFormWorkOrder} invSubtotal={invSubtotal} newInv={newInv} lineAmount={lineAmount} invoices={invoices} currentUser={currentUser} setNewInv={setNewInv} fmt={fmt} setModal={(v: any) => { if (v == null) setResumeDraft(null); setModal(v); }} resetNewInv={resetNewInv} doSubmitInvoice={doSubmitInvoice} doSaveDraftInvoice={doSaveDraft} doDownloadInvoice={doDownloadInvoice} pdfBusy={pdfBusy} resumeDraft={resumeDraft} nextInvNumFromDb={nextInvNumFromDb} woParts={woParts} />
 
       {isManager && !invoiceController && (
         <BillingInvoiceCreateModal
