@@ -140,13 +140,26 @@ test("invoice PDF modal cancels an earlier file and ignores its late extracted v
   assert.equal(h.form.uploadedTotal, "12.00"); assert.equal(h.form.num, "SYNTH-12");
 });
 
-test("invoice PDF modal deduplicates a repeated active selection and blocks submit/save while reading", async () => {
+test("invoice PDF modal deduplicates an active selection and lets the contractor continue while reading", async () => {
   const h = harness(); const selected = file("same.pdf"); const first = h.select(selected); await h.select(selected);
   assert.equal(h.parseCalls.length, 1);
-  const form = h.render().find(node => node.type === "form"); assert.ok(form && typeof form.props.onSubmit === "function");
-  await form.props.onSubmit(); await h.click("Save as draft");
-  assert.equal(h.submitCount(), 0); assert.equal(h.saveCount(), 0);
+  const save = h.render().find(node => node.type === "button" && label(node) === "Save as draft");
+  assert.ok(save && save.props.disabled === false && typeof save.props.onClick === "function");
+  assert.ok(h.render().some(node => node.type === "button" && label(node) === "Stop reading and enter total manually"));
+  await save.props.onClick();
+  assert.equal(h.parseCalls[0].signal.aborted, true);
+  assert.equal(h.saveCount(), 1);
   h.parseCalls[0].resolve(parsed); await first;
+
+  const submitting = harness(); const submitRead = submitting.select(file("submit.pdf"));
+  const form = submitting.render().find(node => node.type === "form");
+  assert.ok(form && typeof form.props.onSubmit === "function");
+  const submit = submitting.render().find(node => node.type === "button" && label(node) === "Submit");
+  assert.ok(submit && submit.props.disabled === false);
+  await form.props.onSubmit();
+  assert.equal(submitting.parseCalls[0].signal.aborted, true);
+  assert.equal(submitting.submitCount(), 1);
+  submitting.parseCalls[0].resolve(parsed); await submitRead;
 });
 
 test("removal, close, unmount and actor/work-order changes abort pending parsing without stale updates", async () => {
@@ -174,7 +187,7 @@ test("PDF extraction limits, encryption and availability errors retain explicit 
     h.parseCalls[0].reject(new InvoicePdfError(code)); await pending;
     assert.equal(h.form.uploadOnly, true); assert.equal(h.form.uploadedTotal, "");
     assert.ok(h.render().some(node => node.type === "button" && label(node) === "Remove attachment"));
-    assert.match(h.render().map(label).join(" "), /could not be read reliably/);
+    assert.match(h.render().map(label).join(" "), /Enter the invoice total manually/);
   }
 });
 

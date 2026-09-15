@@ -344,6 +344,9 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
 .btn-accent:hover { filter: brightness(1.08); }
 .btn-soft { padding: 12px 18px; min-height: 44px; border-radius: 10px; background: ${T.surface}; color: ${T.ink}; border: 1px solid ${T.border}; cursor: pointer; font-weight: 500; font-size: 12px; font-family: inherit; transition: background 140ms; }
 .btn-soft:hover { background: ${T.bgWarm}; }
+.btn-danger { padding: 12px 18px; min-height: 44px; border-radius: 10px; background: ${T.danger}; color: #fff; border: 1px solid ${T.danger}; cursor: pointer; font-weight: 650; font-size: 12px; font-family: inherit; transition: filter 140ms, opacity 140ms; }
+.btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
+.btn-danger:disabled { cursor: default; opacity: 0.65; }
 .side-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: none; background: transparent; color: ${T.sidebarText}; cursor: pointer; font-size: 13px; font-family: inherit; margin-bottom: 2px; transition: background 140ms, color 140ms; }
 .side-btn:hover { background: rgba(250,247,242,0.06); color: ${T.sidebarActive}; }
 .side-btn.active { background: rgba(250,247,242,0.08); color: ${T.sidebarActive}; font-weight: 600; }
@@ -1669,8 +1672,8 @@ export default function PortalShell() {
     if (workOrderReturnPage) {
       setPage(workOrderReturnPage);
       setWorkOrderReturnPage(null);
-    } else if (!isManager && page !== "history") {
-      setPage("my_jobs");
+    } else if (page !== "history") {
+      setPage(isManager ? "work_orders" : "my_jobs");
     }
   }, [isManager, page, setSelectedWO, workOrderReturnPage]);
 
@@ -1702,20 +1705,6 @@ export default function PortalShell() {
     setWorkflowReturn(null);
     return true;
   }, [setSelectedInvoice, setSelectedWO, workflowReturn]);
-
-  const backToAllWorkOrders = useCallback(() => {
-    setSelectedInvoice(null);
-    setSelectedBillingInvoice(null);
-    setBillingDraftToEdit(null);
-    setBillingSourceToStart(null);
-    setBillingWorkOrderToStart(null);
-    setModal(null);
-    setAiNote(null);
-    setWorkflowReturn(null);
-    setWorkOrderReturnPage(null);
-    setSelectedWO(null);
-    setPage(isManager ? "work_orders" : "my_jobs");
-  }, [isManager, setSelectedInvoice, setSelectedWO]);
 
   const closeBillingInvoiceEditor = useCallback(() => {
     if (returnToWorkflowWorkOrder()) return;
@@ -3440,7 +3429,6 @@ export default function PortalShell() {
             isManager={isManager}
             setSelectedWO={setSelectedWO}
             onBackFromWorkOrder={backFromWorkOrder}
-            onBackToAllWorkOrders={backToAllWorkOrders}
             onViewStoreWorkOrders={openStoreWorkOrders}
             setSelectedInvoice={setSelectedInvoice}
             onOpenContractorInvoice={openContractorInvoiceFromWorkOrder}

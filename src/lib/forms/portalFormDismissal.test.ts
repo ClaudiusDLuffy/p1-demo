@@ -69,6 +69,15 @@ test("browser Back asks the topmost dialog before restoring portal navigation", 
   assert.doesNotMatch(navigation, /setModal\(null\)/);
 });
 
+test("the unsaved-changes discard action has a complete destructive button treatment", () => {
+  const shell = readFileSync("src/components/PortalShell.tsx", "utf8");
+  const dialog = readFileSync("src/components/ui/DiscardChangesDialog.tsx", "utf8");
+  assert.match(dialog, /className="btn-danger" data-destructive="true"/);
+  assert.match(shell, /\.btn-danger \{[^}]*min-height: 44px[^}]*background: \$\{T\.danger\}[^}]*border: 1px solid \$\{T\.danger\}/);
+  assert.match(shell, /\.btn-danger:hover:not\(:disabled\)/);
+  assert.match(shell, /\.btn-danger:disabled/);
+});
+
 test("follow-up dismissal preserves its reason while submission uses the captured optimistic version", () => {
   const source = readFileSync("src/components/PortalShell.tsx", "utf8");
   const start = source.indexOf("<CloseReopenedFollowUpModal");
