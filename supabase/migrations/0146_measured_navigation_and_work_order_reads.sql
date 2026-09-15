@@ -18,12 +18,14 @@ begin
     into strict routine from pg_proc p
     where p.pronamespace='p1_read_contracts'::regnamespace
       and p.proname='work_orders_table_v1';
+  -- A Windows SQL transport can preserve CRLF in prosrc. Carriage-return
+  -- normalization keeps the exact reviewed LF hash and transformations.
   if routine.prosecdef or routine.provolatile<>'s'
-    or encode(sha256(convert_to(routine.prosrc,'UTF8')),'hex')
+    or encode(sha256(convert_to(replace(routine.prosrc,chr(13),''),'UTF8')),'hex')
       <> 'd13c2ba5a1d5f5849417cc0fb5ccaa9a19e5327b7782ac3650067431d1c87145' then
     raise exception 'Reviewed table read source changed' using errcode='23514';
   end if;
-  body:=replace(routine.prosrc,
+  body:=replace(replace(routine.prosrc,chr(13),''),
     E'      work_order.id,\n      lower(coalesce(contractor.company, contractor.name, '''')) as contractor_name',
     E'      work_order.id, work_order as _work_order,\n      lower(coalesce(contractor.company, contractor.name, '''')) as contractor_name');
   body:=replace(body,
@@ -61,7 +63,7 @@ begin
   body:=replace(body,E'    from page_rows\n    left join lateral (',
     E'    from page_rows\n    left join lateral (select company,name from public.profiles\n'
       ||E'      where id=page_rows.contractor_id limit 1) page_contractor on true\n    left join lateral (');
-  if body=routine.prosrc or position('join candidate on candidate.id = work_order.id' in body)>0 then
+  if body=replace(routine.prosrc,chr(13),'') or position('join candidate on candidate.id = work_order.id' in body)>0 then
     raise exception 'Table read transformation incomplete' using errcode='23514';
   end if;
   execute format('create function p1_portal_reads.work_orders_table_v2(%s) returns jsonb
@@ -72,8 +74,8 @@ begin
     pg_get_function_identity_arguments(p.oid) identity_arguments
     from pg_proc p where p.pronamespace='public'::regnamespace
     and p.proname in ('list_work_orders_table_rows_v1','count_work_orders_table_v1') loop
-    body:=replace(wrapper.prosrc,'p1_read_contracts.work_orders_table_v1(','p1_portal_reads.work_orders_table_v2(');
-    if body=wrapper.prosrc then raise exception 'Reviewed wrapper source changed' using errcode='23514'; end if;
+    body:=replace(replace(wrapper.prosrc,chr(13),''),'p1_read_contracts.work_orders_table_v1(','p1_portal_reads.work_orders_table_v2(');
+    if body=replace(wrapper.prosrc,chr(13),'') then raise exception 'Reviewed wrapper source changed' using errcode='23514'; end if;
     execute format('create function public.%I(%s) returns jsonb language plpgsql stable security invoker
       set search_path=pg_catalog,public as %L',replace(wrapper.proname,'_v1','_v2'),wrapper.arguments,body);
     execute format('revoke all on function public.%I(%s) from public,anon',replace(wrapper.proname,'_v1','_v2'),wrapper.identity_arguments);
@@ -102,13 +104,13 @@ begin
   select p.* into strict evaluator from pg_proc p
     where p.oid='public.evaluate_work_order_sla_v1(text,timestamptz,timestamptz,timestamptz,timestamptz,timestamptz)'::regprocedure;
   if source.prosecdef or evaluator.prosecdef or evaluator.provolatile<>'i'
-    or encode(sha256(convert_to(source.prosrc,'UTF8')),'hex')
+    or encode(sha256(convert_to(replace(source.prosrc,chr(13),''),'UTF8')),'hex')
       <> '6a50be971d0d6b9a581e74592928f9b136b8f11c8bc8365fff6cd2f17cca9660'
-    or encode(sha256(convert_to(evaluator.prosrc,'UTF8')),'hex')
+    or encode(sha256(convert_to(replace(evaluator.prosrc,chr(13),''),'UTF8')),'hex')
       <> 'c6673b497d247a94914b50ed357052915c2faa4d2ec7e9bedbe182839896acd5' then
     raise exception 'Reviewed navigation or canonical SLA source changed' using errcode='23514';
   end if;
-  body:=source.prosrc;
+  body:=replace(source.prosrc,chr(13),'');
   -- Each field starts on a dedicated, hash-verified line in the source. Keep
   -- only the ten numeric fields actually rendered by operational staff.
   metric_arguments:=split_part(split_part(body,E'  select jsonb_build_object(\n',2),E'\n  )\n  from annotated;',1);
@@ -122,7 +124,7 @@ begin
     end if;
   end loop;
   body:=regexp_replace(body,',[[:space:]]*$','')||E'\n  )\n  from annotated;';
-  canonical_expression:=rtrim(evaluator.prosrc,E' ;\n\r\t');
+  canonical_expression:=rtrim(replace(evaluator.prosrc,chr(13),''),E' ;\n\t');
   canonical_expression:=replace(canonical_expression,'p_response_breach_at','annotated.response_breach_at');
   canonical_expression:=replace(canonical_expression,'p_resolution_breach_at','annotated.resolution_breach_at');
   canonical_expression:=replace(canonical_expression,'p_dispatched_at','annotated.dispatched_at');
@@ -151,11 +153,12 @@ begin
     where p.oid='public.can_access_contractor_work_order(text)'::regprocedure;
   if not source.prosecdef or source.provolatile<>'s'
     or source.proowner<>(select oid from pg_roles where rolname=current_user)
-    or encode(sha256(convert_to(source.prosrc,'UTF8')),'hex')
+    or encode(sha256(convert_to(replace(source.prosrc,chr(13),''),'UTF8')),'hex')
       <> '0dbc7d837bdd4cd0f3b7c00fe9775d7a3de23eeb7f1555ecd4f9c2efcbfa4d13' then
     raise exception 'Reviewed contractor authorization source changed' using errcode='23514';
   end if;
-  canonical_set:=substring(source.prosrc from position(E'      select 1\n' in source.prosrc));
+  body:=replace(source.prosrc,chr(13),'');
+  canonical_set:=substring(body from position(E'      select 1\n' in body));
   canonical_set:=regexp_replace(canonical_set,E'\n    \\)[[:space:]]*$','');
   canonical_set:=regexp_replace(canonical_set,'select 1','select work_order.id,work_order.status');
   canonical_set:=replace(canonical_set,E'where work_order.id = p_work_order_id\n        and work_order.deleted_at is null',

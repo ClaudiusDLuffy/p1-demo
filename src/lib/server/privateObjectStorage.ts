@@ -46,7 +46,12 @@ export function createPrivateObjectStorage(options: {
 }): PrivateObjectStorage {
   const fetcher = options.fetch ?? fetch;
   const timeout = () => AbortSignal.timeout(options.timeoutMs ?? 10_000);
-  const headers = { apikey: options.secret, Authorization: `Bearer ${options.secret}` };
+  // Supabase's current sb_secret keys are opaque API keys, not JWTs, and must
+  // not be presented as Bearer tokens. Legacy service_role JWTs still require
+  // the Authorization header for Storage compatibility during migration.
+  const headers = options.secret.startsWith("sb_secret_")
+    ? { apikey: options.secret }
+    : { apikey: options.secret, Authorization: `Bearer ${options.secret}` };
   const path = (object: BoundObject) => {
     if (!["photos", "invoice-pdfs", "contractor-estimate-attachments"].includes(object.bucket)
       || !object.objectPath || /[\\%?#\u0000-\u001f]/u.test(object.objectPath)
@@ -58,7 +63,10 @@ export function createPrivateObjectStorage(options: {
   const exists = async (object: BoundObject): Promise<boolean | null> => {
     try {
       const response = await fetcher(path(object), { method: "HEAD", headers, signal: timeout(), cache: "no-store" });
-      return response.ok ? true : response.status === 404 ? false : null;
+      // Hosted Storage has returned 400 for an exact validated path immediately
+      // after a successful deletion. Limit that compatibility behavior to HEAD;
+      // download still treats every non-404 failure as unavailable.
+      return response.ok ? true : response.status === 400 || response.status === 404 ? false : null;
     } catch { return null; }
   };
   return {

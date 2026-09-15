@@ -46,7 +46,7 @@ const metadata: PhotoImageMetadata = { format: "jpeg", mimeType: "image/jpeg", e
   sha256: "a".repeat(64), width: 1, height: 1, frames: 1 };
 const pending = (): UploadIntent => ({ intentId: id, operationId: id, batchId, purpose: "photo", workOrderId: "SYNTHETIC",
   parentId: null, bucket: "photos", objectPath: `wo/SYNTHETIC/${id}`, status: "pending", expiresAt: "2099-01-01T00:00:00Z",
-  claimId: null, bindingId: null, photoId: null, attachmentId: null,
+  claimId: null, bindingId: null, storageObjectId: null, photoId: null, attachmentId: null,
   file: { name: "synthetic.jpg", mimeType: "image/jpeg", sizeBytes: 4, sha256: metadata.sha256 } });
 const deletion = (): ObjectDeletion => ({ deletionId: id, operationId: id, bindingId, purpose: "photo", bucket: "photos",
   objectPath: `wo/SYNTHETIC/${id}`, status: "pending", claimId: null, photoId: bindingId });
@@ -54,7 +54,7 @@ const deletion = (): ObjectDeletion => ({ deletionId: id, operationId: id, bindi
 function harness(options: {
   inspect?: typeof inspectPhotoImage; bytes?: Uint8Array | null;
   finalizeFailure?: "rollback" | "lost_response"; failUnavailable?: boolean;
-  busy?: boolean; initialStatus?: UploadIntent["status"]; removeOutcome?: RemovalOutcome;
+  busy?: boolean; initialStatus?: UploadIntent["status"]; removeOutcome?: RemovalOutcome; objectPresent?: boolean;
 } = {}) {
   let intent: UploadIntent = { ...pending(), status: options.initialStatus ?? "pending" };
   let deleted = deletion();
@@ -66,7 +66,8 @@ function harness(options: {
     claim: async () => {
       calls.push("claim");
       if (["finalized", "cleanup_required", "cancelled", "expired", "cleaned"].includes(intent.status)) return { ...intent };
-      intent = { ...intent, status: "validating", claimId: options.busy ? null : claimId }; return { ...intent };
+      intent = { ...intent, status: "validating", claimId: options.busy ? null : claimId,
+        storageObjectId: options.objectPresent === false ? null : id }; return { ...intent };
     },
     finalize: async (_id, claim, inspection) => {
       calls.push("finalize"); assert.equal(claim, claimId); inspections.push(inspection);
@@ -105,6 +106,11 @@ function harness(options: {
     calls, failures, inspections, durable, state: () => intent, ports, storage };
 }
 
+test("upload receipt schema preserves the database-owned Storage object identity", () => {
+  const receipt = uploadIntentSchema.parse({ ...pending(), storageObjectId: id });
+  assert.equal(receipt.storageObjectId, id);
+});
+
 test("trusted photo workflow inspects first and commits binding/metadata/evidence only through finalization", async () => {
   const h = harness(); const result = await h.workflow.finalize(id);
   assert.equal(result.status, "confirmed");
@@ -141,11 +147,12 @@ test("trusted inspection rejection is preserved as safe cleanup guidance, never 
   }
 });
 
-test("missing object retains the original reservation as upload_required without claiming completion", async () => {
-  const h = harness({ bytes: null });
+test("database-confirmed missing object retains the reservation without contacting Storage", async () => {
+  const h = harness({ objectPresent: false });
   const result = await h.workflow.finalize(id);
   assert.equal(result.status, "upload_required");
   assert.deepEqual(h.failures, ["OBJECT_MISSING"]);
+  assert.equal(h.calls.includes("download"), false);
   assert.equal(h.state().objectPath, pending().objectPath);
   assert.equal(h.state().operationId, id);
   assert.deepEqual(h.durable, { metadata: 0, bindings: 0, activities: 0 });

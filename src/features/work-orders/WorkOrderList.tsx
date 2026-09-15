@@ -35,10 +35,7 @@ import {
 import { normalizeExactPortalWorkOrderId } from "../../lib/workOrderIdentity";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery } from "./queries";
-import {
-  resolveWorkOrderCollectionState,
-  WorkOrderCollectionNotice,
-} from "./WorkOrderCollectionNotice";
+import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
 export default function WorkOrderList(props: any) {
@@ -201,17 +198,15 @@ export default function WorkOrderList(props: any) {
     isFetching: activeWorkOrderQuery.isFetching,
     isError: activeWorkOrderQuery.isError,
   });
-  const collectionMessages = exactWorkOrderId
-    ? {
-        loading: `Looking up ${exactWorkOrderId}…`,
-        error: `Could not look up ${exactWorkOrderId}. Your work orders are still saved. Retry the secure connection.`,
-        empty: `No accessible work order found for ${exactWorkOrderId}.`,
-      }
-    : {
-        loading: "Loading work orders…",
-        error: "Work orders could not load. Your work orders are still saved. Retry the secure connection.",
-        empty: "No work orders match your filters.",
-      };
+  const loadingStateMessage = exactWorkOrderId
+    ? `Looking up ${exactWorkOrderId}…`
+    : "Loading work orders…";
+  const errorStateMessage = exactWorkOrderId
+    ? `Could not look up ${exactWorkOrderId}. Please try again.`
+    : "Work orders could not be loaded. Your filters have not been cleared; retry the request.";
+  const emptyStateMessage = exactWorkOrderId
+    ? `No accessible work order found for ${exactWorkOrderId}.`
+    : "No work orders match your filters.";
   const retryWorkOrders = () => { void activeWorkOrderQuery.refetch(); };
 
   const goToPage = (direction: "prev" | "next") => {
@@ -492,13 +487,11 @@ export default function WorkOrderList(props: any) {
 
           {collectionState === "error" && paginatedWOs.length > 0 && (
             <WorkOrderCollectionNotice
-              state={collectionState}
-              loadingMessage={collectionMessages.loading}
-              errorMessage={collectionMessages.error}
-              emptyMessage={collectionMessages.empty}
+              state="error"
+              errorMessage="The latest work-order refresh failed. Showing the previously loaded results."
               onRetry={retryWorkOrders}
               retrying={activeWorkOrderQuery.isFetching}
-              style={{ marginBottom: 14 }}
+              style={{ marginBottom: 14, padding: "14px 16px" }}
             />
           )}
 
@@ -584,15 +577,15 @@ export default function WorkOrderList(props: any) {
                   })}
                   {paginatedWOs.length === 0 && (
                     <tr>
-                      <td colSpan={tableColumns.length} style={{ padding: "36px 20px", textAlign: "center", color: T.subtle, fontSize: 13 }}>
+                      <td colSpan={tableColumns.length} style={{ padding: 0 }}>
                         <WorkOrderCollectionNotice
                           state={collectionState}
-                          loadingMessage={collectionMessages.loading}
-                          errorMessage={collectionMessages.error}
-                          emptyMessage={collectionMessages.empty}
+                          loadingMessage={loadingStateMessage}
+                          errorMessage={errorStateMessage}
+                          emptyMessage={emptyStateMessage}
                           onRetry={retryWorkOrders}
                           retrying={activeWorkOrderQuery.isFetching}
-                          style={{ padding: 0 }}
+                          style={{ border: 0, borderRadius: 0 }}
                         />
                       </td>
                     </tr>
@@ -684,13 +677,12 @@ export default function WorkOrderList(props: any) {
             {paginatedWOs.length === 0 && (
               <WorkOrderCollectionNotice
                 state={collectionState}
-                loadingMessage={collectionMessages.loading}
-                errorMessage={collectionMessages.error}
-                emptyMessage={collectionMessages.empty}
+                loadingMessage={loadingStateMessage}
+                errorMessage={errorStateMessage}
+                emptyMessage={emptyStateMessage}
                 onRetry={retryWorkOrders}
                 retrying={activeWorkOrderQuery.isFetching}
                 className="responsive-grid-empty"
-                style={{ padding: "40px 20px" }}
               />
             )}
           </div>

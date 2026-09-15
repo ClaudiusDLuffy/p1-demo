@@ -26,13 +26,13 @@ export const uploadIntentSchema = z.object({
   bucket: z.enum(["photos", "invoice-pdfs", "contractor-estimate-attachments"]), objectPath: safePath,
   status: z.enum(["pending", "validating", "finalized", "cleanup_required", "cancelled", "expired", "cleaned"]),
   expiresAt: z.iso.datetime({ offset: true }), claimId: z.uuid().nullable(), bindingId: z.uuid().nullable(),
-  photoId: z.uuid().nullable(), attachmentId: z.uuid().nullable(), file: uploadFileSchema,
+  storageObjectId: z.uuid().nullable(), photoId: z.uuid().nullable(), attachmentId: z.uuid().nullable(), file: uploadFileSchema,
 }).superRefine((value, context) => {
   const bucket = value.purpose === "photo" ? "photos" : value.purpose === "estimate_attachment" ? "contractor-estimate-attachments" : "invoice-pdfs";
   const path = value.purpose === "photo" ? `wo/${value.workOrderId}/${value.intentId}`
     : `${value.parentId}/${value.intentId}.${value.purpose === "estimate_attachment" ? "xlsx" : "pdf"}`;
   if (value.bucket !== bucket || value.objectPath !== path) context.addIssue({ code: "custom", message: "Invalid object reservation" });
-  if (value.status === "finalized" && (!value.bindingId || (value.purpose === "photo" && !value.photoId)
+  if (value.status === "finalized" && (!value.storageObjectId || !value.bindingId || (value.purpose === "photo" && !value.photoId)
     || (value.purpose === "estimate_attachment" && !value.attachmentId))) {
     context.addIssue({ code: "custom", message: "Missing finalized object evidence" });
   }

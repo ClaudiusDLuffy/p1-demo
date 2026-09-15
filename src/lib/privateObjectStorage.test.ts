@@ -19,8 +19,9 @@ assert.ok(exports.createPrivateObjectStorage && exports.readBoundedBytes);
 const { createPrivateObjectStorage, readBoundedBytes } = exports;
 const object = { bucket: "photos", objectPath: "wo/SYNTHETIC/00000000-0000-4000-8000-000000000001" };
 const safeFailure = (error: unknown, code: string) => error instanceof PrivateObjectError && error.code === code;
-function storage(responder: (url: string, init: RequestInit) => Promise<Response>, timeoutMs = 10) {
-  return createPrivateObjectStorage({ url: "https://storage.invalid", secret: "synthetic-service-secret", timeoutMs,
+function storage(responder: (url: string, init: RequestInit) => Promise<Response>, timeoutMs = 10,
+  secret = "synthetic-service-secret") {
+  return createPrivateObjectStorage({ url: "https://storage.invalid", secret, timeoutMs,
     fetch: async (input, init = {}) => responder(String(input), init) });
 }
 
@@ -48,9 +49,9 @@ test("bounded stream preserves the exact bytes at its ceiling and releases the r
   assert.equal(stream.locked, false);
 });
 
-test("Storage 404 means absent while 403/5xx remain errors, never false absence", async () => {
+test("Storage GET 404 means absent while 400/403/5xx remain errors, never false absence", async () => {
   assert.equal(await storage(async () => new Response(null, { status: 404 })).download(object, 10), null);
-  for (const status of [403, 500, 503]) {
+  for (const status of [400, 403, 500, 503]) {
     await assert.rejects(storage(async () => new Response("provider details", { status })).download(object, 10), error => safeFailure(error, "OBJECT_DOWNLOAD_FAILED"));
   }
 });
@@ -75,8 +76,8 @@ test("Storage streaming failure cancels the reader and returns a safe transport 
     && error instanceof Error && !error.message.includes("private"));
 });
 
-test("unknown HEAD outcome never sends DELETE, and exact missing object needs no DELETE", async () => {
-  for (const [status, expected] of [[403, "unknown"], [503, "unknown"], [404, "absent"]] as const) {
+test("unknown HEAD outcome never sends DELETE, and hosted missing-object responses need no DELETE", async () => {
+  for (const [status, expected] of [[403, "unknown"], [503, "unknown"], [400, "absent"], [404, "absent"]] as const) {
     const methods: string[] = [];
     const result = await storage(async (_url, init) => { methods.push(init.method ?? "GET"); return new Response(null, { status }); }).remove(object);
     assert.equal(result, expected); assert.deepEqual(methods, ["HEAD"]);
@@ -97,6 +98,14 @@ test("lost DELETE acknowledgement reconciles exact absence and reports deletion"
   assert.equal(typeof request.body, "string");
   assert.deepEqual(JSON.parse(String(request.body)), { prefixes: [object.objectPath] });
   assert.equal(requests[0].url, requests[2].url);
+});
+
+test("successful DELETE followed by hosted Storage HEAD 400 reports deletion", async () => {
+  let heads = 0;
+  const adapter = storage(async (_url, init) => new Response(null, {
+    status: init.method === "DELETE" ? 200 : ++heads === 1 ? 200 : 400,
+  }));
+  assert.equal(await adapter.remove(object), "deleted");
 });
 
 test("DELETE acceptance alone is not proof of removal; ambiguous HEAD stays pending", async () => {
@@ -123,16 +132,31 @@ test("Storage adapter rejects traversal, encoded paths and arbitrary buckets bef
   assert.equal(calls, 0);
 });
 
-test("Storage requests use server credentials and no-store only within the supplied bound object", async () => {
-  const adapter = storage(async (url, init) => {
-    assert.equal(url, `https://storage.invalid/storage/v1/object/photos/${object.objectPath}`);
-    const headers = new Headers(init.headers);
-    assert.equal(headers.get("authorization"), "Bearer synthetic-service-secret");
-    assert.equal(headers.get("apikey"), "synthetic-service-secret");
-    assert.equal(init.cache, "no-store"); assert.ok(init.signal);
-    return new Response(new Uint8Array([1]));
-  });
-  assert.deepEqual(await adapter.download(object, 10), new Uint8Array([1]));
+test("Storage authentication supports current secret keys and legacy service-role JWTs across private buckets", async () => {
+  const objects = [
+    object,
+    { bucket: "invoice-pdfs", objectPath: "00000000-0000-4000-8000-000000000002/invoice.pdf" },
+    { bucket: "contractor-estimate-attachments", objectPath: "00000000-0000-4000-8000-000000000003/form.xlsx" },
+  ];
+  for (const [secret, authorization] of [
+    ["sb_secret_synthetic", null],
+    ["eyJsynthetic.legacy.signature", "Bearer eyJsynthetic.legacy.signature"],
+  ] as const) {
+    let index = 0;
+    const adapter = storage(async (url, init) => {
+      const target = objects[index++];
+      assert.equal(url, `https://storage.invalid/storage/v1/object/${target.bucket}/${target.objectPath}`);
+      const headers = new Headers(init.headers);
+      assert.equal(headers.get("authorization"), authorization);
+      assert.equal(headers.get("apikey"), secret);
+      assert.equal(init.cache, "no-store"); assert.ok(init.signal);
+      return new Response(new Uint8Array([1]));
+    }, 10, secret);
+    for (const target of objects) {
+      assert.deepEqual(await adapter.download(target, 10), new Uint8Array([1]));
+    }
+    assert.equal(index, objects.length);
+  }
 });
 
 test("stalled bounded reader is cancelled by its deadline rather than waiting for another chunk", async () => {

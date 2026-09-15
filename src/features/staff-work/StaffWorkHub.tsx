@@ -10,10 +10,7 @@ import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge
 import { T, PRIORITY, STATUS } from "../../lib/constants";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery } from "../work-orders/queries";
-import {
-  resolveWorkOrderCollectionState,
-  WorkOrderCollectionNotice,
-} from "../work-orders/WorkOrderCollectionNotice";
+import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "../work-orders/WorkOrderCollectionNotice";
 import type {
   StaffNotificationRead,
   StaffWorkFilter,
@@ -133,6 +130,13 @@ export default function StaffWorkHub({
       : filterStaffWorkRows(rows, filter),
     [filter, pageRows, rows, workPageQuery.data],
   );
+  const collectionState = resolveWorkOrderCollectionState({
+    itemCount: visibleRows.length,
+    isPending: workPageQuery.isPending,
+    isFetching: workPageQuery.isFetching,
+    isError: workPageQuery.isError,
+  });
+  const retryStaffWork = () => { void workPageQuery.refetch(); };
   const myTodoCount = summaryCounts?.todo ?? null;
   const unreadCount = summaryCounts?.unread ?? null;
   const readyCount = summaryCounts?.ready ?? null;
@@ -144,13 +148,6 @@ export default function StaffWorkHub({
     todo: myTodoCount,
     ready: readyCount,
   };
-  const workCollectionState = resolveWorkOrderCollectionState({
-    itemCount: visibleRows.length,
-    isPending: workPageQuery.isPending,
-    isFetching: workPageQuery.isFetching,
-    isError: workPageQuery.isError,
-  });
-  const retryStaffWork = () => { void workPageQuery.refetch(); };
 
   if (page !== "staff_work") return null;
 
@@ -217,15 +214,13 @@ export default function StaffWorkHub({
         })}
       </div>
 
-      {workCollectionState === "error" && visibleRows.length > 0 && (
+      {collectionState === "error" && visibleRows.length > 0 && (
         <WorkOrderCollectionNotice
-          state={workCollectionState}
-          loadingMessage="Loading staff work…"
-          errorMessage="Staff work could not load. Previously loaded results may be stale. Retry the secure connection."
-          emptyMessage="Nothing is waiting in this view."
+          state="error"
+          errorMessage="The latest My Work refresh failed. Showing the previously loaded results."
           onRetry={retryStaffWork}
           retrying={workPageQuery.isFetching}
-          style={{ marginBottom: 14 }}
+          style={{ marginBottom: 14, padding: "14px 16px" }}
         />
       )}
 
@@ -330,14 +325,13 @@ export default function StaffWorkHub({
 
         {visibleRows.length === 0 && (
           <WorkOrderCollectionNotice
-            state={workCollectionState}
-            loadingMessage="Loading staff work…"
-            errorMessage="Staff work could not load. Retry the secure connection."
+            state={collectionState}
+            loadingMessage="Loading My Work…"
+            errorMessage="My Work could not be loaded. Please retry the request."
             emptyMessage="Nothing is waiting in this view."
             onRetry={retryStaffWork}
             retrying={workPageQuery.isFetching}
             className="card"
-            style={{ padding: 34 }}
           />
         )}
       </div>

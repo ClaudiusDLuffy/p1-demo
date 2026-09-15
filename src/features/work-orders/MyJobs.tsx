@@ -16,6 +16,7 @@ import {
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "./queries";
+import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
 
@@ -32,10 +33,13 @@ export default function MyJobs(props: any) {
   } = useCursorPagination(JSON.stringify({ search: deferredSearch, sortColumn, sortDirection }));
   const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
-  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled);
-  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, enabled);
-  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, enabled);
-  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled);
+  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled, undefined, { countEnabled: false });
+  // Badge counts are exact but deliberately sequenced behind the visible page
+  // and each other. Four simultaneous scans from every My Jobs open were able
+  // to exhaust the database statement deadline under normal concurrency.
+  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, enabled && jobsQuery.isSuccess && !jobsQuery.isPlaceholderData);
+  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, enabled && activeCountQuery.isSuccess);
+  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled && pendingCountQuery.isSuccess);
   const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
   const resultDiagnosticRef = useRef<string | null>(null);
   const jobsError = safeErrorMessage(jobsQuery.error);
@@ -89,14 +93,22 @@ export default function MyJobs(props: any) {
     position.page,
   ]);
   const retryJobs = () => {
-    void Promise.all([
-      jobsQuery.refetch(),
-      jobsQuery.countQuery.refetch(),
-      activeCountQuery.refetch(),
-      pendingCountQuery.refetch(),
-      capitalCountQuery.refetch(),
-    ]);
+    void (async () => {
+      await jobsQuery.refetch();
+      await activeCountQuery.refetch();
+      await pendingCountQuery.refetch();
+      await capitalCountQuery.refetch();
+    })();
   };
+  const collectionState = resolveWorkOrderCollectionState({
+    itemCount: visibleJobs.length,
+    isPending: enabled && jobsQuery.isPending,
+    isFetching: enabled && jobsQuery.isFetching,
+    isError: jobsQuery.isError || !contractorId,
+  });
+  const jobsErrorMessage = contractorId
+    ? "Your work orders are still saved. Retry the secure connection to load them."
+    : "Your contractor account could not be resolved. Refresh the page or contact P1 support.";
   const jobCounts = {
     active: activeCountQuery.data?.totalCount ?? "—",
     pendingInvoice: pendingCountQuery.data?.totalCount ?? "—",
@@ -160,26 +172,26 @@ export default function MyJobs(props: any) {
                   onDirectionChange={setSortDirection}
                 />
               </div>
-              {jobsQuery.isLoading && (
-                <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
-                  Loading work orders...
-                </div>
+              {collectionState === "error" && visibleJobs.length > 0 && (
+                <WorkOrderCollectionNotice
+                  state="error"
+                  errorMessage="The latest work-order refresh failed. Showing the previously loaded results."
+                  onRetry={retryJobs}
+                  retrying={jobsQuery.isFetching}
+                  style={{ marginBottom: 14, padding: "14px 16px" }}
+                />
               )}
-              {jobsQuery.isError && (
-                <div className="card" role="alert" style={{ padding: "24px 20px", textAlign: "center" }}>
-                  <div style={{ color: T.ink, fontWeight: 700, marginBottom: 6 }}>Work orders could not load</div>
-                  <div style={{ color: T.muted, fontSize: 12, marginBottom: 14 }}>
-                    Your work orders are still saved. Retry the secure connection to load them.
-                  </div>
-                  <button type="button" className="btn-soft" onClick={retryJobs} disabled={jobsQuery.isFetching}>
-                    {jobsQuery.isFetching ? "Retrying..." : "Retry"}
-                  </button>
-                </div>
-              )}
-              {!jobsQuery.isLoading && !jobsQuery.isError && visibleJobs.length === 0 && (
-                <div className="card" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
-                  No matching work orders.
-                </div>
+              {visibleJobs.length === 0 && (
+                <WorkOrderCollectionNotice
+                  state={collectionState}
+                  loadingMessage="Loading your work orders…"
+                  errorMessage={jobsErrorMessage}
+                  emptyMessage={search ? "No work orders match your search." : "No active work orders are assigned to your account."}
+                  onRetry={contractorId ? retryJobs : undefined}
+                  retrying={jobsQuery.isFetching}
+                  className="card"
+                  style={{ marginBottom: 14 }}
+                />
               )}
               {visibleJobs.map((wo, i) => {
                 const sla = slaLabel(wo);

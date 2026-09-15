@@ -37,18 +37,17 @@ type DashboardProps = {
 };
 
 export default function Dashboard(props: DashboardProps) {
-  const { page, isManager, workOrders, slaBreached, nav, onViewUnassigned, doAutoAssign, invoices, currentUser, getUser, setSelectedWO, setAiNote, setPage, search, setSearch, woParts = [] } = props;
+  const { page, isManager, workOrders, p1Unassigned, slaBreached, nav, onViewUnassigned, doAutoAssign, invoices, currentUser, getUser, setSelectedWO, setAiNote, setPage, search, setSearch, woParts = [] } = props;
   const controller = isInvoiceController(currentUser);
+  // The navigation summary supplies the P1 metric. Defer the one remaining
+  // all-priority total until that primary summary has finished instead of
+  // starting two additional exact scans with the initial dashboard request.
   const unassignedQuery = useWorkOrdersCountQuery(
     { scope: "dashboard_unassigned" },
-    page === "dashboard" && isManager && !controller,
-  );
-  const p1UnassignedQuery = useWorkOrdersCountQuery(
-    { scope: "active", status: "unassigned", priority: "p1" },
-    page === "dashboard" && isManager && !controller,
+    page === "dashboard" && isManager && !controller && p1Unassigned !== null,
   );
   const unassignedCount = unassignedQuery.data?.totalCount ?? null;
-  const exactP1Unassigned = p1UnassignedQuery.data?.totalCount ?? null;
+  const exactP1Unassigned = p1Unassigned;
   const hasUnassignedWork = unassignedCount !== null && unassignedCount > 0;
   const unassignedColor = unassignedCount === null ? T.muted : hasUnassignedWork ? T.danger : T.success;
   const unassignedBackground = unassignedCount === null ? T.surface : hasUnassignedWork ? T.dangerSoft : T.successSoft;

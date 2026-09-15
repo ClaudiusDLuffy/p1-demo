@@ -64,13 +64,15 @@ begin
   ) specifications(signature,source_hash,private_name,public_name,validation_family,is_contractor) loop
     select p.*,l.lanname into strict v_source from pg_proc p join pg_language l on l.oid=p.prolang
       where p.oid=to_regprocedure(v_spec.signature);
+    -- Treat CRLF and LF as the same reviewed SQL source while retaining the
+    -- exact semantic hash guard and generating one normalized body.
     if v_source.prosecdef or v_source.provolatile<>'s' or v_source.lanname<>'sql'
-      or md5(v_source.prosrc)<>v_spec.source_hash then
+      or md5(replace(v_source.prosrc,chr(13),''))<>v_spec.source_hash then
       raise exception 'Known invoice read definition drifted; review before compact projection';
     end if;
     v_arguments:=pg_get_function_arguments(v_source.oid);
     v_identity:=pg_get_function_identity_arguments(v_source.oid);
-    v_body:=replace(v_source.prosrc,'invoice.*',v_columns);
+    v_body:=replace(replace(v_source.prosrc,chr(13),''),'invoice.*',v_columns);
     v_body:=replace(v_body,'invoice_rows as (','invoice_rows as not materialized (');
     if v_spec.is_contractor then
       -- Only the explicitly requested line-count sort needs a count before

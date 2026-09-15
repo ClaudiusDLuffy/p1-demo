@@ -57,8 +57,7 @@ for (const [limit, expected] of [[undefined, 25], [0, 1], [-9, 1], [1, 1], [100,
   });
 }
 
-for (const scope of ["dashboard_seven_eleven_updates", "dashboard_pending_submission",
-  "dashboard_p1_parts_to_order", "ready_to_bill", "staff_work", "staff_work_ready"]) {
+for (const scope of ["dashboard_p1_parts_to_order"]) {
   test(`work-order implicit table scope ${scope} keeps the v2 read contract`, async () => {
     const harness = createWorkOrderReadHarness([respond(rawPage([]))]);
     await harness.loadPage({ scope });
@@ -69,6 +68,41 @@ for (const scope of ["dashboard_seven_eleven_updates", "dashboard_pending_submis
       p_updated_date_filter: null, p_sla_filter: null });
   });
 }
+
+for (const scope of ["dashboard_seven_eleven_updates", "dashboard_pending_submission",
+  "ready_to_bill", "staff_work", "staff_work_ready"]) {
+  test(`work-order ${scope} preset uses the equivalent generic cursor read`, async () => {
+    const harness = createWorkOrderReadHarness([respond(rawPage([]))]);
+    await harness.loadPage({ scope });
+    assert.equal(harness.calls[0].name, "list_work_orders_rows_v1");
+    assert.deepEqual(harness.calls[0].args, { ...defaults, p_scope: scope });
+  });
+}
+
+for (const [sort, tableSortColumn, tableSortDirection] of [
+  ["newest", "created", "desc"],
+  ["oldest", "created", "asc"],
+  ["priority", "priority", "asc"],
+  ["sla_due", "sla", "asc"],
+] as const) {
+  test(`work-order ${sort} preset uses the generic cursor read`, async () => {
+    const harness = createWorkOrderReadHarness([respond(rawPage([]))]);
+    await harness.loadPage({ sort, tableSortColumn, tableSortDirection });
+    assert.equal(harness.calls[0].name, "list_work_orders_rows_v1");
+    assert.deepEqual(harness.calls[0].args, { ...defaults, p_sort: sort });
+  });
+}
+
+test("work-order custom table ordering and table-only filtering retain table v2", async () => {
+  const custom = createWorkOrderReadHarness([respond(rawPage([]))]);
+  await custom.loadPage({ sort: "sla_due", tableSortColumn: "created", tableSortDirection: "desc" });
+  assert.equal(custom.calls[0].name, "list_work_orders_table_rows_v2");
+
+  const filtered = createWorkOrderReadHarness([respond(rawPage([]))]);
+  await filtered.loadPage({ sort: "sla_due", tableSortColumn: "sla", tableSortDirection: "asc",
+    summaryFilter: "compressor" });
+  assert.equal(filtered.calls[0].name, "list_work_orders_table_rows_v2");
+});
 
 for (const column of ["work_order", "status", "priority", "incident", "store", "summary", "contractor",
   "technician", "created", "updated", "closed", "sla"]) {

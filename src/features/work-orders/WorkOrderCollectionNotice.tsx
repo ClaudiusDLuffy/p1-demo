@@ -24,22 +24,22 @@ export function resolveWorkOrderCollectionState({
 
 export function WorkOrderCollectionNotice({
   state,
-  loadingMessage,
-  errorMessage,
-  emptyMessage,
+  loadingMessage = "Loading work orders…",
+  errorMessage = "Work orders could not be loaded. Please try again.",
+  emptyMessage = "No work orders match the current filters.",
   onRetry,
-  retryLabel = "Retry",
   retrying = false,
+  retryLabel = "Retry",
   className,
   style,
 }: {
   state: WorkOrderCollectionState;
-  loadingMessage: string;
-  errorMessage: string;
-  emptyMessage: string;
+  loadingMessage?: string;
+  errorMessage?: string;
+  emptyMessage?: string;
   onRetry?: () => void;
-  retryLabel?: string;
   retrying?: boolean;
+  retryLabel?: string;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -58,13 +58,14 @@ export function WorkOrderCollectionNotice({
       role={failed ? "alert" : "status"}
       aria-live={failed ? "assertive" : "polite"}
       style={{
-        padding: "24px 20px",
-        textAlign: "center",
-        color: failed ? T.danger : T.subtle,
-        background: failed ? T.dangerSoft : undefined,
+        padding: "28px 20px",
         borderRadius: 10,
+        border: `1px solid ${failed ? `${T.danger}55` : T.borderSoft}`,
+        background: failed ? T.dangerSoft : T.surface,
+        color: failed ? T.danger : T.muted,
         fontSize: 13,
         lineHeight: 1.5,
+        textAlign: "center",
         ...style,
       }}
     >
