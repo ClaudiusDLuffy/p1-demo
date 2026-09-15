@@ -28,6 +28,7 @@ import { createContractorInvoiceCommands, safeContractorInvoiceError } from "./c
 import { contractorInvoiceDraftCommand, compatibleContractorInvoiceResult } from "./contractorInvoiceDraftAdapter";
 import type { ContractorInvoiceContext } from "./contractorInvoiceCommandContracts";
 import { createLifecycleCommands, safeLifecycleError } from "./workOrderLifecycleCommands";
+import { safeVisitCorrectionError } from "./visitCorrection";
 import { createAssignmentCommands, AssignmentCommandError } from "./workOrderAssignmentCommands";
 import { reviewInvoiceWithNotification, reviewInvoicesWithNotification, retractInvoiceWithNotification } from "./financialNotificationCommands";
 import type { FinancialReviewResult, FinancialBatchReviewResult } from "./financialNotificationCommandContracts";
@@ -1153,7 +1154,7 @@ export async function correctWorkOrderVisit(
     p_check_out_at: checkOutAt,
     p_reason: reason.trim(),
   });
-  if (error) throw normalizeUnknownError(error);
+  if (error) throw safeVisitCorrectionError(error);
   return data;
 }
 
