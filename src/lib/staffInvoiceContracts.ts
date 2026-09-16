@@ -24,7 +24,13 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
 const optionalDate = z.union([date, z.literal(""), z.null()]).optional()
   .transform(value => value || null);
 const optionalText = (max: number) => text(max).nullable().optional().transform(value => value || null);
-const optionalUuid = z.string().uuid().nullable().optional().transform(value => value ?? null);
+const optionalUuid = z.preprocess(
+  value => typeof value === "string" && value.trim() === "" ? null : value,
+  z.string()
+    .uuid("Source reference is invalid. Remove and re-add this line")
+    .nullable()
+    .optional(),
+).transform(value => value ?? null);
 
 /**
  * The untransformed staff line contract is shared with the editor so values

@@ -1239,6 +1239,15 @@ export default function BillingInvoiceCreateModal(props: any) {
   const fieldAria = (name: HeaderField) => ({ "aria-invalid": errors[name] ? true : undefined,
     "aria-describedby": errors[name] ? `${formId}-${name}-error` : undefined });
   const headerError = (name: HeaderField) => errors[name] ? <span id={`${formId}-${name}-error`} role="alert" style={{ display: "block", fontSize: 11, color: T.danger }}>{String(errors[name]?.message || "Review this field.")}</span> : null;
+  const lineValidationIssue = errors.lines
+    ? firstValidationIssue({ lines: errors.lines }, ["lines"])
+    : null;
+  const lineValidationIndex = lineValidationIssue
+    ? /^lines\.(\d+)/.exec(lineValidationIssue.path)
+    : null;
+  const lineValidationMessage = lineValidationIssue
+    ? `${lineValidationIndex ? `Line ${Number(lineValidationIndex[1]) + 1}: ` : ""}${lineValidationIssue.message}`
+    : "Review the invoice line items.";
   const revealValidationIssue = (issue: { path: string }) => {
     const focusPath = financialValidationFocusPath(issue.path);
     window.requestAnimationFrame(() => {
@@ -1800,10 +1809,24 @@ export default function BillingInvoiceCreateModal(props: any) {
                   if (draggingLine != null && draggingLine !== i) move(draggingLine, i);
                   setDraggingLine(null);
                 }}
+                data-validation-control={`lines.${i}.sourceReference`}
+                tabIndex={-1}
                 style={{ position: "relative", display: "grid", gridTemplateColumns: "28px minmax(86px, 110px) minmax(120px, 1fr) minmax(48px, 58px) minmax(64px, 82px) minmax(58px, 74px) minmax(54px, 66px) minmax(72px, 92px)", gap: 8, padding: "10px 48px 10px 12px", borderBottom: i < fields.length - 1 ? `1px solid ${T.borderSoft}` : "none", alignItems: "start", background: draggingLine === i ? T.accentSoft : T.surface }}
               >
-                <input type="hidden" {...register(`lines.${i}.sourceInvoiceLineId` as const)} />
-                <input type="hidden" {...register(`lines.${i}.sourceWorkOrderPartId` as const)} />
+                <input
+                  type="hidden"
+                  {...register(`lines.${i}.sourceInvoiceLineId` as const, {
+                    setValueAs: value =>
+                      typeof value === "string" && value.trim() === "" ? null : value,
+                  })}
+                />
+                <input
+                  type="hidden"
+                  {...register(`lines.${i}.sourceWorkOrderPartId` as const, {
+                    setValueAs: value =>
+                      typeof value === "string" && value.trim() === "" ? null : value,
+                  })}
+                />
                 <input type="hidden" {...register(`lines.${i}.taxTreatmentManual` as const)} />
                 <input
                   type="hidden"
@@ -2023,7 +2046,7 @@ export default function BillingInvoiceCreateModal(props: any) {
           })}
         </div>
         <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>Warranty items may be billed at $0. Other line types require a positive rate.</div>
-        {errors.lines && <div id={`${formId}-lines-error`} role="alert" style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>Each line needs a positive quantity and a valid rate ($0 is allowed only for Warranty). Descriptions are optional only for travel.</div>}
+        {errors.lines && <div id={`${formId}-lines-error`} role="alert" style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>{lineValidationMessage}</div>}
         <div data-validation-control="lines" tabIndex={-1} style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           {QUICK_ADD_LINES.map(item => (
             <button

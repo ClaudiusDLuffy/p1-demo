@@ -8,6 +8,18 @@ test("partial billing data round trips without accepting an invalid financial co
   const read = parseBillingDraft(JSON.stringify(value), Date.parse("2026-08-06T01:05:00.000Z"));
   assert.equal(read?.form.lines[0].rate, ""); assert.deepEqual(read?.selectedSourceIds, [sourceId]);
 });
+test("browser-empty hidden source identifiers persist canonically as null", () => {
+  const value = createBillingDraftPayload({ form: { lines: [{
+    type: "Labor", desc: "Synthetic", qty: 1, rate: 10,
+    sourceInvoiceLineId: "", sourceWorkOrderPartId: "   ",
+  }] } });
+  assert.equal(value.form.lines[0].sourceInvoiceLineId, null);
+  assert.equal(value.form.lines[0].sourceWorkOrderPartId, null);
+  assert.throws(() => createBillingDraftPayload({ form: { lines: [{
+    type: "Labor", desc: "Synthetic", qty: 1, rate: 10,
+    sourceInvoiceLineId: "not-a-uuid",
+  }] } }));
+});
 test("billing keeps existing 30 day expiry and rejects future malformed and old schemas", () => {
   const at = "2026-01-01T00:00:00.000Z"; const value = createBillingDraftPayload({ savedAt: at, form: {} });
   assert.equal(parseBillingDraft(JSON.stringify(value), Date.parse(at) + BILLING_DRAFT_MAX_AGE_MS + 1), null);

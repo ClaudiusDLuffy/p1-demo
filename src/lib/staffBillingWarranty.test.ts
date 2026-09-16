@@ -67,6 +67,21 @@ test("the billing form rejects values the financial command cannot persist", () 
   ]) assert.equal(lineSchema.safeParse(input).success, false);
 });
 
+test("unused hidden source identifiers normalize to null without accepting corrupt references", () => {
+  const labor = { ...warranty, type: "Labor", rate: 110 };
+  const parsed = StaffFinancialLineInputSchema.parse({
+    ...labor,
+    sourceInvoiceLineId: "",
+    sourceWorkOrderPartId: "   ",
+  });
+  assert.equal(parsed.sourceInvoiceLineId, null);
+  assert.equal(parsed.sourceWorkOrderPartId, null);
+  assert.equal(StaffFinancialLineInputSchema.safeParse({
+    ...labor,
+    sourceInvoiceLineId: "not-a-uuid",
+  }).success, false);
+});
+
 test("a complete warranty-only billing form can save with zero subtotal and total", () => {
   const form = { num: "SYNTH-WARRANTY-1", invoiceDate: "2026-09-09", dueDate: "2026-11-08",
     territory: "Texas", equipmentTag: QUICKBOOKS_EQUIPMENT_TAGS[0], storeNumber: "SYNTH",
