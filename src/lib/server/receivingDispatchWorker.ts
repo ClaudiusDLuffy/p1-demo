@@ -9,7 +9,7 @@ import { getPortalOrigin } from "../config/server/appEnvironment";
 const MAX_BATCH = 25;
 const LEASE_SECONDS = 60;
 const START_WINDOW_MS = 10_000;
-const DATABASE_TIMEOUT_MS = 5_000;
+const DATABASE_TIMEOUT_MS = 7_000;
 
 const claimSchema = z.array(z.object({ id: z.uuid() })).max(1);
 const messageSchema = z.object({

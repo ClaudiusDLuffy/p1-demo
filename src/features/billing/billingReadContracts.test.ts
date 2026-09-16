@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { billingReadUrl, parseBillingCount, parseBillingReadInput, parseBillingRows } from "./billingReadContracts";
+import { BILLING_SEARCH_MAX_LENGTH, billingReadUrl, normalizeBillingSearch, parseBillingCount, parseBillingReadInput, parseBillingRows } from "./billingReadContracts";
 import { billingInvoiceCountKey, billingInvoicePageKey } from "./billingQueryKeys";
 
 test("legacy billing first pages preserve count while every continuation is rows only", () => {
@@ -18,6 +18,17 @@ test("billing count URL/key cannot acquire page cursor, ordering or page-size de
   assert.deepEqual(billingInvoiceCountKey("actorA", params), billingInvoiceCountKey("actorA", { ...params, search: "synthetic" }));
   assert.notDeepEqual(billingInvoiceCountKey("actorA", params), billingInvoiceCountKey("actorB", params));
   assert.notDeepEqual(billingInvoiceCountKey("actorA", params), billingInvoicePageKey("actorA", params));
+});
+test("billing clients bound long searches before strict read validation", () => {
+  const overlong = `  ${"a".repeat(BILLING_SEARCH_MAX_LENGTH + 40)}  `;
+  assert.equal(normalizeBillingSearch(overlong).length, BILLING_SEARCH_MAX_LENGTH);
+  const url = new URL(billingReadUrl({ queue: "all", search: overlong }, "rows"), "https://synthetic.invalid");
+  assert.equal(url.searchParams.get("search")?.length, BILLING_SEARCH_MAX_LENGTH);
+  assert.doesNotThrow(() => parseBillingReadInput(url.searchParams));
+  assert.deepEqual(
+    billingInvoiceCountKey("actorA", { queue: "all", search: overlong }),
+    billingInvoiceCountKey("actorA", { queue: "all", search: "a".repeat(BILLING_SEARCH_MAX_LENGTH) }),
+  );
 });
 for (const invalid of ["limit=0", "limit=-1", "limit=101", "limit=1.5", "limit=12junk", "limit=", "limit=01",
   "queue=secret", "sort=untrusted", "direction=sideways", "cursor=a&cursor=b", "queue=all&queue=active",

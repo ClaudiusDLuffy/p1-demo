@@ -25,6 +25,9 @@ const queues = ["active", "all", "draft", "submitted", "sent", "work_order"] as 
 const sorts = ["invoice", "date", "work_order", "store", "territory", "total", "status", "recent"] as const;
 const isQueue = (value: string): value is BillingReadInput["queue"] => queues.some(item => item === value);
 const isSort = (value: string): value is BillingReadInput["sort"] => sorts.some(item => item === value);
+export const BILLING_SEARCH_MAX_LENGTH = 200;
+export const normalizeBillingSearch = (value?: string | null): string =>
+  (value || "").trim().slice(0, BILLING_SEARCH_MAX_LENGTH);
 
 /** The opt-in contract is strict; old first-page defaults remain compatible.
  * Every continuation is rows-only, including an old client's continuation. */
@@ -58,12 +61,13 @@ export function parseBillingReadInput(search: URLSearchParams): BillingReadInput
 }
 
 export function billingCountFilters(params: BillingCountFilters): BillingCountFilters {
-  return { queue: params.queue, search: params.search?.trim() || "", workOrderId: params.workOrderId || null };
+  return { queue: params.queue, search: normalizeBillingSearch(params.search), workOrderId: params.workOrderId || null };
 }
 export function billingReadUrl(params: BillingInvoicePageParams, response: "rows" | "count"): string {
   const search = new URLSearchParams({ response, queue: params.queue });
   if (response === "rows") search.set("contract", "compact-v1");
-  if (params.search?.trim()) search.set("search", params.search.trim());
+  const normalizedSearch = normalizeBillingSearch(params.search);
+  if (normalizedSearch) search.set("search", normalizedSearch);
   if (params.workOrderId) search.set("workOrderId", params.workOrderId);
   if (response === "rows") {
     search.set("sort", params.sort || "invoice");

@@ -20,7 +20,11 @@ export async function POST(request: Request): Promise<Response> {
     authorize: authorizeDiagnostic,
     admit: admitDiagnostic,
     // No free-form message, stack, URL, body or arbitrary detail enters logs.
+    // Source, view and details have already passed closed-schema validation.
     log: (report, context) => safeLog("client_diagnostic", context, { code: report.code,
+      clientLevel: report.level, source: report.source,
+      ...(report.portalView ? { portalView: report.portalView } : {}),
+      ...(report.details || {}),
       ...(report.context?.operationId ? { operationId: report.context.operationId } : {}) }),
   });
 }

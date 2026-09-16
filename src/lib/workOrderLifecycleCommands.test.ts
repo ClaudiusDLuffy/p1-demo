@@ -105,6 +105,23 @@ test("provider SQL/native details never become user messages and no error automa
   }
 });
 
+test("reviewed lifecycle conflicts provide actionable guidance without exposing arbitrary database text", () => {
+  for (const [message, guidance] of [
+    ["STALE_ASSIGNMENT", /assignment changed/i],
+    ["Work order cannot start or resume from its current state", /current state/i],
+    ["The requested visit overlaps existing work", /overlaps another active visit/i],
+    ["The active visit does not match this completion", /active visit changed/i],
+  ] as const) {
+    const error = safeLifecycleError({ code: "PT409", message });
+    assert.match(error.message, guidance);
+    assert.equal(error.code, "PT409");
+  }
+  assert.doesNotMatch(
+    safeLifecycleError({ code: "PT409", message: "private customer SQL text" }).message,
+    /private|customer|SQL/i,
+  );
+});
+
 test("all actual lifecycle identities are reserved, not arbitrary note prefixes", () => {
   for (const key of RESERVED_LIFECYCLE_EVENTS) assert.equal(isReservedLifecycleEvent(key), true);
   for (const key of ["note", "ai_note", "invoice_submitted", "check_in_question", null, undefined]) assert.equal(isReservedLifecycleEvent(key), false);

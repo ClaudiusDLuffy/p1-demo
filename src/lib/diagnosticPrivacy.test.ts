@@ -44,6 +44,24 @@ test("safe logger never emits rejected diagnostic text even when mixed with allo
   assert.equal(JSON.parse(logs[0]).count, 2);
 });
 
+test("safe logger retains only closed diagnostic categories and bounded counts", () => {
+  const logs: string[] = [];
+  const context = createRequestContext(new Request("https://example.invalid/api/client-errors"), "/api/client-errors");
+  assert.equal(safeLog("client_diagnostic", context, {
+    code: "INTERNAL_ERROR", clientLevel: "warning", source: "selected-work-order-query", portalView: "billing.detail",
+    scope: "active", page: 2, itemCount: 4, totalCount: 9, hasMore: true, contractorScopeResolved: false,
+    arbitrary: "SYNTHETIC_PRIVATE_VALUE", invalidCount: 1_000_001,
+  }, line => logs.push(line)), true);
+  const logged = JSON.parse(logs[0]);
+  assert.deepEqual({ clientLevel: logged.clientLevel, source: logged.source, portalView: logged.portalView,
+    scope: logged.scope, page: logged.page, itemCount: logged.itemCount, totalCount: logged.totalCount,
+    hasMore: logged.hasMore, contractorScopeResolved: logged.contractorScopeResolved }, {
+    clientLevel: "warning", source: "selected-work-order-query", portalView: "billing.detail",
+    scope: "active", page: 2, itemCount: 4, totalCount: 9, hasMore: true, contractorScopeResolved: false,
+  });
+  assert.doesNotMatch(logs[0], /SYNTHETIC_PRIVATE_VALUE|arbitrary|invalidCount/);
+});
+
 test("diagnostic transport settles a token lookup that ignores cancellation", async () => {
   const result = await sendClientReport({ version: 1, code: "INTERNAL_ERROR", level: "error", source: "synthetic_fixture", message: "SYNTHETIC_PRIVATE" }, {
     token: () => new Promise(() => undefined),

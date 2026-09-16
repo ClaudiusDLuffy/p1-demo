@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PARTS_SMS_SEND_LIMIT, partsSmsDatabaseRequest, runPartsSmsWorker, type PartsSmsWorkerDependencies } from "./server/partsSmsWorker";
+import { PARTS_SMS_DATABASE_TIMEOUT_MS, PARTS_SMS_SEND_LIMIT, partsSmsDatabaseRequest, runPartsSmsWorker, type PartsSmsWorkerDependencies } from "./server/partsSmsWorker";
 import { ConfigurationError } from "./config/shared";
 
 const id = "00000000-0000-4000-8000-000000000001";
 const sid = `SM${"1".repeat(32)}`;
 const counts = { recoveredBeforeSend: 0, recoveredUnknown: 0, superseded: 0, notDeliverable: 0 };
+test("parts worker database deadline tolerates ordinary provider latency", () => {
+  assert.equal(PARTS_SMS_DATABASE_TIMEOUT_MS, 5_000);
+});
 function fixture(overrides: Partial<PartsSmsWorkerDependencies> = {}) {
   const calls: string[] = [];
   let claims = 0;

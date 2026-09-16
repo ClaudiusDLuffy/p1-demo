@@ -41,6 +41,25 @@ const inputParts = (value: string | null, timeZone: string) =>
     ? dateTimeInputPartsInTimeZone(new Date(value), timeZone)
     : { date: "", time: "" };
 
+type VisitTimelineVisit = {
+  id: string;
+  checkInAt: string | null;
+  checkOutAt: string | null;
+  closureKind?: string | null;
+  durationReviewRequired?: boolean;
+};
+
+type VisitTimelineProps = {
+  workOrder: Record<string, unknown> & { id: string; status?: string | null };
+  visits?: VisitTimelineVisit[];
+  totalCount?: number | null;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
+  currentUser?: { role?: string | null } | null;
+  fire?: (message: string) => void;
+};
+
 export default function VisitTimeline({
   workOrder,
   visits = [],
@@ -50,7 +69,7 @@ export default function VisitTimeline({
   loadingMore = false,
   currentUser,
   fire,
-}: any) {
+}: VisitTimelineProps) {
   const queryClient = useQueryClient();
   const timeZone = timezoneForWorkOrder(workOrder);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -63,16 +82,20 @@ export default function VisitTimeline({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [rejectedCorrection, setRejectedCorrection] = useState<string | null>(null);
   const displayedTotal: number | null = typeof totalCount === "number" ? totalCount : null;
+  const correctionFingerprint = editingId ? JSON.stringify([
+    editingId, form.checkInDate, form.checkInTime, form.checkOutDate, form.checkOutTime, form.reason.trim(),
+  ]) : "";
 
   const orderedVisits = useMemo(
-    () => [...visits].sort((left: any, right: any) =>
+    () => [...visits].sort((left, right) =>
       new Date(right.checkInAt || 0).getTime() - new Date(left.checkInAt || 0).getTime(),
     ),
     [visits],
   );
 
-  const startEditing = (visit: any) => {
+  const startEditing = (visit: VisitTimelineVisit) => {
     if (!visit.checkOutAt) return;
     const checkIn = inputParts(visit.checkInAt, timeZone);
     const checkOut = inputParts(visit.checkOutAt, timeZone);
@@ -85,10 +108,12 @@ export default function VisitTimeline({
       reason: "",
     });
     setError("");
+    setRejectedCorrection(null);
   };
 
   const save = async () => {
-    if (!editingId) return;
+    if (!editingId || rejectedCorrection === correctionFingerprint) return;
+    const attemptedCorrection = correctionFingerprint;
     setSaving(true);
     setError("");
     try {
@@ -127,7 +152,11 @@ export default function VisitTimeline({
         fire?.("Visit times were corrected, but the refreshed timeline is unavailable. Refresh the work order to see the saved times.");
       });
     } catch (caught: unknown) {
-      setError(safeVisitCorrectionError(caught).message);
+      const failure = safeVisitCorrectionError(caught);
+      setError(failure.message);
+      if (failure.code === "VISIT_TIME_OVERLAP" || failure.code === "VISIT_CHANGED") {
+        setRejectedCorrection(attemptedCorrection);
+      }
     } finally {
       setSaving(false);
     }
@@ -145,7 +174,7 @@ export default function VisitTimeline({
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
-        {orderedVisits.map((visit: any, index: number) => {
+        {orderedVisits.map((visit, index) => {
           const editing = editingId === visit.id;
           const isStaff = ["manager", "dispatcher", "back_office"].includes(currentUser?.role);
           const checkedOutAt = new Date(visit.checkOutAt || 0).getTime();
@@ -200,8 +229,8 @@ export default function VisitTimeline({
                   </label>
                   {error && <div role="alert" style={{ fontSize: 11, color: T.danger }}>{error}</div>}
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                    <button type="button" className="btn-soft" disabled={saving} onClick={() => setEditingId(null)}>Cancel</button>
-                    <button type="button" className="btn-primary" disabled={saving || form.reason.trim().length < 5} onClick={save} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <button type="button" className="btn-soft" disabled={saving} onClick={() => { setEditingId(null); setRejectedCorrection(null); }}>Cancel</button>
+                    <button type="button" className="btn-primary" disabled={saving || form.reason.trim().length < 5 || rejectedCorrection === correctionFingerprint} onClick={save} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {saving ? <><BtnSpinnerDark />Saving...</> : "Save correction"}
                     </button>
                   </div>

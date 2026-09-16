@@ -16,10 +16,22 @@ export class LifecycleCommandError extends Error {
   }
 }
 
+const exactLifecycleConflicts = new Map<string, string>([
+  ["STALE_VERSION", "Work order changed in another session. Refresh and review it before trying again."],
+  ["STALE_ASSIGNMENT", "The contractor assignment changed. Refresh the work order before trying again."],
+  ["Work order cannot start or resume from its current state", "This work order can no longer be started or resumed from its current state. Refresh it before taking another action."],
+  ["The requested visit overlaps existing work", "The selected arrival time overlaps another active visit. Adjust the arrival time or close the other visit first."],
+  ["The active visit does not match this completion", "The active visit changed before completion. Refresh the work order and review the current visit."],
+]);
+
 export function safeLifecycleError(cause: unknown): LifecycleCommandError {
   if (cause instanceof LifecycleCommandError) return cause;
-  const provider = z.object({ code: z.string().optional() }).safeParse(cause);
+  const provider = z.object({ code: z.string().optional(), message: z.string().optional() }).safeParse(cause);
   const code = provider.success ? provider.data.code : undefined;
+  const exactConflict = provider.success && provider.data.message
+    ? exactLifecycleConflicts.get(provider.data.message)
+    : undefined;
+  if (code === "PT409" && exactConflict) return new LifecycleCommandError(code, exactConflict, cause);
   if (code === "PT409") return new LifecycleCommandError(code,
     "Work order changed in another session. Refresh and review it before trying again.", cause);
   if (code === "42501") return new LifecycleCommandError(code,

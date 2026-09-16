@@ -80,6 +80,8 @@ import {
   BILLING_INVOICES_KEY,
   useBillingInvoiceByIdQuery,
 } from "../features/billing/queries";
+import { billingInvoiceByIdKey } from "../features/billing/billingQueryKeys";
+import { directoryActorScope } from "../lib/counts/queryKeys";
 import {
   T, PRIORITY, MONTHS, WEEKDAYS,
 } from "../lib/constants";
@@ -4333,6 +4335,24 @@ export default function PortalShell() {
           initialWorkOrderId={billingWorkOrderToStart}
           onClose={closeBillingInvoiceEditor}
           onCreated={(invoice: any) => {
+            if (invoice?.id) {
+              const detailKey = billingInvoiceByIdKey(
+                invoice.id,
+                directoryActorScope(currentUser),
+              );
+              // Stop an older detail request from replacing the authoritative
+              // save response after navigation. A complete summary carries the
+              // new invoice version used by the line-page query.
+              void qc.cancelQueries(
+                { queryKey: detailKey, exact: true },
+                { revert: false },
+              );
+              if (invoice.projection === "summary") {
+                qc.setQueryData(detailKey, invoice);
+              } else {
+                qc.removeQueries({ queryKey: detailKey, exact: true });
+              }
+            }
             qc.setQueryData(BILLING_INVOICES_KEY, (items: any[] | undefined) => {
               if (!invoice?.id) return items || [];
               const exists = (items || []).some(item => item.id === invoice.id);
