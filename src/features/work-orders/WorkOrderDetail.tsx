@@ -77,6 +77,13 @@ const ContractorEstimatePanel = dynamic(
   { ssr: false }
 );
 
+const PART_STATUS_ORDER: Record<string, number> = {
+  backordered: 0,
+  ordered: 1,
+  shipped: 2,
+  received: 3,
+};
+
 // ETA is stored as an ISO timestamp (timestamptz). Render it in the user's
 // locale. Falls through to the raw string for any legacy non-ISO value so
 // historic rows still display.
@@ -221,12 +228,6 @@ export default function WorkOrderDetail(props: any) {
   // Parts tracking list for this WO (everyone — staff + contractor sees the
   // same list since the contractor view is for THEIR own job). Sort:
   // pending statuses first, received last, so what needs attention is at top.
-  const PART_STATUS_ORDER: Record<string, number> = {
-    backordered: 0,
-    ordered: 1,
-    shipped: 2,
-    received: 3,
-  };
   const myParts = useMemo(
     () => woData
       ? [...woParts]
@@ -1070,7 +1071,7 @@ export default function WorkOrderDetail(props: any) {
                                       <div className="wo-invoice-mobile-menu" style={{ position: "absolute", top: 44, right: 0, zIndex: 43, minWidth: 156, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, boxShadow: "0 10px 28px rgba(31,30,28,0.16)", overflow: "hidden" }}>
                                         <button onClick={() => viewInvoice(inv)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>View</button>
                                         {inv.state !== "draft" && (
-                                          <button onClick={() => { setInvoiceMenuId(null); doDownloadInvoice && doDownloadInvoice(inv); }} disabled={pdfBusy} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: pdfBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: pdfBusy ? 0.6 : 1 }}>Download</button>
+                                          <button onClick={() => { setInvoiceMenuId(null); if (doDownloadInvoice) doDownloadInvoice(inv); }} disabled={pdfBusy} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: pdfBusy ? "default" : "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit", opacity: pdfBusy ? 0.6 : 1 }}>Download</button>
                                         )}
                                         {isMyDraft && !isManager && (
                                           <button onClick={() => { setInvoiceMenuId(null); openCreate(inv); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", background: "none", border: "none", borderBottom: `1px solid ${T.borderSoft}`, cursor: "pointer", fontSize: 13, color: T.ink, fontFamily: "inherit" }}>Resume</button>

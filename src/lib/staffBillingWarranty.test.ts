@@ -6,6 +6,7 @@ import test from "node:test";
 import ts from "typescript";
 import { z } from "zod";
 import * as billing from "./staffBilling";
+import { StaffFinancialLineInputSchema } from "./staffInvoiceContracts";
 import { QUICKBOOKS_EQUIPMENT_TAGS } from "./quickBooksEquipmentTags";
 
 const filename = resolve("src/features/billing/BillingInvoiceCreateModal.tsx");
@@ -13,13 +14,17 @@ const source = ts.createSourceFile(filename, readFileSync(filename, "utf8"), ts.
 const nodes: ts.Node[] = [];
 const visit = (node: ts.Node) => { nodes.push(node); ts.forEachChild(node, visit); };
 visit(source);
-const schemaNames = new Set(["BillingLineSchema", "OptionalTaxAmountSchema", "OptionalTaxRateSchema", "BillingInvoiceSchema"]);
+const schemaNames = new Set([
+  "decimalScale", "OptionalTaxAmountSchema", "OptionalTaxRateSchema",
+  "IsoInvoiceDateSchema", "OptionalIsoInvoiceDateSchema", "InvoiceTextSchema",
+  "BillingLineSchema", "BillingInvoiceSchema",
+]);
 const declarations = nodes.filter(node => ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
   && schemaNames.has(node.name.text)).map(node => `const ${node.getText(source)};`).join("\n");
 const exports: { line?: z.ZodType; invoice?: z.ZodType } = {};
 runInNewContext(ts.transpileModule(`${declarations}\nexports.line = BillingLineSchema; exports.invoice = BillingInvoiceSchema;`, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText, { exports, z, QUICKBOOKS_EQUIPMENT_TAGS, ...billing });
+}).outputText, { exports, z, QUICKBOOKS_EQUIPMENT_TAGS, StaffFinancialLineInputSchema, ...billing });
 assert.ok(exports.line && exports.invoice);
 const lineSchema = exports.line;
 const invoiceSchema = exports.invoice;
@@ -49,6 +54,17 @@ test("ordinary billing types cannot use a zero rate or opt in through descriptio
     assert.equal(lineSchema.safeParse({ ...warranty, type }).success, false, type);
     assert.equal(lineSchema.safeParse({ ...warranty, type, rate: 10 }).success, true, type);
   }
+});
+
+test("the billing form rejects values the financial command cannot persist", () => {
+  const labor = { ...warranty, type: "Labor", rate: 110 };
+  for (const input of [
+    { ...labor, qty: 1.001 },
+    { ...labor, rate: 110.001 },
+    { ...labor, sourceUnitCost: 80.001 },
+    { ...labor, markupPercent: 25.01 },
+    { ...labor, sourceInvoiceLineId: "not-a-uuid" },
+  ]) assert.equal(lineSchema.safeParse(input).success, false);
 });
 
 test("a complete warranty-only billing form can save with zero subtotal and total", () => {
@@ -96,11 +112,12 @@ test("changing an editable line to Warranty clears markup and defaults its rate 
   }).outputText, context);
   assert.ok(output.change);
   output.change({ target: { value: "Warranty" } });
-  assert.equal(registered, 1);
+  assert.equal(registered, 0);
+  assert.equal(values["lines.0.type"], "Warranty");
   assert.equal(values["lines.0.rate"], 0);
   assert.equal(values["lines.0.markupPercent"], null);
   // Required P1-purchased parts cannot be reclassified as a no-charge line.
   context.isP1PurchasedPart = true;
   output.change({ target: { value: "Warranty" } });
-  assert.equal(registered, 1);
+  assert.equal(registered, 0);
 });

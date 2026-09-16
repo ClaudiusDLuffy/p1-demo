@@ -28,6 +28,7 @@ export const coreErrorCodes = Object.freeze({
   ROLE_NOT_ALLOWED: entry("Your account cannot perform this action.", 403, "never", "contact_admin"),
   RESOURCE_ACCESS_DENIED: entry("This resource is not available to your account.", 403, "never", "contact_admin"),
   VALIDATION_FAILED: entry("Check the required fields and try again.", 422, "never", "correct_fields", true),
+  FINANCIAL_INPUT_INVALID: entry("The invoice details or linked records do not meet the billing requirements. Review the line items, source invoices, P1 parts, tax settings, and work-order status, then try again.", 422, "never", "correct_fields", true),
   INVALID_REQUEST: entry("The request is invalid. Check the details and try again.", 400, "never", "correct_fields", true),
   INVALID_CURSOR: entry("This page is no longer valid. Start at the newest results.", 400, "never", "refresh_record"),
   FILE_REJECTED: entry("This file could not be accepted. Check its format and size.", 422, "never", "correct_fields"),

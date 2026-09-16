@@ -121,8 +121,10 @@ for (const [helper, prefix] of [["findInvoiceTotal", "total"], ["findInvoiceNumb
     // The old ambiguous whitespace expressions exceed this external deadline
     // even with a 1-second cooperative budget. Bound the regression itself so
     // reintroducing synchronous backtracking cannot hang the test runner.
-    const script = `import { ${helper} } from './src/lib/pdf/invoicePdfTextParser.ts';
-      import { InvoicePdfBudget } from './src/lib/pdf/invoicePdfBudget.ts';
+    const script = `const parserModule = await import('./src/lib/pdf/invoicePdfTextParser.ts');
+      const budgetModule = await import('./src/lib/pdf/invoicePdfBudget.ts');
+      const { ${helper} } = parserModule.default ?? parserModule;
+      const { InvoicePdfBudget } = budgetModule.default ?? budgetModule;
       const result = ${helper}(${JSON.stringify(prefix)} + '\\u2003'.repeat(200000) + '!',
         new InvoicePdfBudget({ limits: { timeoutMs: 1000 } }));
       console.log(JSON.stringify(result));`;

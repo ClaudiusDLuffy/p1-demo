@@ -26,7 +26,12 @@ const optionalDate = z.union([date, z.literal(""), z.null()]).optional()
 const optionalText = (max: number) => text(max).nullable().optional().transform(value => value || null);
 const optionalUuid = z.string().uuid().nullable().optional().transform(value => value ?? null);
 
-export const StaffFinancialLineSchema = z.object({
+/**
+ * The untransformed staff line contract is shared with the editor so values
+ * that pass its visible form validation cannot be rejected immediately by the
+ * command boundary for different precision, length, or source-ID rules.
+ */
+export const StaffFinancialLineInputSchema = z.object({
   type: text(80).min(1), desc: text(4000).optional(), description: text(4000).optional(),
   qty: money.refine(value => value > 0, "Quantity must be positive"),
   rate: money,
@@ -49,7 +54,9 @@ export const StaffFinancialLineSchema = z.object({
   if (line.sourceInvoiceLineId && line.sourceWorkOrderPartId) {
     context.addIssue({ code: "custom", path: ["sourceWorkOrderPartId"], message: "A line cannot have two source owners" });
   }
-}).transform(line => ({
+});
+
+export const StaffFinancialLineSchema = StaffFinancialLineInputSchema.transform(line => ({
   type: normalizeStaffBillingLineType(line.type), description: line.desc ?? line.description ?? "",
   qty: line.qty, rate: line.rate, isTaxable: line.isTaxable,
   sourceInvoiceLineId: line.sourceInvoiceLineId, sourceWorkOrderPartId: line.sourceWorkOrderPartId,

@@ -1,5 +1,56 @@
 import type { ActivityReadModel, ActivityReadRow } from "./activityReadContracts";
 
+const lifecycleTimestampPattern =
+  "\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}(?::?\\d{2})?)";
+
+const lifecycleTextRules: Record<string, {
+  timestampKey: string;
+  pattern: RegExp;
+  replacement: (formatted: string) => string;
+}> = {
+  check_in: {
+    timestampKey: "checkedInAt",
+    pattern: new RegExp(`^Checked in and started work at ${lifecycleTimestampPattern}\\.`),
+    replacement: formatted => `Checked in and started work at ${formatted}.`,
+  },
+  job_paused: {
+    timestampKey: "pausedAt",
+    pattern: new RegExp(`^Work paused at ${lifecycleTimestampPattern}:`),
+    replacement: formatted => `Work paused at ${formatted}:`,
+  },
+  job_completed: {
+    timestampKey: "clockedOutAt",
+    pattern: new RegExp(`^Job completed and clocked out at ${lifecycleTimestampPattern}\\.`),
+    replacement: formatted => `Job completed and clocked out at ${formatted}.`,
+  },
+};
+
+function activityEventRecord(value: ActivityReadRow["event_data"]): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : null;
+}
+
+function localizeLifecycleActivityText(row: ActivityReadRow, timeZone?: string): string {
+  if (!timeZone) return row.text;
+  const rule = lifecycleTextRules[row.event_key];
+  const event = activityEventRecord(row.event_data);
+  const timestamp = rule && event?.[rule.timestampKey];
+  if (!rule || typeof timestamp !== "string") return row.text;
+
+  const instant = new Date(timestamp);
+  if (Number.isNaN(instant.getTime()) || !rule.pattern.test(row.text)) return row.text;
+
+  const formatted = instant.toLocaleString("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return row.text.replace(rule.pattern, rule.replacement(formatted));
+}
+
 /** Mapping only: the existing RPC/RLS owner, not this mapper, decides visibility. */
 export function mapActivityPageRow(row: ActivityReadRow, timeZone?: string): ActivityReadModel {
   return {
@@ -11,7 +62,7 @@ export function mapActivityPageRow(row: ActivityReadRow, timeZone?: string): Act
     time: new Date(row.created_at === null ? 0 : row.created_at).toLocaleString("en-US", {
       ...(timeZone ? { timeZone } : {}), month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
     }),
-    text: row.text,
+    text: localizeLifecycleActivityText(row, timeZone),
     type: row.type,
     activityChannel: row.activity_channel || (row.requires_7eleven_sync ? "field_note" : row.is_staff_only
       ? "internal_note" : row.type === "system" ? "system_event" : "legacy"),
@@ -30,4 +81,3 @@ export function mapActivityPageRow(row: ActivityReadRow, timeZone?: string): Act
     workflowCycle: Number(row.workflow_cycle || 0),
   };
 }
-

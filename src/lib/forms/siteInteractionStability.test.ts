@@ -22,6 +22,13 @@ test("shared dropdowns reveal choices without scrolling a page or modal ancestor
   assert.match(select, /window\.addEventListener\("scroll", updatePosition, true\)/);
   assert.match(select, /!listRef\.current\?\.contains\(target\)/);
   assert.doesNotMatch(select, /top: "calc\(100% \+ 6px\)"/);
+  assert.match(directorySelect, /useModalPortalHost\(\)/);
+  assert.match(directorySelect, /createPortal\(/);
+  assert.match(directorySelect, /position: "fixed"/);
+  assert.match(directorySelect, /portalHost \|\| document\.body/);
+  assert.match(directorySelect, /window\.addEventListener\("scroll", updatePosition, true\)/);
+  assert.match(directorySelect, /!panel\.current\?\.contains\(target\)/);
+  assert.doesNotMatch(directorySelect, /top: "calc\(100% \+ 5px\)"/);
 });
 
 test("closed mobile navigation is absent and an open drawer isolates background controls", () => {

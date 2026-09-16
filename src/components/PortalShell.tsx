@@ -372,7 +372,7 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   font-weight: 500;
   line-height: 1.35;
   animation: fadeUp 0.25s;
-  z-index: 60;
+  z-index: 45;
   box-shadow: 0 8px 32px rgba(31,30,28,0.3);
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1779,7 +1779,7 @@ export default function PortalShell() {
   useEffect(() => {
     if (modal !== "createInvoice") return;
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
-  }, [modal, nextInvNum]);
+  }, [modal, nextInvNum, setNewInv]);
 
   // Contractors must never see the real 7-Eleven NTE. Keep the source array
   // intact for staff calculations and replace the display value at the role
@@ -2637,7 +2637,7 @@ export default function PortalShell() {
     setSelectedBillingInvoice(null);
     setModal(null);
     setPage("dashboard");
-  }, [invoiceController, page]);
+  }, [invoiceController, page, setSelectedInvoice]);
 
   const sensitiveShellIdentity = useRef<string | null>(null);
   useEffect(() => {

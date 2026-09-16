@@ -60,7 +60,7 @@ export default function FloatingProfitCalculator({
   return (
     <aside
       aria-label="Profit calculator"
-      style={{ position: "fixed", right: 18, bottom: 18, zIndex: 60, width: open ? 310 : "auto", maxWidth: "calc(100vw - 28px)" }}
+      style={{ position: "fixed", right: 18, bottom: 18, zIndex: 45, width: open ? 310 : "auto", maxWidth: "calc(100vw - 28px)" }}
     >
       {open ? (
         <div className="card" style={{ padding: 16, boxShadow: "0 16px 46px rgba(31,30,28,0.22)", border: `1px solid ${T.accentRing}`, background: T.surface }}>

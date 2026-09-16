@@ -1,11 +1,14 @@
 "use client";
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { T } from "../../lib/constants";
 import { directoryItemValue, type DirectoryDomain, type DirectoryItem } from "./contracts";
 import { useDirectoryPage, useDirectorySelection } from "./queries";
 import { useFieldControl, type FieldControlProps } from "../../components/ui/fieldContext";
+import { useModalPortalHost } from "../../components/ui/Modal";
 import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
+import { getFloatingPanelPosition, type FloatingPanelPosition } from "../../lib/floatingPanel";
 
 export function DirectoryPageControls({ directory }: { directory: ReturnType<typeof useDirectoryPage> }) {
   return <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
@@ -54,9 +57,12 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
   const selectedValue = value ?? internalValue;
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const formInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const portalHost = useModalPortalHost();
+  const [position, setPosition] = useState<FloatingPanelPosition | null>(null);
   useImperativeHandle(ref, () => {
     const input = formInput.current;
     if (!input) throw new Error("Directory form control is not mounted");
@@ -77,9 +83,38 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
     || (selectedValue === emptyValue || !selectedValue ? emptyLabel : selection.isFetching ? "Loading selection…" : "Selected record unavailable");
   useEffect(() => {
     if (!open) return;
-    const dismiss = (event: PointerEvent) => { if (!wrapper.current?.contains(event.target as Node)) setOpen(false); };
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!wrapper.current?.contains(target) && !panel.current?.contains(target)) {
+        setOpen(false);
+        setPosition(null);
+      }
+    };
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const rect = trigger.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPosition(getFloatingPanelPosition({
+        trigger: rect,
+        panelWidth: Math.max(rect.width, 230),
+        panelHeight: 360,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        margin: 8,
+        gap: 5,
+      }));
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -89,16 +124,17 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
     setInternalValue(nextValue);
     onChange?.({ target: { name, value: nextValue }, currentTarget: { name, value: nextValue }, type: "change" }, item);
     setOpen(false);
+    setPosition(null);
     directory.setSearch("");
     trigger.current?.focus({ preventScroll: true });
   };
   return <div ref={wrapper} style={{ position: "relative", width: style?.width || "100%", minWidth: 0 }}
     onKeyDown={event => {
-      if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true }); return; }
+      if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); setPosition(null); trigger.current?.focus({ preventScroll: true }); return; }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-      if (!open) { if (event.key.startsWith("Arrow")) { event.preventDefault(); setOpen(true); } return; }
+      if (!open) { if (event.key.startsWith("Arrow")) { event.preventDefault(); setPosition(null); setOpen(true); } return; }
       if (event.target instanceof HTMLInputElement && ["Home", "End"].includes(event.key)) return;
-      const choices = Array.from(wrapper.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') || []);
+      const choices = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') || []);
       if (!choices.length) return;
       event.preventDefault();
       const index = choices.indexOf(document.activeElement as HTMLButtonElement);
@@ -110,14 +146,20 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
     }}>
     <input ref={formInput} type="hidden" name={name} value={selectedValue} disabled={disabled} readOnly />
     <button {...association} ref={trigger} type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} aria-controls={listId}
-      onBlur={() => onBlur?.({ target: { name, value: selectedValue }, type: "blur" })} disabled={disabled} onClick={() => setOpen(current => !current)}
+      onBlur={() => onBlur?.({ target: { name, value: selectedValue }, type: "blur" })} disabled={disabled} onClick={() => {
+        setPosition(null);
+        setOpen(current => !current);
+      }}
       style={{ width: "100%", minHeight: 40, padding: "9px 12px", borderRadius: 9, border: `1px solid ${T.border}`,
         background: T.surface, color: T.ink, fontFamily: "inherit", textAlign: "left", ...style }}>
       {caption} <span aria-hidden="true" style={{ float: "right" }}>▾</span>
     </button>
-    {open && !disabled && <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, right: 0, minWidth: 230,
-      zIndex: 95, border: `1px solid ${T.border}`, borderRadius: 10, padding: 8, background: T.surface,
-      boxShadow: "0 12px 28px #0002" }}>
+    {open && !disabled && createPortal(<div ref={panel} data-directory-panel="true" onPointerDown={event => event.stopPropagation()}
+      style={{ position: "fixed", top: position?.top ?? 0, left: position?.left ?? 0, width: position?.width ?? 230,
+      minWidth: 0, maxWidth: "calc(100vw - 16px)", maxHeight: position?.maxHeight ?? 360, overflowY: "auto",
+      visibility: position ? "visible" : "hidden", pointerEvents: position ? "auto" : "none", boxSizing: "border-box",
+      zIndex: 220, border: `1px solid ${T.border}`, borderRadius: 10, padding: 8, background: T.surface,
+      boxShadow: "0 12px 28px #0002", overscrollBehavior: "contain" }}>
       <input ref={searchInput} type="search" maxLength={200} value={directory.search} onChange={event => directory.setSearch(event.target.value)}
         aria-label={`Search ${ariaLabel || "directory"}`} placeholder="Search name or company…"
         style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: 8, marginBottom: 6,
@@ -139,6 +181,6 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
       </div>
       <DirectoryError directory={directory} />
       <DirectoryPageControls directory={directory} />
-    </div>}
+    </div>, portalHost || document.body)}
   </div>;
 });

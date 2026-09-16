@@ -29,7 +29,7 @@ const retiredDraftAccess = new Set(["readBillingDraft", "writeBillingDraft", "cl
 
 /** Structural safeguards complement, and do not substitute for, browser/AT checks. */
 export async function verifyAccessiblePrimitives(runRegressionGuards = true) {
-  const counts = { productionFiles: 0, modalCalls: 0, fieldCalls: 0, explicitFields: 0, groupedFields: 0, contextFields: 0, nativeDialogOwners: 0, nonModalPickerDialogs: 0, options: 0 };
+  const counts = { productionFiles: 0, modalCalls: 0, fieldCalls: 0, explicitFields: 0, groupedFields: 0, contextFields: 0, nativeDialogOwners: 0, featureDialogOwners: 0, nonModalPickerDialogs: 0, options: 0, buttons: 0, formButtons: 0 };
   const issues: string[] = [];
   for (const path of files("src")) {
     counts.productionFiles++;
@@ -52,6 +52,28 @@ export async function verifyAccessiblePrimitives(runRegressionGuards = true) {
       if (ts.isIdentifier(node) && retiredDraftAccess.has(node.text)) fail(node, "RETIRED_DIRECT_DRAFT_ACCESS");
       if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return;
       const name = aliases.get(node.tagName.getText()) ?? node.tagName.getText();
+      if (name === "button") {
+        counts.buttons++;
+        let parent: ts.Node | undefined = node.parent;
+        let insideForm = false;
+        while (parent && !ts.isSourceFile(parent)) {
+          if (ts.isJsxElement(parent) && parent.openingElement.tagName.getText() === "form") {
+            insideForm = true;
+            break;
+          }
+          parent = parent.parent;
+        }
+        if (insideForm) {
+          counts.formButtons++;
+          if (!attribute(node, "type")) fail(node, "FORM_BUTTON_WITHOUT_EXPLICIT_TYPE");
+        }
+        const nativeAction = ["submit", "reset"].includes(literal(attribute(node, "type")) ?? "");
+        const hasSpread = node.attributes.properties.some(item => ts.isJsxSpreadAttribute(item));
+        const deliberatelyInactive = attribute(node, "disabled") !== undefined || attribute(node, "draggable") !== undefined;
+        if (!attribute(node, "onClick") && !attribute(node, "formAction") && !nativeAction && !hasSpread && !deliberatelyInactive) {
+          fail(node, "ACTIVE_BUTTON_WITHOUT_ACTION");
+        }
+      }
       if (["dialog", "alertdialog"].includes(literal(attribute(node, "role")) ?? "")
         && path !== "src/components/ui/Modal.tsx") {
         // Shared date/time pickers are explicitly non-modal popovers. They do
@@ -61,7 +83,13 @@ export async function verifyAccessiblePrimitives(runRegressionGuards = true) {
           && literal(attribute(node, "aria-modal")) === "false"
           && ["Choose date", "Choose time"].includes(literal(attribute(node, "aria-label")) ?? "")
           && attribute(node, "id") !== undefined;
+        const mobileNavigationDrawer = path === "src/components/PortalShell.tsx"
+          && literal(attribute(node, "role")) === "dialog"
+          && literal(attribute(node, "aria-modal")) === "true"
+          && literal(attribute(node, "aria-label")) === "Navigation menu"
+          && attribute(node, "ref")?.initializer?.getText() === "{drawerPanelRef}";
         if (sharedPicker) counts.nonModalPickerDialogs++;
+        else if (mobileNavigationDrawer) counts.featureDialogOwners++;
         else fail(node, "FEATURE_OWNS_DIALOG_ROLE");
       }
       if (name === "dialog") {
@@ -95,6 +123,7 @@ export async function verifyAccessiblePrimitives(runRegressionGuards = true) {
     });
   }
   assert.equal(counts.nativeDialogOwners, 1);
+  assert.equal(counts.featureDialogOwners, 1);
   assert.equal(counts.nonModalPickerDialogs, 2);
   assert.ok(counts.modalCalls > 30 && counts.fieldCalls > 50 && counts.options > 0);
   assert.deepEqual(issues, [], "Production primitive structural guard failed");

@@ -49,6 +49,14 @@ test("Work orders includes capital while the focused Capital view remains", () =
   assert.match(billingCreate, /isCapitalWorkOrder\(wo\) \? " · Capital"/);
 });
 
+test("capital sorting resets cursor in the same interaction as the sort change", () => {
+  assert.doesNotMatch(capitalView, /useEffect\(\(\) => setPosition\(firstCursorPosition\)/);
+  assert.match(capitalView, /const updateSortColumn[\s\S]*setPosition\(firstCursorPosition\);[\s\S]*setSortColumn\(value\)/);
+  assert.match(capitalView, /const updateSortDirection[\s\S]*setPosition\(firstCursorPosition\);[\s\S]*setSortDirection\(value\)/);
+  assert.match(capitalView, /onColumnChange=\{updateSortColumn\}/);
+  assert.match(capitalView, /onDirectionChange=\{updateSortDirection\}/);
+});
+
 test("capital detail exposes guarded assignment controls and a classification badge", () => {
   assert.match(detail, /canAssignCurrentWorkOrder && <DirectorySelect domain="assignable_contractors"/);
   assert.match(detail, /if \(event\.target\.value\) void doAssign\(woData\.id, event\.target\.value\)/);
