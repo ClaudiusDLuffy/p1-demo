@@ -25,6 +25,7 @@ const requireHere = createRequire(import.meta.url);
 function harness(save: (body: Record<string, unknown>) => Promise<Response>, validationErrors: Record<string, unknown> = {}) {
   const guardHarness = createUnsavedChangesHarness();
   const states: { index: number; value: unknown }[] = [];
+  const stateValues = new Map<number, unknown>();
   const messages: string[] = [];
   const created: unknown[] = [];
   const effects: (() => unknown)[] = [];
@@ -62,8 +63,17 @@ function harness(save: (body: Record<string, unknown>) => Promise<Response>, val
         useId: () => "synthetic-billing-form", useDeferredValue: (value: unknown) => value,
         useRef: (current: unknown) => refs[refIndex++] ??= { current },
         useEffect: (fn: () => unknown) => { effects.push(fn); },
-        useState: (initial: unknown) => { const index = stateIndex++; return [typeof initial === "function" ? initial() : initial,
-          (value: unknown) => states.push({ index, value })]; },
+        useState: (initial: unknown) => {
+          const index = stateIndex++;
+          if (!stateValues.has(index)) stateValues.set(index, typeof initial === "function" ? (initial as () => unknown)() : initial);
+          return [stateValues.get(index), (value: unknown) => {
+            const next = typeof value === "function"
+              ? (value as (current: unknown) => unknown)(stateValues.get(index))
+              : value;
+            stateValues.set(index, next);
+            states.push({ index, value: next });
+          }];
+        },
       };
       if (name === "react-hook-form") return {
         useForm: () => ({ register: (name: string) => ({ name }), control: {}, formState: { errors: validationErrors },
@@ -97,8 +107,13 @@ function harness(save: (body: Record<string, unknown>) => Promise<Response>, val
   }, currentUser: { id: financialTestIds.actor, role: "manager" }, fmt: String,
     fire: (message: string) => messages.push(message), onCreated: (invoice: unknown) => created.push(invoice) };
   const component = exports.default;
-  const tree = component(props);
+  component(props);
   for (const effect of effects) effect();
+  // The financial-version effect intentionally enables writes on a following
+  // render. Preserve state slots so this VM fixture observes that render too.
+  stateIndex = 0;
+  refIndex = 0;
+  const tree = component(props);
   const nodes = elements(tree);
   const form = nodes.find(node => node.type === "form");
   assert.ok(form && typeof form.props.onSubmit === "function");

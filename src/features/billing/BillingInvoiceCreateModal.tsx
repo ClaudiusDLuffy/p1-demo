@@ -31,8 +31,6 @@ import {
   isStaffBillingPartsLine,
   normalizeImportedStaffBillingLineType,
   normalizeStaffBillingLineType,
-  isStaffBillingWarrantyLine,
-  isValidStaffBillingRate,
   staffBillingDescriptionPlaceholder,
   staffBillingMarkupPercent,
   STAFF_BILLING_LINE_TYPES,
@@ -88,40 +86,18 @@ import {
 } from "../../lib/quickBooksEquipmentTags";
 import { scrollWithinContainer } from "../../lib/forms/scrollWithinContainer";
 import { firstValidationIssue } from "../../lib/forms/validationErrors";
+import {
+  financialValidationFocusPath,
+  firstFinancialValidationIssue,
+} from "../../lib/forms/financialValidationErrors";
+import { StaffFinancialLineInputSchema } from "../../lib/staffInvoiceContracts";
 
-const BillingLineSchema = z.object({
-  type: z.string().min(1),
-  desc: z.string(),
-  qty: z.number().finite().positive("Qty must be greater than 0"),
-  rate: z.number().finite().optional()
-    .refine(value => value !== undefined, "Rate is required"),
-  isTaxable: z.boolean().default(false),
-  // UI-only. The persistence boundary ignores this flag; it prevents a later
-  // rule refresh from overwriting an explicit staff checkbox choice.
-  taxTreatmentManual: z.boolean().default(false),
-  sourceInvoiceLineId: z.string().optional().nullable(),
-  sourceWorkOrderPartId: z.string().optional().nullable(),
-  sourceUnitCost: z.number().nonnegative().optional().nullable(),
-  markupPercent: z.number().min(0).max(999).optional().nullable(),
-}).superRefine((line, context) => {
-  if (!isValidStaffBillingRate(line.type, line.rate)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["rate"],
-      message: isStaffBillingWarrantyLine(line.type)
-        ? "Warranty rate must be zero or greater"
-        : "Rate must be greater than 0",
-    });
-  }
-  const descriptionOptional = /^(travel|truck charge)$/i.test(line.type.trim());
-  if (!descriptionOptional && !line.desc.trim()) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["desc"],
-      message: "Description is required",
-    });
-  }
-});
+const BillingLineSchema = StaffFinancialLineInputSchema;
+
+const decimalScale = (value: number) => {
+  const [coefficient, exponent = "0"] = value.toString().toLowerCase().split("e");
+  return Math.max(0, (coefficient.split(".")[1]?.length || 0) - Number(exponent));
+};
 
 const OptionalTaxAmountSchema = z.preprocess(
   value => {
@@ -129,7 +105,10 @@ const OptionalTaxAmountSchema = z.preprocess(
     const parsed = Number(value);
     return Number.isNaN(parsed) ? value : parsed;
   },
-  z.number().finite().nonnegative("Sales tax must be zero or greater").optional(),
+  z.number().finite().nonnegative("Sales tax must be zero or greater")
+    .max(99_999_999.99, "Sales tax exceeds the supported amount")
+    .refine(value => decimalScale(value) <= 2, "Sales tax may have at most 2 decimal places")
+    .optional(),
 );
 
 const OptionalTaxRateSchema = z.preprocess(
@@ -142,22 +121,35 @@ const OptionalTaxRateSchema = z.preprocess(
     .finite()
     .min(0, "Tax rate must be between 0% and 100%")
     .max(100, "Tax rate must be between 0% and 100%")
+    .refine(value => decimalScale(value) <= 6, "Tax rate may have at most 6 decimal places")
     .optional(),
 );
 
+const IsoInvoiceDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+  .refine(value => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "Date is invalid");
+const OptionalIsoInvoiceDateSchema = z.union([
+  IsoInvoiceDateSchema,
+  z.literal(""),
+]).optional();
+const InvoiceTextSchema = (maximum: number) => z.string().trim().max(maximum)
+  .refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value), "Control characters are not allowed");
+
 const BillingInvoiceSchema = z.object({
-  num: z.string().trim().min(1, "Invoice number is required").max(80, "Invoice number is too long"),
-  invoiceDate: z.string().min(1, "Invoice date is required"),
-  serviceDate: z.string().optional(),
-  dueDate: z.string().optional(),
-  workOrderId: z.string().optional(),
-  territory: z.string().trim().min(1, "Territory is required"),
+  num: InvoiceTextSchema(80).min(1, "Invoice number is required"),
+  invoiceDate: IsoInvoiceDateSchema,
+  serviceDate: OptionalIsoInvoiceDateSchema,
+  dueDate: OptionalIsoInvoiceDateSchema,
+  workOrderId: InvoiceTextSchema(120).optional(),
+  territory: InvoiceTextSchema(200).min(1, "Territory is required"),
   equipmentTag: z.enum(QUICKBOOKS_EQUIPMENT_TAGS),
-  storeNumber: z.string().min(1, "Store number is required"),
-  storeAddress: z.string().optional(),
-  terms: z.string().min(1),
-  cme: z.string().optional(),
-  taxState: z.string().max(2).optional(),
+  storeNumber: InvoiceTextSchema(80).min(1, "Store number is required"),
+  storeAddress: InvoiceTextSchema(1000).optional(),
+  terms: InvoiceTextSchema(200).min(1, "Payment terms are required"),
+  cme: InvoiceTextSchema(200).optional(),
+  taxState: z.string().trim().max(2).refine(value => !value || /^[a-z]{2}$/i.test(value), "Use a two-letter state code").optional(),
   taxRateOverride: OptionalTaxRateSchema,
   salesTaxOverride: OptionalTaxAmountSchema,
   state: z.enum(["draft", "submitted"]),
@@ -1247,6 +1239,25 @@ export default function BillingInvoiceCreateModal(props: any) {
   const fieldAria = (name: HeaderField) => ({ "aria-invalid": errors[name] ? true : undefined,
     "aria-describedby": errors[name] ? `${formId}-${name}-error` : undefined });
   const headerError = (name: HeaderField) => errors[name] ? <span id={`${formId}-${name}-error`} role="alert" style={{ display: "block", fontSize: 11, color: T.danger }}>{String(errors[name]?.message || "Review this field.")}</span> : null;
+  const revealValidationIssue = (issue: { path: string }) => {
+    const focusPath = financialValidationFocusPath(issue.path);
+    window.requestAnimationFrame(() => {
+      const form = formRef.current;
+      if (!form) return;
+      const explicit = Array.from(form.querySelectorAll<HTMLElement>("[data-validation-control]"))
+        .find(control => control.dataset.validationControl === focusPath
+          || control.dataset.validationControl === focusPath.split(".")[0]);
+      const named = form.elements.namedItem(focusPath) as HTMLElement | RadioNodeList | null;
+      const namedControl = named && "focus" in named ? named as HTMLElement : null;
+      const visibleNamedControl = namedControl?.getAttribute?.("type") === "hidden"
+        ? namedControl.parentElement?.querySelector<HTMLElement>("button, input:not([type=hidden]), textarea, select")
+        : namedControl;
+      const control = explicit || visibleNamedControl;
+      if (!control) return;
+      scrollWithinContainer(control.closest<HTMLElement>(".modal-inner"), control);
+      control.focus({ preventScroll: true });
+    });
+  };
   const handleInvalid = (invalidErrors: Record<string, unknown>) => {
     setActionError("");
     const issue = firstValidationIssue(invalidErrors, [
@@ -1257,22 +1268,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     const message = issue?.message || "Review the highlighted invoice fields.";
     setValidationNotice(`Invoice was not saved. ${message}`);
     if (!issue) return;
-    window.requestAnimationFrame(() => {
-      const form = formRef.current;
-      if (!form) return;
-      const explicit = Array.from(form.querySelectorAll<HTMLElement>("[data-validation-control]"))
-        .find(control => control.dataset.validationControl === issue.path
-          || control.dataset.validationControl === issue.path.split(".")[0]);
-      const named = form.elements.namedItem(issue.path) as HTMLElement | RadioNodeList | null;
-      const namedControl = named && "focus" in named ? named as HTMLElement : null;
-      const visibleNamedControl = namedControl?.getAttribute?.("type") === "hidden"
-        ? namedControl.parentElement?.querySelector<HTMLElement>("button, input:not([type=hidden]), textarea, select")
-        : namedControl;
-      const control = explicit || visibleNamedControl;
-      if (!control) return;
-      scrollWithinContainer(control.closest<HTMLElement>(".modal-inner"), control);
-      control.focus({ preventScroll: true });
-    });
+    revealValidationIssue(issue);
   };
   const submitValidInvoice = (state: "draft" | "submitted") => handleSubmit(data => {
     setValidationNotice("");
@@ -1451,7 +1447,16 @@ export default function BillingInvoiceCreateModal(props: any) {
     } catch (err: unknown) {
       if (!currentAttempt()) return;
       recordStaffFinancialAttemptError(financialAttempt.current, err);
+      const validationIssue = firstFinancialValidationIssue(err);
+      if (validationIssue) {
+        setActionError("");
+        setValidationNotice(`${state === "draft" ? "Draft" : "Invoice"} was not saved. ${validationIssue.message}`);
+        revealValidationIssue(validationIssue);
+        fire?.(`Billing invoice validation failed: ${validationIssue.message}`);
+        return;
+      }
       const detail = safeErrorMessage(err);
+      setValidationNotice("");
       setActionError(`${state === "draft" ? "Draft" : "Invoice"} was not saved. ${detail}`);
       fire?.(`Billing invoice ${isEditing ? "update" : "save"} failed: ${detail}`);
     } finally {
@@ -1672,7 +1677,11 @@ export default function BillingInvoiceCreateModal(props: any) {
         )}
 
         {selectedWorkOrderId && (
-          <div style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, padding: 14, marginBottom: 16, background: T.surfaceSoft }}>
+          <div
+            data-validation-control="sourceInvoiceIds"
+            tabIndex={-1}
+            style={{ border: `1px solid ${T.borderSoft}`, borderRadius: 10, padding: 14, marginBottom: 16, background: T.surfaceSoft }}
+          >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: T.ink }}>Contractor invoices on {selectedWorkOrderId}</div>
@@ -1912,7 +1921,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                 <input
                   className="numeric-readable"
                   type="number"
-                  step="any"
+                  step="0.01"
                   min="0"
                   {...rateRegistration}
                   aria-label={`Line ${i + 1} rate`}

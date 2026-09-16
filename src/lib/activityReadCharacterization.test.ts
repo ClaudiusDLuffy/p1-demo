@@ -47,6 +47,39 @@ test("activity real facade accepts existing JSON envelope and explicit finite ag
   assert.equal(page.totalCount, 1); assert.deepEqual(page.aggregates, { amount: 1.25 });
 });
 
+for (const [eventKey, eventData, text, expected] of [
+  ["check_in", { checkedInAt: "2026-09-15T19:30:00Z", notes: "Synthetic" },
+    "Checked in and started work at 2026-09-15 19:30:00+00. Notes: Synthetic",
+    "Checked in and started work at Sep 15, 3:30 PM. Notes: Synthetic"],
+  ["job_paused", { pausedAt: "2026-09-15T19:45:00Z", reason: "Temporary fix" },
+    "Work paused at 2026-09-15 19:45:00+00: Temporary fix.",
+    "Work paused at Sep 15, 3:45 PM: Temporary fix."],
+  ["job_completed", { clockedOutAt: "2026-09-15T20:30:00Z", resolution: "Repaired" },
+    "Job completed and clocked out at 2026-09-15 20:30:00+00. Asset: N/A / N/A. Resolution: Repaired.",
+    "Job completed and clocked out at Sep 15, 4:30 PM. Asset: N/A / N/A. Resolution: Repaired."],
+] as const) test(`activity feed renders ${eventKey} event time in the store timezone`, async () => {
+  const harness = createActivityVisitReadHarness([respond(rawPage([activityFixture({
+    activity_channel: "field_note",
+    requires_7eleven_sync: true,
+    event_key: eventKey,
+    event_data: eventData,
+    text,
+  })]))]);
+  assert.equal(firstItem(await harness.loadActivities(parent)).text, expected);
+});
+
+test("activity feed does not rewrite lifecycle text without a valid authoritative event timestamp", async () => {
+  const original = "Checked in and started work at a legacy local time.";
+  const harness = createActivityVisitReadHarness([respond(rawPage([activityFixture({
+    activity_channel: "field_note",
+    requires_7eleven_sync: true,
+    event_key: "check_in",
+    event_data: { checkedInAt: "not-a-date" },
+    text: original,
+  })]))]);
+  assert.equal(firstItem(await harness.loadActivities(parent)).text, original);
+});
+
 const channelCases: readonly [string, Record<string, unknown>, Record<string, unknown>][] = [
   ["general contractor message", {}, {}],
   ["staff internal note", { activity_channel: "internal_note", is_staff_only: true }, { activityChannel: "internal_note", isStaffOnly: true }],
@@ -184,4 +217,3 @@ test("activity real facade preserves input immutability and deterministic bytes"
   assert.equal(JSON.stringify(await harness.loadActivities(parent)), JSON.stringify(await harness.loadActivities(parent)));
   assert.equal(JSON.stringify(fixture), before); assert.equal(firstItem(await createActivityVisitReadHarness([respond(rawPage([fixture]))]).loadActivities(parent)).id, ACTIVITY_ID);
 });
-
