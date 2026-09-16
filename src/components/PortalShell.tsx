@@ -1779,7 +1779,7 @@ export default function PortalShell() {
   useEffect(() => {
     if (modal !== "createInvoice") return;
     setNewInv((n: any) => n.num ? n : { ...n, num: nextInvNum() });
-  }, [modal, nextInvNum]);
+  }, [modal, nextInvNum, setNewInv]);
 
   // Contractors must never see the real 7-Eleven NTE. Keep the source array
   // intact for staff calculations and replace the display value at the role
@@ -2637,7 +2637,7 @@ export default function PortalShell() {
     setSelectedBillingInvoice(null);
     setModal(null);
     setPage("dashboard");
-  }, [invoiceController, page]);
+  }, [invoiceController, page, setSelectedInvoice]);
 
   const sensitiveShellIdentity = useRef<string | null>(null);
   useEffect(() => {

@@ -9,7 +9,7 @@ import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
 import { Ico } from "../../components/ui/Ico";
 import { T } from "../../lib/constants";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   firstCursorPosition,
   nextCursorPosition,
@@ -25,7 +25,15 @@ export default function CapitalProjects(props: any) {
   const [position, setPosition] = useState(firstCursorPosition);
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  useEffect(() => setPosition(firstCursorPosition), [sortColumn, sortDirection]);
+  const updateSortColumn = (value: WorkOrderTableSortColumn) => {
+    setPosition(firstCursorPosition);
+    setSortColumn(value);
+    setSortDirection(["created", "updated"].includes(value) ? "desc" : "asc");
+  };
+  const updateSortDirection = (value: "asc" | "desc") => {
+    setPosition(firstCursorPosition);
+    setSortDirection(value);
+  };
   const capitalQuery = useWorkOrdersPageQuery({
     scope: "capital",
     sort: "newest",
@@ -70,11 +78,8 @@ export default function CapitalProjects(props: any) {
                     { value: "contractor", label: "Contractor" },
                     { value: "updated", label: "Last updated" },
                   ]}
-                  onColumnChange={value => {
-                    setSortColumn(value);
-                    setSortDirection(["created", "updated"].includes(value) ? "desc" : "asc");
-                  }}
-                  onDirectionChange={setSortDirection}
+                  onColumnChange={updateSortColumn}
+                  onDirectionChange={updateSortDirection}
                 />
               </div>
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { getFloatingPanelPosition } from "./floatingPanel";
+
+const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 test("a bottom picker flips above a trigger near the viewport edge", () => {
   const position = getFloatingPanelPosition({
@@ -55,4 +59,11 @@ test("a right picker falls back to the left at the viewport edge", () => {
 
   assert.equal(position.placement, "left");
   assert.equal(position.left, 674);
+});
+
+test("the floating profit calculator stays below the shared modal fallback layer", () => {
+  const calculator = source("src/features/billing/FloatingProfitCalculator.tsx");
+  const modal = source("src/components/ui/Modal.tsx");
+  assert.match(calculator, /zIndex: 45/);
+  assert.match(modal, /zIndex: 50/);
 });
