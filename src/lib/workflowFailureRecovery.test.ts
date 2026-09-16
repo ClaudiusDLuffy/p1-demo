@@ -72,6 +72,13 @@ test("database adapters use workflow-specific safe error boundaries", () => {
   assert.match(visitCorrection, /if \(error\) throw safeVisitCorrectionError\(error\)/);
 });
 
+test("an unchanged rejected visit correction cannot generate repeated conflict requests", () => {
+  const timeline = readFileSync("src/features/work-orders/VisitTimeline.tsx", "utf8");
+  assert.match(timeline, /const \[rejectedCorrection, setRejectedCorrection\] = useState<string \| null>\(null\)/);
+  assert.match(timeline, /rejectedCorrection === correctionFingerprint/);
+  assert.match(timeline, /failure\.code === "VISIT_TIME_OVERLAP" \|\| failure\.code === "VISIT_CHANGED"/);
+});
+
 test("capital quote saves capture an exact work-order version and handle thrown API rejections", () => {
   const modal = readFileSync(
     "src/features/billing/BillingInvoiceCreateModal.tsx",

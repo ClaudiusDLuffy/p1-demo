@@ -38,6 +38,7 @@ test("worker is server-only, bounded, claim-token protected, and classifies ambi
   assert.match(worker, /p_claim_token: claimToken/);
   assert.match(worker, /GRAPH_OUTCOME_UNKNOWN/);
   assert.match(worker, /status === "unknown"/);
+  assert.match(worker, /DATABASE_TIMEOUT_MS = 7_000/);
 });
 
 test("service drain route requires CRON_SECRET and uses Node runtime", () => {

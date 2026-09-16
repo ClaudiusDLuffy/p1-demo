@@ -23,9 +23,12 @@ export async function handleClientDiagnostic(request: Request, dependencies: Dia
     catch (error) { if (error instanceof AppError) throw error; throw new AppError("INVALID_REQUEST", { cause: error }); }
     const parsed = clientReportSchema.safeParse(raw);
     if (!parsed.success) throw new AppError("VALIDATION_FAILED", { fieldErrors: parsed.error.issues });
-    // The logging port never receives discarded legacy prose/stack/route data.
-    const safeReport: ClientDiagnosticReport = { version: 1, level: parsed.data.level, source: "client_operation",
+    // The logging port receives only schema-validated categorical context;
+    // legacy prose, stack and route data remain discarded.
+    const safeReport: ClientDiagnosticReport = { version: 1, level: parsed.data.level, source: parsed.data.source,
       code: parsed.data.code, message: "Client operation failed.", correlationId: context.correlationId,
+      ...(parsed.data.portalView ? { portalView: parsed.data.portalView } : {}),
+      ...(parsed.data.details ? { details: parsed.data.details } : {}),
       ...(parsed.data.context?.operationId ? { context: { operationId: parsed.data.context.operationId } } : {}) };
     if (!dependencies.log(safeReport, context)) throw new AppError("PROVIDER_UNAVAILABLE");
     return withRequestId(Response.json({ accepted: true, correlationId: context.correlationId }, { status: 202, headers: { "Cache-Control": "no-store" } }), context);

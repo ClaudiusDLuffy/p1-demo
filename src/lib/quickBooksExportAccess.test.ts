@@ -11,6 +11,7 @@ const source = (path: string) => readFileSync(
 
 const exportPanel = source("src/features/invoices/ControllerExportPanel.tsx");
 const dashboard = source("src/features/dashboard/Dashboard.tsx");
+const invoiceList = source("src/features/invoices/InvoiceList.tsx");
 
 test("all active staff can read the queue while the handoff remains capability-gated", async () => {
   for (const role of ["manager", "dispatcher", "back_office"]) for (const permissions of [[], ["invoice_controller"], ["quickbooks_export"], ["quickbooks_handoff"]]) {
@@ -29,6 +30,7 @@ test("the export panel does not turn an accountant into a restricted controller"
   assert.doesNotMatch(exportPanel, /isInvoiceController\(currentUser\)/);
   assert.match(dashboard, /const controller = isInvoiceController\(currentUser\)/);
   assert.match(dashboard, /<ControllerExportPanel/);
+  assert.match(invoiceList, /\{isManager && \(\s*<ControllerExportPanel/);
 });
 
 test("the QuickBooks audit log stays closed until accounting opens it", () => {

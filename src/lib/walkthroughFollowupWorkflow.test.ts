@@ -44,6 +44,9 @@ test("saving a P1 invoice opens its exact billing detail instead of restoring th
   const saveFlow = billingEditor.slice(saveStart, saveEnd);
 
   assert.match(createdFlow, /setSelectedBillingInvoice\(invoice\.id\)/);
+  assert.match(createdFlow, /billingInvoiceByIdKey\(/);
+  assert.match(createdFlow, /qc\.cancelQueries\(/);
+  assert.match(createdFlow, /qc\.setQueryData\(detailKey, invoice\)/);
   assert.match(createdFlow, /setModal\(null\)/);
   assert.match(createdFlow, /setPage\("billing"\)/);
   assert.match(saveFlow, /onCreated\?\.\(payload\.invoice\)/);

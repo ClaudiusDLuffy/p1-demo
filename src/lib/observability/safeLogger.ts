@@ -13,6 +13,9 @@ export function releaseTags(): { environment: string; release: string } {
 }
 const allowedKeys = new Set(["operationId", "eventId", "attemptId", "runId", "role", "state", "provider", "count", "status", "durationMs", "claimed", "unknown", "accepted", "failed", "recurrenceQueued", "recurrenceBlocked"]);
 const workerCounters = new Set(["queued", "eligible", "parts", "workOrders", "claimed", "accepted", "sent", "deliveredUpdates", "failed", "retryableFailed", "unknown", "notDeliverable", "superseded", "skipped", "completionUnconfirmed", "recoveredBeforeSend", "recoveredUnknown", "statusChecked", "statusUnavailable", "statusStale", "recurrenceQueued", "recurrenceBlocked"]);
+const diagnosticLabels = new Set(["source", "portalView"]);
+const diagnosticCounts = new Set(["page", "itemCount", "totalCount"]);
+const diagnosticBooleans = new Set(["hasMore", "contractorScopeResolved"]);
 export function safeLog(event: string, context: RequestContext, fields: Record<string, unknown> = {}, sink: LogSink = console.info): boolean {
   try {
     const safe: Record<string, unknown> = {};
@@ -20,6 +23,12 @@ export function safeLog(event: string, context: RequestContext, fields: Record<s
       if (key === "code" && isPublicErrorCode(value)) safe.code = value;
       else if (workerCounters.has(key)) { if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000) safe[key] = value; }
       else if (["configured", "heartbeatConfirmed"].includes(key) && typeof value === "boolean") safe[key] = value;
+      else if (diagnosticLabels.has(key) && typeof value === "string" && /^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(value)) safe[key] = value;
+      else if (key === "clientLevel" && typeof value === "string" && ["error", "warning", "info"].includes(value)) safe[key] = value;
+      else if (key === "scope" && typeof value === "string" && ["active", "capital", "all"].includes(value)) safe[key] = value;
+      else if (diagnosticCounts.has(key) && typeof value === "number" && Number.isSafeInteger(value)
+        && value >= (key === "page" ? 1 : 0) && value <= 1_000_000) safe[key] = value;
+      else if (diagnosticBooleans.has(key) && typeof value === "boolean") safe[key] = value;
       else if (allowedKeys.has(key)) {
         if (key.endsWith("Id")) { const id = validCorrelationId(value); if (id) safe[key] = id; }
         else if (typeof value === "number" && Number.isFinite(value)) safe[key] = value;

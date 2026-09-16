@@ -289,12 +289,14 @@ export default function InvoiceList(props: any) {
           {page === "invoices" && !selectedInvoice && (
             <div style={{ animation: "fadeUp 0.3s" }}>
               {isManager && <FinancialNoticeQueue profile={currentUser} onOpenInvoice={setSelectedInvoice} />}
-              <ControllerExportPanel
-                invoices={invoices}
-                currentUser={currentUser}
-                selectedInvoiceIds={selectedHandoffInvoiceIds}
-                onClearSelected={() => setSelectedHandoffIds(new Set())}
-              />
+              {isManager && (
+                <ControllerExportPanel
+                  invoices={invoices}
+                  currentUser={currentUser}
+                  selectedInvoiceIds={selectedHandoffInvoiceIds}
+                  onClearSelected={() => setSelectedHandoffIds(new Set())}
+                />
+              )}
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
                 <div className="mobile-tabs invoice-tabs" style={{ display: "flex", gap: 0, borderBottom: `2px solid ${T.borderSoft}` }}>
                   {invoiceTabs.map(t => (
@@ -336,7 +338,8 @@ export default function InvoiceList(props: any) {
                     <input
                       type="search"
                       value={search}
-                      onChange={(event) => setSearch(event.target.value)}
+                      maxLength={200}
+                      onChange={(event) => setSearch(event.target.value.slice(0, 200))}
                       placeholder="Search invoices"
                       aria-label="Search contractor invoices"
                       style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}

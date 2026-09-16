@@ -17,6 +17,7 @@ import { useInvoicesCountQuery, useInvoicesPageQuery } from "../invoices/queries
 import { useWorkOrdersCountQuery, useWorkOrdersPageQuery } from "../work-orders/queries";
 import BillingTaxRulePanel from "./BillingTaxRulePanel";
 import { useBillingInvoiceCountQuery, useBillingInvoicePageQuery } from "./queries";
+import { BILLING_SEARCH_MAX_LENGTH } from "./billingReadContracts";
 
 type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
 
@@ -356,7 +357,8 @@ export default function BillingInvoiceList(props: any) {
             <input
               type="search"
               value={search}
-              onChange={event => setSearch(event.target.value)}
+              maxLength={BILLING_SEARCH_MAX_LENGTH}
+              onChange={event => setSearch(event.target.value.slice(0, BILLING_SEARCH_MAX_LENGTH))}
               placeholder="Search invoices and Ready to Bill"
               aria-label="Search billing invoices and work orders"
               style={{ width: "100%", minHeight: 38, padding: "8px 12px 8px 34px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontFamily: "inherit", fontSize: 12 }}
