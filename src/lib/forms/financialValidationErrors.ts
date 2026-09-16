@@ -74,8 +74,11 @@ export function firstFinancialValidationIssue(error: unknown): ValidationIssue |
 export function financialValidationFocusPath(path: string): string {
   if (["expectedAssignmentVersion", "expectedWorkflowCycle"].includes(path)) return "workOrderId";
   if (path === "expectedInvoiceVersion") return "num";
-  if (/^lines\.\d+\.(sourceInvoiceLineId|sourceWorkOrderPartId|sourceUnitCost|markupPercent)$/.test(path)) {
-    return path.replace(/\.(sourceInvoiceLineId|sourceWorkOrderPartId|sourceUnitCost|markupPercent)$/, ".rate");
+  if (/^lines\.\d+\.(sourceInvoiceLineId|sourceWorkOrderPartId)$/.test(path)) {
+    return path.replace(/\.(sourceInvoiceLineId|sourceWorkOrderPartId)$/, ".sourceReference");
+  }
+  if (/^lines\.\d+\.(sourceUnitCost|markupPercent)$/.test(path)) {
+    return path.replace(/\.(sourceUnitCost|markupPercent)$/, ".rate");
   }
   return path;
 }

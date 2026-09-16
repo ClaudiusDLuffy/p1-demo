@@ -66,6 +66,14 @@ test("billing line type choices explicitly update controlled form state", () => 
   assert.match(billingEditor, /setValue\(`lines\.\$\{i\}\.type` as const, nextType, \{[\s\S]*?shouldDirty: true,[\s\S]*?shouldTouch: true,[\s\S]*?shouldValidate: true,/);
 });
 
+test("unused billing source identifiers stay null instead of becoming invalid hidden values", () => {
+  assert.match(billingEditor, /register\(`lines\.\$\{i\}\.sourceInvoiceLineId` as const, \{[\s\S]*?value\.trim\(\) === "" \? null : value/);
+  assert.match(billingEditor, /register\(`lines\.\$\{i\}\.sourceWorkOrderPartId` as const, \{[\s\S]*?value\.trim\(\) === "" \? null : value/);
+  assert.match(billingEditor, /data-validation-control=\{`lines\.\$\{i\}\.sourceReference`\}/);
+  assert.match(billingEditor, /\{lineValidationMessage\}/);
+  assert.doesNotMatch(billingEditor, /Each line needs a positive quantity and a valid rate/);
+});
+
 test("invoice hydration stays clean and source preview uses the invoice dialog layer", () => {
   assert.match(billingEditor, /const shouldDirty = workOrderSelectionAuthored\.current/);
   assert.match(billingEditor, /setValue\("territory", territoryFromState\(storeState\), \{\s*shouldDirty,/);

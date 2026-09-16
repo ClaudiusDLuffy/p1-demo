@@ -6,7 +6,10 @@ export const BILLING_DRAFT_VERSION = 2;
 export const BILLING_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const text = (maximum: number) => z.string().max(maximum).refine(isSafeDraftText);
 const partialNumber = z.union([z.number().finite().min(-99_999_999.99).max(99_999_999.99), text(32), z.null()]);
-const id = z.string().uuid().nullable();
+const id = z.preprocess(
+  value => typeof value === "string" && value.trim() === "" ? null : value,
+  z.string().uuid().nullable(),
+);
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
 const lineSchema = z.object({ type: text(80).default("Other"), desc: text(4000).default(""), qty: partialNumber.default(""), rate: partialNumber.default(""),
   isTaxable: z.boolean().default(false), taxTreatmentManual: z.boolean().default(false), sourceInvoiceLineId: id.default(null), sourceWorkOrderPartId: id.default(null),

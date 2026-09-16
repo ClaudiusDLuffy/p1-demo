@@ -30,5 +30,7 @@ test("server-projected field errors use a safe useful label", () => {
 test("hidden financial metadata focuses the nearest editable control", () => {
   assert.equal(financialValidationFocusPath("expectedAssignmentVersion"), "workOrderId");
   assert.equal(financialValidationFocusPath("lines.4.markupPercent"), "lines.4.rate");
+  assert.equal(financialValidationFocusPath("lines.4.sourceInvoiceLineId"), "lines.4.sourceReference");
+  assert.equal(financialValidationFocusPath("lines.4.sourceWorkOrderPartId"), "lines.4.sourceReference");
   assert.equal(financialValidationFocusPath("territory"), "territory");
 });
