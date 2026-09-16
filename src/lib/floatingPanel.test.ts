@@ -63,7 +63,22 @@ test("a right picker falls back to the left at the viewport edge", () => {
 
 test("the floating profit calculator stays below the shared modal fallback layer", () => {
   const calculator = source("src/features/billing/FloatingProfitCalculator.tsx");
+  const portalShell = source("src/components/PortalShell.tsx");
   const modal = source("src/components/ui/Modal.tsx");
   assert.match(calculator, /zIndex: 45/);
+  assert.match(portalShell, /\.app-toast \{[\s\S]*?z-index: 45;/);
+  assert.match(modal, /zIndex: 50/);
+});
+
+test("work-order activity menus stay above mobile navigation and below modals", () => {
+  const activity = source("src/features/work-orders/WorkOrderActivityPanels.tsx");
+  const portalShell = source("src/components/PortalShell.tsx");
+  const modal = source("src/components/ui/Modal.tsx");
+
+  assert.match(portalShell, /className="mobile-bottom-nav"[\s\S]*?zIndex: 40/);
+  assert.match(activity, /position: "fixed", inset: 0, zIndex: 42/);
+  assert.match(activity, /position: "absolute", top: 34, right: 0, zIndex: 43/);
+  assert.doesNotMatch(activity, /className="card" style=\{\{ overflow: "hidden"/);
+  assert.equal(activity.match(/className="card" style=\{\{ overflow: "visible"/g)?.length, 2);
   assert.match(modal, /zIndex: 50/);
 });

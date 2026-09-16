@@ -233,8 +233,8 @@ function ActivityEntryList({
             >…</button>
             {menuOpen && (
               <>
-                <div onClick={() => setActivityMenuId(null)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div style={{ position: "absolute", top: 34, right: 0, zIndex: 41, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(31,30,28,0.12)", minWidth: 120, overflow: "hidden" }}>
+                <div onClick={() => setActivityMenuId(null)} style={{ position: "fixed", inset: 0, zIndex: 42 }} />
+                <div style={{ position: "absolute", top: 34, right: 0, zIndex: 43, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(31,30,28,0.12)", minWidth: 120, overflow: "hidden" }}>
                   <button
                     type="button"
                     onClick={() => {
@@ -353,8 +353,8 @@ export default function WorkOrderActivityPanels({
           Closed-job activity is read only. New notes, acknowledgements, and deletions are disabled.
         </div>
       )}
-      <div className="card" style={{ overflow: "hidden", borderColor: `${T.accent}55` }}>
-        <div style={{ padding: "18px 20px", background: T.accentSoft, borderBottom: `1px solid ${T.accent}33` }}>
+      <div className="card" style={{ overflow: "visible", borderColor: `${T.accent}55` }}>
+        <div style={{ padding: "18px 20px", background: T.accentSoft, borderBottom: `1px solid ${T.accent}33`, borderRadius: "16px 16px 0 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 750, color: T.ink }}>7-Eleven updates / job notes</div>
@@ -445,8 +445,8 @@ export default function WorkOrderActivityPanels({
         </div>
       </div>
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        <div style={{ padding: "18px 20px", background: T.surfaceSoft, borderBottom: `1px solid ${T.borderSoft}` }}>
+      <div className="card" style={{ overflow: "visible" }}>
+        <div style={{ padding: "18px 20px", background: T.surfaceSoft, borderBottom: `1px solid ${T.borderSoft}`, borderRadius: "16px 16px 0 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 750, color: T.ink }}>General chat &amp; activity</div>

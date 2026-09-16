@@ -17,7 +17,8 @@ const requireHere = createRequire(import.meta.url);
 function componentHarness(file: string, imports: (name: string) => unknown) {
   const filename = resolve(file), slots: unknown[] = [], cleanups: (() => void)[] = [];
   let index = 0;
-  const document = { activeElement: null as unknown, addEventListener: () => undefined, removeEventListener: () => undefined };
+  const document = { activeElement: null as unknown, body: {}, addEventListener: () => undefined, removeEventListener: () => undefined };
+  const window = { innerWidth: 1024, innerHeight: 768, addEventListener: () => undefined, removeEventListener: () => undefined };
   const exports: Record<string, (props: Record<string, unknown>) => Node> = {};
   const jsx = (type: unknown, props: Node["props"]) => ({ type, props });
   const react = {
@@ -31,8 +32,12 @@ function componentHarness(file: string, imports: (name: string) => unknown) {
   const code = ts.transpileModule(readFileSync(filename, "utf8"), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;
-  runInNewContext(code, { exports, document, HTMLInputElement: class {}, AbortController, AbortSignal, Promise,
-    require: (name: string) => name === "react" ? react : name.endsWith("/fieldContext") ? { useFieldControl: (props: unknown) => props } : name === "react/jsx-runtime" ? { jsx, jsxs: jsx }
+  runInNewContext(code, { exports, document, window, HTMLInputElement: class {}, AbortController, AbortSignal, Promise,
+    require: (name: string) => name === "react" ? react : name === "react-dom" ? { createPortal: (children: unknown) => children }
+      : name.endsWith("/fieldContext") ? { useFieldControl: (props: unknown) => props }
+      : name.endsWith("/Modal") ? { useModalPortalHost: () => null }
+      : name.endsWith("/floatingPanel") ? { getFloatingPanelPosition: () => ({ top: 42, left: 24, width: 230, maxHeight: 360, placement: "bottom" }) }
+      : name === "react/jsx-runtime" ? { jsx, jsxs: jsx }
       : imports(name) || requireHere(resolve(filename, "..", name)),
   }, { filename });
   return { exports, slots, document, render: (name: string, props: Record<string, unknown>) => { index = 0; return exports[name](props); },
@@ -72,7 +77,8 @@ test("picker keyboard traversal and record-only selection preserve rowUUID witho
   let tree = h.render("DirectorySelect", props);
   (nodes(tree).find(node => node.type === "button")!.props.onClick as () => void)(); tree = h.render("DirectorySelect", props);
   const choices = [0, 1, 2].map(index => ({ index, focus() { h.document.activeElement = this; } }));
-  const wrapper = tree.props.ref as { current: unknown }; wrapper.current = { querySelectorAll: () => choices };
+  const panel = nodes(tree).find(node => node.props["data-directory-panel"] === "true")!;
+  (panel.props.ref as { current: unknown }).current = { querySelectorAll: () => choices };
   const key = tree.props.onKeyDown as (event: unknown) => void;
   key({ key: "ArrowDown", target: {}, preventDefault() {} }); assert.equal(h.document.activeElement, choices[0]);
   key({ key: "End", target: {}, preventDefault() {} }); assert.equal(h.document.activeElement, choices[2]);
