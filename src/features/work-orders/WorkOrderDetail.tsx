@@ -37,6 +37,8 @@ import {
   canChangeWorkOrderAssignment,
   canDuplicateWorkOrderForReassignment,
   canRejectUnassignedWorkOrder,
+  canSetWorkOrderEta,
+  workOrderVisitAction,
 } from "../../lib/workOrderDispatchActions";
 import {
   canFlagWorkOrderCapital,
@@ -330,6 +332,8 @@ export default function WorkOrderDetail(props: any) {
   };
   const canAssignCurrentWorkOrder = canAssignWorkOrder(assignmentEligibility);
   const canChangeCurrentAssignment = canChangeWorkOrderAssignment(assignmentEligibility);
+  const visitAction = workOrderVisitAction(assignmentEligibility);
+  const canSetCurrentEta = canSetWorkOrderEta(assignmentEligibility);
   const canRejectDuringDispatch = canRejectUnassignedWorkOrder({
     isOperationalStaff: isManager,
     isInvoiceController: invoiceController,
@@ -763,11 +767,13 @@ export default function WorkOrderDetail(props: any) {
                             : "Duplicate for reassignment"}
                         </button>
                       )}
-                      {!contractorHistoryReadOnly && woData.status === "assigned" && (
+                      {!contractorHistoryReadOnly && visitAction === "start" && (
                         <>
-                          <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
-                            {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
-                          </button>
+                          {canSetCurrentEta && (
+                            <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
+                              {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
+                            </button>
+                          )}
                           <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
                             {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Starting...</> : "Start work"}
                           </button>
@@ -825,7 +831,7 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
                         </button>
                       )}
-                      {!contractorHistoryReadOnly && (woData.status === "parts" || (woData.assignmentTransferPendingVisit && woData.contractor && woData.status === "wip")) && (
+                      {!contractorHistoryReadOnly && (visitAction === "resume" || visitAction === "receiving_start") && (
                         <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
                           {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : woData.assignmentTransferPendingVisit ? "Start new visit after transfer" : "Resume work"}
                         </button>

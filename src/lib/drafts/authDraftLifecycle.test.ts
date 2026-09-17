@@ -21,9 +21,11 @@ function harness() {
   const draft = createDraftSession({ storage, project: "https://synthetic.invalid", environment: "test", random: () => String(++sequence) });
   const effects: (() => void | (() => void))[] = []; const timers: (() => unknown)[] = [];
   let callback: (event: string, session: Session) => void = () => undefined;
+  let authSession: Session = null, profileReads = 0;
   let role = "manager", active = true, currentId = user, cancel: () => Promise<void> = async () => undefined;
   let signoutFailure = false, signouts = 0, unsubscribed = 0;
   const query = (table: string): unknown => {
+    profileReads++;
     const result = () => ({ data: table === "profiles" ? { id: currentId, role, active, name: "Synthetic" } : [], error: null });
     const builder: Record<string, unknown> = { then: (done: (value: unknown) => unknown) => Promise.resolve(done(result())) };
     for (const name of ["select", "eq"]) builder[name] = () => builder;
@@ -42,8 +44,9 @@ function harness() {
       } };
       if (name.endsWith("/constants")) return { DEMO_ACCOUNTS: [] };
       if (name.endsWith("/supabase/client")) return { getRememberedEmail: () => "", getRememberMePreference: () => false,
-        setRememberMePreference: () => undefined, supabase: () => ({ from: query, rpc: async () => ({ data: {}, error: null }),
-          auth: { onAuthStateChange: (listener: typeof callback) => { callback = listener; return { data: { subscription: {
+        setRememberMePreference: () => undefined, supabase: () => ({ from: query, rpc: async () => { profileReads++; return { data: {}, error: null }; },
+          auth: { getSession: async () => ({ data: { session: authSession }, error: null }),
+            onAuthStateChange: (listener: typeof callback) => { callback = listener; return { data: { subscription: {
             unsubscribe: () => { unsubscribed++; },
           } } }; } } }) };
       return localRequire(resolve(filename, "..", name));
@@ -51,8 +54,9 @@ function harness() {
   });
   assert.ok(output.default); const auth = output.default({ setPage: () => undefined, setSelectedWO: () => undefined, setAiNote: () => undefined });
   const cleanups = effects.map(effect => effect());
-  return { auth, draft, values, emit: async (event: string, session: Session) => { callback(event, session); while (timers.length) await timers.shift()?.(); },
+  return { auth, draft, values, emit: async (event: string, session: Session) => { authSession = session; callback(event, session); while (timers.length) await timers.shift()?.(); },
     mutate: (next: { role?: string; active?: boolean; id?: string }) => { role = next.role ?? role; active = next.active ?? active; currentId = next.id ?? currentId; },
+    loseSession: () => { authSession = null; }, profileReads: () => profileReads,
     holdCancellation: (fn: () => Promise<void>) => { cancel = fn; }, failSignout: () => { signoutFailure = true; }, signouts: () => signouts,
     cleanup: () => { for (const cleanup of cleanups) if (typeof cleanup === "function") cleanup(); }, unsubscribed: () => unsubscribed,
   };
@@ -85,4 +89,13 @@ test("confirmed cross-tab account switch and inactive self revoke prior recovery
   h.mutate({ id: second }); await h.emit("SIGNED_IN", { user: { id: second } });
   assert.equal(lease.save("late").status, "revoked"); const next = h.draft.open("staff-billing", "new", validate)!; next.save("next");
   h.mutate({ active: false }); await h.auth.refreshCurrentProfile(); assert.equal(next.isPersisted(), false);
+});
+test("silent provider-session loss revokes the cached identity before another profile read", async () => {
+  const h = harness(); await h.emit("INITIAL_SESSION", { user: { id: user } });
+  const lease = h.draft.open("staff-billing", "new", validate)!; lease.save("synthetic");
+  const readsBeforeLoss = h.profileReads(); h.loseSession();
+  assert.equal(await h.auth.refreshCurrentProfile(), false);
+  assert.equal(h.profileReads(), readsBeforeLoss);
+  assert.equal(lease.save("late").status, "revoked");
+  assert.equal(h.draft.hasDrafts(), false);
 });

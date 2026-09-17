@@ -34,6 +34,47 @@ export type WorkOrderAssignmentEligibility = StaffActionContext & {
   billingOnly?: boolean | null;
 };
 
+export type WorkOrderVisitEligibility = {
+  assignmentTransferPendingVisit?: boolean | null;
+  status?: string | null;
+  functionalStatus?: string | null;
+  contractorId?: string | null;
+};
+
+export type WorkOrderVisitAction = "start" | "resume" | "receiving_start";
+
+/**
+ * Mirrors the authoritative visit-state boundary. Email-intake assignments
+ * intentionally remain `assigned / New` until their first field action, while
+ * manually created assignments begin as `assigned / Dispatched`.
+ */
+export function workOrderVisitAction(
+  input: WorkOrderVisitEligibility,
+): WorkOrderVisitAction | null {
+  if (!input.contractorId) return null;
+  if (input.assignmentTransferPendingVisit === true
+      && input.status === "wip"
+      && input.functionalStatus === "Work in Progress") {
+    return "receiving_start";
+  }
+  if (input.status === "parts" && input.functionalStatus === "Awaiting Parts") {
+    return "resume";
+  }
+  if (input.status === "assigned"
+      && ["New", "Dispatched"].includes(String(input.functionalStatus || ""))) {
+    return "start";
+  }
+  return null;
+}
+
+export function canSetWorkOrderEta(
+  input: WorkOrderVisitEligibility,
+): boolean {
+  return Boolean(input.contractorId)
+    && input.status === "assigned"
+    && ["New", "Dispatched"].includes(String(input.functionalStatus || ""));
+}
+
 const hasOperationalAssignmentAccess = (
   input: WorkOrderAssignmentEligibility,
 ) => input.isOperationalStaff

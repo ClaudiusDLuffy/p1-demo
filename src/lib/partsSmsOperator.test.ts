@@ -27,7 +27,8 @@ test("actual auth hydration and Dashboard importer expose parts operations only 
       "../../lib/db": { signIn: async () => ({ user: { id: prof.id } }), signOut: async () => undefined },
       "../../lib/constants": { DEMO_ACCOUNTS: [] },
       "../../lib/supabase/client": { getRememberedEmail: () => "", getRememberMePreference: () => false, setRememberMePreference() {},
-        supabase: () => ({ rpc: async () => ({ data: {}, error: null }), from: (table: string) => ({ select: () => ({ eq: () => table === "profiles"
+        supabase: () => ({ auth: { getSession: async () => ({ data: { session: { user: { id: prof.id } } }, error: null }) },
+          rpc: async () => ({ data: {}, error: null }), from: (table: string) => ({ select: () => ({ eq: () => table === "profiles"
           ? { single: async () => ({ data: prof, error: null }) }
           : { data: actor.permissions.map(permission => ({ permission })), error: null } }) }) }) },
     });

@@ -11,7 +11,8 @@ function fixture() {
     "@tanstack/react-query": { useQueryClient: () => client }, "../../lib/constants": { DEMO_ACCOUNTS: [] },
     "../../lib/db": { signIn: async () => ({ user: { id: profile.id } }), signOut: async () => undefined },
     "../../lib/supabase/client": { getRememberedEmail: () => "", getRememberMePreference: () => false, setRememberMePreference() {},
-      supabase: () => ({ rpc: async () => ({ data: scope, error: scopeFailure ? { code: "42501" } : null }), from: (table: string) => ({ select: () => ({ eq: () => table === "profiles"
+      supabase: () => ({ auth: { getSession: async () => ({ data: { session: { user: { id: profile.id } } }, error: null }) },
+        rpc: async () => ({ data: scope, error: scopeFailure ? { code: "42501" } : null }), from: (table: string) => ({ select: () => ({ eq: () => table === "profiles"
         ? { single: async () => { const data = profile; if (pause) await pause; return { data, error: null }; } }
         : { data: grants.map(permission => ({ permission })), error: null } }) }) }) },
   });

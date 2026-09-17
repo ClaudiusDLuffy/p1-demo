@@ -8,6 +8,7 @@ const read = (path: string) =>
 
 const db = read("src/lib/db.ts");
 const authHook = read("src/features/auth/useAuth.ts");
+const portalShell = read("src/components/PortalShell.tsx");
 
 test("ordinary sign-out is local and surfaces SDK failures", () => {
   const start = db.indexOf("export async function signOut");
@@ -39,4 +40,12 @@ test("stale profile responses cannot overwrite the newly signed-in identity", ()
   assert.match(authHook, /expectedUserIdRef\.current\s*=\s*nextUserId/);
   assert.match(authHook, /authTransitionRef\.current\s*===\s*"login"/);
   assert.match(authHook, /authTransitionRef\.current\s*===\s*"logout"/);
+});
+
+test("portal data is gated by the live provider session and silent loss is monitored", () => {
+  assert.match(portalShell, /currentUser:\s*hydratedUser,\s*hasSession/);
+  assert.match(portalShell, /const currentUser\s*=\s*hasSession\s*\?\s*hydratedUser\s*:\s*null/);
+  assert.match(authHook, /auth\.getSession\(\)/);
+  assert.match(authHook, /SESSION_WATCHDOG_MS\s*=\s*30_000/);
+  assert.match(authHook, /clearSessionState\(expectedUserId,\s*SESSION_EXPIRED_MESSAGE\)/);
 });
