@@ -1417,19 +1417,25 @@ export default function useWorkOrders({
   const doCapitalFlag = async (woId: string) => {
     setLoading("capitalFlag_" + woId, true);
     try {
-    const text = "Marked as a capital replacement and ready for quote preparation.";
-    const patch = {
-      status: "capital",
-      functionalStatus: "Work in Progress",
-      capitalStatus: null,
-      isCapital: true,
-    };
-    const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
-    patchLocalWO(woId, patch, localActivity(text, "system"));
-    fire("Flagged for capital");
-    await dbCall(async () => {
-      await flagWorkOrderCapital(lifecycleContextFor(workOrders.find(w => w.id === woId)));
-    }, "Capital flag failed", () => restoreWorkOrders(snapshot));
+      const text = "Marked as a capital replacement and ready for quote preparation.";
+      let confirmedLifecycleVersion = 0;
+      const saved = await dbCall(async () => {
+        const authoritativeWorkOrder = await loadWorkOrderById(woId);
+        if (!authoritativeWorkOrder) throw new Error("Work order not found");
+        const context = lifecycleContextFor(authoritativeWorkOrder);
+        await flagWorkOrderCapital(context);
+        confirmedLifecycleVersion = context.expectedLifecycleVersion + 1;
+      }, "Capital flag failed");
+      if (!saved) return false;
+      patchLocalWO(woId, {
+        status: "capital",
+        functionalStatus: "Work in Progress",
+        capitalStatus: null,
+        isCapital: true,
+        lifecycleVersion: confirmedLifecycleVersion,
+      }, localActivity(text, "system"));
+      fire("Flagged for capital");
+      return true;
     } finally {
       setLoading("capitalFlag_" + woId, false);
     }

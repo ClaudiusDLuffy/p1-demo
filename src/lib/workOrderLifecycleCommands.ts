@@ -24,6 +24,11 @@ const exactLifecycleConflicts = new Map<string, string>([
   ["The active visit does not match this completion", "The active visit changed before completion. Refresh the work order and review the current visit."],
 ]);
 
+const exactLifecycleAccessConflicts = new Map<string, string>([
+  ["Completed field work must be reopened before its status can regress", "This completed work order must be reopened before returning it to field work."],
+  ["Closed work orders must be reopened through the reopen workflow", "This closed work order must be reopened before another workflow action can be performed."],
+]);
+
 export function safeLifecycleError(cause: unknown): LifecycleCommandError {
   if (cause instanceof LifecycleCommandError) return cause;
   const provider = z.object({ code: z.string().optional(), message: z.string().optional() }).safeParse(cause);
@@ -35,7 +40,8 @@ export function safeLifecycleError(cause: unknown): LifecycleCommandError {
   if (code === "PT409") return new LifecycleCommandError(code,
     "Work order changed in another session. Refresh and review it before trying again.", cause);
   if (code === "42501") return new LifecycleCommandError(code,
-    "You no longer have permission to perform this action. Refresh the work order.", cause);
+    provider.success && provider.data.message && exactLifecycleAccessConflicts.get(provider.data.message)
+      || "You no longer have permission to perform this action. Refresh the work order.", cause);
   if (code === "22023" || cause instanceof z.ZodError) return new LifecycleCommandError("22023",
     "Check the action's dates, equipment details, and required parts information, then try again.", cause);
   return new LifecycleCommandError("LIFECYCLE_FAILED",
