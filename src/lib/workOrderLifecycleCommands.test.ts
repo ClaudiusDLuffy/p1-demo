@@ -122,6 +122,15 @@ test("reviewed lifecycle conflicts provide actionable guidance without exposing 
   );
 });
 
+test("reviewed lifecycle access conflicts are state guidance, not false permission failures", () => {
+  const completed = safeLifecycleError({ code: "42501", message: "Completed field work must be reopened before its status can regress" });
+  assert.match(completed.message, /completed work order must be reopened/i);
+  assert.doesNotMatch(completed.message, /permission/i);
+  const closed = safeLifecycleError({ code: "42501", message: "Closed work orders must be reopened through the reopen workflow" });
+  assert.match(closed.message, /closed work order must be reopened/i);
+  assert.doesNotMatch(closed.message, /permission/i);
+});
+
 test("all actual lifecycle identities are reserved, not arbitrary note prefixes", () => {
   for (const key of RESERVED_LIFECYCLE_EVENTS) assert.equal(isReservedLifecycleEvent(key), true);
   for (const key of ["note", "ai_note", "invoice_submitted", "check_in_question", null, undefined]) assert.equal(isReservedLifecycleEvent(key), false);
