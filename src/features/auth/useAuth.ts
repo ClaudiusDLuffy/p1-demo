@@ -18,6 +18,9 @@ import { activateBrowserDraftSession, draftActivationTicket, revokeBrowserDraftS
 type AuthControls = { fire?: (message: string) => void; setPage(page: string): void;
   setSelectedWO(id: string | null): void; setAiNote(value: null): void; setInvoices?(values: never[]): void };
 
+const SESSION_EXPIRED_MESSAGE = "Your session expired. Please sign in again.";
+const SESSION_WATCHDOG_MS = 30_000;
+
 export async function changePassword(
   newPassword: string
 ): Promise<{ success: boolean; error?: string }> {
@@ -52,12 +55,44 @@ export default function useAuth({
 
   useEffect(() => { const t = setTimeout(() => setFadeIn(true), 50); return () => clearTimeout(t); }, []);
 
+  const clearSessionState = useCallback((expectedUserId: string | null, message?: string) => {
+    if (expectedUserId !== null && expectedUserIdRef.current !== expectedUserId) return false;
+    revokeBrowserDraftSession(expectedUserIdRef.current);
+    profileRequestRef.current += 1;
+    expectedUserIdRef.current = null;
+    lastLoadedUserIdRef.current = null;
+    currentProfileRef.current = null;
+    loginAttemptRef.current = false;
+    authTransitionRef.current = null;
+    qc.clear();
+    setHasSession(false);
+    setCurrentUser(null);
+    setLoginLoading(false);
+    setSelectedWO(null);
+    setAiNote(null);
+    setInvoices?.([]);
+    setPage("dashboard");
+    if (message) setLoginError(message);
+    return true;
+  }, [qc, setPage, setSelectedWO, setAiNote, setInvoices]);
+
   const hydrateProfile = useCallback(async (userId: string) => {
     if (expectedUserIdRef.current !== userId) return false;
     const request = ++profileRequestRef.current;
     let draftTicket = draftActivationTicket();
+    const sb = supabase();
     try {
-      const sb = supabase();
+      // A cached profile is not an authenticated session. Verify the provider
+      // session before any profile-scoped RPC so a silently cleared browser
+      // token cannot keep polling authenticated-only database capabilities as
+      // anon while the old portal remains visible.
+      const { data: sessionData, error: sessionError } = await sb.auth.getSession();
+      if (expectedUserIdRef.current !== userId || request !== profileRequestRef.current) return false;
+      if (!sessionData.session || sessionData.session.user.id !== userId) {
+        clearSessionState(userId, SESSION_EXPIRED_MESSAGE);
+        return false;
+      }
+      if (sessionError) throw sessionError;
       const [profileResult, scopeResult, permissionsResult] = await Promise.all([
         sb.from("profiles").select("*").eq("id", userId).single(),
         // Narrow contract for this existing RPC until generated types include it.
@@ -97,6 +132,16 @@ export default function useAuth({
       return next.active && !changed;
     } catch (err: unknown) {
       if (expectedUserIdRef.current !== userId || request !== profileRequestRef.current) return false;
+      // The session can disappear between the liveness check and the profile
+      // reads. Classify that race as authentication loss, not as a staff
+      // permission failure, and tear down the stale identity immediately.
+      try {
+        const { data } = await sb.auth.getSession();
+        if (!data.session || data.session.user.id !== userId) {
+          clearSessionState(userId, SESSION_EXPIRED_MESSAGE);
+          return false;
+        }
+      } catch { /* retain the original, already-safe profile error */ }
       setLoginError(safeErrorMessage(err));
       if (fire) fire(safeErrorMessage(err));
       throw err;
@@ -107,7 +152,7 @@ export default function useAuth({
         setLoginLoading(false);
       }
     }
-  }, [fire, setPage, qc, setSelectedWO, setAiNote, setInvoices]);
+  }, [clearSessionState, fire, setPage, qc, setSelectedWO, setAiNote, setInvoices]);
 
   const refreshCurrentProfile = useCallback(async () => {
     const id = expectedUserIdRef.current;
@@ -223,26 +268,55 @@ export default function useAuth({
         setHasSession(true);
         hydrate(nextUserId);
       } else if (event === "INITIAL_SESSION" && !session) {
-        revokeBrowserDraftSession();
         // No session on mount - make sure the spinner isn't left on.
-        expectedUserIdRef.current = null;
-        lastLoadedUserIdRef.current = null;
-        currentProfileRef.current = null;
-        setHasSession(false);
-        setLoginLoading(false);
+        clearSessionState(expectedUserIdRef.current);
       } else if (event === "SIGNED_OUT") {
-        revokeBrowserDraftSession(expectedUserIdRef.current);
-        qc.clear();
-        expectedUserIdRef.current = null;
-        lastLoadedUserIdRef.current = null;
-        currentProfileRef.current = null;
-        setHasSession(false);
-        setCurrentUser(null);
-        if (!loginAttemptRef.current) setLoginLoading(false);
+        const explicitLogout = authTransitionRef.current === "logout";
+        clearSessionState(
+          expectedUserIdRef.current,
+          explicitLogout ? undefined : SESSION_EXPIRED_MESSAGE,
+        );
       }
     });
     return () => { mounted = false; profileRequestRef.current += 1; subscription.unsubscribe(); };
-  }, [hydrateProfile, qc]);
+  }, [clearSessionState, hydrateProfile, qc]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    let disposed = false;
+    let checking = false;
+    const verifyLiveSession = async () => {
+      const expectedUserId = expectedUserIdRef.current;
+      if (!expectedUserId || checking || authTransitionRef.current !== null) return;
+      checking = true;
+      try {
+        const { data } = await supabase().auth.getSession();
+        if (!disposed
+          && expectedUserIdRef.current === expectedUserId
+          && (!data.session || data.session.user.id !== expectedUserId)) {
+          clearSessionState(expectedUserId, SESSION_EXPIRED_MESSAGE);
+        }
+      } catch {
+        // A network/storage exception is not proof that the session ended.
+        // Existing reads surface their bounded error while the next check can
+        // confirm whether the provider session still exists.
+      } finally {
+        checking = false;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void verifyLiveSession();
+    };
+    const interval = window.setInterval(() => { void verifyLiveSession(); }, SESSION_WATCHDOG_MS);
+    window.addEventListener("online", verifyLiveSession);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", verifyLiveSession);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [clearSessionState]);
 
   return {
     currentUser, setCurrentUser, hasSession, loginEmail, setLoginEmail,

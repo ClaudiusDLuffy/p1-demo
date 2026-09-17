@@ -1344,9 +1344,12 @@ export default function PortalShell() {
   const [resolutionInput, setResolutionInput] = useState("");
   const [resolutionNotesInput, setResolutionNotesInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
-  const { currentUser, refreshCurrentProfile, loginEmail, setLoginEmail,
+  const { currentUser: hydratedUser, hasSession, refreshCurrentProfile, loginEmail, setLoginEmail,
     loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
     fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
+  // A hydrated profile is only an authorization projection; it must never
+  // keep data hooks alive after the underlying Supabase session disappears.
+  const currentUser = hasSession ? hydratedUser : null;
   // Wait for the profile before enabling portal data. Starting on the raw
   // session and then resetting again when the profile arrives caused every
   // initial query to run twice.

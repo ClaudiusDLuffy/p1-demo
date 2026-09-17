@@ -6,7 +6,39 @@ import {
   canChangeWorkOrderAssignment,
   canDuplicateWorkOrderForReassignment,
   canRejectUnassignedWorkOrder,
+  canSetWorkOrderEta,
+  workOrderVisitAction,
 } from "./workOrderDispatchActions";
+
+test("email-intake and manual assignments can start work and set an ETA", () => {
+  for (const functionalStatus of ["New", "Dispatched"]) {
+    const workOrder = {
+      status: "assigned",
+      functionalStatus,
+      contractorId: "contractor-1",
+    };
+    assert.equal(workOrderVisitAction(workOrder), "start", functionalStatus);
+    assert.equal(canSetWorkOrderEta(workOrder), true, functionalStatus);
+  }
+});
+
+test("visit controls mirror resume and receiving-transfer state boundaries", () => {
+  assert.equal(workOrderVisitAction({
+    status: "parts", functionalStatus: "Awaiting Parts", contractorId: "contractor-1",
+  }), "resume");
+  assert.equal(workOrderVisitAction({
+    status: "wip", functionalStatus: "Work in Progress", contractorId: "contractor-1",
+    assignmentTransferPendingVisit: true,
+  }), "receiving_start");
+  for (const workOrder of [
+    { status: "assigned", functionalStatus: "Completed", contractorId: "contractor-1" },
+    { status: "parts", functionalStatus: "Dispatched", contractorId: "contractor-1" },
+    { status: "assigned", functionalStatus: "New", contractorId: null },
+  ]) {
+    assert.equal(workOrderVisitAction(workOrder), null, JSON.stringify(workOrder));
+    assert.equal(canSetWorkOrderEta(workOrder), false, JSON.stringify(workOrder));
+  }
+});
 
 test("operational staff can assign ordinary and capital-stage work orders", () => {
   const common = {
