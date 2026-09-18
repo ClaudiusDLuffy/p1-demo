@@ -1,15 +1,33 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
 import Image from "next/image";
 import { T } from "../../lib/constants";
+import { RUNNING_DEPLOYMENT_VERSION, shortDeploymentVersion } from "../../lib/deploymentVersion";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
+
+type LoginFormProps = {
+  loginEmail: string;
+  setLoginEmail: Dispatch<SetStateAction<string>>;
+  loginPassword: string;
+  setLoginPassword: Dispatch<SetStateAction<string>>;
+  rememberMe: boolean;
+  setRememberMe: Dispatch<SetStateAction<boolean>>;
+  loginLoading: boolean;
+  loginError: string | null;
+  fadeIn: boolean;
+  imageErrors: Record<string, boolean>;
+  setImageErrors: Dispatch<SetStateAction<Record<string, boolean>>>;
+  doLogin: (email: string, password: string, remember?: boolean) => Promise<void>;
+  CSS: string;
+};
 
 export default function LoginForm({
   loginEmail, setLoginEmail, loginPassword, setLoginPassword,
   rememberMe, setRememberMe,
   loginLoading, loginError, fadeIn, imageErrors, setImageErrors,
   doLogin, CSS
-}: any) {
+}: LoginFormProps) {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-inter), system-ui, sans-serif", padding: 16, opacity: fadeIn ? 1 : 0, transition: "opacity 0.6s", position: "relative" }}>
       <style>{CSS}</style>
@@ -27,7 +45,7 @@ export default function LoginForm({
                 height={1452}
                 style={{ width: 90, height: "auto", objectFit: "contain" }}
                 priority
-                onError={() => setImageErrors((prev: any) => ({ ...prev, loginLogo: true }))}
+                onError={() => setImageErrors(prev => ({ ...prev, loginLogo: true }))}
               />
             )}
           </div>
@@ -78,6 +96,19 @@ export default function LoginForm({
               : "Sign in"
             }
           </button>
+          <div
+            aria-label={`Sign-in portal version ${shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}`}
+            title={`Portal build ${RUNNING_DEPLOYMENT_VERSION}`}
+            style={{
+              marginTop: 14,
+              color: T.muted,
+              fontSize: 10,
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
+          >
+            Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}
+          </div>
         </div>
       </div>
     </div>

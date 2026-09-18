@@ -17,6 +17,7 @@ test("a stale browser build receives a visible update and reloads onto the curre
 
   await page.goto("/");
   await expect(page.getByLabel("Portal build local")).toBeVisible();
+  await expect(page.getByLabel("Sign-in portal version local")).toBeVisible();
   const update = page.locator('section[aria-label="Portal update available"]');
   await expect(update).toBeVisible();
   await expect(update).toContainText("local → synthetic-");
