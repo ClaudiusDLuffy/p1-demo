@@ -44,6 +44,7 @@ function harness(failingName?: string, pdf?: { generate: (...args: unknown[]) =>
     "WORK_ORDERS_KEY", "WORK_ORDER_PAGES_KEY", "WORK_ORDER_BY_ID_KEY", "WORK_ORDER_DETAILS_KEY",
     "PORTAL_NAVIGATION_SUMMARY_KEY", "CONTRACTOR_WORKLOAD_SUMMARY_KEY", "INVOICES_KEY",
     "INVOICE_PAGES_KEY", "INVOICE_BY_ID_KEY", "CONTROLLER_INVOICE_HOLDS_KEY",
+    "CONTROLLER_EXPORT_QUEUE_KEY", "CONTROLLER_EXPORT_HISTORY_KEY",
   ].map(key => [key, [key]]));
   const db = new Proxy({}, { get: (_target, name: string) => async (...args: unknown[]) => {
     calls.push({ name, args });
@@ -79,6 +80,12 @@ function harness(failingName?: string, pdf?: { generate: (...args: unknown[]) =>
         throw new Error("Unexpected summary hydration in legacy complete fixture");
       } }) };
       if (name.endsWith("/db")) return db;
+      if (name.endsWith("/financialNotificationCommands")) return {
+        updateInvoicePaymentHold: async (...args: unknown[]) => {
+          calls.push({ name: "updateInvoicePaymentHold", args });
+          return { applied: true, notificationStatus: "queued" };
+        },
+      };
       if (name.endsWith("/directory/api")) return { loadDirectorySelection: async (...args: unknown[]) => {
         exactReads.push(args); return directory?.selection ?? null;
       } };
@@ -93,6 +100,18 @@ function harness(failingName?: string, pdf?: { generate: (...args: unknown[]) =>
     fire: (message: string) => messages.push(message) });
   return { hook, messages, invalidations, stateChanges, calls, exactReads, documentReads };
 }
+
+test("placing a payment hold refreshes the cancelled handoff package and accounting queue", async () => {
+  const h = harness();
+  assert.equal(await h.hook.doPlaceInvoicePaymentHold(
+    { id: invoiceId, num: "TEST-1" },
+    "Synthetic payment hold",
+    null,
+  ), true);
+  assert.ok(h.invalidations.includes("CONTROLLER_INVOICE_HOLDS_KEY"));
+  assert.ok(h.invalidations.includes("CONTROLLER_EXPORT_QUEUE_KEY"));
+  assert.ok(h.invalidations.includes("CONTROLLER_EXPORT_HISTORY_KEY"));
+});
 
 for (const existing of [false, true]) {
   test(`contractor draft ${existing ? "edit" : "creation"} preserves partial input and success feedback`, async () => {
@@ -186,6 +205,9 @@ test("own deletion preserves its guarded command and final-live-invoice warning"
     contractorAssignmentVersion: 2, workflowCycle: 1 }), true);
   assert.equal(h.calls[0].name, "deleteOwnContractorInvoice");
   assert.ok(h.messages.some(message => message.includes("no live invoices left")));
+  const clearSelection = h.stateChanges.find(change => typeof change === "function") as ((current: string | null) => string | null);
+  assert.equal(clearSelection(invoiceId), null);
+  assert.equal(clearSelection("74000000-0000-4000-8000-000000000099"), "74000000-0000-4000-8000-000000000099");
 });
 
 test("unknown deletion result retains the original captured versions and operation for retry", async () => {

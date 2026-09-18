@@ -15,6 +15,7 @@ const database = read("src/lib/db.ts");
 const portalShell = read("src/components/PortalShell.tsx");
 const notificationCommands = read("src/lib/financialNotificationCommands.ts");
 const notificationBoundary = read("supabase/migrations/0136_expand_financial_notification_delivery.sql");
+const operationIdCorrection = read("supabase/migrations/0154_rfc_batch_financial_operation_ids.sql");
 
 test("batch review is transactional and delegates every row to the guarded lifecycle", () => {
   assert.match(migration, /^begin;/m);
@@ -69,4 +70,12 @@ test("client uses one versioned batch RPC whose transaction owns rejected-invoic
   assert.match(invoiceHook, /notifications queued/);
   assert.doesNotMatch(invoiceHook, /notifyInvoiceReview|notifications\/invoice-review/);
   assert.match(portalShell, /doBatchReviewInvoices=\{doBatchReviewInvoices\}/);
+});
+
+test("batch child receipts use deterministic RFC UUIDs accepted by the client contract", () => {
+  assert.match(operationIdCorrection, /v_child_digest := md5\(p_operation_id::text \|\| ':' \|\| v_id::text\)/);
+  assert.match(operationIdCorrection, /substr\(v_child_digest, 9, 4\) \|\| '-5'/);
+  assert.match(operationIdCorrection, /substr\(v_child_digest, 14, 3\) \|\| '-8'/);
+  assert.doesNotMatch(operationIdCorrection, /md5\([^;]+\)::uuid/);
+  assert.match(operationIdCorrection, /review_contractor_invoice_with_notification_v1\([\s\S]*v_child/);
 });

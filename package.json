@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "e2e:local": "node scripts/e2e/run-local-e2e.mjs",
+    "e2e:local:seed": "node scripts/e2e/seed-local-synthetic.mjs",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "publish:contractor-templates": "tsx scripts/publish-contractor-estimate-templates.ts"
   },
@@ -28,6 +30,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

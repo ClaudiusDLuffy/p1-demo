@@ -14,8 +14,8 @@ test('final migration inventory permits only the exact byte-pinned historical pa
   const names = validateMigrationInventory(input);
   assert.deepEqual(names, [...input.keys()].sort());
   assert.deepEqual(names.filter(name => name.startsWith('0029_')), Object.keys(HISTORICAL_0029));
-  assert.equal(names.length, 154);
-  assert.equal(names.at(-1), '0153_allow_email_intake_assignments_to_start.sql');
+  assert.equal(names.length, 155);
+  assert.equal(names.at(-1), '0154_rfc_batch_financial_operation_ids.sql');
   for (const [name, hash] of Object.entries(HISTORICAL_0029)) {
     assert.equal(createHash('sha256').update(input.get(name)!).digest('hex'), hash);
   }
