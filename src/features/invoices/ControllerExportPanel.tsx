@@ -17,6 +17,8 @@ import { invalidatePortalPlan } from "../../lib/realtime/realtimeBatcher";
 import { isPortalVisible } from "../../lib/realtime/browserVisibility";
 import {
   CONTROLLER_INVOICE_HOLDS_KEY,
+  CONTROLLER_EXPORT_HISTORY_KEY,
+  CONTROLLER_EXPORT_QUEUE_KEY,
 } from "./queries";
 import QuickBooksSandboxConnection from "./QuickBooksSandboxConnection";
 import { prepareInvoicePaymentHold, updateInvoicePaymentHold } from "../../lib/financialNotificationCommands";
@@ -69,9 +71,6 @@ type HandoffBatch = {
 type HandoffActor = { id: string; name: string };
 
 const MAX_CONTROLLER_EXPORT_INVOICES = 500;
-const CONTROLLER_EXPORT_QUEUE_KEY = ["controller-export-queue"] as const;
-const CONTROLLER_EXPORT_HISTORY_KEY = "controller-export-history";
-
 async function controllerExportRequest(path: string, init?: RequestInit) {
   const sb = supabase();
   const { data } = await sb.auth.getSession();
@@ -192,7 +191,7 @@ export default function ControllerExportPanel({
   });
 
   const historyQuery = useQuery({
-    queryKey: [CONTROLLER_EXPORT_HISTORY_KEY, userScope, fromDate, toDate, actor],
+    queryKey: [...CONTROLLER_EXPORT_HISTORY_KEY, userScope, fromDate, toDate, actor],
     queryFn: async () => {
       const params = new URLSearchParams({ history: "1" });
       if (fromDate) params.set("from", fromDate);

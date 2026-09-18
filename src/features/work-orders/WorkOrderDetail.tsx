@@ -789,6 +789,9 @@ export default function WorkOrderDetail(props: any) {
                               {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
                             </button>
                           )}
+                          <button type="button" onClick={() => setModal("workReport")} className="btn-soft">
+                            Submit work report
+                          </button>
                           {contractorCompletionControl.visible && (
                             <button
                               type="button"

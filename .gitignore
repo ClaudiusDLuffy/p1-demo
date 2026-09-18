@@ -24,6 +24,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# local Supabase CLI state
+supabase/.branches/
+supabase/.temp/
+
+# local browser E2E evidence
+test-results/
+playwright-report/
+blob-report/
+
 # local documentation
 /docs/
 

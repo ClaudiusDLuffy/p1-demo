@@ -36,6 +36,8 @@ import {
 } from "../work-orders/queries";
 import {
   CONTROLLER_INVOICE_HOLDS_KEY,
+  CONTROLLER_EXPORT_HISTORY_KEY,
+  CONTROLLER_EXPORT_QUEUE_KEY,
   INVOICE_BY_ID_KEY,
   INVOICE_PAGES_KEY,
   INVOICES_KEY,
@@ -98,7 +100,11 @@ export default function useInvoices({ currentUser, fire }: any) {
   const refreshFinancialMutation = async (invoiceIds: string[], includeHolds = false) => {
     const refreshes = await Promise.allSettled([
       invalidateWorkflowData(), invalidateFinancialNotificationData(invoiceIds),
-      ...(includeHolds ? [qc.invalidateQueries({ queryKey: CONTROLLER_INVOICE_HOLDS_KEY })] : []),
+      ...(includeHolds ? [
+        qc.invalidateQueries({ queryKey: CONTROLLER_INVOICE_HOLDS_KEY }),
+        qc.invalidateQueries({ queryKey: CONTROLLER_EXPORT_QUEUE_KEY }),
+        qc.invalidateQueries({ queryKey: CONTROLLER_EXPORT_HISTORY_KEY }),
+      ] : []),
     ]);
     return refreshes.some(result => result.status === "rejected")
       ? ". The action was saved, but the latest view could not be loaded. Refresh to review it." : "";
@@ -570,6 +576,11 @@ export default function useInvoices({ currentUser, fire }: any) {
         });
       }
       deletionContexts.current.delete(inv.id);
+      // Clear a detail selection before any post-delete read invalidation. A
+      // selected soft-deleted invoice is intentionally absent from compact
+      // reads, so refetching that key first would produce avoidable NOT_FOUND
+      // responses while the successful delete handler is still unwinding.
+      setSelectedInvoice(current => current === inv.id ? null : current);
       // The shell no longer owns a global invoice cache. Check only this work
       // order's cursor pages before claiming that its final live invoice was
       // removed; a scoped read preserves the old warning without a full-table

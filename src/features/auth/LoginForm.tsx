@@ -23,9 +23,9 @@ export default function LoginForm({
               <Image
                 src="/p1-pros-logo.jpeg"
                 alt="P1 Pros"
-                width={180}
-                height={60}
-                style={{ objectFit: "contain" }}
+                width={1523}
+                height={1452}
+                style={{ width: 90, height: "auto", objectFit: "contain" }}
                 priority
                 onError={() => setImageErrors((prev: any) => ({ ...prev, loginLogo: true }))}
               />

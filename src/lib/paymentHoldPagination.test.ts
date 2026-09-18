@@ -157,7 +157,12 @@ function uiHarness() {
     "../../lib/supabase/client": { supabase: () => ({ auth: { getSession: async () => ({ data: { session: { access_token: "synthetic" } } }) } }) },
     "../../lib/errors/apiFetch": { apiFetch: async (path: string, init: RequestInit) => { requests.push({ path, signal: init.signal }); return Response.json(page()); } },
     "../work-orders/queries": { WORK_ORDERS_KEY: ["work-orders"] },
-    "./queries": { CONTROLLER_INVOICE_HOLDS_KEY: ["controller-invoice-payment-holds"], INVOICES_KEY: ["invoices"] },
+    "./queries": {
+      CONTROLLER_INVOICE_HOLDS_KEY: ["controller-invoice-payment-holds"],
+      CONTROLLER_EXPORT_QUEUE_KEY: ["controller-export-queue"],
+      CONTROLLER_EXPORT_HISTORY_KEY: ["controller-export-history"],
+      INVOICES_KEY: ["invoices"],
+    },
     "./QuickBooksSandboxConnection": { default: "QuickBooksSandboxConnection" },
     "../../lib/financialNotificationCommands": { prepareInvoicePaymentHold: async () => { actions.push("prepare"); return { expectedSourceEventId: actor }; },
       updateInvoicePaymentHold: async (_id: string, action: string, _reason: string, source: string) => { actions.push(action); assert.equal(source, actor); return {}; } },

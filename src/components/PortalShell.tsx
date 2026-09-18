@@ -2663,7 +2663,7 @@ export default function PortalShell() {
   // ===============================================================
   //  LOGIN
   // ===============================================================
-  if (!currentUser) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} rememberMe={rememberMe} setRememberMe={setRememberMe} loginLoading={loginLoading} loginError={loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
+  if (!currentUser || currentUser.active !== true) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} rememberMe={rememberMe} setRememberMe={setRememberMe} loginLoading={loginLoading} loginError={currentUser?.active === false ? "Your account is inactive. Contact an administrator." : loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
 
   // ===============================================================
   //  APP SHELL
@@ -2752,9 +2752,9 @@ export default function PortalShell() {
                 <Image
                   src="/p1-pros-logo.jpeg"
                   alt="P1 Pros"
-                  width={36}
-                  height={36}
-                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
+                  width={1523}
+                  height={1452}
+                  style={{ width: 30, height: "auto", objectFit: "contain", display: "block" }}
                   onError={() => setImageErrors(prev => ({ ...prev, sidebarLogo: true }))}
                 />
               )}
@@ -2905,9 +2905,9 @@ export default function PortalShell() {
                 <Image
                   src="/p1-pros-logo.jpeg"
                   alt="P1 Pros"
-                  width={36}
-                  height={36}
-                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
+                  width={1523}
+                  height={1452}
+                  style={{ width: 30, height: "auto", objectFit: "contain", display: "block" }}
                   onError={() => setImageErrors(prev => ({ ...prev, sidebarLogo: true }))}
                 />
               )}
@@ -3252,7 +3252,7 @@ export default function PortalShell() {
           <InvoiceList page={page} selectedInvoice={selectedInvoice} invTab={invTab} setInvTab={setInvTab} isManager={isManager} invoices={invoices} currentUser={currentUser} setSelectedInvoice={setSelectedInvoice} getUser={getUser} fmt={fmt} doBatchReviewInvoices={doBatchReviewInvoices} onEditRejected={openCreateInvoice} />
 
           <InvoiceDetail
-            key={`${currentUser.id}:${selectedInvoice || ""}`}
+            key={`invoice-detail:${currentUser.id}:${selectedInvoice || ""}`}
             page={page}
             selectedInvoice={selectedInvoice}
             invoices={invoiceDetailRows}
@@ -3317,7 +3317,7 @@ export default function PortalShell() {
 
           {isManager && !invoiceController && page === "billing" && selectedBillingInvoice && (
             <BillingInvoiceDetail
-              key={`${currentUser.id}:${selectedBillingInvoice || ""}`}
+              key={`billing-invoice-detail:${currentUser.id}:${selectedBillingInvoice || ""}`}
               invoice={selectedBillingInvoiceData}
               workOrder={selectedBillingInvoiceData?.wot
                 ? selectedBillingWorkOrder
@@ -3427,7 +3427,7 @@ export default function PortalShell() {
           )}
 
           <WorkOrderDetail
-            key={`${currentUser.id}:${selectedWO || ""}`}
+            key={`work-order-detail:${currentUser.id}:${selectedWO || ""}`}
             page={page}
             selectedWO={selectedWO}
             woData={woData}
@@ -3627,7 +3627,7 @@ export default function PortalShell() {
             <DirectorySelect aria-label="New contractor" domain="assignable_contractors" value={reassignTarget} emptyLabel="Choose a contractor…" disabled={modalLoading}
               excludedIds={[woData.contractor]} onChange={event => setReassignTarget(event.target.value)} />
           </div>
-          {isManager && !invoiceController && currentUser?.active !== false && reassignTarget && reassignTarget !== woData.contractor && (
+          {isManager && !invoiceController && reassignTarget && reassignTarget !== woData.contractor && (
             <AdministrativeTransferAction key={`${woData.id}-${reassignTarget}`} contractorId={reassignTarget} disabled={modalLoading} onDirtyChange={setAdministrativeTransferDirty}
               onTransfer={async (reason, confirmed) => {
                 setModalLoading(true);
@@ -3676,7 +3676,7 @@ export default function PortalShell() {
               ? <>The current contractor will lose portal access and receive an automatic removal email. The capital workflow and staff quote remain attached; resolve any open contractor invoices first.</>
               : <>The current contractor will lose portal access and receive an automatic removal email. If invoicing may still be needed, use <strong>Duplicate for reassignment</strong> instead.</>}
           </div>
-          {isManager && !invoiceController && currentUser?.active !== false && (
+          {isManager && !invoiceController && (
             <AdministrativeTransferAction key={`${woData.id}-unassign`} contractorId={null} disabled={modalLoading} onDirtyChange={setAdministrativeTransferDirty}
               onTransfer={async (reason, confirmed) => {
                 setModalLoading(true);
