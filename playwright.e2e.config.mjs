@@ -30,6 +30,7 @@ const disabledExternalProviders = {
   QUICKBOOKS_PRODUCTION_CLIENT_ID: "",
   QUICKBOOKS_PRODUCTION_CLIENT_SECRET: "",
   QUICKBOOKS_TOKEN_ENCRYPTION_KEY: "",
+  P1_E2E_ALLOW_LOCAL_CSP: "true",
 };
 
 export default defineConfig({
@@ -46,9 +47,9 @@ export default defineConfig({
   ],
   use: {
     baseURL,
-    // The production CSP intentionally permits hosted Supabase origins only.
-    // This bypass is confined to Playwright's disposable localhost context so
-    // browser workflows can reach the local gateway without weakening the app.
+    // The production CSP still permits hosted Supabase origins only. The local
+    // server adds its exact loopback Supabase origin under a development-only
+    // flag because WebKit does not consistently honor CSP bypass for fetches.
     bypassCSP: true,
     viewport: { width: 1440, height: 1000 },
     screenshot: "only-on-failure",
@@ -77,6 +78,10 @@ export default defineConfig({
     {
       name: "desktop-chrome",
       use: { ...devices["Desktop Chrome"], channel: "chrome" },
+    },
+    {
+      name: "desktop-webkit",
+      use: { ...devices["Desktop Safari"] },
     },
   ],
 });

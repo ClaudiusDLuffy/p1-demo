@@ -38,6 +38,16 @@ export function createPhotoObjectUrl(blob: Blob): string {
 export function revokePhotoObjectUrl(url: string): void {
   URL.revokeObjectURL(url);
 }
+export const PHOTO_DOWNLOAD_REVOKE_DELAY_MS = 1_000;
+export function revokePhotoObjectUrlAfterDownload(
+  url: string,
+  schedule: (callback: () => void, delay: number) => unknown = globalThis.setTimeout,
+): void {
+  // Safari/WebKit may begin consuming a programmatic download after the click
+  // handler returns. Immediate revocation turns a valid download into an
+  // access-control failure, so retain the URL for one bounded second.
+  schedule(() => revokePhotoObjectUrl(url), PHOTO_DOWNLOAD_REVOKE_DELAY_MS);
+}
 export function createPhotoArchiveObjectUrl(archive: Uint8Array): string {
   const bytes = new Uint8Array(archive.byteLength);
   bytes.set(archive);

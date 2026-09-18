@@ -86,6 +86,17 @@ test("actual Sel Enter selects once with field name/value and returns focus; Esc
   const escape = key("Escape", triggerElement); uiInvoke(find(tree, node => node.type === "button"), "onKeyDown", escape);
   assert.equal(escape.defaultPrevented, true); assert.equal(escape.stopped, true); assert.equal(changes.length, 1);
 });
+test("open Sel still consumes Escape preemptively prevented by its modal owner", () => {
+  const h = primitiveHarness("src/components/ui/Sel.tsx");
+  const props = { name: "priority", value: "p3", children: [option("p3", "P3"), option("p4", "P4")] };
+  let tree = h.render("Sel", props); const triggerElement = { focus() {} };
+  const trigger = find(tree, node => node.type === "button"); (trigger.props.ref as { current: unknown }).current = triggerElement;
+  uiInvoke(trigger, "onClick"); tree = h.render("Sel", props);
+  const escape = key("Escape", triggerElement); escape.preventDefault();
+  uiInvoke(find(tree, node => node.type === "button"), "onKeyDown", escape);
+  tree = h.render("Sel", props);
+  assert.equal(uiNodes(tree).some(node => node.props.role === "listbox"), false);
+});
 test("searchable Sel uses named combobox, bounded search, no-results and disabled-option guard", () => {
   const h = primitiveHarness("src/components/ui/Sel.tsx"); let changes = 0;
   const props = { "aria-label": "Technician type", children: Array.from({ length: 11 }, (_, index) => option(String(index), `Choice ${index}`, index === 0)), onChange: () => changes++ };
@@ -192,6 +203,32 @@ test("legacy Modal close callback remains single and Escape/backdrop opt-outs ar
   tree = h.render("Modal", { ...props, closeOnEscape: true }); h.effects.forEach(effect => effect());
   dialog = find(tree, node => node.type === "dialog");
   uiInvoke(dialog, "onCancel", { preventDefault() {} }); assert.equal(closed, 2);
+});
+
+test("Modal reserves Safari native cancel for an expanded owned picker", () => {
+  const preferred: string[] = [];
+  const host = { dataset: {}, isConnected: true, remove() {} };
+  const h = primitiveHarness("src/components/ui/Modal.tsx", { "../../lib/forms/modalRuntime": {
+    registerModal: () => () => undefined, isTopModal: () => true,
+    isBackdropRelease: (started: boolean, ended: boolean) => started && ended,
+  } });
+  let tree = h.render("Modal", { title: "Picker owner", onRequestClose: (reason: string) => preferred.push(reason) });
+  uiInvoke(find(tree, node => node.props["data-modal-anchor"] === "true"), "ref", {
+    ownerDocument: { createElement: () => host, body: { appendChild() {} } },
+  });
+  tree = h.render("Modal", { title: "Picker owner", onRequestClose: (reason: string) => preferred.push(reason) });
+  h.effects.forEach(effect => effect());
+  const dialog = find(tree, node => node.type === "dialog");
+  let pickerExpanded = true;
+  const element = { setAttribute() {}, removeAttribute() {}, querySelector: () => pickerExpanded ? {} : null };
+  (dialog.props.ref as { current: unknown }).current = element;
+  uiInvoke(dialog, "onKeyDownCapture", { key: "Escape" });
+  let prevented = 0;
+  uiInvoke(dialog, "onCancel", { preventDefault() { prevented++; } });
+  assert.equal(prevented, 1); assert.deepEqual(preferred, []);
+  pickerExpanded = false;
+  uiInvoke(dialog, "onCancel", { preventDefault() { prevented++; } });
+  assert.deepEqual(preferred, ["escape"]);
 });
 
 test("runtime blank Modal names get safe fallbacks and generic non-sensitive warnings", () => {

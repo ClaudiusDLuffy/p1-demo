@@ -5,11 +5,12 @@ import ts from "typescript";
 type Header = { key: string; value: string };
 type Configuration = { headers(): Promise<{ source: string; headers: Header[] }[]> };
 
-export const PRESERVED_ENFORCED_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-src 'self' blob:; object-src 'none'";
+export const PRESERVED_ENFORCED_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co; frame-src 'self' blob:; object-src 'none'";
 
 /** Executes the installed Next config shape without .env, building assets, or
  * inheriting the test runner's deployment configuration. */
-export async function readNextHeaders(reportOnlyHeaders: () => Header[] = () => []) {
+export async function readNextHeaders(reportOnlyHeaders: () => Header[] = () => [],
+  environment: Record<string, string | undefined> = {}) {
   const source = readFileSync("next.config.ts", "utf8");
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -17,6 +18,8 @@ export async function readNextHeaders(reportOnlyHeaders: () => Header[] = () => 
   const exports: { default?: (phase: string) => Promise<Configuration> } = {};
   vm.runInNewContext(output, {
     exports,
+    process: { env: environment },
+    URL,
     require(name: string) {
       if (name === "next/constants") return {
         PHASE_DEVELOPMENT_SERVER: "phase-development-server",

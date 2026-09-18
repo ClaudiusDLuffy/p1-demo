@@ -45,6 +45,8 @@ class Element {
     visit(this); return nodes;
   }
   querySelector(selector: string) {
+    if (selector.includes("aria-expanded")) return this.querySelectorAll().find(element =>
+      element.attributes.get("aria-expanded") === "true" && element.attributes.has("aria-haspopup")) || null;
     const key = selector.includes("restore-focus") ? "data-modal-restore-focus" : "data-modal-initial-focus";
     return selector.includes("main") ? null : this.querySelectorAll().find(element => element.attributes.get(key) === "true") || null;
   }
@@ -128,6 +130,15 @@ test("nested dialogs use one listener pair and only topmost receives Escape/navi
 test("Escape consumed by nested selection does not dismiss modal", () => {
   const h = setup(); const remove = h.register(); const event = key("Escape"); event.preventDefault();
   h.owner.emit("keydown", event); assert.deepEqual(h.requests, []); remove();
+});
+test("expanded modal-owned picker receives Escape before the document modal listener", () => {
+  const h = setup(); const picker = h.dialog.append(new Element(h.owner, "button"));
+  picker.setAttribute("aria-haspopup", "listbox"); picker.setAttribute("aria-expanded", "true");
+  const remove = h.register(); const first = key("Escape");
+  h.owner.emit("keydown", first); assert.deepEqual(h.requests, []); assert.equal(first.defaultPrevented, true);
+  picker.setAttribute("aria-expanded", "false"); const second = key("Escape");
+  h.owner.emit("keydown", second); assert.deepEqual(h.requests, ["escape"]); assert.equal(second.defaultPrevented, true);
+  remove();
 });
 test("focus outside top modal is recovered and disconnected restore falls back to parent", () => {
   const h = setup(); const trigger = h.owner.body.append(new Element(h.owner, "button")); trigger.focus();

@@ -103,6 +103,10 @@ const downloadPrivateArchive = (payload: ArchiveDownloadPayload, fallbackName: s
   const anchor = document.createElement("a");
   anchor.href = target.toString();
   anchor.download = payload.filename || fallbackName;
+  // WebKit ignores download= for a different origin. Keep that navigation in
+  // a separate browsing context so Safari cannot interrupt the live portal's
+  // query refreshes while the signed Storage response becomes a download.
+  anchor.target = "_blank";
   anchor.rel = "noopener noreferrer";
   document.body.appendChild(anchor);
   anchor.click();

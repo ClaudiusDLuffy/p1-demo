@@ -13,7 +13,7 @@ import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { T } from "../../lib/constants";
 import { loadAllWorkOrderPhotoPaths } from "../../lib/db";
 import { getPhotoUrl, loadPhotoBlob, loadPhotoPreviewBlob } from "./browserPhotoStorageAdapter";
-import { createPhotoArchiveObjectUrl, createPhotoObjectUrl, revokePhotoObjectUrl } from "./browserPhotoFileAdapter";
+import { createPhotoArchiveObjectUrl, createPhotoObjectUrl, revokePhotoObjectUrl, revokePhotoObjectUrlAfterDownload } from "./browserPhotoFileAdapter";
 import { PHOTO_ACCEPTED_FORMAT_GUIDANCE, PHOTO_IMAGE_FORMATS, PHOTO_INPUT_ACCEPT } from "../../lib/photoContentPolicy";
 import { PHOTO_UPLOAD_MAX_FILES, type PhotoUploadItem } from "./photoUploadController";
 import { PhotoUploadProgress, type PhotoUploadProgressProps } from "./PhotoUploadProgress";
@@ -147,8 +147,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
       fire?.(`Photo download failed: ${message}`);
     } finally {
       if (objectUrl) {
-        const completedObjectUrl = objectUrl;
-        window.setTimeout(() => revokePhotoObjectUrl(completedObjectUrl), 0);
+        revokePhotoObjectUrlAfterDownload(objectUrl);
       }
       setArchiveProgress(null);
     }
@@ -184,7 +183,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
       anchor.click();
       anchor.remove();
     } finally {
-      if (objectUrl) revokePhotoObjectUrl(objectUrl);
+      if (objectUrl) revokePhotoObjectUrlAfterDownload(objectUrl);
       setDownloadingPath(null);
     }
   };
