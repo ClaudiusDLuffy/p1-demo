@@ -123,11 +123,13 @@ test("dispatcher rejects an untouched unassigned work order with an audited reas
 test("staff work-order lifecycle controls reach their intended queues", async ({ page }) => {
   await openStaffWorkOrder(page, "E2E-STRAIGHT-BILL");
   await page.getByRole("button", { name: "Straight to Billing", exact: true }).click();
-  await expect(page.getByText("Billing only · do not dispatch", { exact: true })).toBeVisible();
   const billingDialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice" });
   await expect(billingDialog).toBeVisible();
+  await expect(billingDialog.getByRole("button", { name: "Invoice work order", exact: true }))
+    .toContainText("E2E-STRAIGHT-BILL");
   await billingDialog.getByRole("button", { name: "Discard draft", exact: true }).click();
   await expect(billingDialog).toBeHidden();
+  await expect(page.getByText("Billing only · do not dispatch", { exact: true })).toBeVisible();
 
   await openSidebarPage(page, "Work orders");
   await openWorkOrder(page, "E2E-CAPITAL-DECLINE");

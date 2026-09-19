@@ -33,10 +33,18 @@ test("auto-populated P1 invoice numbers are editable before lifecycle lock", () 
 test("an untouched invoice-number preview refreshes every time create opens", () => {
   assert.match(modal, /const numberEditedRef = useRef\(false\)/);
   assert.match(modal, /billing-invoices\?nextNumber=1[\s\S]*cache: "no-store"/);
-  assert.match(modal, /if \(!numberEditedRef\.current\) \{\s*setValue\("num", preview/);
+  assert.match(modal, /if \(!numberEditedRef\.current && !numberInputFocusedRef\.current\) \{\s*setValue\("num", preview/);
   assert.match(modal, /num: editingInvoice\?\.num \|\| ""/);
   assert.doesNotMatch(modal, /num: editingInvoice\?\.num \|\| numberPreview/);
   assert.match(modal, /numberEditedRef\.current = restoredNumberEdited/);
+});
+
+test("an invoice-number preview cannot splice into active manual input", () => {
+  assert.match(modal, /const numberInputFocusedRef = useRef\(false\)/);
+  assert.match(modal, /const pendingNumberPreviewRef = useRef\(""\)/);
+  assert.match(modal, /onFocus=\{\(\) => \{ numberInputFocusedRef\.current = true; \}\}/);
+  assert.match(modal, /pendingNumberPreviewRef\.current = preview/);
+  assert.match(modal, /!String\(getValues\("num"\) \|\| ""\)\.trim\(\)/);
 });
 
 test("staff invoice allocation reconciles counters with persisted numbers", () => {
