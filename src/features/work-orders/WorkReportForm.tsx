@@ -64,7 +64,7 @@ export default function WorkReportForm(props: any) {
       {dismissal.dialog}
       <form onSubmit={handleSubmit(onSubmit)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
-          Work report for Store #{woStore || "-"} / {woId}
+          Work report for Store #{woStore || "-"} / {woId}. This adds visit documentation; it does not check in, check out, resume, or complete the work order.
         </div>
         <div style={{ display: "grid", gap: 14 }}>
           <Field label="Technician name">

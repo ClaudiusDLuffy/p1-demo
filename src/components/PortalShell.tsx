@@ -1441,7 +1441,7 @@ export default function PortalShell() {
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
     doCloseReopenedFollowUp, doReopen,
-    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto, photoUploadItems, retryPhotoUploads, cancelPhotoUploads, photoDeleteErrors, retryPhotoDeletion,
     doAddPart, doUpdatePart, doDeletePart,
@@ -3453,6 +3453,7 @@ export default function PortalShell() {
             setModal={setModal}
             doCapitalFlag={doCapitalFlag}
             doCapitalDecline={doCapitalDecline}
+            doCapitalResume={doCapitalResume}
             doCapitalComplete={handleCapitalCompleted}
             onOpenBillingForWorkOrder={openBillingFromWorkOrder}
             doMoveToInvoice={doMoveToInvoice}
@@ -4119,7 +4120,7 @@ export default function PortalShell() {
       })()}
 
       {modal === "startWork" && woData && (
-        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title={woData.status === "parts" ? "Resume work" : "Start work"} width={440}>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title={woData.functionalStatus === "Awaiting Parts" ? "Resume work" : "Start work"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Checking in at Store #{woData.store}. Status will auto-sync to 7-Eleven.</div>
           <div style={{ display: "grid", gap: 14 }}>
             {woData.assignmentTransferPendingVisit ? (
@@ -4155,7 +4156,7 @@ export default function PortalShell() {
               disabled={modalLoading}
               className="btn-accent"
               style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />{woData.status === "parts" ? "Resuming..." : "Starting..."}</> : woData.assignmentTransferPendingVisit ? "Start new visit now" : (woData.status === "parts" ? "Resume" : "Start work")}</button>
+            >{modalLoading ? <><BtnSpinner />{woData.functionalStatus === "Awaiting Parts" ? "Resuming..." : "Starting..."}</> : woData.assignmentTransferPendingVisit ? "Start new visit now" : (woData.functionalStatus === "Awaiting Parts" ? "Resume" : "Start work")}</button>
           </div>
         </Modal>
       )}

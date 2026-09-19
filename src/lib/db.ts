@@ -996,6 +996,16 @@ export async function completeCapitalWork(id: string): Promise<any> {
   return data;
 }
 
+export async function resumeCapitalWork(id: string): Promise<any> {
+  const sb = supabase();
+  const { data, error } = await sb.rpc(
+    "resume_capital_work",
+    { p_work_order_id: id },
+  );
+  if (error) throw normalizeUnknownError(error);
+  return data;
+}
+
 export async function closeWorkOrderWithoutInvoice(
   id: string,
   expectedWorkflowCycle: number,

@@ -23,9 +23,11 @@ test("email-intake and manual assignments can start work and set an ETA", () => 
 });
 
 test("visit controls mirror resume and receiving-transfer state boundaries", () => {
-  assert.equal(workOrderVisitAction({
-    status: "parts", functionalStatus: "Awaiting Parts", contractorId: "contractor-1",
-  }), "resume");
+  for (const status of ["parts", "pending_invoice", "pending_approval", "pending_payment"]) {
+    assert.equal(workOrderVisitAction({
+      status, functionalStatus: "Awaiting Parts", contractorId: "contractor-1",
+    }), "resume", status);
+  }
   assert.equal(workOrderVisitAction({
     status: "wip", functionalStatus: "Work in Progress", contractorId: "contractor-1",
     assignmentTransferPendingVisit: true,

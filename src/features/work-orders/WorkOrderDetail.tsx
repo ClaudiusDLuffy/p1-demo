@@ -106,7 +106,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 
 export default function WorkOrderDetail(props: any) {
   const { photoUploadItems = [], retryPhotoUploads, cancelPhotoUploads, photoDeleteError = "", retryPhotoDeletion } = props;
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -303,6 +303,7 @@ export default function WorkOrderDetail(props: any) {
   // pending_approval, which previously hid these). Capital is excluded (it has
   // its own staff flow). Pausing/closing never touches existing invoices.
   const jobOpen = !["closed", "capital", "pending_capital_completion"].includes(woData?.status);
+  const fieldWorkInProgress = woData?.functionalStatus === "Work in Progress";
   const sevenElevenWorkOrderId = canonicalSevenElevenWorkOrderId(woData);
   const unrelatedIncidentWorkOrderIds = (
     woData?.incidentReuse?.relatedWorkOrderIds || []
@@ -632,7 +633,11 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
                         <Badge conf={PRIORITY[woData.priority]} />
-                        <Badge conf={{ ...(STATUS[woData.status] || {}), label: `Portal: ${STATUS[woData.status]?.label || woData.status}` }} />
+                        <Badge conf={{
+                          ...(STATUS[woData.status] || {}),
+                          label: `${["pending_invoice", "pending_approval", "pending_payment"].includes(woData.status)
+                            && woData.functionalStatus !== "Completed" ? "Billing" : "Portal"}: ${STATUS[woData.status]?.label || woData.status}`,
+                        }} />
                         <CapitalWorkOrderBadge workOrder={woData} />
                         {woData.functionalStatus && <Badge conf={{ label: `7-Eleven FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
                         {sla2
@@ -782,7 +787,7 @@ export default function WorkOrderDetail(props: any) {
                       {/* Field completion is independent of invoice permission.
                           Invoice-capable technicians retain the separate invoice
                           workflow after marking the field work complete. */}
-                      {!contractorHistoryReadOnly && !isManager && jobOpen && !woData.assignmentTransferPendingVisit && !["assigned", "parts"].includes(woData.status) && (
+                      {!contractorHistoryReadOnly && !isManager && jobOpen && fieldWorkInProgress && !woData.assignmentTransferPendingVisit && !["assigned", "parts"].includes(woData.status) && (
                         <>
                           {woData.functionalStatus === "Work in Progress" && (
                             <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
@@ -830,6 +835,11 @@ export default function WorkOrderDetail(props: any) {
                         </button>
                       )}
                       {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
+                        <button onClick={() => void doCapitalResume(woData.id)} disabled={isLoading("capitalResume_" + woData.id)} className="btn-accent" style={loadingStyle("capitalResume_" + woData.id)}>
+                          {isLoading("capitalResume_" + woData.id) ? <><BtnSpinner />Authorizing...</> : "Authorize & resume capital work"}
+                        </button>
+                      )}
+                      {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
                         <button onClick={() => void doCapitalComplete(woData.id)} disabled={isLoading("capitalComplete_" + woData.id)} className="btn-accent" style={loadingStyle("capitalComplete_" + woData.id)}>
                           {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
                         </button>
@@ -870,6 +880,15 @@ export default function WorkOrderDetail(props: any) {
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
 
                     </div>
+
+                    {!isManager && woData.status === "pending_capital_completion" && (
+                      <div role="status" className="card" style={{ padding: "14px 16px", marginBottom: 16, background: T.warnSoft, borderColor: `${T.warn}44` }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Capital work is waiting for P1 authorization</div>
+                        <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
+                          P1 must record 7-Eleven approval before the contractor can start the next field visit. This hold cannot be bypassed from a contractor account.
+                        </div>
+                      </div>
+                    )}
 
                     {!contractorHistoryReadOnly && woData.status !== "closed" && !isManager && canInvoice && (
                       <div className="card contractor-invoice-cta" style={{ padding: "16px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>

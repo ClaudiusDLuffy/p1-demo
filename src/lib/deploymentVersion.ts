@@ -11,6 +11,7 @@ export function normalizeDeploymentVersion(value: unknown): string | null {
 
 export function shortDeploymentVersion(value: string): string {
   if (value === FALLBACK_VERSION) return "local";
+  if (/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(value)) return value;
   const withoutVercelPrefix = value.startsWith("dpl_") ? value.slice(4) : value;
   return withoutVercelPrefix.slice(0, 10);
 }

@@ -92,7 +92,7 @@ export default function DashboardWorkBuckets({
   };
   const buckets = [
     { id: "unassigned", label: "Unassigned", description: "New calls that still need a contractor assignment.", query: unassignedQuery },
-    { id: "pending_submission", label: "Pending 7-Eleven submission", description: "Contractor review is complete; P1 billing still needs to be prepared or submitted.", query: submissionQuery },
+    { id: "pending_submission", label: "Pending 7-Eleven submission", description: "P1 billing still needs to be prepared or submitted. Field progress is tracked separately.", query: submissionQuery },
     { id: "pending_approval", label: "Pending approvals", description: "Submitted, revised, or rejected contractor invoices still need a staff decision or correction.", query: approvalQuery },
     { id: "awaiting_parts", label: "Awaiting parts", description: "Jobs paused for parts, kept separate from P1 procurement requests.", query: partsQuery },
     { id: "seven_eleven_updates", label: "Needing 7-Eleven updates", description: "Activity exists that has not yet been copied into the 7-Eleven portal.", query: sevenElevenQuery },

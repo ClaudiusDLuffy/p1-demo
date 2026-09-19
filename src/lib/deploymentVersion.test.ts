@@ -7,20 +7,21 @@ import {
 } from "./deploymentVersion";
 
 test("deployment versions accept only bounded public identifiers", () => {
-  assert.equal(normalizeDeploymentVersion(" dpl_ABC-123.test "), "dpl_ABC-123.test");
+  assert.equal(normalizeDeploymentVersion(" 0.1.0-beta.1 "), "0.1.0-beta.1");
   for (const invalid of [null, "", "contains spaces", "slash/value", "x".repeat(121)]) {
     assert.equal(normalizeDeploymentVersion(invalid), null);
   }
 });
 
 test("deployment comparison fails closed on invalid responses", () => {
-  assert.equal(deploymentChanged("dpl_old", "dpl_new"), true);
-  assert.equal(deploymentChanged("dpl_old", "dpl_old"), false);
-  assert.equal(deploymentChanged("dpl_old", "invalid response"), false);
+  assert.equal(deploymentChanged("0.1.0", "0.1.1"), true);
+  assert.equal(deploymentChanged("0.1.0", "0.1.0"), false);
+  assert.equal(deploymentChanged("0.1.0", "invalid response"), false);
 });
 
-test("display versions stay short without exposing the Vercel prefix", () => {
+test("display versions preserve package release numbers", () => {
   assert.equal(shortDeploymentVersion("local-development"), "local");
-  assert.equal(shortDeploymentVersion("dpl_1234567890abcdef"), "1234567890");
-  assert.equal(shortDeploymentVersion("abcdef1234567890"), "abcdef1234");
+  assert.equal(shortDeploymentVersion("0.1.0"), "0.1.0");
+  assert.equal(shortDeploymentVersion("12.34.56"), "12.34.56");
+  assert.equal(shortDeploymentVersion("1.2.3-release.10"), "1.2.3-release.10");
 });

@@ -57,7 +57,8 @@ export function workOrderVisitAction(
       && input.functionalStatus === "Work in Progress") {
     return "receiving_start";
   }
-  if (input.status === "parts" && input.functionalStatus === "Awaiting Parts") {
+  if (["parts", "pending_invoice", "pending_approval", "pending_payment"].includes(String(input.status || ""))
+      && input.functionalStatus === "Awaiting Parts") {
     return "resume";
   }
   if (input.status === "assigned"
