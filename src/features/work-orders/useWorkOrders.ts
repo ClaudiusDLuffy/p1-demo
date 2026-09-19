@@ -20,6 +20,7 @@ import {
   flagWorkOrderCapital,
   moveWorkOrderStraightToBilling,
   completeCapitalWork,
+  resumeCapitalWork,
   closeWorkOrderWithoutInvoice,
   closeReopenedWorkOrderWithoutAdditionalBilling,
   reopenWorkOrder,
@@ -734,7 +735,12 @@ export default function useWorkOrders({
       minute: "2-digit",
     });
     const text = `Checked in and started work at ${formattedStart}.${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
-    const patch: Record<string, unknown> = { status: "wip", functionalStatus: "Work in Progress" };
+    const patch: Record<string, unknown> = {
+      status: ["pending_invoice", "pending_approval", "pending_payment"].includes(existing?.status)
+        ? existing.status
+        : "wip",
+      functionalStatus: "Work in Progress",
+    };
     if (!existing?.startTimeRaw) {
       patch.startTime = formattedStart;
       patch.startTimeRaw = firstStartIso;
@@ -746,7 +752,7 @@ export default function useWorkOrders({
     const started = await dbCall(async () => {
       const result = await startWorkOrderVisit({
         ...lifecycleContextFor(existing), checkedInAt: requestedStartIso, notes: notes.trim(),
-      }, existing?.status === "parts" || existing?.assignmentTransferPendingVisit === true);
+      }, existing?.functionalStatus === "Awaiting Parts" || existing?.assignmentTransferPendingVisit === true);
       patchLocalWO(woId, { lifecycleVersion: result.lifecycleVersion, assignmentTransferPendingVisit: false });
     }, "Start work failed", (error) => {
       restoreWorkOrders(snapshot);
@@ -810,7 +816,12 @@ export default function useWorkOrders({
       minute: "2-digit",
     });
     const text = `Work paused at ${formattedPause}: ${reason}.${partsSummary}${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
-    const updates: Record<string, unknown> = { status: "parts", functionalStatus: "Awaiting Parts" };
+    const updates: Record<string, unknown> = {
+      status: ["pending_invoice", "pending_approval", "pending_payment"].includes(existing?.status)
+        ? existing.status
+        : "parts",
+      functionalStatus: "Awaiting Parts",
+    };
     if (partLabel) updates.partNeeded = partLabel;
     if (legacyEta) updates.partEta = legacyEta;
     const snapshot = qc.getQueryData(WORK_ORDERS_KEY);
@@ -1520,6 +1531,33 @@ export default function useWorkOrders({
     }
   };
 
+  const doCapitalResume = async (woId: string) => {
+    setLoading("capitalResume_" + woId, true);
+    try {
+      const result = await resumeCapitalWork(woId);
+      patchLocalWO(woId, {
+        status: result.status,
+        functionalStatus: result.functional_status,
+        capitalStatus: result.capital_status,
+        isCapital: result.is_capital,
+        contractorAssignmentVersion: result.contractor_assignment_version,
+        lifecycleVersion: result.lifecycle_version,
+      }, localActivity(
+        `Capital work authorized by 7-Eleven and released for the next field visit by ${currentUser.name}.`,
+        "system",
+      ));
+      invalidateWorkOrders();
+      fire("Capital work authorized — contractor can begin the next visit");
+      return true;
+    } catch (error: unknown) {
+      invalidateWorkOrders();
+      fire(`Capital authorization failed: ${rpcErrorMessage(error)}`);
+      return false;
+    } finally {
+      setLoading("capitalResume_" + woId, false);
+    }
+  };
+
 
   const doAutoAssign = async () => {
     const unassigned: any[] = [];
@@ -2003,7 +2041,7 @@ export default function useWorkOrders({
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
     doCloseReopenedFollowUp, doReopen,
-    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalComplete, doAutoAssign,
+    doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto, photoUploadItems, retryPhotoUploads, cancelPhotoUploads, photoDeleteErrors, retryPhotoDeletion,
     doAddPart, doUpdatePart, doDeletePart,

@@ -322,7 +322,7 @@ export const getWorkOrderProgressSteps = (
   const workStarted = Boolean(wo?.startTime || wo?.startTimeRaw || wo?.start_time);
   const dispatched = Boolean(wo?.dispatchedAt || wo?.dispatched_at || wo?.contractor || workStarted);
   const assetCaptured = Boolean(wo?.assetMake && wo?.assetModel && wo?.assetSerial);
-  const reachedCompleted = ["completed", "pending_invoice", "pending_approval", "closed"].includes(status);
+  const reachedCompleted = wo?.functionalStatus === "Completed";
   const trackedSyncUpdates = activities.filter((activity) => activity.requiresSevenElevenSync);
   const reachedPortalUpdated = workOrderHasPendingSevenElevenSync(wo)
     ? false

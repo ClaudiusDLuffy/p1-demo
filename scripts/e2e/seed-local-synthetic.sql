@@ -262,7 +262,12 @@ from (values
   ('E2E-BATCH-REJECT-B',      '043', 'HVAC',          'HVAC',                    'Batch reject contractor bill B',    'p3', 'pending_approval',          'Completed',                   :'direct_id'::uuid,          2500::numeric, false, null,                    false, now() - interval '3 hours',   now() - interval '1 hour',    null::uuid,                 'Synthetic Direct Contractor',     0, 2::bigint, null::timestamptz),
   ('E2E-HISTORY-FILES',       '044', 'Refrigeration', 'Refrigeration equipment',  'Closed-history private files',      'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
   ('E2E-WORK-REPORT',         '045', 'Refrigeration', 'Refrigeration equipment',  'Work report controls',              'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
-  ('E2E-ACCESS-REVOCATION',   '046', 'Refrigeration', 'Refrigeration equipment',  'Live access revocation',            'p2', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1500::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 0, 0::bigint, null::timestamptz)
+  ('E2E-ACCESS-REVOCATION',   '046', 'Refrigeration', 'Refrigeration equipment',  'Live access revocation',            'p2', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1500::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 0, 0::bigint, null::timestamptz),
+  ('E2E-AGED-PARTS',          '047', 'Refrigeration', 'Refrigeration equipment',  'Aged paused field work',            'p2', 'parts',                     'Awaiting Parts',              :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '32 days',  null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 4::bigint, null::timestamptz),
+  ('E2E-AGED-CAPITAL-PARTS',  '048', 'Refrigeration', 'Refrigeration equipment',  'Aged paused capital field work',    'p2', 'parts',                     'Awaiting Parts',              :'direct_id'::uuid,          5000::numeric, true,  'Approved - work authorized',false, now() - interval '32 days',  null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 4::bigint, null::timestamptz),
+  ('E2E-AGED-INVOICE-PARTS',  '049', 'Refrigeration', 'Refrigeration equipment',  'Aged paused invoicing field work',  'p2', 'pending_invoice',           'Awaiting Parts',              :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '32 days',  null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 4::bigint, null::timestamptz),
+  ('E2E-AGED-CAPITAL-WAIT',   '050', 'Refrigeration', 'Refrigeration equipment',  'Aged capital authorization wait',   'p2', 'pending_capital_completion','Pending Capital Completion',  :'direct_id'::uuid,          5000::numeric, true,  'Approved - work authorized',false, now() - interval '32 days',  null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 4::bigint, null::timestamptz),
+  ('E2E-STAFF-BILL-CALC',     '051', 'General',       'General Maintenance',      'Billing calculation persistence',   'p3', 'pending_invoice',           'Completed',                   null::uuid,                  2000::numeric, false, null,                    true,  null::timestamptz,              now() - interval '1 hour',    null::uuid,                 null::text,                         0, 1::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
@@ -303,6 +308,26 @@ values
     '00000000-0000-4000-8000-00000000f202', 'E2E-TRANSFER-OPEN',
     :'direct_id'::uuid, now() - interval '2 hours', null,
     :'direct_id'::uuid, null
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f203', 'E2E-AGED-PARTS',
+    :'direct_id'::uuid, now() - interval '32 days', now() - interval '32 days' + interval '90 minutes',
+    :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f204', 'E2E-AGED-CAPITAL-PARTS',
+    :'direct_id'::uuid, now() - interval '32 days', now() - interval '32 days' + interval '75 minutes',
+    :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f205', 'E2E-AGED-INVOICE-PARTS',
+    :'direct_id'::uuid, now() - interval '32 days', now() - interval '32 days' + interval '60 minutes',
+    :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f206', 'E2E-AGED-CAPITAL-WAIT',
+    :'direct_id'::uuid, now() - interval '32 days', now() - interval '32 days' + interval '45 minutes',
+    :'direct_id'::uuid, :'direct_id'::uuid
   );
 
 insert into public.activities (

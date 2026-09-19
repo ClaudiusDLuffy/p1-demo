@@ -96,14 +96,59 @@ test("staff creates and submits a complete P1-to-7-Eleven invoice", async ({ pag
   await expect(page.getByText("#P1-E2E-SUBMITTED-001", { exact: true })).toBeVisible();
 });
 
+test("billing calculations persist exact quantities, markup, tax, subtotal, and total", async ({ page }) => {
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "7-Eleven billing");
+  const search = page.getByRole("searchbox", { name: "Search billing invoices and work orders" });
+  await search.fill("E2E-STAFF-BILL-CALC");
+  const readyRow = page.getByText("E2E-STAFF-BILL-CALC", { exact: true })
+    .locator("xpath=ancestor::div[.//button[normalize-space()='Create invoice']][1]");
+  await readyRow.getByRole("button", { name: "Create invoice", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice" });
+
+  await dialog.getByLabel("Invoice #").fill("P1-E2E-CALC-001");
+  await dialog.getByRole("button", { name: /^\+ Labor/ }).click();
+  await dialog.getByLabel("Line 1 description").fill("Synthetic calculation labor");
+  await dialog.getByLabel("Line 1 quantity").fill("2.5");
+  await dialog.getByLabel("Line 1 rate").fill("100");
+  await dialog.getByRole("button", { name: /^\+ Parts/ }).click();
+  await dialog.getByLabel("Line 2 description").fill("Synthetic calculation part");
+  await dialog.getByLabel("Line 2 quantity").fill("2");
+  await dialog.getByLabel("Line 2 rate").fill("80");
+  await dialog.getByLabel("Line 2 markup percent").fill("25");
+  await dialog.getByLabel("Line 2 taxable").check();
+  await dialog.getByLabel("Manual sales tax amount").fill("16.50");
+
+  await expect(dialog.getByText(/^\$450(?:\.00)?$/).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$16\.5(?:0)?$/).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$466\.5(?:0)?$/).first()).toBeVisible();
+  await dialog.getByRole("button", { name: "Save as Draft", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("#P1-E2E-CALC-001", { exact: true })).toBeVisible();
+
+  await page.getByText("#P1-E2E-CALC-001", { exact: true }).click();
+  await page.getByRole("button", { name: "Edit invoice", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Edit invoice #P1-E2E-CALC-001" });
+  await expect(dialog.getByLabel("Line 1 quantity")).toHaveValue("2.5");
+  await expect(dialog.getByLabel("Line 1 rate")).toHaveValue("100");
+  await expect(dialog.getByLabel("Line 2 quantity")).toHaveValue("2");
+  await expect(dialog.getByLabel("Line 2 rate")).toHaveValue("100");
+  await expect(dialog.getByLabel("Line 2 markup percent")).toHaveValue("25");
+  await expect(dialog.getByLabel("Line 2 taxable")).toBeChecked();
+  await expect(dialog.getByLabel("Manual sales tax amount")).toHaveValue("16.5");
+  await expect(dialog.getByText(/^\$466\.5(?:0)?$/).first()).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+});
+
 test("staff edits a billing draft, downloads PDF and CSV, then deletes it", async ({ page }) => {
   await login(page, accounts.backoffice);
   await openSidebarPage(page, "7-Eleven billing");
   const search = page.getByRole("searchbox", { name: "Search billing invoices and work orders" });
   await search.fill("P1-E2E-EDIT-001");
-  await page.getByRole("button", { name: /^Drafts/ }).click();
-  await page.locator("#billing-bucket-draft").getByRole("row")
-    .filter({ hasText: "#P1-E2E-EDIT-001" }).click();
+  const draftRow = page.getByRole("row").filter({ hasText: "#P1-E2E-EDIT-001" }).first();
+  await expect(draftRow).toBeVisible();
+  await draftRow.click();
   await expect(page.getByRole("button", { name: "Edit invoice", exact: true })).toBeVisible();
 
   const pdf = page.waitForEvent("download");
