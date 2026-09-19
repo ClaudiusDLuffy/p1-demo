@@ -115,6 +115,11 @@ export function registerModal(input: Omit<ModalEntry, "previousFocus">): () => v
         const top = next.entries.at(-1);
         if (!top || event.defaultPrevented) return;
         if (event.key === "Escape") {
+          // React portal handlers and WebKit's native <dialog> cancellation do
+          // not have a consistent listener order. An expanded picker owned by
+          // the top modal gets the first Escape regardless of that order.
+          const expandedPicker = readSafely(() => top.dialog.querySelector('[aria-expanded="true"][aria-haspopup]'));
+          if (expandedPicker) { event.preventDefault(); return; }
           event.preventDefault();
           top.requestClose("escape");
         } else if (event.key === "Tab") {

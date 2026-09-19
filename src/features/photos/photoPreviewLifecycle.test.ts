@@ -8,6 +8,23 @@ import ts from "typescript";
 import { createBrowserPhotoStorageAdapter } from "./browserPhotoStorageAdapter";
 import * as fileAdapter from "./browserPhotoFileAdapter";
 
+test("download object URLs remain alive long enough for Safari to consume them", () => {
+  const originalRevoke = URL.revokeObjectURL;
+  const revoked: string[] = [];
+  URL.revokeObjectURL = url => { revoked.push(url); };
+  try {
+    let callback: (() => void) | undefined;
+    let delay = 0;
+    fileAdapter.revokePhotoObjectUrlAfterDownload("blob:synthetic-download", (next, milliseconds) => {
+      callback = next; delay = milliseconds;
+    });
+    assert.equal(delay, fileAdapter.PHOTO_DOWNLOAD_REVOKE_DELAY_MS);
+    assert.deepEqual(revoked, []);
+    assert.ok(callback); callback();
+    assert.deepEqual(revoked, ["blob:synthetic-download"]);
+  } finally { URL.revokeObjectURL = originalRevoke; }
+});
+
 for (const earlyUnmount of [false, true]) test(`gallery preview cleanup handles ${earlyUnmount ? "late download after unmount" : "normal unmount"}`, async () => {
   const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL;
   const created: string[] = [], revoked: string[] = [], stateUpdates: number[] = [];

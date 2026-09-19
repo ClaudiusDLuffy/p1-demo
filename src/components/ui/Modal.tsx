@@ -44,6 +44,7 @@ function ModalInstance({ open = true, title, description, children, width = 480,
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [layerHost, setLayerHost] = useState<HTMLDivElement | null>(null);
   const startedOnBackdrop = useRef(false);
+  const ownedLayerEscapeAt = useRef(0);
   const callbacks = useRef({ onRequestClose, onClose, closeOnEscape, closeOnBackdrop, dismissDisabled, initialFocusRef, restoreFocusRef });
   // Busy/identity changes must be observed before a passive effect can run.
   useLayoutEffect(() => { callbacks.current = { onRequestClose, onClose, closeOnEscape, closeOnBackdrop, dismissDisabled, initialFocusRef, restoreFocusRef }; });
@@ -84,7 +85,24 @@ function ModalInstance({ open = true, title, description, children, width = 480,
   return <><span hidden ref={mountHost} data-modal-anchor="true" />{host && createPortal(<dialog ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId}
     aria-describedby={description ? descriptionId : undefined} aria-busy={dismissDisabled || undefined}
     tabIndex={-1} className="modal-overlay"
-    onCancel={event => { event.preventDefault(); if (dialog.current && isTopModal(dialog.current)) request("escape"); }}
+    onKeyDownCapture={event => {
+      if (event.key !== "Escape" || !dialog.current?.querySelector('[aria-expanded="true"][aria-haspopup]')) return;
+      // WebKit dispatches the native dialog cancel event even when an owned
+      // picker consumes Escape. Reserve this press for the picker so Safari
+      // does not close both layers at once.
+      ownedLayerEscapeAt.current = Date.now();
+    }}
+    onCancel={event => {
+      event.preventDefault();
+      if (dialog.current?.querySelector?.('[aria-expanded="true"][aria-haspopup]')) {
+        ownedLayerEscapeAt.current = 0;
+        return;
+      }
+      // WebKit's cancel can arrive after key-up, so use a short event window
+      // instead of clearing the reservation in the key-up handler.
+      if (Date.now() - ownedLayerEscapeAt.current < 500) { ownedLayerEscapeAt.current = 0; return; }
+      if (dialog.current && isTopModal(dialog.current)) request("escape");
+    }}
     onPointerDown={event => { startedOnBackdrop.current = event.target === event.currentTarget; }}
     onPointerUp={event => {
       const dismiss = isBackdropRelease(startedOnBackdrop.current, event.target === event.currentTarget);

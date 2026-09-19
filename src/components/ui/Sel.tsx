@@ -290,7 +290,13 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
         disabled={disabled}
         onBlur={() => onBlur?.({ target: { name, value: String(selectedValue ?? "") }, type: "blur" })}
         onClick={() => open ? close() : openMenu()}
-        onKeyDown={event => { onKeyDown?.(event); if (!event.defaultPrevented) handleKey(event); }}
+        onKeyDown={event => {
+          onKeyDown?.(event);
+          // The shared modal listener may prevent WebKit's native dialog
+          // cancellation before React sees the key. The open picker must still
+          // consume that same Escape and close only itself.
+          if (!event.defaultPrevented || (event.key === "Escape" && open)) handleKey(event);
+        }}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}

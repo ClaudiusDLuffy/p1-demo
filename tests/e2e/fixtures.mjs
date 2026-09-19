@@ -52,16 +52,34 @@ export async function login(page, account) {
   // environments are never involved in this harness.
   const localJwtClockRetry = async route => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const response = await route.fetch();
-      if (response.status() !== 401) {
-        await route.fulfill({ response });
+      let status;
+      let headers;
+      let body;
+      try {
+        const response = await route.fetch();
+        // Materialize the local response before fulfilling the intercepted
+        // request. Long serial browser batches can otherwise outlive
+        // Playwright's response handle even though the bytes already arrived.
+        status = response.status();
+        headers = response.headers();
+        body = await response.body();
+      } catch (error) {
+        // A query invalidation can cancel a stale read while the local retry
+        // handler is materializing it. Do not replay that request: writes may
+        // be non-repeatable, and the browser has already abandoned this one.
+        if (!/response has been disposed|fetch response has been disposed/i.test(String(error))) throw error;
+        await route.abort("aborted").catch(() => undefined);
+        return;
+      }
+      if (status !== 401) {
+        await route.fulfill({ status, headers, body });
         return;
       }
 
-      const body = await response.text();
-      const isLocalClockRace = body.includes("PGRST303") && body.includes("JWT issued at future");
+      const text = body.toString("utf8");
+      const isLocalClockRace = text.includes("PGRST303") && text.includes("JWT issued at future");
       if (!isLocalClockRace || attempt === 4) {
-        await route.fulfill({ response, body });
+        await route.fulfill({ status, headers, body });
         return;
       }
 

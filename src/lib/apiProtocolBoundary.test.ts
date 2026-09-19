@@ -53,7 +53,7 @@ test("optional API catch-all covers root and unknown paths without shadowing any
   const walk = (path: string): string[] => readdirSync(path, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
     ? walk(`${path}/${entry.name}`) : entry.name === "route.ts" ? [`${path}/route.ts`] : []);
   const routes = walk("src/app/api").map(path => path.replace("src/app", "").replace("/route.ts", ""));
-  assert.equal(routes.length, 25);
+  assert.equal(routes.length, 26);
   const sorted = getSortedRoutes(routes);
   for (const path of routes.filter(route => !route.includes("["))) assert.equal(sorted.find(route => getRouteRegex(route).re.test(path)), path);
   for (const path of ["/api", "/api/nonexistent", "/api/nonexistent/private-path", "/api/notifications/unknown", "/api/%3Cscript%3E"]) {

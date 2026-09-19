@@ -102,7 +102,8 @@ test("staff edits a billing draft, downloads PDF and CSV, then deletes it", asyn
   const search = page.getByRole("searchbox", { name: "Search billing invoices and work orders" });
   await search.fill("P1-E2E-EDIT-001");
   await page.getByRole("button", { name: /^Drafts/ }).click();
-  await page.locator("tr:visible").filter({ hasText: "#P1-E2E-EDIT-001" }).click();
+  await page.locator("#billing-bucket-draft").getByRole("row")
+    .filter({ hasText: "#P1-E2E-EDIT-001" }).click();
   await expect(page.getByRole("button", { name: "Edit invoice", exact: true })).toBeVisible();
 
   const pdf = page.waitForEvent("download");
