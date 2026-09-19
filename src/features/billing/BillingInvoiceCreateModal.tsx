@@ -274,6 +274,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   }, []);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const numberEditedRef = useRef(false);
+  const numberInputFocusedRef = useRef(false);
+  const pendingNumberPreviewRef = useRef("");
   const formRef = useRef<HTMLFormElement | null>(null);
   const [validationNotice, setValidationNotice] = useState("");
   const [actionError, setActionError] = useState("");
@@ -741,7 +743,8 @@ export default function BillingInvoiceCreateModal(props: any) {
         setNumberPreviewError("");
         // Auto-generated values are previews only. Refresh an untouched value
         // every time the form opens, while preserving an intentional override.
-        if (!numberEditedRef.current) {
+        pendingNumberPreviewRef.current = preview;
+        if (!numberEditedRef.current && !numberInputFocusedRef.current) {
           setValue("num", preview, { shouldValidate: true });
         }
       } catch (error) {
@@ -1215,6 +1218,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     setPartsMarkup("25");
     setCustomTerritory(false);
     numberEditedRef.current = false;
+    numberInputFocusedRef.current = false;
+    pendingNumberPreviewRef.current = "";
     setNumberEdited(false);
     setDraftState("idle");
     setDraftSavedAt(null);
@@ -1525,7 +1530,15 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <div className="billing-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...fieldAria("num")} aria-required="true" {...register("num", { onChange: () => { numberEditedRef.current = true; setNumberEdited(true); } })} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span id={`${formId}-num-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input {...fieldAria("num")} aria-required="true" {...register("num", {
+            onChange: () => { numberEditedRef.current = true; setNumberEdited(true); },
+            onBlur: () => {
+              numberInputFocusedRef.current = false;
+              if (!numberEditedRef.current && !String(getValues("num") || "").trim() && pendingNumberPreviewRef.current) {
+                setValue("num", pendingNumberPreviewRef.current, { shouldValidate: true });
+              }
+            },
+          })} onFocus={() => { numberInputFocusedRef.current = true; }} placeholder={numberPreviewError ? "Enter invoice number" : "Loading…"} title="Auto-populated, but editable until approval or QuickBooks sync. The value comes from the staff numbering configuration." style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.num || numberPreviewError ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.num && <span id={`${formId}-num-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}{!errors.num && numberPreviewError && <span style={{ display: "block", fontSize: 10, color: T.danger, marginTop: 4 }}>{numberPreviewError}. Enter a number manually or ask an owner to configure this staff series.</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input {...fieldAria("invoiceDate")} aria-required="true" type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.invoiceDate ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("invoiceDate")}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input {...fieldAria("serviceDate")} type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("serviceDate")}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Due date</span><input {...fieldAria("dueDate")} type="date" {...register("dueDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{headerError("dueDate")}</label>

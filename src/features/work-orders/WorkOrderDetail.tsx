@@ -713,7 +713,11 @@ export default function WorkOrderDetail(props: any) {
                             : "Straight to Billing"}
                         </button>
                       )}
-                      {isManager && !invoiceController && woData.status !== "closed" && onOpenBillingForWorkOrder && (
+                      {isManager
+                        && !invoiceController
+                        && woData.status !== "closed"
+                        && !(woData.isCapital && woData.status === "completed")
+                        && onOpenBillingForWorkOrder && (
                         <button
                           type="button"
                           onClick={() => onOpenBillingForWorkOrder(woData.id, currentBillingDocument?.id || null)}
@@ -1528,7 +1532,7 @@ export default function WorkOrderDetail(props: any) {
                           {!contractorHistoryReadOnly && doAddPart && (
                             <button
                               type="button"
-                              onClick={() => doAddPart(woData.id, { description: "", status: "ordered" })}
+                              onClick={() => doAddPart(woData.id, { description: woData.partNeeded || "New part", status: "ordered" })}
                               className="btn-soft"
                               style={{ padding: "4px 10px", fontSize: 11 }}
                             >+ Add to list</button>
@@ -1541,7 +1545,7 @@ export default function WorkOrderDetail(props: any) {
                       !contractorHistoryReadOnly && doAddPart && (woData.status === "parts" || woData.status === "wip" || isManager) && (
                         <button
                           type="button"
-                          onClick={() => doAddPart(woData.id, { description: "", status: "ordered" })}
+                          onClick={() => doAddPart(woData.id, { description: "New part", status: "ordered" })}
                           className="btn-soft"
                           style={{ padding: "8px 14px", fontSize: 12 }}
                         >+ Add part</button>
