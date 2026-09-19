@@ -23,7 +23,8 @@ export function usePortalRealtime(actor: DirectoryActor | null, refreshIdentity:
     const identity = latest.current.actor;
     if (!identity?.id || identity.active !== true) return;
     const report = (category: string) => {
-      void reportClientFailure({ source: `portal-realtime.${category}`, message: "Live refresh is temporarily unavailable." });
+      void reportClientFailure({ source: `portal-realtime.${category}`, code: "PROVIDER_UNAVAILABLE",
+        message: "Live refresh is temporarily unavailable." });
     };
     const current = createPortalRealtimeSession({ client, actor: identity, timer, visibility: browserVisibility,
       subscription: supabase(), refreshIdentity: () => latest.current.refreshIdentity(), report,

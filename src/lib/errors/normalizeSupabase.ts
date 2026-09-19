@@ -1,6 +1,10 @@
 import { AppError } from "./AppError";
 import type { PublicErrorCode } from "./catalog";
 const databaseCodes: Record<string, PublicErrorCode> = {
+  // PostgREST group 0 represents database connectivity. These are safe to
+  // retry only at read boundaries; mutation replay remains separately guarded.
+  PGRST000: "PROVIDER_UNAVAILABLE", PGRST001: "PROVIDER_UNAVAILABLE", PGRST002: "PROVIDER_UNAVAILABLE",
+  PGRST003: "PROVIDER_UNAVAILABLE",
   "42501": "FORBIDDEN", PT403: "FORBIDDEN", PGRST301: "AUTH_INVALID", PGRST302: "AUTH_REQUIRED", PT401: "AUTH_REQUIRED",
   "23505": "CONFLICT", "23503": "VALIDATION_FAILED", "23514": "VALIDATION_FAILED", "22023": "VALIDATION_FAILED", PT422: "VALIDATION_FAILED",
   PT409: "STALE_VERSION", "40001": "STALE_VERSION", "55000": "INVALID_TRANSITION", "40P01": "CONFLICT",

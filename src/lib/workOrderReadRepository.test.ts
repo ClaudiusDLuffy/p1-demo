@@ -237,7 +237,8 @@ for (const mode of ["page", "exact"] as const) {
 }
 
 for (const [code, expected] of [["42501", "FORBIDDEN"], ["22023", "VALIDATION_FAILED"],
-  ["57014", "TIMEOUT"], ["XX000", "INTERNAL_ERROR"]]) {
+  ["57014", "TIMEOUT"], ["PGRST000", "PROVIDER_UNAVAILABLE"], ["PGRST001", "PROVIDER_UNAVAILABLE"],
+  ["PGRST002", "PROVIDER_UNAVAILABLE"], ["PGRST003", "PROVIDER_UNAVAILABLE"], ["XX000", "INTERNAL_ERROR"]]) {
   test(`work-order read preserves normalized ${code} error and redacts provider text`, async () => {
     const harness = createWorkOrderReadHarness([() => ({ data: null, error: {
       code, message: "SYNTHETIC_PRIVATE_PROVIDER_DETAIL", details: "SYNTHETIC_SQL_DETAIL", hint: "SYNTHETIC_HINT",

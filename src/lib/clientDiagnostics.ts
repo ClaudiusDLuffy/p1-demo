@@ -1,6 +1,7 @@
 "use client";
 import { supabase } from "./supabase/client";
 import { normalizeUnknownError } from "./errors/normalizeUnknown";
+import { errorMetadata, isPublicErrorCode, type PublicErrorCode } from "./errors/catalog";
 import { diagnosticDetailsSchema, type ClientReportResult } from "./observability/clientReportContracts";
 import { sendClientReport } from "./observability/clientReportTransport";
 import { normalizeCorrelationId, validCorrelationId } from "./observability/correlationId";
@@ -8,7 +9,7 @@ import { normalizeCorrelationId, validCorrelationId } from "./observability/corr
 const LAST_FAILED_REQUEST_KEY = "p1:last-failed-request";
 const LAST_CLIENT_ERROR_KEY = "p1:last-client-error";
 const LAST_REPORT_RESULT_KEY = "p1:last-report-result";
-export type ClientFailureContext = { source: string; message: string; stack?: string | null; portalView?: string | null; correlationId?: string };
+export type ClientFailureContext = { source: string; message: string; code?: PublicErrorCode; stack?: string | null; portalView?: string | null; correlationId?: string };
 export type ClientDiagnosticLevel = "error" | "warning" | "info";
 export type ClientDiagnosticValue = string | number | boolean | null;
 export type ClientDiagnosticContext = ClientFailureContext & { level?: ClientDiagnosticLevel; details?: Record<string, ClientDiagnosticValue> };
@@ -63,15 +64,18 @@ function shouldReport(signature: string): boolean {
   } catch { /* no browser-storage dependency */ }
   return true;
 }
+export function resolveClientDiagnosticCode(context: Pick<ClientFailureContext, "code" | "message">): PublicErrorCode {
+  return isPublicErrorCode(context.code) ? context.code : normalizeUnknownError({ message: context.message }).code;
+}
 export async function reportClientDiagnostic(context: ClientDiagnosticContext, signal?: AbortSignal): Promise<ClientReportResult> {
   if (typeof window === "undefined") return { status: "unavailable" };
   try {
-    const error = normalizeUnknownError({ message: context.message });
+    const code = resolveClientDiagnosticCode(context);
     const source = /^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(context.source) ? context.source : "client_failure";
     const correlationId = normalizeCorrelationId(context.correlationId ?? readLastFailedRequest()?.correlationId);
-    if (!shouldReport(source + ":" + error.code)) return { status: "unavailable", correlationId };
+    if (!shouldReport(source + ":" + code)) return { status: "unavailable", correlationId };
     const portalView = context.portalView && /^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(context.portalView) ? context.portalView : undefined;
-    const result = await sendClientReport({ version: 1, source, code: error.code, message: error.message,
+    const result = await sendClientReport({ version: 1, source, code, message: errorMetadata(code).message,
       level: context.level ?? "error", correlationId, portalView, details: sanitizeDiagnosticDetails(context.details),
       // Never send arbitrary Error stacks or customer text from a caller.
       route: "/" }, { signal, token: async () => {
