@@ -116,8 +116,9 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expectContractorVisibility(browser, account, false);
   }
 
-  // Dispatch first to the legacy team lead and verify its My Team scope and
-  // member picker before continuing through the supported staff transition.
+  // Dispatch first to the legacy team lead and verify its My Team read scope.
+  // The incomplete legacy reassignment control stays hidden; assignment still
+  // crosses the supported staff boundary below.
   await asAccount(browser, accounts.dispatcher, async page => {
     await openStaffWorkOrder(page);
     await page.getByRole("button", { name: "Assign to contractor…", exact: true }).click();
@@ -133,15 +134,11 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await page.getByRole("searchbox", { name: "Search team work orders" }).fill(WORK_ORDER_ID);
     const row = page.getByRole("row").filter({ has: page.getByText(WORK_ORDER_ID, { exact: true }) });
     await expect(row).toBeVisible();
-    await row.locator('button[aria-haspopup="listbox"]').click();
-    await expect(page.getByRole("option", { name: "Synthetic Team Member", exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(row.locator('button[aria-haspopup="listbox"]')).toHaveCount(0);
+    await expect(row.getByRole("button", { name: /^(Assign|Reassign)$/ })).toHaveCount(0);
   });
 
-  // The legacy My Team picker currently exposes a reassignment that its
-  // staff-only database command cannot authorize. Keep this broader scenario
-  // moving through the supported staff boundary; the focused failed browser
-  // attempt and database evidence remain a separate product finding.
+  // Continue through the supported staff assignment boundary.
   await asAccount(browser, accounts.manager, async page => {
     await openStaffWorkOrder(page);
     await page.getByRole("button", { name: "Reassign", exact: true }).click();

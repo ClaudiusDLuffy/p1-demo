@@ -25,11 +25,8 @@ export default function SubDispatchView(props: any) {
     setSelectedWO,
     setPage,
     setAiNote,
-    doAssign,
-    doReassign,
     doSetTechnician,
     doAssignPortalTechnician,
-    loadingStates = {},
   } = props;
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [savingWo, setSavingWo] = useState<string | null>(null);
@@ -94,7 +91,6 @@ export default function SubDispatchView(props: any) {
         { key: "store", label: "Store" },
         { key: "status", label: "Status" },
         { key: "contractor", label: "Assigned technician" },
-        { key: null, label: "Assign / Reassign" },
       ];
 
   const chooseSort = (column: WorkOrderTableSortColumn) => {
@@ -156,14 +152,11 @@ export default function SubDispatchView(props: any) {
                 const currentTarget = workOrder.assignedTechnicianProfileId
                   || (workOrder.technicianOnJob ? `snapshot:${workOrder.id}` : "");
                 const targetKey = `${currentUser.id}:${contractorAccountId}:${workOrder.id}`;
-                const target = targets[targetKey] ?? (companyMode ? currentTarget : workOrder.contractor || "");
+                const target = targets[targetKey] ?? currentTarget;
                 const assigned = companyMode
                   ? workOrder.technicianOnJob || "Not set"
                   : labels.getUser(workOrder.contractor)?.name || workOrder.technicianOnJob || "Unassigned";
-                const actionKey = workOrder.contractor ? `reassign_${workOrder.id}` : `assign_${workOrder.id}`;
-                const actionLoading = companyMode
-                  ? savingWo === workOrder.id
-                  : !!loadingStates[actionKey];
+                const actionLoading = savingWo === workOrder.id;
                 return (
                   <tr key={workOrder.id} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
                     <td style={{ padding: "14px 16px" }}>
@@ -189,81 +182,73 @@ export default function SubDispatchView(props: any) {
                     <td style={{ padding: "14px 16px", fontSize: 13, color: assigned === "Unassigned" || assigned === "Not set" ? T.subtle : T.ink }}>
                       {assigned}
                     </td>
-                    <td style={{ padding: "14px 16px" }}>
+                    {companyMode && <td style={{ padding: "14px 16px" }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         <DirectorySelect
-                          domain={companyMode ? "company_technicians" : "legacy_team"}
-                          contractorId={companyMode ? contractorAccountId : null}
-                          technicianValues={companyMode}
+                          domain="company_technicians"
+                          contractorId={contractorAccountId}
+                          technicianValues
                           value={target}
                           selectedLabel={target === currentTarget ? assigned : undefined}
-                          emptyLabel={companyMode ? "Not set" : "Select team member"}
+                          emptyLabel="Not set"
                           onChange={event => setTargets(previous => ({ ...previous, [targetKey]: event.target.value }))}
                           style={{ width: 190, padding: "8px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, fontFamily: "inherit" }}
                         />
                         <button
                           onClick={async () => {
-                            if (companyMode) {
-                              setSavingWo(workOrder.id);
-                              setSaveError(null);
-                              try {
-                                if (target.startsWith("snapshot:")) return;
-                                const selectedTechnician = target ? await loadDirectorySelection(
-                                  target.startsWith("legacy:") ? "company_technicians" : "technician_profile",
-                                  target.startsWith("legacy:") ? target.slice(7) : target,
-                                  contractorAccountId,
-                                ) : null;
-                                if (target && !selectedTechnician) {
-                                  setSaveError("This technician is no longer available. Choose a current team member.");
-                                  return;
-                                }
-                                if (!target) {
-                                  if (workOrder.assignedTechnicianProfileId) {
-                                    await doAssignPortalTechnician(workOrder.id, null, null);
-                                  } else {
-                                    await doSetTechnician(workOrder.id, "");
-                                  }
-                                } else if (selectedTechnician?.profileId) {
-                                  await doAssignPortalTechnician(
-                                    workOrder.id,
-                                    selectedTechnician.profileId,
-                                    selectedTechnician.name,
-                                  );
-                                } else if (selectedTechnician) {
-                                  if (workOrder.assignedTechnicianProfileId) {
-                                    await doAssignPortalTechnician(workOrder.id, null, null);
-                                  }
-                                  await doSetTechnician(workOrder.id, selectedTechnician.name);
-                                }
-                              } catch (error: unknown) {
-                                setSaveError(safeErrorMessage(error));
-                              } finally {
-                                setSavingWo(null);
+                            setSavingWo(workOrder.id);
+                            setSaveError(null);
+                            try {
+                              if (target.startsWith("snapshot:")) return;
+                              const selectedTechnician = target ? await loadDirectorySelection(
+                                target.startsWith("legacy:") ? "company_technicians" : "technician_profile",
+                                target.startsWith("legacy:") ? target.slice(7) : target,
+                                contractorAccountId,
+                              ) : null;
+                              if (target && !selectedTechnician) {
+                                setSaveError("This technician is no longer available. Choose a current team member.");
+                                return;
                               }
-                              return;
+                              if (!target) {
+                                if (workOrder.assignedTechnicianProfileId) {
+                                  await doAssignPortalTechnician(workOrder.id, null, null);
+                                } else {
+                                  await doSetTechnician(workOrder.id, "");
+                                }
+                              } else if (selectedTechnician?.profileId) {
+                                await doAssignPortalTechnician(
+                                  workOrder.id,
+                                  selectedTechnician.profileId,
+                                  selectedTechnician.name,
+                                );
+                              } else if (selectedTechnician) {
+                                if (workOrder.assignedTechnicianProfileId) {
+                                  await doAssignPortalTechnician(workOrder.id, null, null);
+                                }
+                                await doSetTechnician(workOrder.id, selectedTechnician.name);
+                              }
+                            } catch (error: unknown) {
+                              setSaveError(safeErrorMessage(error));
+                            } finally {
+                              setSavingWo(null);
                             }
-                            if (!target) return;
-                            if (workOrder.contractor) doReassign(workOrder.id, target);
-                            else doAssign(workOrder.id, target);
                           }}
-                          disabled={actionLoading || target.startsWith("snapshot:") || (!companyMode && !target)}
+                          disabled={actionLoading || target.startsWith("snapshot:")}
                           className="btn-soft"
                           style={{ padding: "8px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 6, opacity: actionLoading ? 0.7 : 1, cursor: actionLoading ? "default" : "pointer" }}
                         >
                           {actionLoading
                             ? <><BtnSpinnerDark />Saving...</>
-                            : companyMode
-                              ? "Save"
-                              : workOrder.contractor ? "Reassign" : "Assign"}
+                            : "Save"}
                         </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 );
               })}
               {myTeamWOs.length === 0 && !teamWorkOrdersQuery.isError && (
                 <tr>
-                  <td colSpan={5} style={{ padding: 28, textAlign: "center", color: T.subtle, fontSize: 13 }}>
+                  <td colSpan={headers.length} style={{ padding: 28, textAlign: "center", color: T.subtle, fontSize: 13 }}>
                     {teamWorkOrdersQuery.isPending ? "Loading team work…" : "No team work orders found."}
                   </td>
                 </tr>
