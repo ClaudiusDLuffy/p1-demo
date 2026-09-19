@@ -18,5 +18,6 @@ test("ordinary work-order reads retain the shared safe-read retry policy", () =>
 
 test("table mode retains retries for transient transport failures", () => {
   assert.equal(retryWorkOrderRead(tableRead, 0, new AppError("NETWORK_UNAVAILABLE")), true);
+  assert.equal(retryWorkOrderRead(tableRead, 0, { code: "PGRST003" }), true);
   assert.equal(retryWorkOrderRead(tableRead, 2, new AppError("NETWORK_UNAVAILABLE")), false);
 });

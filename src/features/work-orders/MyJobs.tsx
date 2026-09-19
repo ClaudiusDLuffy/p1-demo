@@ -1,7 +1,7 @@
 "use client";
 // @ts-nocheck
 
-import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { normalizeUnknownError } from "../../lib/errors/normalizeUnknown";
 import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
 import { Badge } from "../../components/ui/Badge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
@@ -42,15 +42,18 @@ export default function MyJobs(props: any) {
   const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled && pendingCountQuery.isSuccess);
   const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
   const resultDiagnosticRef = useRef<string | null>(null);
-  const jobsError = safeErrorMessage(jobsQuery.error);
+  const jobsFailure = jobsQuery.error ? normalizeUnknownError(jobsQuery.error) : null;
+  const jobsError = jobsFailure?.message || "";
+  const jobsErrorCode = jobsFailure?.code;
   useEffect(() => {
     if (!jobsError) return;
     void reportClientFailure({
       source: "my-jobs-query",
+      code: jobsErrorCode,
       message: jobsError,
       portalView: "my_jobs",
     });
-  }, [jobsError]);
+  }, [jobsError, jobsErrorCode]);
   useEffect(() => {
     if (
       !enabled

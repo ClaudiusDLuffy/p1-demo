@@ -5,7 +5,7 @@ import { DirectoryScopeProvider, useDirectoryLabels } from "../features/director
 import { DirectorySelect } from "../features/directory/DirectorySelect";
 import { directoryScopeKey } from "../features/directory/contracts";
 import { loadDirectorySelection } from "../features/directory/api";
-import { safeErrorMessage } from "../lib/errors/normalizeUnknown";
+import { normalizeUnknownError, safeErrorMessage } from "../lib/errors/normalizeUnknown";
 import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from "react";
 import { createWorkOrderCreationAttempt } from "../lib/workOrderCreationCommand";
 import { AssignmentCommandError } from "../lib/workOrderAssignmentCommands";
@@ -1409,15 +1409,20 @@ export default function PortalShell() {
     currentUser,
   );
   const selectedWorkOrderLookup = selectedWorkOrderQuery.data;
-  const selectedWorkOrderError = safeErrorMessage(selectedWorkOrderQuery.error);
+  const selectedWorkOrderFailure = selectedWorkOrderQuery.error
+    ? normalizeUnknownError(selectedWorkOrderQuery.error)
+    : null;
+  const selectedWorkOrderError = selectedWorkOrderFailure?.message || "";
+  const selectedWorkOrderErrorCode = selectedWorkOrderFailure?.code;
   useEffect(() => {
     if (!selectedWorkOrderError || !selectedWO) return;
     void reportClientFailure({
       source: "selected-work-order-query",
+      code: selectedWorkOrderErrorCode,
       message: selectedWorkOrderError,
       portalView: page,
     });
-  }, [page, selectedWO, selectedWorkOrderError]);
+  }, [page, selectedWO, selectedWorkOrderError, selectedWorkOrderErrorCode]);
   const shellWorkOrdersData = useMemo(() => {
     return selectedWorkOrderLookup ? [selectedWorkOrderLookup] : [];
   }, [selectedWorkOrderLookup]);

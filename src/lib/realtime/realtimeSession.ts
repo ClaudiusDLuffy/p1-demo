@@ -35,7 +35,13 @@ export function createPortalRealtimeSession(deps: PortalSessionDependencies) {
   if (!deps.actor.id || deps.actor.active !== true) stop();
   else try {
     unsubscribe = createPortalRealtimeSubscription(deps.subscription, {
-      event: event => current.add(event), reconnect: () => current.requestRefresh(true), error: report,
+      event: event => current.add(event), reconnect: () => current.requestRefresh(true), error: category => {
+        report(category);
+        // WebSocket connectivity and ordinary HTTPS reads can fail
+        // independently. Recover the visible screen through the bounded HTTP
+        // read path immediately while the provider owns channel reconnection.
+        if (category === "connection") current.requestRefresh(true);
+      },
     });
     visibilityUnsubscribe = deps.visibility.subscribe(() => {
       current.visibilityChanged();

@@ -3,12 +3,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { sanitizeDiagnosticDetails, type ClientDiagnosticValue } from "./clientDiagnostics";
+import { resolveClientDiagnosticCode, sanitizeDiagnosticDetails, type ClientDiagnosticValue } from "./clientDiagnostics";
 import { handleClientDiagnostic } from "./server/diagnostics/handler";
 import type { ClientDiagnosticReport } from "./observability/clientReportContracts";
 
 const read = (path: string) =>
   readFileSync(resolve(process.cwd(), path), "utf8");
+
+test("client diagnostics preserve an already-normalized safe error category", () => {
+  assert.equal(resolveClientDiagnosticCode({ code: "TIMEOUT", message: "SYNTHETIC_PRIVATE_PROVIDER_TEXT" }), "TIMEOUT");
+  assert.equal(resolveClientDiagnosticCode({ message: "RESULT_UNCONFIRMED" }), "RESULT_UNCONFIRMED");
+  assert.equal(resolveClientDiagnosticCode({ message: "SYNTHETIC_PRIVATE_PROVIDER_TEXT" }), "INTERNAL_ERROR");
+});
 
 test("diagnostic details retain only closed, bounded primitive fields", () => {
   assert.deepEqual(sanitizeDiagnosticDetails({

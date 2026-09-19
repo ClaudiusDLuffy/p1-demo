@@ -60,6 +60,18 @@ test("session owns one channel/timer: hidden storm waits, focus plus visibility 
   session.stop(); session.stop(); clock.run(); await session.refresh(); assert.equal(fixture.total(), 1);
   assert.equal(unsubscribed, 1); assert.equal(repeats, 1); assert.equal(clearRepeats, 1); assert.equal(provider.counts().removals, 1); fixture.close();
 });
+test("realtime connection loss immediately falls back to one bounded visible HTTP refresh", async () => {
+  const provider = subscriptionFixture(); const fixture = observerFixture(currentMeasurementKeys); const clock = testTimer();
+  const errors: string[] = [];
+  const session = createPortalRealtimeSession({ client: fixture.client, actor: syntheticActor, timer: clock.timer,
+    subscription: provider.ports, visibility: { visible: () => true, online: () => true, subscribe: () => () => undefined },
+    refreshIdentity: async () => true, report: category => errors.push(category), repeat: () => 1, clearRepeat() {} });
+  provider.status("SUBSCRIBED"); provider.status("CHANNEL_ERROR"); provider.status("TIMED_OUT");
+  assert.deepEqual(errors, ["connection"]); assert.equal(clock.stats().sets, 1);
+  clock.run(); await session.refresh();
+  assert.equal(fixture.total(), currentMeasurementKeys.length);
+  session.stop(); fixture.close();
+});
 test("session cleanup attempts all resources despite visibility and interval cleanup failures", () => {
   const provider = subscriptionFixture(); const fixture = observerFixture([]); const clock = testTimer(); const errors: string[] = []; let intervalsCleared = 0;
   const session = createPortalRealtimeSession({ client: fixture.client, actor: syntheticActor, timer: clock.timer, subscription: provider.ports,
