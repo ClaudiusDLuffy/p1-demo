@@ -9,18 +9,19 @@ test("a stale browser build receives a visible update and reloads onto the curre
       contentType: "application/json",
       headers: { "Cache-Control": "no-store" },
       body: JSON.stringify({
-        deploymentVersion: versionChecks === 1 ? "0.1.1" : "0.1.0",
-        displayVersion: versionChecks === 1 ? "0.1.1" : "0.1.0",
+        deploymentVersion: versionChecks === 1 ? "2.1.3" : "2.1.2",
+        displayVersion: versionChecks === 1 ? "2.1.3" : "2.1.2",
       }),
     });
   });
 
   await page.goto("/");
-  await expect(page.getByLabel("Portal version 0.1.0", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Sign-in portal version 0.1.0", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Portal version 2.1.2", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Sign-in portal version 2.1.2", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Last updated .* (?:EST|EDT) · Miami/).first()).toBeVisible();
   const update = page.locator('section[aria-label="Portal update available"]');
   await expect(update).toBeVisible();
-  await expect(update).toContainText("0.1.0 → 0.1.1");
+  await expect(update).toContainText("2.1.2 → 2.1.3");
 
   const reloaded = page.waitForEvent("domcontentloaded");
   const checkedAfterReload = page.waitForResponse(response => response.url().includes("/api/version?"));
@@ -40,7 +41,7 @@ test("an available update does not discard a dirty work-order form", async ({ pa
       status: 200,
       contentType: "application/json",
       headers: { "Cache-Control": "no-store" },
-      body: JSON.stringify({ deploymentVersion: "0.1.1" }),
+      body: JSON.stringify({ deploymentVersion: "2.1.3" }),
     });
   });
 

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deploymentChanged,
+  formatDeploymentUpdatedAt,
+  RUNNING_DEPLOYMENT_UPDATED_AT,
   normalizeDeploymentVersion,
   RUNNING_DEPLOYMENT_VERSION,
   shortDeploymentVersion,
@@ -18,6 +20,7 @@ type VersionResponse = {
 };
 
 export default function DeploymentVersionGuard({ children }: { children: React.ReactNode }) {
+  const buildUpdatedAt = formatDeploymentUpdatedAt(RUNNING_DEPLOYMENT_UPDATED_AT);
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
   const [dirtyWarning, setDirtyWarning] = useState(false);
   const lastCheckAt = useRef(0);
@@ -92,12 +95,17 @@ export default function DeploymentVersionGuard({ children }: { children: React.R
           zIndex: 4,
           color: "#78716c",
           fontSize: 9,
-          lineHeight: 1,
+          lineHeight: 1.25,
           opacity: 0.72,
           pointerEvents: "none",
         }}
       >
-        Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}
+        <div>Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}</div>
+        {buildUpdatedAt && (
+          <div style={{ marginTop: 2, fontSize: 8 }}>
+            Last updated {buildUpdatedAt} · Miami
+          </div>
+        )}
       </div>
       {availableVersion && (
         <section

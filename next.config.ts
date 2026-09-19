@@ -11,6 +11,9 @@ const deploymentVersion = (
   || "local-development"
 ).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 120);
 const portalVersion = packageJson.version;
+// Captured once when this deployment is built. Miami uses the IANA
+// America/New_York zone when the value is presented so DST stays correct.
+const portalBuildUpdatedAt = new Date().toISOString();
 
 function localE2eConnectSources() {
   if (process.env.P1_E2E_ALLOW_LOCAL_CSP !== "true") return "";
@@ -43,6 +46,7 @@ const nextConfig: NextConfig = {
     // The opaque per-deployment identifier above remains private to Next.js
     // cache busting and version-skew protection.
     NEXT_PUBLIC_P1_BUILD_VERSION: portalVersion,
+    NEXT_PUBLIC_P1_BUILD_UPDATED_AT: portalBuildUpdatedAt,
   },
   serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   outputFileTracingIncludes: {
