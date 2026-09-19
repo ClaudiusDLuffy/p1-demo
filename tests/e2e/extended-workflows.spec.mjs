@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { access } from "node:fs/promises";
 import { accounts, expect, login, openSidebarPage, openWorkOrder, test } from "./fixtures.mjs";
 
 test("report-only technician can complete the full field-work lifecycle without invoice access", async ({ page }) => {
@@ -68,24 +69,39 @@ test("invoice-capable technician can upload and submit a synthetic PDF invoice",
   await page.getByRole("button", { name: "Create or upload invoice", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create invoice" });
 
-  const pdf = new jsPDF();
-  pdf.text("Synthetic Test Invoice", 20, 25);
-  pdf.text("Invoice Number: E2E-PDF-001", 20, 40);
-  pdf.text("Synthetic service total: $225.00", 20, 55);
-  const buffer = Buffer.from(pdf.output("arraybuffer"));
-  await dialog.locator('input[type="file"][accept*="pdf"]').setInputFiles({
-    name: "synthetic-e2e-invoice.pdf",
-    mimeType: "application/pdf",
-    buffer,
-  });
+  const suppliedPdfPath = process.env.P1_E2E_INVOICE_PDF_PATH;
+  if (suppliedPdfPath) {
+    await access(suppliedPdfPath);
+    await dialog.locator('input[type="file"][accept*="pdf"]').setInputFiles(suppliedPdfPath);
+  } else {
+    const pdf = new jsPDF();
+    pdf.text("Synthetic Test Invoice", 20, 25);
+    pdf.text("Invoice Number: E2E-PDF-001", 20, 40);
+    pdf.text("Synthetic service total: $225.00", 20, 55);
+    const buffer = Buffer.from(pdf.output("arraybuffer"));
+    await dialog.locator('input[type="file"][accept*="pdf"]').setInputFiles({
+      name: "synthetic-e2e-invoice.pdf",
+      mimeType: "application/pdf",
+      buffer,
+    });
+  }
 
   await expect(dialog.getByText("Uploaded invoice amount", { exact: true })).toBeVisible();
   await dialog.getByLabel("Invoice #").fill("E2E-PDF-001");
   const total = dialog.getByLabel("Invoice total");
   await expect(total).toBeVisible();
-  await total.fill("225.00");
-  const totalOnly = dialog.getByRole("button", { name: "Use invoice total only", exact: true });
-  if (await totalOnly.isVisible()) await totalOnly.click();
+  if (suppliedPdfPath) {
+    const reviewed = dialog.getByRole("checkbox", {
+      name: "I reviewed these line items against the uploaded invoice.",
+      exact: true,
+    });
+    await expect(reviewed).toBeVisible();
+    await reviewed.check();
+  } else {
+    await total.fill("225.00");
+    const totalOnly = dialog.getByRole("button", { name: "Use invoice total only", exact: true });
+    if (await totalOnly.isVisible()) await totalOnly.click();
+  }
   await dialog.getByRole("button", { name: "Submit", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("#E2E-PDF-001", { exact: true })).toBeVisible();

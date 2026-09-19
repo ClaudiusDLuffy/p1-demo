@@ -425,6 +425,7 @@ export default function InvoiceList(props: any) {
                                 checked={handoffSelectionMode
                                   ? selectedHandoffIds.has(String(inv.id))
                                   : selectedReviewIds.has(String(inv.id))}
+                                onClick={(event) => event.stopPropagation()}
                                 onChange={() => handoffSelectionMode
                                   ? toggleHandoffSelection(String(inv.id))
                                   : toggleReviewSelection(String(inv.id))}
