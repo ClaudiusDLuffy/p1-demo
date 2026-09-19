@@ -98,7 +98,7 @@ export default function LoginForm({
           </button>
           <div
             aria-label={`Sign-in portal version ${shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}`}
-            title={`Portal build ${RUNNING_DEPLOYMENT_VERSION}`}
+            title={`Portal version ${RUNNING_DEPLOYMENT_VERSION}`}
             style={{
               marginTop: 14,
               color: T.muted,

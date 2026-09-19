@@ -9,18 +9,18 @@ test("a stale browser build receives a visible update and reloads onto the curre
       contentType: "application/json",
       headers: { "Cache-Control": "no-store" },
       body: JSON.stringify({
-        deploymentVersion: versionChecks === 1 ? "dpl_synthetic-new-build" : "local-development",
-        displayVersion: versionChecks === 1 ? "synthetic-" : "local",
+        deploymentVersion: versionChecks === 1 ? "0.1.1" : "0.1.0",
+        displayVersion: versionChecks === 1 ? "0.1.1" : "0.1.0",
       }),
     });
   });
 
   await page.goto("/");
-  await expect(page.getByLabel("Portal build local")).toBeVisible();
-  await expect(page.getByLabel("Sign-in portal version local")).toBeVisible();
+  await expect(page.getByLabel("Portal version 0.1.0", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Sign-in portal version 0.1.0", { exact: true })).toBeVisible();
   const update = page.locator('section[aria-label="Portal update available"]');
   await expect(update).toBeVisible();
-  await expect(update).toContainText("local → synthetic-");
+  await expect(update).toContainText("0.1.0 → 0.1.1");
 
   const reloaded = page.waitForEvent("domcontentloaded");
   const checkedAfterReload = page.waitForResponse(response => response.url().includes("/api/version?"));
@@ -40,7 +40,7 @@ test("an available update does not discard a dirty work-order form", async ({ pa
       status: 200,
       contentType: "application/json",
       headers: { "Cache-Control": "no-store" },
-      body: JSON.stringify({ deploymentVersion: "dpl_synthetic-new-build" }),
+      body: JSON.stringify({ deploymentVersion: "0.1.1" }),
     });
   });
 

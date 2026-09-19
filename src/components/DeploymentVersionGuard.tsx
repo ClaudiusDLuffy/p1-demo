@@ -83,8 +83,8 @@ export default function DeploymentVersionGuard({ children }: { children: React.R
     <>
       {children}
       <div
-        aria-label={`Portal build ${shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}`}
-        title={`Portal build ${RUNNING_DEPLOYMENT_VERSION}`}
+        aria-label={`Portal version ${shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}`}
+        title={`Portal version ${RUNNING_DEPLOYMENT_VERSION}`}
         style={{
           position: "fixed",
           left: 8,
@@ -97,7 +97,7 @@ export default function DeploymentVersionGuard({ children }: { children: React.R
           pointerEvents: "none",
         }}
       >
-        Build {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}
+        Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}
       </div>
       {availableVersion && (
         <section
@@ -120,7 +120,7 @@ export default function DeploymentVersionGuard({ children }: { children: React.R
         >
           <div style={{ fontSize: 14, fontWeight: 800 }}>Portal update available</div>
           <p style={{ margin: "7px 0 12px", fontSize: 12, lineHeight: 1.5 }}>
-            A newer portal build is ready. Update before starting another action so you are not working on stale code.
+            A newer portal version is ready. Update before starting another action so you are not working on stale code.
           </p>
           {dirtyWarning && (
             <p role="status" style={{ margin: "0 0 12px", fontSize: 12, lineHeight: 1.5, color: "#b45309", fontWeight: 700 }}>

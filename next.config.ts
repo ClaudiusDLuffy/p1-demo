@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import { getCspReportOnlyHeaders } from "./src/lib/config/server/browserSecurity";
+import packageJson from "./package.json";
 
 const deploymentVersion = (
   process.env.VERCEL_DEPLOYMENT_ID
@@ -9,6 +10,7 @@ const deploymentVersion = (
   || process.env.VERCEL_URL
   || "local-development"
 ).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 120);
+const portalVersion = packageJson.version;
 
 function localE2eConnectSources() {
   if (process.env.P1_E2E_ALLOW_LOCAL_CSP !== "true") return "";
@@ -36,7 +38,11 @@ const nextConfig: NextConfig = {
   // when a client-side request crosses deployment versions.
   deploymentId: deploymentVersion,
   env: {
-    NEXT_PUBLIC_P1_BUILD_VERSION: deploymentVersion,
+    // This is the human-managed release number shown in the portal and used
+    // by the visible update prompt. Increment package.json for each release.
+    // The opaque per-deployment identifier above remains private to Next.js
+    // cache busting and version-skew protection.
+    NEXT_PUBLIC_P1_BUILD_VERSION: portalVersion,
   },
   serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   outputFileTracingIncludes: {
