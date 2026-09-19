@@ -21,5 +21,32 @@ export function deploymentChanged(running: string, available: unknown): availabl
   return normalized !== null && normalized !== running;
 }
 
+export function normalizeDeploymentUpdatedAt(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+export function formatDeploymentUpdatedAt(value: unknown): string | null {
+  const normalized = normalizeDeploymentUpdatedAt(value);
+  if (!normalized) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).formatToParts(new Date(normalized));
+  const valueByType = new Map(parts.map(part => [part.type, part.value]));
+  return `${valueByType.get("month")} ${valueByType.get("day")}, ${valueByType.get("year")}, `
+    + `${valueByType.get("hour")}:${valueByType.get("minute")} ${valueByType.get("dayPeriod")} `
+    + valueByType.get("timeZoneName");
+}
+
 export const RUNNING_DEPLOYMENT_VERSION =
   normalizeDeploymentVersion(process.env.NEXT_PUBLIC_P1_BUILD_VERSION) || FALLBACK_VERSION;
+
+export const RUNNING_DEPLOYMENT_UPDATED_AT =
+  normalizeDeploymentUpdatedAt(process.env.NEXT_PUBLIC_P1_BUILD_UPDATED_AT);

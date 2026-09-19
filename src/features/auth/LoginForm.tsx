@@ -3,7 +3,12 @@
 import type { Dispatch, SetStateAction } from "react";
 import Image from "next/image";
 import { T } from "../../lib/constants";
-import { RUNNING_DEPLOYMENT_VERSION, shortDeploymentVersion } from "../../lib/deploymentVersion";
+import {
+  formatDeploymentUpdatedAt,
+  RUNNING_DEPLOYMENT_UPDATED_AT,
+  RUNNING_DEPLOYMENT_VERSION,
+  shortDeploymentVersion,
+} from "../../lib/deploymentVersion";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 
 type LoginFormProps = {
@@ -28,6 +33,7 @@ export default function LoginForm({
   loginLoading, loginError, fadeIn, imageErrors, setImageErrors,
   doLogin, CSS
 }: LoginFormProps) {
+  const buildUpdatedAt = formatDeploymentUpdatedAt(RUNNING_DEPLOYMENT_UPDATED_AT);
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-inter), system-ui, sans-serif", padding: 16, opacity: fadeIn ? 1 : 0, transition: "opacity 0.6s", position: "relative" }}>
       <style>{CSS}</style>
@@ -107,7 +113,12 @@ export default function LoginForm({
               textAlign: "center",
             }}
           >
-            Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}
+            <div>Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}</div>
+            {buildUpdatedAt && (
+              <div style={{ marginTop: 2, fontSize: 9 }}>
+                Last updated {buildUpdatedAt} · Miami
+              </div>
+            )}
           </div>
         </div>
       </div>

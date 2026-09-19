@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deploymentChanged,
+  formatDeploymentUpdatedAt,
+  normalizeDeploymentUpdatedAt,
   normalizeDeploymentVersion,
   shortDeploymentVersion,
 } from "./deploymentVersion";
@@ -24,4 +26,11 @@ test("display versions preserve package release numbers", () => {
   assert.equal(shortDeploymentVersion("0.1.0"), "0.1.0");
   assert.equal(shortDeploymentVersion("12.34.56"), "12.34.56");
   assert.equal(shortDeploymentVersion("1.2.3-release.10"), "1.2.3-release.10");
+});
+
+test("build timestamps are validated and displayed in Miami time with DST", () => {
+  assert.equal(normalizeDeploymentUpdatedAt("not-a-date"), null);
+  assert.equal(normalizeDeploymentUpdatedAt("2026-09-19T10:30:00Z"), "2026-09-19T10:30:00.000Z");
+  assert.equal(formatDeploymentUpdatedAt("2026-07-15T16:30:00Z"), "Jul 15, 2026, 12:30 PM EDT");
+  assert.equal(formatDeploymentUpdatedAt("2026-01-15T16:30:00Z"), "Jan 15, 2026, 11:30 AM EST");
 });

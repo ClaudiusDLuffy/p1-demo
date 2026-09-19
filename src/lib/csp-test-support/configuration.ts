@@ -12,6 +12,7 @@ export const PRESERVED_ENFORCED_CSP = "default-src 'self'; script-src 'self' 'un
 export async function readNextHeaders(reportOnlyHeaders: () => Header[] = () => [],
   environment: Record<string, string | undefined> = {}) {
   const source = readFileSync("next.config.ts", "utf8");
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -28,6 +29,7 @@ export async function readNextHeaders(reportOnlyHeaders: () => Header[] = () => 
       if (name === "./src/lib/config/server/browserSecurity") return {
         getCspReportOnlyHeaders: reportOnlyHeaders,
       };
+      if (name === "./package.json") return { default: packageJson };
       throw new Error(`Unexpected configuration import: ${name}`);
     },
   }, { timeout: 1_000 });
