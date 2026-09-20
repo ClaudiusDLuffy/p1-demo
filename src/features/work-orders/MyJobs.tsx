@@ -14,8 +14,9 @@ import {
   reportClientFailure,
 } from "../../lib/clientDiagnostics";
 import { CONTRACTOR_ACTIVE_WORK_ORDER_SORT } from "../../lib/workOrderView";
+import { normalizeExactPortalWorkOrderId } from "../../lib/workOrderIdentity";
 import { useCursorPagination } from "../../lib/useCursorPagination";
-import { useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "./queries";
+import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery, useWorkOrdersCountQuery } from "./queries";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
@@ -26,6 +27,7 @@ export default function MyJobs(props: any) {
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const deferredSearch = useDeferredValue(search.trim());
+  const exactWorkOrderId = normalizeExactPortalWorkOrderId(deferredSearch);
   const {
     position,
     previous: previousPage,
@@ -33,16 +35,26 @@ export default function MyJobs(props: any) {
   } = useCursorPagination(JSON.stringify({ search: deferredSearch, sortColumn, sortDirection }));
   const contractorId = currentUser?.contractorAccountId || currentUser?.id || null;
   const enabled = page === "my_jobs" && !isManager && Boolean(contractorId);
-  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, enabled, undefined, { countEnabled: false });
+  const listQueryEnabled = enabled && !exactWorkOrderId;
+  const jobsQuery = useWorkOrdersPageQuery({ scope: "active", contractorId, search: deferredSearch, sort: CONTRACTOR_ACTIVE_WORK_ORDER_SORT, tableSortColumn: sortColumn, tableSortDirection: sortDirection, limit: 25, cursor: position.cursor }, listQueryEnabled, undefined, { countEnabled: false });
+  const exactWorkOrderQuery = useWorkOrderFamilyQuery(
+    exactWorkOrderId,
+    enabled && Boolean(exactWorkOrderId),
+  );
   // Badge counts are exact but deliberately sequenced behind the visible page
   // and each other. Four simultaneous scans from every My Jobs open were able
   // to exhaust the database statement deadline under normal concurrency.
-  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, enabled && jobsQuery.isSuccess && !jobsQuery.isPlaceholderData);
-  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, enabled && activeCountQuery.isSuccess);
-  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, enabled && pendingCountQuery.isSuccess);
-  const visibleJobs: any[] = (jobsQuery.data?.items || (enabled ? [] : myWOs)) as any[];
+  const activeCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId }, listQueryEnabled && jobsQuery.isSuccess && !jobsQuery.isPlaceholderData);
+  const pendingCountQuery = useWorkOrdersCountQuery({ scope: "active", contractorId, status: "pending_invoice" }, listQueryEnabled && activeCountQuery.isSuccess);
+  const capitalCountQuery = useWorkOrdersCountQuery({ scope: "capital", contractorId }, listQueryEnabled && pendingCountQuery.isSuccess);
+  const activeJobsQuery = exactWorkOrderId ? exactWorkOrderQuery : jobsQuery;
+  const visibleJobs: any[] = (
+    exactWorkOrderId
+      ? exactWorkOrderQuery.data || []
+      : jobsQuery.data?.items || (enabled ? [] : myWOs)
+  ) as any[];
   const resultDiagnosticRef = useRef<string | null>(null);
-  const jobsFailure = jobsQuery.error ? normalizeUnknownError(jobsQuery.error) : null;
+  const jobsFailure = activeJobsQuery.error ? normalizeUnknownError(activeJobsQuery.error) : null;
   const jobsError = jobsFailure?.message || "";
   const jobsErrorCode = jobsFailure?.code;
   useEffect(() => {
@@ -56,7 +68,7 @@ export default function MyJobs(props: any) {
   }, [jobsError, jobsErrorCode]);
   useEffect(() => {
     if (
-      !enabled
+      !listQueryEnabled
       || deferredSearch !== ""
       || position.page !== 1
       || !jobsQuery.isSuccess
@@ -89,7 +101,7 @@ export default function MyJobs(props: any) {
   }, [
     contractorId,
     deferredSearch,
-    enabled,
+    listQueryEnabled,
     jobsQuery.data,
     jobsQuery.isFetching,
     jobsQuery.isSuccess,
@@ -97,7 +109,8 @@ export default function MyJobs(props: any) {
   ]);
   const retryJobs = () => {
     void (async () => {
-      await jobsQuery.refetch();
+      await activeJobsQuery.refetch();
+      if (exactWorkOrderId) return;
       await activeCountQuery.refetch();
       await pendingCountQuery.refetch();
       await capitalCountQuery.refetch();
@@ -105,9 +118,9 @@ export default function MyJobs(props: any) {
   };
   const collectionState = resolveWorkOrderCollectionState({
     itemCount: visibleJobs.length,
-    isPending: enabled && jobsQuery.isPending,
-    isFetching: enabled && jobsQuery.isFetching,
-    isError: jobsQuery.isError || !contractorId,
+    isPending: enabled && activeJobsQuery.isPending,
+    isFetching: enabled && activeJobsQuery.isFetching,
+    isError: activeJobsQuery.isError || !contractorId,
   });
   const jobsErrorMessage = contractorId
     ? "Your work orders are still saved. Retry the secure connection to load them."
@@ -180,18 +193,20 @@ export default function MyJobs(props: any) {
                   state="error"
                   errorMessage="The latest work-order refresh failed. Showing the previously loaded results."
                   onRetry={retryJobs}
-                  retrying={jobsQuery.isFetching}
+                  retrying={activeJobsQuery.isFetching}
                   style={{ marginBottom: 14, padding: "14px 16px" }}
                 />
               )}
               {visibleJobs.length === 0 && (
                 <WorkOrderCollectionNotice
                   state={collectionState}
-                  loadingMessage="Loading your work orders…"
+                  loadingMessage={exactWorkOrderId ? `Looking up ${exactWorkOrderId}…` : "Loading your work orders…"}
                   errorMessage={jobsErrorMessage}
-                  emptyMessage={search ? "No work orders match your search." : "No active work orders are assigned to your account."}
+                  emptyMessage={exactWorkOrderId
+                    ? `No accessible work order found for ${exactWorkOrderId}.`
+                    : search ? "No work orders match your search." : "No active work orders are assigned to your account."}
                   onRetry={contractorId ? retryJobs : undefined}
-                  retrying={jobsQuery.isFetching}
+                  retrying={activeJobsQuery.isFetching}
                   className="card"
                   style={{ marginBottom: 14 }}
                 />
@@ -248,15 +263,17 @@ export default function MyJobs(props: any) {
               })}
               <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <span title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontSize: 11, color: T.muted }}>
-                  {jobsQuery.isError
+                  {activeJobsQuery.isError
                     ? "Work orders unavailable"
-                    : jobsQuery.isFetching
+                    : activeJobsQuery.isFetching
                       ? "Loading jobs..."
-                      : `${jobsQuery.data?.totalCount ?? "—"} jobs · page ${position.page}`}
+                      : exactWorkOrderId
+                        ? `${visibleJobs.length} exact assignment${visibleJobs.length === 1 ? "" : "s"}`
+                        : `${jobsQuery.data?.totalCount ?? "—"} jobs · page ${position.page}`}
                 </span>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" className="btn-soft" disabled={position.page <= 1 || jobsQuery.isFetching} onClick={previousPage}>Previous</button>
-                  <button type="button" className="btn-soft" disabled={!jobsQuery.data?.hasMore || jobsQuery.isFetching} onClick={() => nextPage(jobsQuery.data?.nextCursor || null)}>Next</button>
+                  <button type="button" className="btn-soft" disabled={Boolean(exactWorkOrderId) || position.page <= 1 || jobsQuery.isFetching} onClick={previousPage}>Previous</button>
+                  <button type="button" className="btn-soft" disabled={Boolean(exactWorkOrderId) || !jobsQuery.data?.hasMore || jobsQuery.isFetching} onClick={() => nextPage(jobsQuery.data?.nextCursor || null)}>Next</button>
                 </div>
               </div>
             </div>

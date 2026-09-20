@@ -6,6 +6,7 @@ import { workOrderFamilyKey } from "./counts/queryKeys";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const list = read("src/features/work-orders/WorkOrderList.tsx");
+const myJobs = read("src/features/work-orders/MyJobs.tsx");
 const queries = read("src/features/work-orders/queries.ts");
 const dataLayer = read("src/lib/db.ts");
 const migration = read("supabase/migrations/0109_immediate_seven_eleven_activity_alerts.sql");
@@ -25,6 +26,17 @@ test("exact WOT searches use the scoped family lookup instead of filtered pages"
     dataLayer,
     /id\.eq\.\$\{reference\},duplicate_root_work_order_id\.eq\.\$\{reference\}/,
   );
+});
+
+test("contractor My Jobs exact WOT searches bypass a crowded filtered page", () => {
+  assert.match(myJobs, /normalizeExactPortalWorkOrderId\(deferredSearch\)/);
+  assert.match(myJobs, /useWorkOrderFamilyQuery\([\s\S]*?exactWorkOrderId/);
+  assert.match(myJobs, /listQueryEnabled[\s\S]*?!exactWorkOrderId/);
+  assert.match(
+    myJobs,
+    /const visibleJobs:[\s\S]*?exactWorkOrderQuery\.data \|\| \[\][\s\S]*?: jobsQuery\.data\?\.items/,
+  );
+  assert.match(myJobs, /No accessible work order found for \$\{exactWorkOrderId\}/);
 });
 
 test("the exact family lookup preserves RLS and never returns soft-deleted work orders", () => {

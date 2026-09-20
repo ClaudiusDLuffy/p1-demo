@@ -50,6 +50,7 @@ values
   (:'company_admin_id'::uuid, 'Synthetic Company Admin', 'CA', 'e2e.company.admin@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#F59E0B', true, 'direct', null, true, '00000000-0000-4000-8000-00000000e201', 'company_admin'),
   (:'company_admin_2_id'::uuid, 'Synthetic Company Admin Two', 'C2', 'e2e.company.admin2@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#B45309', true, 'direct', null, true, '00000000-0000-4000-8000-00000000e201', 'company_admin'),
   (:'invoice_tech_id'::uuid, 'Synthetic Invoice Technician', 'IT', 'e2e.invoice.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#10B981', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'invoice'),
+  (:'legacy_invoice_tech_id'::uuid, 'Synthetic Legacy Invoice Technician', 'LI', 'e2e.legacy.invoice.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#0D9488', true, null, null, true, '00000000-0000-4000-8000-00000000e201', 'invoice'),
   (:'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 'RV', 'e2e.revocation.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#047857', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'invoice'),
   (:'report_tech_id'::uuid, 'Synthetic Report Technician', 'RT', 'e2e.report.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#EC4899', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
   (:'team_lead_id'::uuid, 'Synthetic Team Lead', 'TL', 'e2e.team.lead@p1.invalid', 'contractor', null, 'Synthetic Service Company · Field Team', 'Test Territory', array['general'], '#0F766E', true, 'mr_freeze', null, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
@@ -87,12 +88,13 @@ values
 
 delete from public.contractor_technicians
 where contractor_id = :'company_admin_id'::uuid
-   or profile_id in (:'invoice_tech_id'::uuid, :'revocation_tech_id'::uuid, :'report_tech_id'::uuid,
+   or profile_id in (:'invoice_tech_id'::uuid, :'legacy_invoice_tech_id'::uuid, :'revocation_tech_id'::uuid, :'report_tech_id'::uuid,
      :'team_lead_id'::uuid, :'team_member_id'::uuid);
 
 insert into public.contractor_technicians (contractor_id, profile_id, name, tier, is_active)
 values
   (:'company_admin_id'::uuid, :'invoice_tech_id'::uuid, 'Synthetic Invoice Technician', 'contracted', true),
+  (:'company_admin_id'::uuid, :'legacy_invoice_tech_id'::uuid, 'Synthetic Legacy Invoice Technician', 'contracted', true),
   (:'company_admin_id'::uuid, :'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 'contracted', true),
   (:'company_admin_id'::uuid, :'report_tech_id'::uuid, 'Synthetic Report Technician', 'contracted', true),
   (:'company_admin_id'::uuid, :'team_lead_id'::uuid, 'Synthetic Team Lead', 'mr_freeze', true),
@@ -284,13 +286,48 @@ from (values
   ('E2E-PHOTO-CONCURRENT-A',  '060', 'Refrigeration', 'Refrigeration equipment',  'Concurrent mobile photo batch A',   'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
   ('E2E-PHOTO-CONCURRENT-B',  '061', 'Refrigeration', 'Refrigeration equipment',  'Concurrent mobile photo batch B',   'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
   ('E2E-STORE-ACTIVE',        '062', 'General',       'General Maintenance',      'Exact store active call',            'p3', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          1200::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
-  ('E2E-STORE-CLOSED',        '063', 'General',       'General Maintenance',      'Exact store historical call',        'p3', 'closed',                    'Completed',                   :'direct_id'::uuid,          1200::numeric, false, null,                    false, now() - interval '3 days',    now() - interval '3 days' + interval '1 hour', null::uuid,          'Synthetic Direct Contractor',     0, 3::bigint, now() - interval '2 days')
+  ('E2E-STORE-CLOSED',        '063', 'General',       'General Maintenance',      'Exact store historical call',        'p3', 'closed',                    'Completed',                   :'direct_id'::uuid,          1200::numeric, false, null,                    false, now() - interval '3 days',    now() - interval '3 days' + interval '1 hour', null::uuid,          'Synthetic Direct Contractor',     0, 3::bigint, now() - interval '2 days'),
+  ('WOTEST5',                 '064', 'Refrigeration', 'Refrigeration equipment',  'Legacy-linked mobile field work',    'p2', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   2400::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'legacy_invoice_tech_id'::uuid, 'Synthetic Legacy Invoice Technician', 0, 0::bigint, null::timestamptz),
+  ('WOTEST5-OVERLAP',         '065', 'Refrigeration', 'Refrigeration equipment',  'Parallel assigned mobile field work','p3', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1800::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'legacy_invoice_tech_id'::uuid, 'Synthetic Legacy Invoice Technician', 0, 0::bigint, null::timestamptz),
+  ('WOTEST6',                 '066', 'HVAC',          'HVAC',                     'Aged mixed billing field workflow',  'p1', 'pending_invoice',           'Awaiting Parts',              :'company_admin_id'::uuid,   4200::numeric, false, null,                    false, now() - interval '30 days',   now() - interval '30 days' + interval '90 minutes', :'invoice_tech_id'::uuid, 'Synthetic Invoice Technician', 0, 4::bigint, null::timestamptz),
+  ('WOT9005005',              '067', 'Refrigeration', 'Refrigeration equipment',  'Exact high-volume assignment lookup','p3', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1800::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'legacy_invoice_tech_id'::uuid, 'Synthetic Legacy Invoice Technician', 0, 0::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
   billing_only, start_time, end_time, assigned_technician_profile_id,
   technician_on_job, workflow_cycle, lifecycle_version, closed_at
 );
+
+-- Eleazar/Cliff-style accounts can carry many active assignments. Keep this
+-- synthetic legacy-linked technician above the 25-row My Jobs page size so
+-- exact search, cursor reset, counts and direct detail access are exercised
+-- together instead of only on a short first page.
+insert into public.work_orders (
+  id, incident_id, store_number, city, address, store_state, store_timezone,
+  line_of_service, business_service, category, sub_category, summary, description,
+  priority, status, functional_status, contractor_id, afm_id, afm_name, afm_email,
+  nte, dispatched_at, is_capital, created_by, source, billing_only,
+  contractor_assignment_started_at, contractor_assignment_version,
+  assigned_technician_profile_id, technician_on_job, workflow_cycle, lifecycle_version
+)
+select
+  'WOTEST5-Q' || lpad(sequence::text, 2, '0'),
+  'E2E-INC-5Q' || lpad(sequence::text, 2, '0'),
+  'E2E001', 'Synthetic City, TX',
+  '100 Test Fixture Way, Synthetic City, TX 75001', 'TX', 'America/Chicago',
+  'Refrigeration', 'Refrigeration equipment', 'Synthetic fixture',
+  'High-volume assigned queue',
+  'Legacy-linked assignment ' || sequence,
+  'Disposable active queue fixture ' || sequence || ' for pagination and search.',
+  'p3'::public.wo_priority, 'assigned'::public.wo_status,
+  'Dispatched'::public.fsm_functional_status,
+  :'company_admin_id'::uuid,
+  '00000000-0000-4000-8000-00000000e301'::uuid,
+  'Synthetic AFM', null, 1800, now() - make_interval(mins => sequence),
+  false, :'dispatcher_id'::uuid, 'manual', false,
+  now() - make_interval(mins => sequence), 1,
+  :'legacy_invoice_tech_id'::uuid, 'Synthetic Legacy Invoice Technician', 0, 0::bigint
+from generate_series(1, 26) sequence;
 
 -- A legacy company technician without a login is a real supported directory
 -- shape.  It must remain visible to company administrators without exposing
@@ -365,6 +402,11 @@ values
     '00000000-0000-4000-8000-00000000f210', 'E2E-COMPLETED-RETURN-STAFF',
     :'direct_id'::uuid, now() - interval '4 days', now() - interval '4 days' + interval '2 hours',
     :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f211', 'WOTEST6',
+    :'company_admin_id'::uuid, now() - interval '30 days', now() - interval '30 days' + interval '90 minutes',
+    :'invoice_tech_id'::uuid, :'invoice_tech_id'::uuid
   );
 
 insert into public.activities (

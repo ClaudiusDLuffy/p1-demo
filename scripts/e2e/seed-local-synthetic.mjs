@@ -13,6 +13,7 @@ const accounts = [
   ["company_admin_id", "e2e.company.admin@p1.invalid", "Synthetic Company Admin", "contractor"],
   ["company_admin_2_id", "e2e.company.admin2@p1.invalid", "Synthetic Company Admin Two", "contractor"],
   ["invoice_tech_id", "e2e.invoice.tech@p1.invalid", "Synthetic Invoice Technician", "contractor"],
+  ["legacy_invoice_tech_id", "e2e.legacy.invoice.tech@p1.invalid", "Synthetic Legacy Invoice Technician", "contractor"],
   ["revocation_tech_id", "e2e.revocation.tech@p1.invalid", "Synthetic Revocation Technician", "contractor"],
   ["report_tech_id", "e2e.report.tech@p1.invalid", "Synthetic Report Technician", "contractor"],
   ["team_lead_id", "e2e.team.lead@p1.invalid", "Synthetic Team Lead", "contractor"],
@@ -67,7 +68,7 @@ async function main() {
     ["exec", "-i", "supabase_db_p1-demo-e2e", "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", ...variables],
     { input: sql, stdio: ["pipe", "pipe", "inherit"], maxBuffer: 4 * 1024 * 1024 },
   );
-  console.log(JSON.stringify({ seeded: true, accounts: accounts.length, workOrders: 63, productionDataUsed: false }, null, 2));
+  console.log(JSON.stringify({ seeded: true, accounts: accounts.length, workOrders: 93, productionDataUsed: false }, null, 2));
 }
 
 main().catch(error => {

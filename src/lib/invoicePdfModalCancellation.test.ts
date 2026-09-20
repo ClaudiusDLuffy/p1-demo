@@ -131,6 +131,25 @@ test("late number suggestion from the same invoice's previous open cannot popula
   h.unmount();
 });
 
+test("focusing the invoice number protects authored input from a late suggestion", async () => {
+  const h = harness();
+  let finish: (value: string) => void = () => undefined;
+  h.props.nextInvNumFromDb = () => new Promise<string>(resolve => { finish = resolve; });
+  h.props.modal = null;
+  h.render();
+  h.props.modal = "createInvoice";
+  const input = h.render().find(node => node.type === "input" && node.props.placeholder === "e.g. 6557");
+  assert.ok(input && typeof input.props.onFocus === "function");
+  input.props.onFocus();
+  h.form.num = "AUTHORED-1042";
+  finish("6501");
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(h.form.num, "AUTHORED-1042");
+  assert.equal(h.formCalls.some(call => call.field === "num" && call.value === "6501"), false);
+  h.unmount();
+});
+
 test("invoice PDF modal cancels an earlier file and ignores its late extracted values", async () => {
   const h = harness(); const first = h.select(file("first.pdf")); const second = h.select(file("second.pdf"));
   assert.equal(h.parseCalls[0].signal.aborted, true); assert.equal(h.parseCalls[1].signal.aborted, false);
