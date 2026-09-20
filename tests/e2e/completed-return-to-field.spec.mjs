@@ -1,7 +1,15 @@
-import { accounts, expect, login, openSidebarPage, openWorkOrder, test } from "./fixtures.mjs";
+import {
+  accounts,
+  expect,
+  login,
+  openSidebarPage,
+  openWorkOrder,
+  test,
+  waitForApplicationRequestsToSettle,
+} from "./fixtures.mjs";
 
 async function reloadWorkOrder(page, workOrderId) {
-  await page.waitForLoadState("networkidle");
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await expect(page.locator(".app-root")).toBeVisible();
   await openWorkOrder(page, workOrderId);

@@ -1,16 +1,24 @@
 import { devices } from "@playwright/test";
 import { createCanvas } from "@napi-rs/canvas";
-import { accounts, expect, login, openWorkOrder, test } from "./fixtures.mjs";
+import {
+  accounts,
+  expect,
+  login,
+  openWorkOrder,
+  test,
+  waitForApplicationRequestsToSettle,
+} from "./fixtures.mjs";
 
 const mobileDevice = { ...devices["iPhone 13"] };
 delete mobileDevice.defaultBrowserType;
 test.use(mobileDevice);
+const mobileFieldWorkOrderId = "E2E-MOBILE-FIELD";
 
 async function reloadWorkOrder(page, workOrderId) {
   // Let mutation-triggered reads settle before navigating. WebKit reports
   // cross-origin fetches aborted by an immediate reload as CORS page errors,
   // which would hide whether the persisted workflow itself reloaded cleanly.
-  await page.waitForLoadState("networkidle");
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await expect(page.locator(".app-root")).toBeVisible();
   await openWorkOrder(page, workOrderId);
@@ -18,7 +26,7 @@ async function reloadWorkOrder(page, workOrderId) {
 
 async function refreshWorkOrder(page, workOrderId) {
   await page.getByRole("button", { name: "Refresh portal", exact: true }).click();
-  await page.waitForLoadState("networkidle");
+  await waitForApplicationRequestsToSettle(page);
   await page.getByRole("button", { name: "Back to previous view", exact: true }).click();
   await openWorkOrder(page, workOrderId);
 }
@@ -58,7 +66,7 @@ test("mobile contractor can upload an eight-photo batch and retain every confirm
 
 test("mobile technician can clock in, clock out, resume, and complete across refreshes", async ({ page }) => {
   await login(page, accounts.reportTech);
-  await openWorkOrder(page, "E2E-REPORT-START");
+  await openWorkOrder(page, mobileFieldWorkOrderId);
 
   await page.getByRole("button", { name: "Start work", exact: true }).click();
   let dialog = page.getByRole("dialog", { name: "Start work" });
@@ -67,7 +75,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Work in Progress", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await page.getByRole("button", { name: "Pause (parts)", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Pause work" });
   await dialog.getByRole("combobox", { name: "Reason" }).click();
@@ -77,7 +85,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Awaiting Parts", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await page.getByRole("button", { name: "Resume work", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Resume work" });
   await dialog.getByPlaceholder("What are you seeing on site?").fill("Mobile return visit resumed.");
@@ -85,7 +93,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Work in Progress", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await page.getByRole("button", { name: "Mark work complete", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Mark work complete" });
   await dialog.getByLabel("Equipment make").fill("Synthetic Mobile Make");
@@ -99,7 +107,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
   await expect(page.getByText("Visit 1", { exact: true })).toBeVisible();
   await expect(page.getByText("Visit 2", { exact: true })).toBeVisible();

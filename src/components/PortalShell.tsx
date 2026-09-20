@@ -46,6 +46,7 @@ import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import {
+  WORK_ORDER_BY_ID_KEY,
   WORK_ORDERS_KEY,
   useWorkOrderByIdQuery,
   useWorkOrderDetailsQuery,
@@ -1356,9 +1357,21 @@ export default function PortalShell() {
   const isAuthenticated = !!currentUser?.id && currentUser.active === true;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const invoiceController = isInvoiceController(currentUser);
-  const notesSeenInFlight = useRef(new Set<string>());
+  const notesSeenInFlight = useRef(new Map<string, Promise<string | null>>());
+  const notesSeenVersions = useRef(new Map<string, string>());
   const staffReadInFlight = useRef(new Set<string>());
   const qc = useQueryClient();
+  const awaitCurrentWorkOrderVersion = useCallback(async (workOrderId: string, fallback: string | null | undefined) => {
+    const pendingRead = notesSeenInFlight.current.get(workOrderId);
+    const acknowledgedVersion = pendingRead
+      ? await pendingRead
+      : notesSeenVersions.current.get(workOrderId);
+    if (!acknowledgedVersion) return fallback || null;
+    if (!fallback) return acknowledgedVersion;
+    return new Date(acknowledgedVersion).getTime() > new Date(fallback).getTime()
+      ? acknowledgedVersion
+      : fallback;
+  }, []);
   const refreshVisiblePortal = usePortalRealtime(currentUser, refreshCurrentProfile);
   const refreshBillingMutation = useCallback((invoiceId?: string, workOrderId?: string, closesWork = false) => {
     if (!currentUser) return Promise.resolve();
@@ -1901,28 +1914,37 @@ export default function PortalShell() {
 
     const workOrderId = selectedWO;
     const latestNoteAt = woData.latestNoteAt;
-    notesSeenInFlight.current.add(workOrderId);
-
-    void markWorkOrderNotesSeen(workOrderId, latestNoteAt)
-      .then(() => {
+    const request = markWorkOrderNotesSeen(workOrderId, latestNoteAt)
+      .then(updatedAt => {
+        notesSeenVersions.current.set(workOrderId, updatedAt);
         const markSeen = (items: any[] | undefined) => items?.map((wo: any) =>
           wo.id === workOrderId
-            ? { ...wo, staffNotesSeenAt: latestNoteAt, hasUnreadNotes: false }
+            ? { ...wo, staffNotesSeenAt: latestNoteAt, hasUnreadNotes: false, updatedAt }
             : wo
         );
         setWorkOrders((items: any[]) => markSeen(items) || []);
         qc.setQueryData(WORK_ORDERS_KEY, markSeen);
+        qc.setQueriesData({ queryKey: WORK_ORDER_BY_ID_KEY }, (workOrder: any) =>
+          workOrder?.id === workOrderId
+            ? { ...workOrder, staffNotesSeenAt: latestNoteAt, hasUnreadNotes: false, updatedAt }
+            : workOrder
+        );
         if (currentUser) void invalidatePortalPlan(qc, currentUser, { refreshIdentity: false, targets: [
           { family: "work_detail", id: workOrderId }, { family: "work_pages", subset: "staff" }, { family: "work_pages", subset: "notes" },
           { family: "work_counts", subset: "staff" }, { family: "navigation" },
         ] }, isPortalVisible());
+        return updatedAt;
       })
       .catch((error: any) => {
         fire(`Could not clear new-note indicator: ${safeErrorMessage(error)}`);
+        return null;
       })
       .finally(() => {
-        notesSeenInFlight.current.delete(workOrderId);
+        if (notesSeenInFlight.current.get(workOrderId) === request) {
+          notesSeenInFlight.current.delete(workOrderId);
+        }
       });
+    notesSeenInFlight.current.set(workOrderId, request);
   }, [fire, isManager, qc, currentUser, selectedWorkOrderBeingRead, selectedWO, setWorkOrders, woData?.hasUnreadNotes, woData?.latestNoteAt]);
 
   const shellFormState = useMemo(() => ({ etaDateInput, etaTimeInput, editWoForm, reassignTarget,
@@ -3845,7 +3867,8 @@ export default function PortalShell() {
               onClick={async () => {
                 setModalLoading(true);
                 try {
-                  if (!woData.updatedAt) {
+                  const expectedUpdatedAt = await awaitCurrentWorkOrderVersion(woData.id, woData.updatedAt);
+                  if (!expectedUpdatedAt) {
                     fire("Work-order version is missing. Refresh the page before closing this work order.");
                     return;
                   }
@@ -3853,7 +3876,7 @@ export default function PortalShell() {
                     woData.id,
                     Number(woData.workflowCycle || 0),
                     Number(woData.contractorAssignmentVersion || 0),
-                    woData.updatedAt,
+                    expectedUpdatedAt,
                   );
                   if (closed) setModal(null);
                 } finally {
@@ -3874,7 +3897,11 @@ export default function PortalShell() {
           workOrderId={followUpCloseSnapshot.id}
           onClose={() => setModal(null)}
           onConfirm={async reason => {
-            if (!followUpCloseSnapshot.updatedAt) {
+            const expectedUpdatedAt = await awaitCurrentWorkOrderVersion(
+              followUpCloseSnapshot.id,
+              followUpCloseSnapshot.updatedAt,
+            );
+            if (!expectedUpdatedAt) {
               fire("Work-order version is missing. Refresh the page before closing this follow-up.");
               return false;
             }
@@ -3882,7 +3909,7 @@ export default function PortalShell() {
               followUpCloseSnapshot.id,
               followUpCloseSnapshot.workflowCycle,
               followUpCloseSnapshot.contractorAssignmentVersion,
-              followUpCloseSnapshot.updatedAt,
+              expectedUpdatedAt,
               reason,
             );
           }}

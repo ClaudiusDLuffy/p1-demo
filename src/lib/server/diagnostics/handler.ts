@@ -1,7 +1,7 @@
 import { AppError } from "../../errors/AppError";
 import { errorResponse } from "../../errors/httpBoundary";
 import { readBoundedBody } from "../../http/boundedBody";
-import { clientReportSchema, CLIENT_DIAGNOSTIC_BODY_BYTES, type ClientDiagnosticReport } from "../../observability/clientReportContracts";
+import { clientReportSchema, CLIENT_DIAGNOSTIC_BODY_BYTES, CLIENT_REPORT_ACCEPTED_HEADER, type ClientDiagnosticReport } from "../../observability/clientReportContracts";
 import { createRequestContext, withRequestId, type RequestContext } from "../../observability/requestContext";
 export type DiagnosticDependencies = {
   authorize: (request: Request) => Promise<string>;
@@ -31,7 +31,13 @@ export async function handleClientDiagnostic(request: Request, dependencies: Dia
       ...(parsed.data.details ? { details: parsed.data.details } : {}),
       ...(parsed.data.context?.operationId ? { context: { operationId: parsed.data.context.operationId } } : {}) };
     if (!dependencies.log(safeReport, context)) throw new AppError("PROVIDER_UNAVAILABLE");
-    return withRequestId(Response.json({ accepted: true, correlationId: context.correlationId }, { status: 202, headers: { "Cache-Control": "no-store" } }), context);
+    // A correlated header-only receipt avoids leaving a small response stream
+    // pending in Safari/WebKit while still proving that this exact report was
+    // accepted. Diagnostics never need to return application data.
+    return withRequestId(new Response(null, {
+      status: 202,
+      headers: { "Cache-Control": "no-store", [CLIENT_REPORT_ACCEPTED_HEADER]: "1" },
+    }), context);
   } catch (error) {
     // No payload log on rejection; diagnostics cannot amplify logs recursively.
     context.failureLogged = true;

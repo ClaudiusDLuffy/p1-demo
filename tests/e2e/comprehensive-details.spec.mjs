@@ -1,4 +1,12 @@
-import { accounts, expect, login, openSidebarPage, openWorkOrder, test } from "./fixtures.mjs";
+import {
+  accounts,
+  expect,
+  login,
+  openSidebarPage,
+  openWorkOrder,
+  test,
+  waitForApplicationRequestsToSettle,
+} from "./fixtures.mjs";
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -159,6 +167,7 @@ test("contractor can correct an aged visit and the audit reason persists", async
   await expect(page.getByText(/Jan 15, 2024(?:,| at) 7:15 AM/)).toBeVisible();
   await expect(page.getByText(`Synthetic Direct Contractor corrected visit time: ${auditReason}`, { exact: true })).toBeVisible();
 
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await openSidebarPage(page, "My jobs");
   await openWorkOrder(page, "E2E-AGED-VISIT-CORRECT");

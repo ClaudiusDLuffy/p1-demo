@@ -5,19 +5,25 @@ import { redact, redactText } from "./observability/redaction";
 import { errorMetadata } from "./errors/catalog";
 import { safeLog } from "./observability/safeLogger";
 import { createRequestContext } from "./observability/requestContext";
+import { CLIENT_REPORT_ACCEPTED_HEADER } from "./observability/clientReportContracts";
 
 test("client diagnostic transport omits free-form stack and replaces message with a catalog value", async () => {
   const correlationId = crypto.randomUUID();
   let outbound = "";
+  let keepalive: boolean | undefined;
   const result = await sendClientReport({ version: 1, code: "INTERNAL_ERROR", correlationId,
     level: "error", source: "synthetic_fixture", message: "SYNTHETIC_PRIVATE_MESSAGE", stack: "SYNTHETIC_PRIVATE_STACK" }, {
     token: async () => "synthetic-token",
     fetch: async (_input, init) => {
       outbound = String(init?.body);
-      return Response.json({ accepted: true, correlationId }, { status: 202, headers: { "X-Request-ID": correlationId } });
+      keepalive = init?.keepalive;
+      return new Response(null, { status: 202, headers: {
+        "X-Request-ID": correlationId, [CLIENT_REPORT_ACCEPTED_HEADER]: "1",
+      } });
     },
   });
   assert.equal(result.status, "accepted");
+  assert.equal(keepalive, true);
   assert.doesNotMatch(outbound, /SYNTHETIC_PRIVATE_MESSAGE|SYNTHETIC_PRIVATE_STACK|"stack"/);
   assert.equal(JSON.parse(outbound).message, errorMetadata("INTERNAL_ERROR").message);
 });

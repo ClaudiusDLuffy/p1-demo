@@ -45,11 +45,60 @@ export const test = base.extend({
 
 export { expect };
 
+const trackedRequestsByPage = new WeakMap();
+
+function shouldTrackApplicationRequest(request) {
+  const url = request.url();
+  return url.includes("/rest/v1/")
+    || url.includes("/storage/v1/")
+    || url.includes("/api/client-errors");
+}
+
+function ensureApplicationRequestTracker(page) {
+  const existing = trackedRequestsByPage.get(page);
+  if (existing) return existing;
+
+  const pending = new Set();
+  page.on("request", request => {
+    if (shouldTrackApplicationRequest(request)) pending.add(request);
+  });
+  const settle = request => pending.delete(request);
+  page.on("requestfinished", settle);
+  page.on("requestfailed", settle);
+  trackedRequestsByPage.set(page, pending);
+  return pending;
+}
+
+export async function waitForApplicationRequestsToSettle(page, {
+  quietWindowMs = 250,
+  timeoutMs = 10_000,
+} = {}) {
+  const pending = ensureApplicationRequestTracker(page);
+  const deadline = Date.now() + timeoutMs;
+  let quietSince = null;
+
+  while (Date.now() < deadline) {
+    if (pending.size === 0) {
+      quietSince ??= Date.now();
+      if (Date.now() - quietSince >= quietWindowMs) return;
+    } else {
+      quietSince = null;
+    }
+    await page.waitForTimeout(50);
+  }
+
+  const unresolved = [...pending]
+    .map(request => `${request.method()} ${request.url().replace(/\?.*$/, "")}`)
+    .sort();
+  throw new Error(`Application requests did not settle: ${unresolved.join(", ")}`);
+}
+
 export async function login(page, account) {
   // The disposable local GoTrue/PostgREST pair can briefly disagree at the JWT
   // issue second. Retry only that local PGRST303 response so the test observes
   // application behavior instead of a container-clock race. Hosted
   // environments are never involved in this harness.
+  ensureApplicationRequestTracker(page);
   const localJwtClockRetry = async route => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       let status;

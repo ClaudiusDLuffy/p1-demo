@@ -1,4 +1,5 @@
 import { access } from "node:fs/promises";
+import { basename } from "node:path";
 import { jsPDF } from "jspdf";
 import {
   accounts,
@@ -8,10 +9,15 @@ import {
   openWorkOrder,
   sidebar,
   test,
+  waitForApplicationRequestsToSettle,
 } from "./fixtures.mjs";
 
 const WORK_ORDER_ID = "WOTEST3";
 const INVOICE_NUMBER = "WOTEST3-PDF";
+const SYNTHETIC_INVOICE_FILENAME = "wotest3-synthetic-invoice.pdf";
+const expectedInvoiceFilename = process.env.P1_E2E_INVOICE_PDF_PATH
+  ? basename(process.env.P1_E2E_INVOICE_PDF_PATH)
+  : SYNTHETIC_INVOICE_FILENAME;
 
 async function asAccount(browser, account, run) {
   const context = await browser.newContext();
@@ -71,7 +77,7 @@ async function uploadInvoice(page) {
     pdf.text(`Invoice Number: ${INVOICE_NUMBER}`, 20, 40);
     pdf.text("Synthetic service total: $225.00", 20, 55);
     await dialog.locator('input[type="file"][accept*="pdf"]').setInputFiles({
-      name: "wotest3-synthetic-invoice.pdf",
+      name: SYNTHETIC_INVOICE_FILENAME,
       mimeType: "application/pdf",
       buffer: Buffer.from(pdf.output("arraybuffer")),
     });
@@ -309,6 +315,7 @@ test("WOTEST3 crosses every synthetic role boundary and completes the field-to-p
     await expect(page.getByText("Visit 1", { exact: true })).toBeVisible();
     await expect(page.getByText("Visit 2", { exact: true })).toBeVisible();
 
+    await waitForApplicationRequestsToSettle(page);
     await page.reload();
     await openSidebarPage(page, "My jobs");
     await openWorkOrder(page, WORK_ORDER_ID);
@@ -336,7 +343,7 @@ test("WOTEST3 crosses every synthetic role boundary and completes the field-to-p
     await openContractorInvoice(page, INVOICE_NUMBER, "Submitted");
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download PDF", exact: true }).click();
-    expect((await download).suggestedFilename()).toMatch(/(?:test-invoice-7eleven|WOTEST3-PDF).*\.pdf/i);
+    expect((await download).suggestedFilename()).toBe(expectedInvoiceFilename);
     await page.getByRole("button", { name: "Approve", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `Approve invoice #${INVOICE_NUMBER}` });
     await dialog.getByRole("button", { name: "Approve", exact: true }).click();
@@ -351,7 +358,7 @@ test("WOTEST3 crosses every synthetic role boundary and completes the field-to-p
     await expect(page.getByRole("button", { name: "Reject", exact: true })).toHaveCount(0);
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download PDF", exact: true }).click();
-    expect((await download).suggestedFilename()).toMatch(/(?:test-invoice-7eleven|WOTEST3-PDF).*\.pdf/i);
+    expect((await download).suggestedFilename()).toBe(expectedInvoiceFilename);
   });
 
   await asAccount(browser, accounts.accounting, async page => {
