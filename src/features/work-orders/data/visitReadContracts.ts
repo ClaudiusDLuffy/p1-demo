@@ -7,6 +7,7 @@ export type VisitReadRow = {
   check_out_at: string | null;
   checked_in_by: string;
   checked_out_by: string | null;
+  technician_profile_id: string | null;
   closure_kind: "administrative_transfer" | null;
   duration_review_required: boolean;
   administrative_closed_at: string | null;
@@ -22,6 +23,7 @@ export type VisitReadModel = {
   checkOutAt: string | null;
   createdBy: string | null;
   closedBy: string | null;
+  technicianProfileId: string | null;
   closureKind: "administrative_transfer" | null;
   durationReviewRequired: boolean;
   administrativeClosedAt: string | null;

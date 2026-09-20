@@ -2769,6 +2769,7 @@ export type Database = {
           contractor_id: string
           created_at: string
           id: string
+          technician_profile_id: string | null
           updated_at: string
           work_order_id: string
         }
@@ -2782,6 +2783,7 @@ export type Database = {
           contractor_id: string
           created_at?: string
           id?: string
+          technician_profile_id?: string | null
           updated_at?: string
           work_order_id: string
         }
@@ -2795,6 +2797,7 @@ export type Database = {
           contractor_id?: string
           created_at?: string
           id?: string
+          technician_profile_id?: string | null
           updated_at?: string
           work_order_id?: string
         }
@@ -2830,6 +2833,13 @@ export type Database = {
           {
             foreignKeyName: "work_order_visits_contractor_id_fkey"
             columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_visits_technician_profile_id_fkey"
+            columns: ["technician_profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]

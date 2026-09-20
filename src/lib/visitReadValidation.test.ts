@@ -34,6 +34,7 @@ const malformedRows: readonly [string, Record<string, unknown>][] = [
   ["invalid check-in actor", { checked_in_by: "actor" }],
   ["null check-in actor", { checked_in_by: null }],
   ["invalid checkout actor", { checked_out_by: "actor" }],
+  ["invalid visit technician", { technician_profile_id: "technician" }],
   ["invalid check-in timestamp", { check_in_at: "yesterday" }],
   ["invalid checkout timestamp", { check_out_at: "tomorrow" }],
   ["invalid privacy timestamp", { created_at: "old cycle" }],
@@ -113,8 +114,8 @@ test("visit mapper exactly preserves nullable open representation, public keys a
   const value = visitRow({ check_out_at: null, checked_out_by: null });
   const parsed = parseVisitReadRow(value, visitParent);
   assert.deepEqual(mapVisit(parsed), visitExpected({ checkOutAt: null, closedBy: null }));
-  assert.equal(Object.keys(parsed).length, 11);
-  assert.equal(Object.keys(mapVisit(parsed)).length, 11);
+  assert.equal(Object.keys(parsed).length, 12);
+  assert.equal(Object.keys(mapVisit(parsed)).length, 12);
 });
 
 for (const timestamp of ["2024-02-29T08:15:20Z", "2026-09-10T08:15:20.123456+00:00", "2026-09-10T08:15:20.123-05:30"]) {
@@ -156,7 +157,7 @@ test("visit validation follows PostgreSQL reason code-point and btrim rules with
   for (const reason of ["  " + "😀".repeat(500) + "  ", "\t"]) {
     const mapped = mapVisit(parseVisitReadRow(administrativeVisitRow({ administrative_close_reason: reason }), visitParent));
     assert.equal(mapped.durationReviewRequired, true);
-    assert.equal(Object.keys(mapped).length, 11);
+    assert.equal(Object.keys(mapped).length, 12);
   }
 });
 

@@ -1,3 +1,4 @@
+import { devices } from "@playwright/test";
 import {
   accounts,
   expect,
@@ -11,6 +12,8 @@ import {
 const WORK_ORDER_ID = "WOTEST4";
 const CAPITAL_QUOTE_NUMBER = "WOTEST4-CAP-Q";
 const FINAL_INVOICE_NUMBER = "WOTEST4-CAP-FINAL";
+const mobileDevice = { ...devices["iPhone 13"] };
+delete mobileDevice.defaultBrowserType;
 
 async function asAccount(browser, account, run, options = {}) {
   const context = await browser.newContext(options);
@@ -56,6 +59,18 @@ async function expectContractorVisibility(browser, account, visible) {
       await expect(page.getByText(WORK_ORDER_ID, { exact: true }).first()).toBeVisible();
     } else {
       await expect(page.getByText("No work orders match your search.", { exact: true })).toBeVisible();
+    }
+  });
+}
+
+async function expectContractorClosedVisibility(browser, account, visible) {
+  await asAccount(browser, account, async page => {
+    await openSidebarPage(page, "Closed jobs");
+    await page.getByRole("textbox", { name: "Search closed jobs" }).fill(WORK_ORDER_ID);
+    if (visible) {
+      await expect(page.getByRole("button", { name: new RegExp(`^${WORK_ORDER_ID} Copy work order`) })).toBeVisible();
+    } else {
+      await expect(page.getByText("No closed work orders match the current filters.", { exact: true }).first()).toBeVisible();
     }
   });
 }
@@ -121,14 +136,24 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expectContractorVisibility(browser, account, false);
   }
 
-  // Dispatch first to the legacy team lead and verify its My Team read scope.
-  // The incomplete legacy reassignment control stays hidden; assignment still
-  // crosses the supported staff boundary below.
+  // Dispatch to the canonical company, then let its administrator assign the
+  // work to the team lead. Contractor ownership never moves to a child login.
   await asAccount(browser, accounts.dispatcher, async page => {
     await openStaffWorkOrder(page);
     await page.getByRole("button", { name: "Assign to contractor…", exact: true }).click();
-    await page.getByRole("option", { name: /Synthetic Team Lead/ }).click();
-    await expect(page.getByText("Synthetic Team Lead", { exact: true }).first()).toBeVisible();
+    await page.getByRole("option", { name: /Synthetic Company Admin/ }).first().click();
+    await expect(page.getByText("Synthetic Company Admin", { exact: true }).first()).toBeVisible();
+  });
+
+  await asAccount(browser, accounts.companyAdmin, async page => {
+    await openContractorWorkOrder(page);
+    const technicianCard = page.locator(".card").filter({
+      has: page.getByText("Technician on Job", { exact: true }),
+    }).filter({ has: page.locator('button[aria-haspopup="listbox"]') }).first();
+    const picker = technicianCard.locator('button[aria-haspopup="listbox"]');
+    await picker.click();
+    await page.getByRole("option", { name: "Synthetic Team Lead", exact: true }).click();
+    await expect(picker).toContainText("Synthetic Team Lead");
   });
 
   await expectContractorVisibility(browser, accounts.teamLead, true);
@@ -139,26 +164,21 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await page.getByRole("searchbox", { name: "Search team work orders" }).fill(WORK_ORDER_ID);
     const row = page.getByRole("row").filter({ has: page.getByText(WORK_ORDER_ID, { exact: true }) });
     await expect(row).toBeVisible();
-    await expect(row.locator('button[aria-haspopup="listbox"]')).toHaveCount(0);
-    await expect(row.getByRole("button", { name: /^(Assign|Reassign)$/ })).toHaveCount(0);
-  });
-
-  // Continue through the supported staff assignment boundary.
-  await asAccount(browser, accounts.manager, async page => {
-    await openStaffWorkOrder(page);
-    await page.getByRole("button", { name: "Reassign", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Reassign work order" });
-    await dialog.getByRole("button", { name: "New contractor" }).click();
-    await page.getByRole("option", { name: /Synthetic Team Member/ }).click();
-    await dialog.getByRole("button", { name: "Reassign", exact: true }).click();
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText("Synthetic Team Member", { exact: true }).first()).toBeVisible();
+    const picker = row.locator('button[aria-haspopup="listbox"]');
+    await picker.click();
+    await expect(page.getByRole("option", { name: "Synthetic Team Lead", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Synthetic Team Member", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Synthetic Direct Contractor", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: "Synthetic Report Technician", exact: true })).toHaveCount(0);
+    await page.getByRole("option", { name: "Synthetic Team Member", exact: true }).click();
+    await row.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(row).toContainText("Synthetic Team Member");
   });
 
   await expectContractorVisibility(browser, accounts.teamMember, true);
-  await expectContractorVisibility(browser, accounts.teamLead, false);
+  await expectContractorVisibility(browser, accounts.teamLead, true);
   await expectContractorVisibility(browser, accounts.direct, false);
-  await expectContractorVisibility(browser, accounts.companyAdmin, false);
+  await expectContractorVisibility(browser, accounts.companyAdmin, true);
 
   // A capital flag must place the job behind the quote/authorization hold and
   // retain the child assignment without exposing the internal planning note.
@@ -169,7 +189,7 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expect(page.getByRole("button", { name: "Create capital quote", exact: true })).toBeVisible();
   });
 
-  await asAccount(browser, accounts.teamMember, async page => {
+  await asAccount(browser, accounts.teamLead, async page => {
     await openContractorWorkOrder(page);
     await expect(page.getByText("WOTEST4 staff-only capital planning note.", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Start work", exact: true })).toHaveCount(0);
@@ -211,11 +231,11 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expect(page.getByText("7-Eleven FSM: Dispatched", { exact: true })).toBeVisible();
   });
 
-  // At a narrow mobile viewport, the assigned child runs visit one, sends both
-  // activity channels, uploads evidence, creates a part, and submits a work
-  // report. The report must document work without replacing the active visit
-  // or falsely completing progress.
-  await asAccount(browser, accounts.teamMember, async page => {
+  // At a narrow mobile viewport, the team lead runs visit one on behalf of the
+  // assigned child, sends both activity channels, uploads evidence, creates a
+  // part, and submits a work report. The report must document work without
+  // replacing the active visit or falsely completing progress.
+  await asAccount(browser, accounts.teamLead, async page => {
     // Contractor login already lands on My jobs. At this deliberately narrow
     // viewport the desktop sidebar is hidden, so open the assigned record from
     // the mobile list instead of asking the desktop-only navigation helper to
@@ -267,7 +287,21 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await dialog.getByRole("button", { name: "Pause work", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByRole("button", { name: "Resume work", exact: true })).toBeVisible();
-  }, { viewport: { width: 390, height: 844 } });
+
+    // The lead may correct the completed visit on behalf of the assigned team
+    // member; the visible activity author remains the lead for accountability.
+    await page.getByRole("button", { name: "Correct actual time", exact: true }).click();
+    const checkinDate = page.getByLabel("Actual check-in date");
+    const checkinTime = page.getByLabel("Actual check-in time");
+    const corrected = new Date(`${await checkinDate.inputValue()}T${await checkinTime.inputValue()}:00Z`);
+    corrected.setUTCMinutes(corrected.getUTCMinutes() - 1);
+    await checkinDate.fill(corrected.toISOString().slice(0, 10));
+    await checkinTime.fill(corrected.toISOString().slice(11, 16));
+    const correctionReason = "Team lead verified the crew timesheet.";
+    await page.getByPlaceholder("Explain why the recorded time was inaccurate").fill(correctionReason);
+    await page.getByRole("button", { name: "Save correction", exact: true }).click();
+    await expect(page.getByText(`Synthetic Team Lead corrected visit time: ${correctionReason}`, { exact: true })).toBeVisible();
+  }, mobileDevice);
 
   // Staff can see both contractor channels, but only staff can add procurement
   // cost/status. Refresh proves the combined state is not merely optimistic.
@@ -298,9 +332,10 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expect(page.getByText("P1 ordered", { exact: true })).toBeVisible();
   });
 
-  // The return visit is a genuine second visit. Completion must update the
-  // timeline and progress immediately and retain the capital identity.
-  await asAccount(browser, accounts.teamMember, async page => {
+  // The return visit is a genuine second visit performed by the lead on behalf
+  // of the same assigned technician. Completion must update the timeline and
+  // progress immediately while preserving both identities and capital state.
+  await asAccount(browser, accounts.teamLead, async page => {
     await openContractorWorkOrder(page);
     await page.getByRole("button", { name: "Resume work", exact: true }).click();
     let dialog = page.getByRole("dialog", { name: "Resume work" });
@@ -323,6 +358,10 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
     await expect(page.getByText("Visit 1", { exact: true })).toBeVisible();
     await expect(page.getByText("Visit 2", { exact: true })).toBeVisible();
+    await expect(page.getByText(
+      "Recorded by an authorized team lead on behalf of the assigned technician",
+      { exact: true },
+    )).toHaveCount(2);
     await expect(page.getByText("Capital", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Create or upload invoice/ })).toHaveCount(0);
   });
@@ -376,6 +415,6 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     expect((await download).suggestedFilename()).toBe("WOTEST4-photo-1.png");
     await expect(page.getByRole("button", { name: "x", exact: true })).toHaveCount(0);
   });
-  await expectContractorVisibility(browser, accounts.direct, false);
-  await expectContractorVisibility(browser, accounts.companyAdmin, false);
+  await expectContractorClosedVisibility(browser, accounts.direct, false);
+  await expectContractorClosedVisibility(browser, accounts.companyAdmin, true);
 });

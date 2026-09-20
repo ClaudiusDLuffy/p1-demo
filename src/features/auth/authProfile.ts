@@ -21,7 +21,8 @@ export function parseAuthProfile(profile: unknown, contractorScope: unknown, gra
     contractorTier: text(p.contractor_tier), dispatcherId: text(p.dispatcher_id),
     contractorAccountId: text(scope.contractorAccountId) ?? (p.role === "contractor" ? p.id : null),
     contractorOrganizationId: text(scope.organizationId), contractorOrganizationName: text(scope.organizationName),
-    contractorAccessLevel: text(scope.accessLevel), canInvoice: scope.canInvoice === true, canManageTeam: scope.canManageTeam === true,
+    contractorAccessLevel: text(scope.accessLevel), canInvoice: scope.canInvoice === true,
+    canManageTeam: scope.canManageTeam === true, canLeadTeam: scope.canLeadTeam === true,
     staffPermissions: Array.isArray(grants) ? grants.flatMap(grant => typeof row(grant).permission === "string" ? [String(row(grant).permission)] : []) : [],
     contractorNteDisplay: numeric(p.contractor_nte_display) ?? 1000,
     defaultLaborRate: numeric(p.default_labor_rate), defaultTruckRate: numeric(p.default_truck_rate) };

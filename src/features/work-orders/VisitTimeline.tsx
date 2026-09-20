@@ -46,6 +46,8 @@ type VisitTimelineVisit = {
   id: string;
   checkInAt: string | null;
   checkOutAt: string | null;
+  createdBy?: string | null;
+  technicianProfileId?: string | null;
   closureKind?: string | null;
   durationReviewRequired?: boolean;
 };
@@ -190,6 +192,11 @@ export default function VisitTimeline({
                   <div style={{ marginTop: 3, fontSize: 11, color: T.muted }}>
                     {formatVisitTime(visit.checkInAt, timeZone)} → {formatVisitTime(visit.checkOutAt, timeZone)}
                   </div>
+                  {visit.technicianProfileId && visit.createdBy && visit.technicianProfileId !== visit.createdBy && (
+                    <div style={{ marginTop: 3, fontSize: 10, color: T.subtle }}>
+                      Recorded by an authorized team lead on behalf of the assigned technician
+                    </div>
+                  )}
                 </div>
                 {canOfferCorrection && !editing && (
                   <button type="button" className="btn-soft" onClick={() => startEditing(visit)} style={{ padding: "6px 9px", fontSize: 10 }}>

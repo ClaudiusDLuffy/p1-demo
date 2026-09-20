@@ -47,6 +47,7 @@ export type DirectoryActor = {
   contractorAccessLevel?: string | null;
   contractorTier?: string | null;
   canManageTeam?: boolean;
+  canLeadTeam?: boolean;
   staffPermissions?: readonly string[];
 };
 export const isDirectoryId = (value: unknown): value is string =>
@@ -61,7 +62,8 @@ export const directoryScopeKey = (actor?: DirectoryActor | null) => [
   actor?.id || "", actor?.role || "", actor?.active === true,
   actor?.contractorAccountId || "", actor?.contractorOrganizationId || "",
   actor?.contractorAccessLevel || "", actor?.contractorTier || "",
-  actor?.canManageTeam === true, [...(actor?.staffPermissions || [])].sort().join(","),
+  actor?.canManageTeam === true, actor?.canLeadTeam === true,
+  [...(actor?.staffPermissions || [])].sort().join(","),
 ] as const;
 export function directoryLabelIds(values: readonly unknown[]): string[] {
   const ids = [...new Set(values.filter(isDirectoryId))].sort();

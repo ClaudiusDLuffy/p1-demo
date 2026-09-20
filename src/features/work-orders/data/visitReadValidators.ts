@@ -40,6 +40,7 @@ const rowSchema: z.ZodType<VisitReadRow> = z.object({
   check_out_at: date.nullable(),
   checked_in_by: uuid,
   checked_out_by: uuid.nullable(),
+  technician_profile_id: uuid.nullable(),
   check_in_activity_id: uuid.nullable(),
   check_out_activity_id: uuid.nullable(),
   created_at: date,
@@ -67,6 +68,7 @@ const rowSchema: z.ZodType<VisitReadRow> = z.object({
     id: row.id, work_order_id: row.work_order_id, contractor_id: row.contractor_id,
     check_in_at: row.check_in_at, check_out_at: row.check_out_at,
     checked_in_by: row.checked_in_by, checked_out_by: row.checked_out_by,
+    technician_profile_id: row.technician_profile_id,
     closure_kind: row.closure_kind, duration_review_required: row.duration_review_required,
     administrative_closed_at: row.administrative_closed_at, administrative_closed_by: row.administrative_closed_by,
   }));

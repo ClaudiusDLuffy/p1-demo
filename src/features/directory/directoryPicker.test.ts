@@ -134,3 +134,19 @@ test("technician revalidation failure is visible without mutation and ordinary m
   }
   h.close();
 });
+test("authorized team lead revalidates and assigns a structured team profile", async () => {
+  const calls: unknown[][] = [];
+  const h = componentHarness("src/features/work-orders/WorkOrderTechnicianPicker.tsx", name => name.endsWith("/DirectorySelect") ? { DirectorySelect: "DirectorySelect" }
+    : name.endsWith("/directory/api") ? { loadDirectorySelection: async () => ({ id: id(7), name: "Crew technician" }) } : null);
+  const props = { workOrder: { id: "WOT-SYNTHETIC", contractor: id(4), assignedTechnicianProfileId: id(6), technicianOnJob: "Team lead" },
+    actor: { contractorOrganizationId: id(5), contractorAccessLevel: "report_only", canLeadTeam: true }, isManager: false,
+    doAssignPortalTechnician: async (...args: unknown[]) => calls.push(args), doSetTechnician: async () => undefined };
+  const tree = h.render("default", props);
+  const picker = nodes(tree).find(node => node.type === "DirectorySelect")!;
+  assert.equal(picker.props.domain, "legacy_team");
+  await (picker.props.onChange as (event: unknown, item: unknown) => Promise<void>)(
+    { target: { value: id(7) } }, { id: id(7), name: "Crew technician" },
+  );
+  assert.deepEqual(calls, [["WOT-SYNTHETIC", id(7), "Crew technician"]]);
+  h.close();
+});

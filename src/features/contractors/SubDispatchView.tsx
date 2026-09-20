@@ -35,6 +35,7 @@ export default function SubDispatchView(props: any) {
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const companyMode = !!currentUser?.canManageTeam;
+  const teamLeadMode = !!currentUser?.canLeadTeam;
   const contractorAccountId = currentUser?.contractorAccountId || currentUser?.id;
 
   const deferredSearch = useDeferredValue(search.trim());
@@ -73,12 +74,12 @@ export default function SubDispatchView(props: any) {
   const labels = useDirectoryLabels(myTeamWOs.map(workOrder =>
     "contractor" in workOrder && typeof workOrder.contractor === "string" ? workOrder.contractor : null), page === "team_dispatch");
 
-  const hasTeamAccess = companyMode || currentUser?.contractorTier === "mr_freeze";
+  const hasTeamAccess = companyMode || teamLeadMode;
   if (page !== "team_dispatch" || currentUser?.role !== "contractor" || !hasTeamAccess) {
     return null;
   }
 
-  const headers = companyMode
+  const headers = companyMode || teamLeadMode
     ? [
         { key: "work_order", label: "WO" },
         { key: "store", label: "Store" },
@@ -104,9 +105,9 @@ export default function SubDispatchView(props: any) {
 
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
-      {companyMode && (
+      {(companyMode || teamLeadMode) && (
         <div style={{ marginBottom: 14, color: T.muted, fontSize: 12 }}>
-          {currentUser.contractorOrganizationName || currentUser.company || "Company"}
+          {teamLeadMode ? "Your assigned crew" : currentUser.contractorOrganizationName || currentUser.company || "Company"}
           {" · Search team members when assigning a technician"}
         </div>
       )}
@@ -153,7 +154,7 @@ export default function SubDispatchView(props: any) {
                   || (workOrder.technicianOnJob ? `snapshot:${workOrder.id}` : "");
                 const targetKey = `${currentUser.id}:${contractorAccountId}:${workOrder.id}`;
                 const target = targets[targetKey] ?? currentTarget;
-                const assigned = companyMode
+                const assigned = companyMode || teamLeadMode
                   ? workOrder.technicianOnJob || "Not set"
                   : labels.getUser(workOrder.contractor)?.name || workOrder.technicianOnJob || "Unassigned";
                 const actionLoading = savingWo === workOrder.id;
@@ -182,12 +183,12 @@ export default function SubDispatchView(props: any) {
                     <td style={{ padding: "14px 16px", fontSize: 13, color: assigned === "Unassigned" || assigned === "Not set" ? T.subtle : T.ink }}>
                       {assigned}
                     </td>
-                    {companyMode && <td style={{ padding: "14px 16px" }}>
+                    {(companyMode || teamLeadMode) && <td style={{ padding: "14px 16px" }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         <DirectorySelect
-                          domain="company_technicians"
-                          contractorId={contractorAccountId}
-                          technicianValues
+                          domain={teamLeadMode ? "legacy_team" : "company_technicians"}
+                          contractorId={teamLeadMode ? null : contractorAccountId}
+                          technicianValues={!teamLeadMode}
                           value={target}
                           selectedLabel={target === currentTarget ? assigned : undefined}
                           emptyLabel="Not set"
@@ -201,20 +202,31 @@ export default function SubDispatchView(props: any) {
                             try {
                               if (target.startsWith("snapshot:")) return;
                               const selectedTechnician = target ? await loadDirectorySelection(
-                                target.startsWith("legacy:") ? "company_technicians" : "technician_profile",
+                                teamLeadMode
+                                  ? "legacy_team"
+                                  : target.startsWith("legacy:") ? "company_technicians" : "technician_profile",
                                 target.startsWith("legacy:") ? target.slice(7) : target,
-                                contractorAccountId,
+                                teamLeadMode ? null : contractorAccountId,
                               ) : null;
                               if (target && !selectedTechnician) {
                                 setSaveError("This technician is no longer available. Choose a current team member.");
                                 return;
                               }
-                              if (!target) {
+                              if (!target && teamLeadMode) {
+                                setSaveError("Choose a current member of your team.");
+                                return;
+                              } else if (!target) {
                                 if (workOrder.assignedTechnicianProfileId) {
                                   await doAssignPortalTechnician(workOrder.id, null, null);
                                 } else {
                                   await doSetTechnician(workOrder.id, "");
                                 }
+                              } else if (teamLeadMode && selectedTechnician) {
+                                await doAssignPortalTechnician(
+                                  workOrder.id,
+                                  selectedTechnician.id,
+                                  selectedTechnician.name,
+                                );
                               } else if (selectedTechnician?.profileId) {
                                 await doAssignPortalTechnician(
                                   workOrder.id,
