@@ -56,6 +56,11 @@ export function createPhotoUploadController<Intent>(ports: PhotoUploadPorts<Inte
   let entries: Entry<Intent>[] = [];
   let running: Promise<readonly PhotoUploadItem[]> | null = null;
   let cancelling: Promise<readonly PhotoUploadItem[]> | null = null;
+  // Upload two files at a time for mobile throughput, but serialize trusted
+  // image inspection. The server intentionally admits one bounded decoder per
+  // instance, so concurrent finalization from one batch would make every
+  // second photo fail with IMAGE_INSPECTION_BUSY.
+  let finalizeTail: Promise<void> = Promise.resolve();
   let disposed = false;
   const cancellationTargets = new Set<Entry<Intent>>();
   const snapshot = (): readonly PhotoUploadItem[] => entries.map(entry => ({ ...entry.item }));
@@ -104,15 +109,20 @@ export function createPhotoUploadController<Intent>(ports: PhotoUploadPorts<Inte
       if (entry.controller === recoveryController) entry.controller = undefined;
     }
   };
-  const finalize = async (entry: Entry<Intent>, intent: Intent, signal: AbortSignal) => {
+  const finalize = (entry: Entry<Intent>, intent: Intent, signal: AbortSignal) => {
     update(entry, { status: "validating" });
-    const result = await ports.finalize(intent, signal, () => update(entry, { status: "finalizing" }));
-    if (disposed) return result;
-    if (result.status !== "upload_required") {
-      update(entry, { status: "finalizing" });
-      terminal(entry, result);
-    }
-    return result;
+    const task = finalizeTail.then(async () => {
+      if (disposed || signal.aborted) throw new PhotoUploadError("This upload session has ended. Select the photos again after signing in.", false);
+      const result = await ports.finalize(intent, signal, () => update(entry, { status: "finalizing" }));
+      if (disposed) return result;
+      if (result.status !== "upload_required") {
+        update(entry, { status: "finalizing" });
+        terminal(entry, result);
+      }
+      return result;
+    });
+    finalizeTail = task.then(() => undefined, () => undefined);
+    return task;
   };
   const processEntry = async (entry: Entry<Intent>) => {
     if (disposed) return;
