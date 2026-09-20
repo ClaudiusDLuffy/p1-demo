@@ -174,7 +174,7 @@ assertDisposableTarget();
 const migrationNames = readdirSync(migrationsDirectory)
   .filter(name => /^\d+.*\.sql$/.test(name))
   .sort();
-assert.equal(migrationNames.length, 157, "Migration inventory changed; review the local installer");
+assert.equal(migrationNames.length, 158, "Migration inventory changed; review the local installer");
 
 for (const [index, name] of migrationNames.entries()) {
   const source = readFileSync(join(migrationsDirectory, name), "utf8");

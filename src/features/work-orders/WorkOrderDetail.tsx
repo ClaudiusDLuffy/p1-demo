@@ -33,6 +33,11 @@ import { getContractorCompletionControl } from "../../lib/contractorCompletion";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { canCloseReopenedFollowUpWithoutBilling } from "../../lib/reopenedFollowUpClose";
 import {
+  canReturnCompletedWorkOrderToField,
+  COMPLETED_RETURN_REASON_MAX_LENGTH,
+  validateCompletedReturnReason,
+} from "../../lib/completedWorkOrderReturn";
+import {
   canAssignWorkOrder,
   canChangeWorkOrderAssignment,
   canDuplicateWorkOrderForReassignment,
@@ -106,7 +111,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 
 export default function WorkOrderDetail(props: any) {
   const { photoUploadItems = [], retryPhotoUploads, cancelPhotoUploads, photoDeleteError = "", retryPhotoDeletion } = props;
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doReturnCompletedToField, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
     selectedWO
     && woData
@@ -164,6 +169,9 @@ export default function WorkOrderDetail(props: any) {
   const [retractingInvId, setRetractingInvId] = useState<string | null>(null);
   const [busyInvId, setBusyInvId] = useState<string | null>(null);
   const [invoiceMenuId, setInvoiceMenuId] = useState<string | null>(null);
+  const [returnToFieldOpen, setReturnToFieldOpen] = useState(false);
+  const [returnToFieldReason, setReturnToFieldReason] = useState("");
+  const [returnToFieldError, setReturnToFieldError] = useState("");
   useEffect(() => {
     setNoteText("");
   }, [selectedWO, setNoteText]);
@@ -322,6 +330,16 @@ export default function WorkOrderDetail(props: any) {
       && woData?.activityPage?.hasMore === false,
   });
   const canReviewInvoices = isManager && !invoiceController;
+  const canReturnToField = canReturnCompletedWorkOrderToField({
+    status: woData?.status,
+    functionalStatus: woData?.functionalStatus,
+    contractorId: woData?.contractor,
+    billingOnly: woData?.billingOnly,
+    isCapital: woData?.isCapital,
+    isOperationalStaff: isManager,
+    isInvoiceController: invoiceController,
+    canManageContractorCompany: currentUser?.canManageTeam === true,
+  });
   const assignmentEligibility = {
     assignmentTransferPendingVisit: woData?.assignmentTransferPendingVisit,
     isOperationalStaff: isManager,
@@ -363,6 +381,17 @@ export default function WorkOrderDetail(props: any) {
     isCapital: woData?.isCapital,
   });
   const isLoading = (key: string) => !!loadingStates[key];
+  const returnToFieldDismissal = useUnsavedChangesGuard({
+    scopeKey: `${currentUser?.id || ""}:${woData?.id || ""}:return-to-field`,
+    enabled: returnToFieldOpen,
+    dirty: returnToFieldReason.length > 0,
+    busy: isLoading("returnToField_" + (woData?.id || "")),
+    onClose: () => {
+      setReturnToFieldOpen(false);
+      setReturnToFieldReason("");
+      setReturnToFieldError("");
+    },
+  });
   const loadingStyle = (key: string) => ({
     opacity: isLoading(key) ? 0.7 : 1,
     cursor: isLoading(key) ? "default" : "pointer",
@@ -431,6 +460,32 @@ export default function WorkOrderDetail(props: any) {
                       {isLoading("reopen_" + woData.id)
                         ? <><BtnSpinner />Reopening...</>
                         : "Reopen work order"}
+                    </button>
+                  </div>
+                )}
+
+                {canReturnToField && (
+                  <div className="card" style={{ padding: "14px 16px", marginBottom: 12, background: T.surface, border: `1px solid ${T.accentRing}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 280px" }}>
+                      <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>Field work is marked complete</div>
+                      <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                        If another visit is required, return this job to field work. Existing invoices and visit history stay unchanged, and a reason is recorded.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReturnToFieldReason("");
+                        setReturnToFieldError("");
+                        setReturnToFieldOpen(true);
+                      }}
+                      disabled={isLoading("returnToField_" + woData.id)}
+                      className="btn-primary"
+                      style={loadingStyle("returnToField_" + woData.id)}
+                    >
+                      {isLoading("returnToField_" + woData.id)
+                        ? <><BtnSpinner />Returning...</>
+                        : "Return to field work"}
                     </button>
                   </div>
                 )}
@@ -1557,6 +1612,75 @@ export default function WorkOrderDetail(props: any) {
             );
           })()}
 
+          {returnToFieldOpen && woData && (
+            <Modal
+              onRequestClose={returnToFieldDismissal.requestClose}
+              dismissDisabled={isLoading("returnToField_" + woData.id)}
+              closeOnBackdrop={!isLoading("returnToField_" + woData.id)}
+              title="Return to field work"
+              width={500}
+            >
+              <div style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.55 }}>
+                Start a new field-work cycle for <span className="mono" style={{ color: T.accent, fontWeight: 600 }}>{woData.id}</span>. The contractor must use Resume work to begin the next visit.
+              </div>
+              <Field label="Reason for another visit *" required error={returnToFieldError}>
+                <TA
+                  rows={3}
+                  maxLength={COMPLETED_RETURN_REASON_MAX_LENGTH}
+                  value={returnToFieldReason}
+                  onChange={(event: any) => {
+                    setReturnToFieldReason(event.target.value);
+                    setReturnToFieldError("");
+                  }}
+                  disabled={isLoading("returnToField_" + woData.id)}
+                  placeholder="Explain what field work still needs to be completed..."
+                  aria-invalid={Boolean(returnToFieldError)}
+                />
+              </Field>
+              <div style={{ marginTop: -8, marginBottom: 14, textAlign: "right", fontSize: 10, color: T.subtle }}>
+                {returnToFieldReason.length}/{COMPLETED_RETURN_REASON_MAX_LENGTH}
+              </div>
+              <div role="note" style={{ padding: "11px 12px", borderRadius: 10, background: T.warnSoft, color: "#73560C", fontSize: 11, lineHeight: 1.5, marginBottom: 14 }}>
+                Existing invoices, contractor and technician assignments, prior visits, photos, and history will not be changed. This action sends no dispatch notification.
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => returnToFieldDismissal.requestClose("cancel_button")}
+                  disabled={isLoading("returnToField_" + woData.id)}
+                  className="btn-soft"
+                >Cancel</button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const reasonError = validateCompletedReturnReason(returnToFieldReason);
+                    if (reasonError) {
+                      setReturnToFieldError(reasonError);
+                      return;
+                    }
+                    const returned = await doReturnCompletedToField(
+                      woData.id,
+                      returnToFieldReason.trim(),
+                      setReturnToFieldError,
+                    );
+                    if (returned) {
+                      setReturnToFieldOpen(false);
+                      setReturnToFieldReason("");
+                      setReturnToFieldError("");
+                    }
+                  }}
+                  disabled={isLoading("returnToField_" + woData.id)}
+                  className="btn-primary"
+                  style={loadingStyle("returnToField_" + woData.id)}
+                >
+                  {isLoading("returnToField_" + woData.id)
+                    ? <><BtnSpinner />Returning...</>
+                    : "Return to field work"}
+                </button>
+              </div>
+            </Modal>
+          )}
+
           {!contractorHistoryReadOnly && modal === "workReport" && woData && (
             <WorkReportForm
               woId={woData.id}
@@ -1574,6 +1698,7 @@ export default function WorkOrderDetail(props: any) {
           )}
 
       {rejectionDismissal.dialog}
+      {returnToFieldDismissal.dialog}
     </>
   );
 }
