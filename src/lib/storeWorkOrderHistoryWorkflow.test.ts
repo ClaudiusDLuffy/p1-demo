@@ -27,9 +27,10 @@ test("view-all navigation resets broad filters and requests an exact store view"
 
 test("the work-order list includes closed store calls and preserves exact-store filtering", () => {
   assert.match(list, /useState\(!storeView\)/);
-  assert.match(list, /storeNumber: storeView\?\.storeNumber \|\| null/);
-  assert.match(list, /String\(workOrder\.store \|\| ""\) === storeView\.storeNumber/);
-  assert.match(list, /scope: hideClosed \? "active" : "all"/);
+  assert.match(list, /const scopedStoreNumber = exactStoreNumber \|\| storeView\?\.storeNumber \|\| null/);
+  assert.match(list, /String\(workOrder\.store \|\| ""\) === scopedStoreNumber/);
+  assert.match(list, /scope: exactStoreNumber \? "all" : hideClosed \? "active" : "all"/);
+  assert.match(list, /storeNumber: scopedStoreNumber/);
   assert.match(shell, /key=\{workOrderStoreView[\s\S]*store-\$\{workOrderStoreView\.requestId\}/);
 });
 

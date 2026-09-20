@@ -120,6 +120,22 @@ test("two mobile contractor sessions recover concurrent photo inspection without
   }
 });
 
+test("mobile staff store-number lookup includes current and historical calls despite queue filters", async ({ page }) => {
+  await login(page, accounts.manager);
+  await page.getByRole("button", { name: "Work", exact: true }).click();
+  await page.getByRole("combobox", { name: "Filter unassigned work orders" }).click();
+  await page.getByRole("option", { name: "Unassigned only", exact: true }).click();
+  await page.getByPlaceholder("Search WO#, INC#, store, keyword...").fill("38839");
+
+  await expect(page.getByRole("status").filter({ hasText: "Store #38839" })).toBeVisible();
+  for (const id of ["E2E-STORE-ACTIVE", "E2E-STORE-CLOSED"]) {
+    await expect(page.locator("tr:visible, .mobile-card:visible").filter({
+      has: page.getByText(id, { exact: true }),
+    }).first()).toBeVisible();
+  }
+  await expect(page.getByText("No work orders match your filters.", { exact: true })).toHaveCount(0);
+});
+
 test("mobile technician can clock in, clock out, resume, and complete across refreshes", async ({ page }) => {
   await login(page, accounts.reportTech);
   await openWorkOrder(page, mobileFieldWorkOrderId);

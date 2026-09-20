@@ -103,7 +103,9 @@ values ('00000000-0000-4000-8000-00000000e301', 'Synthetic AFM', 'afm@synthetic.
 on conflict (id) do update set name = excluded.name, email = excluded.email, region = excluded.region;
 
 insert into public.stores (store_number, city, state, address, default_afm_id, notes)
-values ('E2E001', 'Synthetic City', 'TX', '100 Test Fixture Way, Synthetic City, TX 75001', '00000000-0000-4000-8000-00000000e301', 'Synthetic E2E store only')
+values
+  ('E2E001', 'Synthetic City', 'TX', '100 Test Fixture Way, Synthetic City, TX 75001', '00000000-0000-4000-8000-00000000e301', 'Synthetic E2E store only'),
+  ('38839', 'Store Search City', 'TX', '38839 Search Test Way, Store Search City, TX 75001', '00000000-0000-4000-8000-00000000e301', 'Synthetic exact-store search only')
 on conflict (store_number) do update set city = excluded.city, state = excluded.state, address = excluded.address,
   default_afm_id = excluded.default_afm_id, notes = excluded.notes;
 
@@ -193,9 +195,9 @@ insert into public.work_orders (
 select
   fixture.id,
   'E2E-INC-' || fixture.sequence,
-  'E2E001',
-  'Synthetic City, TX',
-  '100 Test Fixture Way, Synthetic City, TX 75001',
+  case when fixture.sequence in ('062', '063') then '38839' else 'E2E001' end,
+  case when fixture.sequence in ('062', '063') then 'Store Search City, TX' else 'Synthetic City, TX' end,
+  case when fixture.sequence in ('062', '063') then '38839 Search Test Way, Store Search City, TX 75001' else '100 Test Fixture Way, Synthetic City, TX 75001' end,
   'TX',
   'America/Chicago',
   fixture.line_of_service,
@@ -280,7 +282,9 @@ from (values
   ('E2E-MOBILE-FIELD',        '058', 'Refrigeration', 'Refrigeration equipment',  'Isolated mobile field lifecycle',   'p3', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1800::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 0::bigint, null::timestamptz),
   ('E2E-MOBILE-STANDALONE',   '059', 'Refrigeration', 'Refrigeration equipment',  'Installed mobile field lifecycle',  'p3', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1800::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 0::bigint, null::timestamptz),
   ('E2E-PHOTO-CONCURRENT-A',  '060', 'Refrigeration', 'Refrigeration equipment',  'Concurrent mobile photo batch A',   'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
-  ('E2E-PHOTO-CONCURRENT-B',  '061', 'Refrigeration', 'Refrigeration equipment',  'Concurrent mobile photo batch B',   'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz)
+  ('E2E-PHOTO-CONCURRENT-B',  '061', 'Refrigeration', 'Refrigeration equipment',  'Concurrent mobile photo batch B',   'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
+  ('E2E-STORE-ACTIVE',        '062', 'General',       'General Maintenance',      'Exact store active call',            'p3', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          1200::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 1::bigint, null::timestamptz),
+  ('E2E-STORE-CLOSED',        '063', 'General',       'General Maintenance',      'Exact store historical call',        'p3', 'closed',                    'Completed',                   :'direct_id'::uuid,          1200::numeric, false, null,                    false, now() - interval '3 days',    now() - interval '3 days' + interval '1 hour', null::uuid,          'Synthetic Direct Contractor',     0, 3::bigint, now() - interval '2 days')
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
