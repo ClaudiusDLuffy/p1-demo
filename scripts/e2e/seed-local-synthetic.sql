@@ -269,7 +269,8 @@ from (values
   ('E2E-AGED-CAPITAL-WAIT',   '050', 'Refrigeration', 'Refrigeration equipment',  'Aged capital authorization wait',   'p2', 'pending_capital_completion','Pending Capital Completion',  :'direct_id'::uuid,          5000::numeric, true,  'Approved - work authorized',false, now() - interval '32 days',  null::timestamptz,              null::uuid,                 'Synthetic Direct Contractor',     0, 4::bigint, null::timestamptz),
   ('E2E-STAFF-BILL-CALC',     '051', 'General',       'General Maintenance',      'Billing calculation persistence',   'p3', 'pending_invoice',           'Completed',                   null::uuid,                  2000::numeric, false, null,                    true,  null::timestamptz,              now() - interval '1 hour',    null::uuid,                 null::text,                         0, 1::bigint, null::timestamptz),
   ('WOTEST3',                 '052', 'Refrigeration', 'Refrigeration equipment',  'Full synthetic role workflow',      'p2', 'unassigned',                'New',                         null::uuid,                  2500::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 null::text,                         0, 0::bigint, null::timestamptz),
-  ('WOTEST4',                 '053', 'General',       'General Maintenance',      'Capital and team mixed workflow',   'p1', 'unassigned',                'New',                         null::uuid,                  6000::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 null::text,                         0, 0::bigint, null::timestamptz)
+  ('WOTEST4',                 '053', 'General',       'General Maintenance',      'Capital and team mixed workflow',   'p1', 'unassigned',                'New',                         null::uuid,                  6000::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 null::text,                         0, 0::bigint, null::timestamptz),
+  ('E2E-AGED-VISIT-CORRECT',  '054', 'Refrigeration', 'Refrigeration equipment',  'Aged contractor visit correction',  'p3', 'pending_invoice',           'Completed',                   :'direct_id'::uuid,          1800::numeric, false, null,                    false, '2024-01-15 12:00:00+00'::timestamptz, '2024-01-15 13:00:00+00'::timestamptz, null::uuid,          'Synthetic Direct Contractor',     0, 2::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
@@ -329,6 +330,11 @@ values
   (
     '00000000-0000-4000-8000-00000000f206', 'E2E-AGED-CAPITAL-WAIT',
     :'direct_id'::uuid, now() - interval '32 days', now() - interval '32 days' + interval '45 minutes',
+    :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f207', 'E2E-AGED-VISIT-CORRECT',
+    :'direct_id'::uuid, '2024-01-15 12:00:00+00'::timestamptz, '2024-01-15 13:00:00+00'::timestamptz,
     :'direct_id'::uuid, :'direct_id'::uuid
   );
 

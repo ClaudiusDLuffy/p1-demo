@@ -11,6 +11,7 @@ import {
 } from "../../lib/billingRules";
 import { correctWorkOrderVisit } from "../../lib/db";
 import {
+  canOfferVisitCorrection,
   safeVisitCorrectionError,
   validateVisitCorrection,
 } from "../../lib/visitCorrection";
@@ -176,14 +177,11 @@ export default function VisitTimeline({
       <div style={{ display: "grid", gap: 8 }}>
         {orderedVisits.map((visit, index) => {
           const editing = editingId === visit.id;
-          const isStaff = ["manager", "dispatcher", "back_office"].includes(currentUser?.role);
-          const checkedOutAt = new Date(visit.checkOutAt || 0).getTime();
-          const contractorWindowOpen = workOrder.status !== "closed"
-            && Number.isFinite(checkedOutAt)
-            && checkedOutAt >= Date.now() - 24 * 60 * 60 * 1000;
-          const canOfferCorrection = Boolean(
-            visit.checkOutAt && (isStaff || contractorWindowOpen),
-          );
+          const canOfferCorrection = canOfferVisitCorrection({
+            role: currentUser?.role,
+            workOrderStatus: workOrder.status,
+            checkOutAt: visit.checkOutAt,
+          });
           return (
             <div key={visit.id} style={{ padding: "10px 12px", border: `1px solid ${T.borderSoft}`, borderRadius: 9, background: T.surfaceSoft }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
