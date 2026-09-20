@@ -11,6 +11,7 @@ export const accounts = {
   companyAdmin: { email: "e2e.company.admin@p1.invalid", name: "Synthetic Company Admin" },
   companyAdminTwo: { email: "e2e.company.admin2@p1.invalid", name: "Synthetic Company Admin Two" },
   invoiceTech: { email: "e2e.invoice.tech@p1.invalid", name: "Synthetic Invoice Technician" },
+  legacyInvoiceTech: { email: "e2e.legacy.invoice.tech@p1.invalid", name: "Synthetic Legacy Invoice Technician" },
   revocationTech: { email: "e2e.revocation.tech@p1.invalid", name: "Synthetic Revocation Technician" },
   reportTech: { email: "e2e.report.tech@p1.invalid", name: "Synthetic Report Technician" },
   teamLead: { email: "e2e.team.lead@p1.invalid", name: "Synthetic Team Lead" },

@@ -46,10 +46,14 @@ test("report-only technician can complete the full field-work lifecycle without 
 test("contractor organization and technician scopes stay isolated", async ({ page }) => {
   await login(page, accounts.companyAdmin);
   await openSidebarPage(page, "My jobs");
-  await expect(page.getByText("E2E-ADMIN-WORKFLOW", { exact: true })).toBeVisible();
-  await expect(page.getByText("E2E-NEW-START", { exact: true })).toBeVisible();
-  await expect(page.getByText("E2E-REPORT-START", { exact: true })).toBeVisible();
+  const search = page.getByRole("searchbox", { name: "Search my jobs" });
+  for (const workOrderId of ["E2E-ADMIN-WORKFLOW", "E2E-NEW-START", "E2E-REPORT-START"]) {
+    await search.fill(workOrderId);
+    await expect(page.getByText(workOrderId, { exact: true })).toBeVisible();
+  }
+  await search.fill("E2E-DIRECT-INVOICE");
   await expect(page.getByText("E2E-DIRECT-INVOICE", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("No work orders match your search.", { exact: true })).toBeVisible();
 });
 
 test("staff dispatcher can assign an unassigned work order", async ({ page }) => {

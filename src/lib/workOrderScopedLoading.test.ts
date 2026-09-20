@@ -92,11 +92,11 @@ test("the portal shell does not restore hidden global preload queries", () => {
 test("contractor work-order page failures are reported and remain retryable", () => {
   assert.match(myJobs, /reportClientFailure/);
   assert.match(myJobs, /source:\s*"my-jobs-query"/);
-  assert.match(myJobs, /jobsQuery\.isError/);
-  assert.match(myJobs, /jobsQuery\.refetch\(\)/);
+  assert.match(myJobs, /activeJobsQuery\.isError/);
+  assert.match(myJobs, /activeJobsQuery\.refetch\(\)/);
   assert.match(myJobs, /Your work orders are still saved/);
   assert.match(myJobs, /resolveWorkOrderCollectionState\(\{/);
-  assert.match(myJobs, /isError:\s*jobsQuery\.isError \|\| !contractorId/);
+  assert.match(myJobs, /isError:\s*activeJobsQuery\.isError \|\| !contractorId/);
   assert.match(myJobs, /state=\{collectionState\}/);
 });
 
