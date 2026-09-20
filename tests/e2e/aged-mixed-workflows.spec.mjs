@@ -1,4 +1,12 @@
-import { accounts, expect, login, openSidebarPage, openWorkOrder, test } from "./fixtures.mjs";
+import {
+  accounts,
+  expect,
+  login,
+  openSidebarPage,
+  openWorkOrder,
+  test,
+  waitForApplicationRequestsToSettle,
+} from "./fixtures.mjs";
 
 async function openDirectJob(page, workOrderId) {
   await openSidebarPage(page, "My jobs");
@@ -22,6 +30,7 @@ async function resumeJob(page, workOrderId) {
   await expect(page.getByRole("button", { name: "Pause (parts)", exact: true })).toBeVisible();
   await expect(page.getByText(/^Visit \d+$/)).toHaveCount(2);
 
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await openSidebarPage(page, "My jobs");
   await openWorkOrder(page, workOrderId);
@@ -76,6 +85,7 @@ test("an invoicing-track job paused for parts resumes without losing billing sta
   await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
   await expect(page.getByText("Completed", { exact: true }).last()).toBeVisible();
 
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await openDirectJob(page, "E2E-AGED-INVOICE-PARTS");
   await expect(page.getByText("Portal: Pending 7-Eleven Submission", { exact: true })).toBeVisible();
@@ -101,6 +111,7 @@ test("capital authorization wait is explicit and staff can release the next fiel
     await staffContext.close();
   }
 
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await openDirectJob(page, "E2E-AGED-CAPITAL-WAIT");
   await expect(page.getByRole("button", { name: "Start work", exact: true })).toBeVisible();

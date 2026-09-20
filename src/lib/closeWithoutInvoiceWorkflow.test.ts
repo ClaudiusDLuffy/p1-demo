@@ -42,7 +42,8 @@ test("staff only get the no-invoice exception on work orders", () => {
   assert.match(detail, /Close — no invoice/);
   assert.doesNotMatch(detail, /setModal\("closeWO"\)/);
   assert.match(shell, /modal === "closeWithoutInvoice"/);
-  assert.match(shell, /await doCloseWithoutInvoice\(\s*woData\.id,[\s\S]*woData\.updatedAt/);
+  assert.match(shell, /const expectedUpdatedAt = await awaitCurrentWorkOrderVersion\(woData\.id, woData\.updatedAt\)/);
+  assert.match(shell, /await doCloseWithoutInvoice\(\s*woData\.id,[\s\S]*expectedUpdatedAt/);
   assert.match(hook, /closeWorkOrderWithoutInvoice\(\s*woId,\s*expectedWorkflowCycle,\s*expectedContractorAssignmentVersion,\s*expectedUpdatedAt/);
   assert.match(hook, /doCloseWithoutInvoice,[\s\S]*doCloseReopenedFollowUp, doReopen/);
   assert.doesNotMatch(hook, /const doCloseWO/);

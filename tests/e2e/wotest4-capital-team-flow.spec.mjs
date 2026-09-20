@@ -5,6 +5,7 @@ import {
   openSidebarPage,
   openWorkOrder,
   test,
+  waitForApplicationRequestsToSettle,
 } from "./fixtures.mjs";
 
 const WORK_ORDER_ID = "WOTEST4";
@@ -27,6 +28,10 @@ async function asAccount(browser, account, run, options = {}) {
   try {
     await login(page, account);
     await run(page);
+    // Detail queries can still be settling after the visible assertions pass.
+    // Let those successful reads finish before closing this isolated context;
+    // WebKit otherwise reports teardown cancellations as access-control errors.
+    await waitForApplicationRequestsToSettle(page);
     expect(fatal, `${account.name} browser errors and HTTP 5xx responses`).toEqual([]);
   } finally {
     await context.close();
@@ -282,6 +287,10 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await page.getByRole("combobox", { name: "P1 purchasing status for WOTEST4 replacement compressor" }).click();
     await page.getByRole("option", { name: "Ordered", exact: true }).click();
     await expect(page.getByText("P1 ordered", { exact: true })).toBeVisible();
+    // Persisted UI is already visible, but the mutation's invalidation reads
+    // must settle before a deliberate hard reload. Safari/WebKit surfaces
+    // canceled cross-origin reads as page errors if reload interrupts them.
+    await waitForApplicationRequestsToSettle(page);
     await page.reload();
     await openStaffWorkOrder(page);
     await expect(page.getByText("WOTEST4 replacement compressor", { exact: false }).first()).toBeVisible();

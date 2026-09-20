@@ -67,7 +67,7 @@ async function main() {
     ["exec", "-i", "supabase_db_p1-demo-e2e", "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", ...variables],
     { input: sql, stdio: ["pipe", "pipe", "inherit"], maxBuffer: 4 * 1024 * 1024 },
   );
-  console.log(JSON.stringify({ seeded: true, accounts: accounts.length, workOrders: 58, productionDataUsed: false }, null, 2));
+  console.log(JSON.stringify({ seeded: true, accounts: accounts.length, workOrders: 59, productionDataUsed: false }, null, 2));
 }
 
 main().catch(error => {

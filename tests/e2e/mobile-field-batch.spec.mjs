@@ -1,6 +1,13 @@
 import { devices } from "@playwright/test";
 import { createCanvas } from "@napi-rs/canvas";
-import { accounts, expect, login, openWorkOrder, test } from "./fixtures.mjs";
+import {
+  accounts,
+  expect,
+  login,
+  openWorkOrder,
+  test,
+  waitForApplicationRequestsToSettle,
+} from "./fixtures.mjs";
 
 const mobileDevice = { ...devices["iPhone 13"] };
 delete mobileDevice.defaultBrowserType;
@@ -11,7 +18,7 @@ async function reloadWorkOrder(page, workOrderId) {
   // Let mutation-triggered reads settle before navigating. WebKit reports
   // cross-origin fetches aborted by an immediate reload as CORS page errors,
   // which would hide whether the persisted workflow itself reloaded cleanly.
-  await page.waitForLoadState("networkidle");
+  await waitForApplicationRequestsToSettle(page);
   await page.reload();
   await expect(page.locator(".app-root")).toBeVisible();
   await openWorkOrder(page, workOrderId);
@@ -19,7 +26,7 @@ async function reloadWorkOrder(page, workOrderId) {
 
 async function refreshWorkOrder(page, workOrderId) {
   await page.getByRole("button", { name: "Refresh portal", exact: true }).click();
-  await page.waitForLoadState("networkidle");
+  await waitForApplicationRequestsToSettle(page);
   await page.getByRole("button", { name: "Back to previous view", exact: true }).click();
   await openWorkOrder(page, workOrderId);
 }

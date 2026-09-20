@@ -3,7 +3,7 @@ import test from "node:test";
 import { AppError } from "./errors/AppError";
 import { handleClientDiagnostic, type DiagnosticDependencies } from "./server/diagnostics/handler";
 import { sendClientReport } from "./observability/clientReportTransport";
-import { clientReportSchema, CLIENT_DIAGNOSTIC_BODY_BYTES } from "./observability/clientReportContracts";
+import { clientReportSchema, CLIENT_DIAGNOSTIC_BODY_BYTES, CLIENT_REPORT_ACCEPTED_HEADER } from "./observability/clientReportContracts";
 import { redact, redactText } from "./observability/redaction";
 import { createRequestContext } from "./observability/requestContext";
 import { logBoundaryFailure, safeLog } from "./observability/safeLogger";
@@ -31,7 +31,9 @@ for (const length of [undefined, "1", String(CLIENT_DIAGNOSTIC_BODY_BYTES)]) {
 test("exact cap succeeds and acknowledged response is correlated", async () => {
   const h = ports(); const response = await handleClientDiagnostic(request(JSON.stringify(payload()).padEnd(CLIENT_DIAGNOSTIC_BODY_BYTES, " ")), h.dependencies);
   assert.equal(response.status, 202); assert.equal(h.seen.logged, 1);
-  assert.deepEqual(await response.json(), { accepted: true, correlationId: response.headers.get("X-Request-ID") });
+  assert.equal(response.headers.get(CLIENT_REPORT_ACCEPTED_HEADER), "1");
+  assert.ok(response.headers.get("X-Request-ID"));
+  assert.equal(await response.text(), "");
 });
 for (const auth of ["anonymous", "inactive"]) test(`diagnostics rejects ${auth} before admission/body`, async () => {
   const h = ports({ auth }); const req = request(JSON.stringify(payload()));
@@ -49,13 +51,26 @@ for (const status of [400, 401, 403, 413, 429, 500]) test(`reporter acknowledges
   const result = await sendClientReport(payload(), { token: async () => "synthetic-token", fetch: async () => new Response("private synthetic body", { status }) });
   assert.equal(result.status, status === 429 ? "rate_limited" : status >= 500 ? "unavailable" : "rejected");
 });
-test("reporter accepts only a correlated202 acknowledgment", async () => {
+test("reporter accepts only a correlated 202 header acknowledgment", async () => {
   const result = await sendClientReport(payload(), { token: async () => "synthetic-token", fetch: async (_url, init) => {
     const id = new Headers(init?.headers).get("X-Request-ID");
-    return Response.json({ accepted: true, correlationId: id }, { status: 202, headers: { "X-Request-ID": String(id) } });
+    return new Response(null, { status: 202, headers: {
+      "X-Request-ID": String(id), [CLIENT_REPORT_ACCEPTED_HEADER]: "1",
+    } });
   } });
   assert.equal(result.status, "accepted");
   assert.equal((await sendClientReport(payload(), { token: async () => "synthetic-token", fetch: async () => new Response(null, { status: 202 }) })).status, "unavailable");
+});
+
+test("reporter settles from a valid header receipt without reading a stalled WebKit-style body", async () => {
+  const result = await sendClientReport(payload(), { token: async () => "synthetic-token", timeoutMs: 10, fetch: async (_url, init) => {
+    const id = String(new Headers(init?.headers).get("X-Request-ID"));
+    const body = new ReadableStream<Uint8Array>({ pull: () => new Promise(() => undefined) });
+    return new Response(body, { status: 202, headers: {
+      "X-Request-ID": id, [CLIENT_REPORT_ACCEPTED_HEADER]: "1",
+    } });
+  } });
+  assert.equal(result.status, "accepted");
 });
 test("reporter bounds a never-resolving transport and aborts it", async () => {
   let signal: AbortSignal | null | undefined;

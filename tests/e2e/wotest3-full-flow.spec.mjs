@@ -9,6 +9,7 @@ import {
   openWorkOrder,
   sidebar,
   test,
+  waitForApplicationRequestsToSettle,
 } from "./fixtures.mjs";
 
 const WORK_ORDER_ID = "WOTEST3";
@@ -314,6 +315,7 @@ test("WOTEST3 crosses every synthetic role boundary and completes the field-to-p
     await expect(page.getByText("Visit 1", { exact: true })).toBeVisible();
     await expect(page.getByText("Visit 2", { exact: true })).toBeVisible();
 
+    await waitForApplicationRequestsToSettle(page);
     await page.reload();
     await openSidebarPage(page, "My jobs");
     await openWorkOrder(page, WORK_ORDER_ID);

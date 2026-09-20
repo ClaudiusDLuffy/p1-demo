@@ -3,6 +3,7 @@ import { isPublicErrorCode, type PublicErrorCode } from "../errors/catalog";
 import { redactText } from "./redaction";
 export const CLIENT_DIAGNOSTIC_BODY_BYTES = 25_000; // Original decimal-byte cap.
 export const CLIENT_REPORT_TIMEOUT_MS = 4_000;
+export const CLIENT_REPORT_ACCEPTED_HEADER = "X-P1-Diagnostic-Accepted";
 const identifier = z.string().max(128).regex(/^[A-Za-z0-9_-]+$/);
 const label = z.string().max(120).regex(/^[a-zA-Z][a-zA-Z0-9_.-]*$/);
 export const diagnosticDetailsSchema = z.strictObject({

@@ -1121,12 +1121,18 @@ export async function returnCompletedWorkOrderToField(
 export async function markWorkOrderNotesSeen(
   workOrderId: string,
   latestNoteAt: string,
-): Promise<void> {
+): Promise<string> {
   const sb = supabase();
-  const { error } = await (sb.from("work_orders") as any)
+  const { data, error } = await (sb.from("work_orders") as any)
     .update({ staff_notes_seen_at: latestNoteAt })
-    .eq("id", workOrderId);
+    .eq("id", workOrderId)
+    .select("updated_at")
+    .single();
   if (error) throw normalizeUnknownError(error);
+  if (typeof data?.updated_at !== "string" || !data.updated_at) {
+    throw new Error("The work-order read acknowledgment did not return its updated version.");
+  }
+  return data.updated_at;
 }
 
 /** @deprecated Raw visit writes are denied after 0123; use startWorkOrderVisit. */
