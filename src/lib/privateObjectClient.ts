@@ -23,7 +23,7 @@ async function objectRequest<T>(action: "intents" | "finalize" | "cancel" | "del
   } catch { throw new PhotoUploadError("The file operation could not be confirmed. Retry this same file to check its status."); }
   if (!response.ok) {
     const safe = await parseApiError(response, signal);
-    throw new PhotoUploadError(safeErrorMessage(safe), response.status !== 422);
+    throw new PhotoUploadError(safeErrorMessage(safe), response.status !== 422, safe.code);
   }
   let raw: unknown;
   try { raw = await response.json(); } catch { throw new PhotoUploadError("The file operation could not be confirmed. Retry this same file."); }
