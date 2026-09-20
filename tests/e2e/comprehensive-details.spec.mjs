@@ -144,6 +144,29 @@ test("staff can correct a completed visit and persist the audit reason", async (
   await expect(page.getByRole("button", { name: "Correct actual time", exact: true })).toBeVisible();
 });
 
+test("contractor can correct an aged visit and the audit reason persists", async ({ page }) => {
+  await openAs(page, accounts.direct, "My jobs", "E2E-AGED-VISIT-CORRECT");
+  const correctionButton = page.getByRole("button", { name: "Correct actual time", exact: true });
+  await expect(correctionButton).toBeVisible();
+  await correctionButton.click();
+
+  await page.getByLabel("Actual check-out time").fill("07:15");
+  const auditReason = "Corrected from the archived technician timesheet.";
+  await page.getByPlaceholder("Explain why the recorded time was inaccurate").fill(auditReason);
+  await page.getByRole("button", { name: "Save correction", exact: true }).click();
+
+  await expect(page.getByPlaceholder("Explain why the recorded time was inaccurate")).toBeHidden();
+  await expect(page.getByText(/Jan 15, 2024(?:,| at) 7:15 AM/)).toBeVisible();
+  await expect(page.getByText(`Synthetic Direct Contractor corrected visit time: ${auditReason}`, { exact: true })).toBeVisible();
+
+  await page.reload();
+  await openSidebarPage(page, "My jobs");
+  await openWorkOrder(page, "E2E-AGED-VISIT-CORRECT");
+  await expect(page.getByRole("button", { name: "Correct actual time", exact: true })).toBeVisible();
+  await expect(page.getByText(/Jan 15, 2024(?:,| at) 7:15 AM/)).toBeVisible();
+  await expect(page.getByText(`Synthetic Direct Contractor corrected visit time: ${auditReason}`, { exact: true })).toBeVisible();
+});
+
 test("photo upload, preview, individual download, archive download, and removal work locally", async ({ page }) => {
   await openAs(page, accounts.direct, "My jobs", "E2E-PHOTO");
   await page.locator('input[type="file"][multiple]').setInputFiles("public/p1-icon-192.png");

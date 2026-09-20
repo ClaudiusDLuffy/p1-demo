@@ -13,6 +13,22 @@ type VisitCorrectionInput = {
   nowMs?: number;
 };
 
+const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
+
+export function canOfferVisitCorrection({
+  role,
+  workOrderStatus,
+  checkOutAt,
+}: {
+  role?: string | null;
+  workOrderStatus?: string | null;
+  checkOutAt?: string | null;
+}): boolean {
+  if (!checkOutAt) return false;
+  if (role && STAFF_ROLES.has(role)) return true;
+  return role === "contractor" && workOrderStatus !== "closed";
+}
+
 export class VisitCorrectionError extends Error {
   constructor(
     public readonly code: string,
@@ -33,7 +49,6 @@ const exactServerMessages = new Map<string, readonly [string, string]>([
   ["A single visit cannot exceed 72 hours", ["VISIT_DURATION_LIMIT", "A single visit cannot exceed 72 hours."]],
   ["The corrected times are unchanged", ["VISIT_TIMES_UNCHANGED", "Change at least one actual visit time before saving."]],
   ["You cannot correct this visit", ["VISIT_ACCESS_DENIED", "This visit is not available for correction with your current work-order access."]],
-  ["Contractor corrections are limited to 24 hours after check-out", ["VISIT_CORRECTION_WINDOW_CLOSED", "Contractor corrections are limited to 24 hours after check-out. Contact P1 staff to correct this visit."]],
   ["Visit time is locked after the P1 invoice is approved", ["VISIT_LOCKED_BY_INVOICE", "Visit time is locked because the P1 invoice is already approved or paid."]],
   ["The corrected time overlaps another visit for this technician", ["VISIT_TIME_OVERLAP", "These times overlap another visit for this technician. Review both visits before saving."]],
   ["Visit not found", ["VISIT_NOT_FOUND", "This visit is no longer available. Refresh the work order."]],
