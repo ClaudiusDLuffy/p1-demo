@@ -5,6 +5,7 @@ import { accounts, expect, login, openWorkOrder, test } from "./fixtures.mjs";
 const mobileDevice = { ...devices["iPhone 13"] };
 delete mobileDevice.defaultBrowserType;
 test.use(mobileDevice);
+const mobileFieldWorkOrderId = "E2E-MOBILE-FIELD";
 
 async function reloadWorkOrder(page, workOrderId) {
   // Let mutation-triggered reads settle before navigating. WebKit reports
@@ -58,7 +59,7 @@ test("mobile contractor can upload an eight-photo batch and retain every confirm
 
 test("mobile technician can clock in, clock out, resume, and complete across refreshes", async ({ page }) => {
   await login(page, accounts.reportTech);
-  await openWorkOrder(page, "E2E-REPORT-START");
+  await openWorkOrder(page, mobileFieldWorkOrderId);
 
   await page.getByRole("button", { name: "Start work", exact: true }).click();
   let dialog = page.getByRole("dialog", { name: "Start work" });
@@ -67,7 +68,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Work in Progress", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await page.getByRole("button", { name: "Pause (parts)", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Pause work" });
   await dialog.getByRole("combobox", { name: "Reason" }).click();
@@ -77,7 +78,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Awaiting Parts", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await page.getByRole("button", { name: "Resume work", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Resume work" });
   await dialog.getByPlaceholder("What are you seeing on site?").fill("Mobile return visit resumed.");
@@ -85,7 +86,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Work in Progress", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await page.getByRole("button", { name: "Mark work complete", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Mark work complete" });
   await dialog.getByLabel("Equipment make").fill("Synthetic Mobile Make");
@@ -99,7 +100,7 @@ test("mobile technician can clock in, clock out, resume, and complete across ref
   await expect(dialog).toBeHidden();
   await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
 
-  await refreshWorkOrder(page, "E2E-REPORT-START");
+  await refreshWorkOrder(page, mobileFieldWorkOrderId);
   await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
   await expect(page.getByText("Visit 1", { exact: true })).toBeVisible();
   await expect(page.getByText("Visit 2", { exact: true })).toBeVisible();
