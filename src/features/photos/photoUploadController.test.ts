@@ -68,6 +68,39 @@ test("photo controller confirms all eight independently with at most two active 
   assert.equal(h.controller.busy, false);
 });
 
+test("parallel mobile uploads serialize image finalization to server decoder capacity", async () => {
+  let activeFinalizations = 0, peakFinalizations = 0;
+  const h = harness({ finalize: async (intent, _signal, finalizing) => {
+    finalizing();
+    activeFinalizations++;
+    peakFinalizations = Math.max(peakFinalizations, activeFinalizations);
+    await new Promise<void>(resolvePromise => setImmediate(resolvePromise));
+    activeFinalizations--;
+    return { status: "confirmed", storagePath: `synthetic/${intent}` };
+  } });
+
+  const items = await h.controller.start(Array.from({ length: 8 }, (_, index) => file(`${index}.jpg`)));
+  assert.equal(items.filter(item => item.status === "confirmed").length, 8);
+  assert.equal(peakFinalizations, 1);
+});
+
+test("ending a session does not start a photo that was waiting for image inspection", async () => {
+  const gate = deferred();
+  let finalizations = 0;
+  const h = harness({ finalize: async intent => {
+    finalizations++;
+    await gate.promise;
+    return { status: "confirmed", storagePath: `synthetic/${intent}` };
+  } });
+
+  const running = h.controller.start([file("first.jpg"), file("second.jpg")]);
+  await until(() => finalizations === 1);
+  h.controller.dispose();
+  gate.finish();
+  await running;
+  assert.equal(finalizations, 1);
+});
+
 test("photo controller rejects zero/nine files without authorizing or silently dropping a file", async () => {
   const h = harness();
   await assert.rejects(h.controller.start([]), /between 1 and 8/);
