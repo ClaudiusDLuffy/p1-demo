@@ -103,11 +103,12 @@ test("unlinked dropdown entries are explicit record-only choices", () => {
   );
 });
 
-test("legacy team dispatch stays read-only while company administrators retain technician controls", () => {
+test("authorized team leads and company administrators both use structured technician assignments", () => {
   assert.doesNotMatch(subDispatch, /\bdoAssign\b/);
   assert.doesNotMatch(subDispatch, /\bdoReassign\b/);
-  assert.doesNotMatch(subDispatch, /domain=\{?"legacy_team"/);
-  assert.match(subDispatch, /\{companyMode && <td[\s\S]*domain="company_technicians"/);
+  assert.match(subDispatch, /teamLeadMode = !!currentUser\?\.canLeadTeam/);
+  assert.match(subDispatch, /teamLeadMode \? "legacy_team" : "company_technicians"/);
+  assert.match(subDispatch, /companyMode \|\| teamLeadMode/);
   assert.match(subDispatch, /doAssignPortalTechnician/);
 });
 

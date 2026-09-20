@@ -10,7 +10,7 @@ export function visitRow(patch: Record<string, unknown> = {}): Record<string, un
   return {
     id: visitId, work_order_id: visitParent, contractor_id: visitContractor,
     check_in_at: "2026-09-10T08:00:00.000Z", check_out_at: "2026-09-10T10:00:00.000Z",
-    checked_in_by: visitActor, checked_out_by: visitActor,
+    checked_in_by: visitActor, checked_out_by: visitActor, technician_profile_id: visitActor,
     check_in_activity_id: null, check_out_activity_id: null,
     created_at: "2026-09-10T08:00:00.000Z", updated_at: "2026-09-10T10:00:00.000Z",
     closure_kind: null, duration_review_required: false,
@@ -35,7 +35,7 @@ export function visitExpected(patch: Record<string, unknown> = {}): Record<strin
   return {
     id: visitId, workOrderId: visitParent, contractorId: visitContractor,
     checkInAt: "2026-09-10T08:00:00.000Z", checkOutAt: "2026-09-10T10:00:00.000Z",
-    createdBy: visitActor, closedBy: visitActor, closureKind: null,
+    createdBy: visitActor, closedBy: visitActor, technicianProfileId: visitActor, closureKind: null,
     durationReviewRequired: false, administrativeClosedAt: null, administrativeClosedBy: null,
     ...patch,
   };

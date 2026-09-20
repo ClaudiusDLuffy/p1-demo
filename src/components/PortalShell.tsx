@@ -2645,14 +2645,14 @@ export default function PortalShell() {
     : [
       { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge, attentionBadge: contractorAttentionBadge },
       { id: "history", label: "Closed jobs", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
-      ...(currentUser?.contractorTier === "mr_freeze" || currentUser?.canManageTeam ? [
+      ...(currentUser?.canLeadTeam || currentUser?.canManageTeam ? [
         { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
       ] : []),
       ...(currentUser?.canInvoice ? [
         { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
       ] : []),
     ],
-    [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canManageTeam, currentUser?.contractorTier, navigationSummary?.staffWorkCount]
+    [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]
   );
   const bottomNavItems = useMemo(() => {
     const preferred = ["dashboard", "staff_work", "work_orders", "invoices"];

@@ -14,12 +14,13 @@ export default function WorkOrderTechnicianPicker({ workOrder, actor, isManager,
   doSetTechnician: (id: string, name: string) => Promise<unknown>;
 }) {
   const canManage = actor?.canManageTeam === true;
+  const canLead = actor?.canLeadTeam === true;
   const pending = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => () => { pending.current?.abort(); }, [workOrder.id, workOrder.contractor]);
-  const readOnly = isManager || actor?.contractorAccessLevel === "report_only"
-    || Boolean(actor?.contractorOrganizationId && !canManage);
+  const readOnly = isManager || (actor?.contractorAccessLevel === "report_only" && !canLead)
+    || Boolean(actor?.contractorOrganizationId && !canManage && !canLead);
   return <div className="card" style={{ padding: 18, marginBottom: 16 }}>
     <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: .8, color: T.subtle, marginBottom: 10 }}>Technician on Job</div>
     {!readOnly && canManage ? <DirectorySelect domain="company_technicians" contractorId={workOrder.contractor} technicianValues disabled={busy}
@@ -47,8 +48,9 @@ export default function WorkOrderTechnicianPicker({ workOrder, actor, isManager,
           if (pending.current === controller) pending.current = null;
           if (!controller.signal.aborted) setBusy(false);
         }
-      }} /> : !readOnly && actor?.contractorTier === "mr_freeze" ?
-      <DirectorySelect domain="legacy_team" value="" selectedLabel={workOrder.technicianOnJob || undefined} emptyLabel="— Not set —" disabled={busy}
+      }} /> : !readOnly && canLead ?
+      <DirectorySelect domain="legacy_team" value={workOrder.assignedTechnicianProfileId || ""}
+        selectedLabel={workOrder.technicianOnJob || undefined} emptyLabel="Choose a team member" disabled={busy}
         onChange={async (_event, technician) => {
           if (pending.current) return;
           const controller = new AbortController(); pending.current = controller; setBusy(true); setError("");
@@ -56,7 +58,8 @@ export default function WorkOrderTechnicianPicker({ workOrder, actor, isManager,
             const exact = technician ? await loadDirectorySelection("legacy_team", technician.id, null, controller.signal) : null;
             if (technician && !exact) throw new AppError("INVALID_REQUEST");
             controller.signal.throwIfAborted();
-            await doSetTechnician(workOrder.id, exact?.name || "");
+            if (!exact) throw new AppError("INVALID_REQUEST");
+            await doAssignPortalTechnician(workOrder.id, exact.id, exact.name);
           } catch (failure) { if (!controller.signal.aborted) setError(safeErrorMessage(failure)); }
           finally {
             if (pending.current === controller) pending.current = null;

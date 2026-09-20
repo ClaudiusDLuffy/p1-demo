@@ -9,6 +9,7 @@ export const mapVisit = (visit: VisitReadRow): VisitReadModel => ({
   checkOutAt: visit.check_out_at || null,
   createdBy: visit.checked_in_by || null,
   closedBy: visit.checked_out_by || null,
+  technicianProfileId: visit.technician_profile_id || null,
   closureKind: visit.closure_kind || null,
   durationReviewRequired: visit.duration_review_required === true,
   administrativeClosedAt: visit.administrative_closed_at || null,

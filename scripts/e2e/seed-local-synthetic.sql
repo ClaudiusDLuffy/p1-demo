@@ -52,8 +52,8 @@ values
   (:'invoice_tech_id'::uuid, 'Synthetic Invoice Technician', 'IT', 'e2e.invoice.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#10B981', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'invoice'),
   (:'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 'RV', 'e2e.revocation.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#047857', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'invoice'),
   (:'report_tech_id'::uuid, 'Synthetic Report Technician', 'RT', 'e2e.report.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#EC4899', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
-  (:'team_lead_id'::uuid, 'Synthetic Team Lead', 'TL', 'e2e.team.lead@p1.invalid', 'contractor', null, 'Synthetic Team Dispatch', 'Test Territory', array['general'], '#0F766E', true, 'mr_freeze', null, true, null, null),
-  (:'team_member_id'::uuid, 'Synthetic Team Member', 'TM', 'e2e.team.member@p1.invalid', 'contractor', null, 'Synthetic Subcontractor', 'Test Territory', array['general'], '#2563EB', true, 'contracted', :'team_lead_id'::uuid, true, null, null)
+  (:'team_lead_id'::uuid, 'Synthetic Team Lead', 'TL', 'e2e.team.lead@p1.invalid', 'contractor', null, 'Synthetic Service Company · Field Team', 'Test Territory', array['general'], '#0F766E', true, 'mr_freeze', null, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
+  (:'team_member_id'::uuid, 'Synthetic Team Member', 'TM', 'e2e.team.member@p1.invalid', 'contractor', null, 'Synthetic Service Company · Field Team', 'Test Territory', array['general'], '#2563EB', true, 'contracted', :'team_lead_id'::uuid, true, '00000000-0000-4000-8000-00000000e201', 'report_only')
 on conflict (id) do update set
   name = excluded.name,
   initials = excluded.initials,
@@ -87,13 +87,16 @@ values
 
 delete from public.contractor_technicians
 where contractor_id = :'company_admin_id'::uuid
-   or profile_id in (:'invoice_tech_id'::uuid, :'revocation_tech_id'::uuid, :'report_tech_id'::uuid);
+   or profile_id in (:'invoice_tech_id'::uuid, :'revocation_tech_id'::uuid, :'report_tech_id'::uuid,
+     :'team_lead_id'::uuid, :'team_member_id'::uuid);
 
 insert into public.contractor_technicians (contractor_id, profile_id, name, tier, is_active)
 values
   (:'company_admin_id'::uuid, :'invoice_tech_id'::uuid, 'Synthetic Invoice Technician', 'contracted', true),
   (:'company_admin_id'::uuid, :'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 'contracted', true),
-  (:'company_admin_id'::uuid, :'report_tech_id'::uuid, 'Synthetic Report Technician', 'contracted', true);
+  (:'company_admin_id'::uuid, :'report_tech_id'::uuid, 'Synthetic Report Technician', 'contracted', true),
+  (:'company_admin_id'::uuid, :'team_lead_id'::uuid, 'Synthetic Team Lead', 'mr_freeze', true),
+  (:'company_admin_id'::uuid, :'team_member_id'::uuid, 'Synthetic Team Member', 'contracted', true);
 
 insert into public.afms (id, name, email, region)
 values ('00000000-0000-4000-8000-00000000e301', 'Synthetic AFM', 'afm@synthetic.invalid', 'Synthetic Region')
@@ -164,9 +167,9 @@ values
 
   ('E2E-SUB-TEAM', 'E2E-INC-009', 'E2E001', 'Synthetic City, TX', '100 Test Fixture Way, Synthetic City, TX 75001', 'TX', 'America/Chicago',
    'General', 'Synthetic equipment', 'Fixture', 'Legacy team dispatch workflow', 'Team dispatch workflow', 'Fixture visible to a synthetic team lead and member.',
-   'p4', 'assigned', 'Dispatched', :'team_member_id'::uuid, '00000000-0000-4000-8000-00000000e301', 'Synthetic AFM', null,
+   'p4', 'assigned', 'Dispatched', :'company_admin_id'::uuid, '00000000-0000-4000-8000-00000000e301', 'Synthetic AFM', null,
    900, now() - interval '12 minutes', null, null, false, null, :'dispatcher_id'::uuid, 'manual', false, null, null,
-   now() - interval '12 minutes', 1, null, 'Synthetic Team Member', 0, 0),
+   now() - interval '12 minutes', 1, :'team_member_id'::uuid, 'Synthetic Team Member', 0, 0),
 
   ('E2E-MOBILE-INVOICE', 'E2E-INC-010', 'E2E001', 'Synthetic City, TX', '100 Test Fixture Way, Synthetic City, TX 75001', 'TX', 'America/Chicago',
    'HVAC', 'Synthetic equipment', 'Fixture', 'Narrow viewport invoicing', 'Mobile invoice workflow', 'Isolated completed work for narrow-viewport invoice controls.',
