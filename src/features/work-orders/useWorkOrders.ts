@@ -24,6 +24,7 @@ import {
   closeWorkOrderWithoutInvoice,
   closeReopenedWorkOrderWithoutAdditionalBilling,
   reopenWorkOrder,
+  returnCompletedWorkOrderToField,
   finishContractorInvoicing,
   assignContractorTechnician,
   reviewContractorInvoice,
@@ -64,6 +65,7 @@ import {
   rpcErrorMessage,
 } from "../../lib/rpcConflict";
 import type { WorkOrderReopenMode } from "../../lib/workOrderReopen";
+import { completedReturnErrorMessage } from "../../lib/completedWorkOrderReturn";
 import { workOrderStatusAfterFieldCompletion } from "../../lib/contractorCompletion";
 import {
   contractorAttentionRequestToast,
@@ -1387,6 +1389,58 @@ export default function useWorkOrders({
     }
   };
 
+  const doReturnCompletedToField = async (
+    woId: string,
+    reason: string,
+    onFailure?: (message: string) => void,
+  ) => {
+    if (lifecycleInFlight.current.has(woId)) return false;
+    lifecycleInFlight.current.add(woId);
+    setLoading("returnToField_" + woId, true);
+    try {
+      const existing = workOrders.find(workOrder => workOrder.id === woId);
+      const context = lifecycleContextFor(existing);
+      const result = await returnCompletedWorkOrderToField({
+        ...context,
+        reason: reason.trim(),
+      });
+      patchLocalWO(
+        woId,
+        {
+          status: result.workOrderStatus,
+          functionalStatus: result.functionalStatus,
+          workflowCycle: result.workflowCycle,
+          lifecycleVersion: result.lifecycleVersion,
+          contractorInvoicingCompletedAt: null,
+          contractorInvoicingCompletedBy: null,
+          contractorInvoicingAssignmentVersion: null,
+          contractorInvoicingWorkflowCycle: null,
+          contractorInvoicingCompletionSource: null,
+        },
+        localActivity(
+          `Completed work returned for another field visit by ${currentUser.name}. Reason: ${reason.trim()}`,
+          "system",
+          isManager,
+          "work_order_reopened",
+          false,
+          false,
+        ),
+      );
+      invalidateWorkOrders();
+      fire("Work order returned for another field visit");
+      return true;
+    } catch (error: unknown) {
+      invalidateWorkOrders();
+      const message = completedReturnErrorMessage(error);
+      onFailure?.(message);
+      fire(`Return to field work failed: ${message}`);
+      return false;
+    } finally {
+      lifecycleInFlight.current.delete(woId);
+      setLoading("returnToField_" + woId, false);
+    }
+  };
+
   // Staff-only edit of WO header fields. Patches only the fields that
   // actually changed (caller computes the diff). Each change writes its own
   // human-readable activity-log entry (one entry per changed field) so the
@@ -2040,7 +2094,7 @@ export default function useWorkOrders({
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
-    doCloseReopenedFollowUp, doReopen,
+    doCloseReopenedFollowUp, doReopen, doReturnCompletedToField,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto, photoUploadItems, retryPhotoUploads, cancelPhotoUploads, photoDeleteErrors, retryPhotoDeletion,

@@ -77,6 +77,7 @@ export type LifecycleFunctions = {
   }>;
   mark_work_order_activity_synced_v1: Routine<{ p_activity_id: string; p_synced: boolean }>;
   flag_work_order_capital_v1: Routine<Omit<CommonArgs, "p_operation_id">>;
+  return_completed_work_order_to_field_v1: Routine<CommonArgs & { p_reason: string }>;
 };
 
 // Forward-migration overlay: keep the generated baseline byte-identical.

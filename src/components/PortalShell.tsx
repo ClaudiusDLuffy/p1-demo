@@ -1445,7 +1445,7 @@ export default function PortalShell() {
     doStartWork, doPauseWork, doCloseComplete,
     doMoveToInvoice, doFinishContractorInvoicing,
     doApproveInvoice, doMarkPaid, doCloseWithoutInvoice,
-    doCloseReopenedFollowUp, doReopen,
+    doCloseReopenedFollowUp, doReopen, doReturnCompletedToField,
     doEditWorkOrder, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, doAutoAssign,
     doSetEta, doSetTechnician, doAssignPortalTechnician, doPostNote, doDeleteActivity,
     doAddPhotos, doRemovePhoto, photoUploadItems, retryPhotoUploads, cancelPhotoUploads, photoDeleteErrors, retryPhotoDeletion,
@@ -3468,6 +3468,7 @@ export default function PortalShell() {
             doMarkPaid={doMarkPaid}
             doCloseWithoutInvoice={doCloseWithoutInvoice}
             onRequestReopen={requestReopen}
+            doReturnCompletedToField={doReturnCompletedToField}
             doDownloadInvoice={doDownloadInvoice}
             doDeleteInvoice={doDeleteInvoice}
             doRejectInvoice={doRejectInvoice}

@@ -270,7 +270,10 @@ from (values
   ('E2E-STAFF-BILL-CALC',     '051', 'General',       'General Maintenance',      'Billing calculation persistence',   'p3', 'pending_invoice',           'Completed',                   null::uuid,                  2000::numeric, false, null,                    true,  null::timestamptz,              now() - interval '1 hour',    null::uuid,                 null::text,                         0, 1::bigint, null::timestamptz),
   ('WOTEST3',                 '052', 'Refrigeration', 'Refrigeration equipment',  'Full synthetic role workflow',      'p2', 'unassigned',                'New',                         null::uuid,                  2500::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 null::text,                         0, 0::bigint, null::timestamptz),
   ('WOTEST4',                 '053', 'General',       'General Maintenance',      'Capital and team mixed workflow',   'p1', 'unassigned',                'New',                         null::uuid,                  6000::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid,                 null::text,                         0, 0::bigint, null::timestamptz),
-  ('E2E-AGED-VISIT-CORRECT',  '054', 'Refrigeration', 'Refrigeration equipment',  'Aged contractor visit correction',  'p3', 'pending_invoice',           'Completed',                   :'direct_id'::uuid,          1800::numeric, false, null,                    false, '2024-01-15 12:00:00+00'::timestamptz, '2024-01-15 13:00:00+00'::timestamptz, null::uuid,          'Synthetic Direct Contractor',     0, 2::bigint, null::timestamptz)
+  ('E2E-AGED-VISIT-CORRECT',  '054', 'Refrigeration', 'Refrigeration equipment',  'Aged contractor visit correction',  'p3', 'pending_invoice',           'Completed',                   :'direct_id'::uuid,          1800::numeric, false, null,                    false, '2024-01-15 12:00:00+00'::timestamptz, '2024-01-15 13:00:00+00'::timestamptz, null::uuid,          'Synthetic Direct Contractor',     0, 2::bigint, null::timestamptz),
+  ('E2E-COMPLETED-RETURN',    '055', 'Refrigeration', 'Refrigeration equipment',  'Completed company return visit',    'p1', 'completed',                 'Completed',                   :'company_admin_id'::uuid,   5000::numeric, false, null,                    false, now() - interval '6 days',    now() - interval '6 days' + interval '2 hours', :'report_tech_id'::uuid, 'Synthetic Report Technician', 2, 5::bigint, null::timestamptz),
+  ('E2E-COMPLETED-RETURN-MOBILE','056','Refrigeration','Refrigeration equipment',  'Completed mobile return visit',     'p2', 'completed',                 'Completed',                   :'company_admin_id'::uuid,   4000::numeric, false, null,                    false, now() - interval '8 days',    now() - interval '8 days' + interval '90 minutes', :'report_tech_id'::uuid, 'Synthetic Report Technician', 1, 4::bigint, null::timestamptz),
+  ('E2E-COMPLETED-RETURN-STAFF','057','HVAC',          'HVAC',                    'Completed staff return visit',      'p2', 'pending_approval',          'Completed',                   :'direct_id'::uuid,          3000::numeric, false, null,                    false, now() - interval '4 days',    now() - interval '4 days' + interval '2 hours', null::uuid, 'Synthetic Direct Contractor', 1, 4::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
@@ -336,6 +339,21 @@ values
     '00000000-0000-4000-8000-00000000f207', 'E2E-AGED-VISIT-CORRECT',
     :'direct_id'::uuid, '2024-01-15 12:00:00+00'::timestamptz, '2024-01-15 13:00:00+00'::timestamptz,
     :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f208', 'E2E-COMPLETED-RETURN',
+    :'company_admin_id'::uuid, now() - interval '6 days', now() - interval '6 days' + interval '2 hours',
+    :'report_tech_id'::uuid, :'report_tech_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f209', 'E2E-COMPLETED-RETURN-MOBILE',
+    :'company_admin_id'::uuid, now() - interval '8 days', now() - interval '8 days' + interval '90 minutes',
+    :'report_tech_id'::uuid, :'report_tech_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f210', 'E2E-COMPLETED-RETURN-STAFF',
+    :'direct_id'::uuid, now() - interval '4 days', now() - interval '4 days' + interval '2 hours',
+    :'direct_id'::uuid, :'direct_id'::uuid
   );
 
 insert into public.activities (
@@ -375,7 +393,11 @@ values
   ('00000000-0000-4000-8000-00000000a111', 'E2E-BATCH-APPROVE-A',    'E2E-BATCH-APPROVE-A', 'E2E001', '100 Test Fixture Way', :'direct_id'::uuid, 'Synthetic contractor bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 290, 0, 290, null, null, null, null, :'direct_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
   ('00000000-0000-4000-8000-00000000a112', 'E2E-BATCH-APPROVE-B',    'E2E-BATCH-APPROVE-B', 'E2E001', '100 Test Fixture Way', :'direct_id'::uuid, 'Synthetic contractor bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 300, 0, 300, null, null, null, null, :'direct_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
   ('00000000-0000-4000-8000-00000000a113', 'E2E-BATCH-REJECT-A',     'E2E-BATCH-REJECT-A',  'E2E001', '100 Test Fixture Way', :'direct_id'::uuid, 'Synthetic contractor bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 310, 0, 310, null, null, null, null, :'direct_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
-  ('00000000-0000-4000-8000-00000000a114', 'E2E-BATCH-REJECT-B',     'E2E-BATCH-REJECT-B',  'E2E001', '100 Test Fixture Way', :'direct_id'::uuid, 'Synthetic contractor bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 320, 0, 320, null, null, null, null, :'direct_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1);
+  ('00000000-0000-4000-8000-00000000a114', 'E2E-BATCH-REJECT-B',     'E2E-BATCH-REJECT-B',  'E2E001', '100 Test Fixture Way', :'direct_id'::uuid, 'Synthetic contractor bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 320, 0, 320, null, null, null, null, :'direct_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
+  ('00000000-0000-4000-8000-00000000a115', 'E2E-RETURN-ONE',          'E2E-COMPLETED-RETURN', 'E2E001', '100 Test Fixture Way', :'company_admin_id'::uuid, 'Synthetic first submitted bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 440, 0, 440, null, null, null, null, :'company_admin_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
+  ('00000000-0000-4000-8000-00000000a116', 'E2E-RETURN-TWO',          'E2E-COMPLETED-RETURN', 'E2E001', '100 Test Fixture Way', :'company_admin_id'::uuid, 'Synthetic second submitted bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 1130, 0, 1130, null, null, null, null, :'company_admin_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
+  ('00000000-0000-4000-8000-00000000a117', 'E2E-MOBILE-RETURN',       'E2E-COMPLETED-RETURN-MOBILE', 'E2E001', '100 Test Fixture Way', :'company_admin_id'::uuid, 'Synthetic mobile submitted bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 300, 0, 300, null, null, null, null, :'company_admin_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1),
+  ('00000000-0000-4000-8000-00000000a118', 'E2E-STAFF-RETURN',        'E2E-COMPLETED-RETURN-STAFF', 'E2E001', '100 Test Fixture Way', :'direct_id'::uuid, 'Synthetic staff-path submitted bill', current_date, current_date, current_date + 30, 'Net 30', 'submitted', 500, 0, 500, null, null, null, null, :'direct_id'::uuid, 'contractor', null, 1, null, null, 'invoice', null, 1);
 
 -- Establish the rejected snapshot using the same transaction marker enforced
 -- for staff review transitions, while retaining owner-maintenance seeding.
@@ -404,7 +426,11 @@ from (values
   ('00000000-0000-4000-8000-00000000a111'::uuid, 'Labor', 'Synthetic batch approval labor A', 290::numeric),
   ('00000000-0000-4000-8000-00000000a112'::uuid, 'Labor', 'Synthetic batch approval labor B', 300::numeric),
   ('00000000-0000-4000-8000-00000000a113'::uuid, 'Labor', 'Synthetic batch rejection labor A', 310::numeric),
-  ('00000000-0000-4000-8000-00000000a114'::uuid, 'Labor', 'Synthetic batch rejection labor B', 320::numeric)
+  ('00000000-0000-4000-8000-00000000a114'::uuid, 'Labor', 'Synthetic batch rejection labor B', 320::numeric),
+  ('00000000-0000-4000-8000-00000000a115'::uuid, 'Labor', 'Synthetic completed return labor one', 440::numeric),
+  ('00000000-0000-4000-8000-00000000a116'::uuid, 'Parts/Hardware', 'Synthetic completed return parts two', 1130::numeric),
+  ('00000000-0000-4000-8000-00000000a117'::uuid, 'Labor', 'Synthetic mobile return labor', 300::numeric),
+  ('00000000-0000-4000-8000-00000000a118'::uuid, 'Labor', 'Synthetic staff return labor', 500::numeric)
 ) as invoice(id, line_type, description, amount);
 
 insert into public.work_order_afm_contacts (work_order_id, afm_email)

@@ -50,6 +50,12 @@ import type { Database, Json } from "./supabase/database.types";
 import { createPortalRealtimeSubscription } from "./realtime/realtimeSubscription";
 import type { NormalizedRealtimeEvent } from "./realtime/realtimeEvent";
 import type { WorkOrderReopenMode } from "./workOrderReopen";
+import {
+  completedReturnCommandSchema,
+  completedReturnResultSchema,
+  type CompletedReturnCommand,
+  type CompletedReturnResult,
+} from "./completedWorkOrderReturn";
 import type {
   ContractorEstimate,
   ContractorEstimateAttachment,
@@ -1086,6 +1092,30 @@ export async function reopenWorkOrder(
   });
   if (error) throw normalizeUnknownError(error);
   return data as unknown as ReopenWorkOrderResult;
+}
+
+export async function returnCompletedWorkOrderToField(
+  input: CompletedReturnCommand,
+): Promise<CompletedReturnResult> {
+  const command = completedReturnCommandSchema.parse(input);
+  const sb = supabase();
+  const { data, error } = await sb.rpc("return_completed_work_order_to_field_v1", {
+    p_work_order_id: command.workOrderId,
+    p_expected_assignment_version: command.expectedAssignmentVersion,
+    p_expected_workflow_cycle: command.expectedWorkflowCycle,
+    p_expected_lifecycle_version: command.expectedLifecycleVersion,
+    p_operation_id: command.operationId,
+    p_reason: command.reason,
+  });
+  if (error) throw normalizeUnknownError(error);
+  const result = completedReturnResultSchema.parse(data);
+  if (result.workOrderId !== command.workOrderId
+      || result.operationId !== command.operationId
+      || result.assignmentVersion !== command.expectedAssignmentVersion
+      || result.workflowCycle !== command.expectedWorkflowCycle + 1) {
+    throw new Error("The return-to-field response did not match the requested work order version.");
+  }
+  return result;
 }
 
 export async function markWorkOrderNotesSeen(
