@@ -4,6 +4,7 @@ export { PhotoUploadError } from "./photoUploadError";
 
 export const PHOTO_UPLOAD_MAX_FILES = 8;
 export const PHOTO_UPLOAD_CONCURRENCY = 2;
+export const PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000, 8_000] as const;
 export type PhotoUploadStatus = "queued" | "authorizing" | "uploading" | "validating" | "finalizing"
   | "confirmed" | "failed" | "cleanup_required" | "cancelled";
 export type PhotoUploadItem = Readonly<{
@@ -48,11 +49,43 @@ type Entry<Intent> = {
 
 export type PhotoUploadController = ReturnType<typeof createPhotoUploadController>;
 
+function inspectionBusyRetryDelay(operationId: string, attempt: number): number {
+  const base = PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS[attempt];
+  let hash = 2_166_136_261;
+  for (const character of `${operationId}:${attempt}`) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  // Stable per-operation jitter keeps separate phones from retrying in lockstep
+  // while making the recovery schedule deterministic and testable.
+  return base + (hash >>> 0) % Math.max(1, Math.floor(base / 2));
+}
+
+function waitForInspectionRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new PhotoUploadError(
+    "This upload session has ended. Select the photos again after signing in.", false,
+  ));
+  return new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolvePromise();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new PhotoUploadError("This upload session has ended. Select the photos again after signing in.", false));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export function createPhotoUploadController<Intent>(ports: PhotoUploadPorts<Intent>, options: {
   onChange?: (items: readonly PhotoUploadItem[]) => void;
   createId?: () => string;
+  waitBeforeInspectionRetry?: (delayMs: number, signal: AbortSignal) => Promise<void>;
 } = {}) {
   const createId = options.createId ?? (() => crypto.randomUUID());
+  const waitBeforeInspectionRetry = options.waitBeforeInspectionRetry ?? waitForInspectionRetry;
   let entries: Entry<Intent>[] = [];
   let running: Promise<readonly PhotoUploadItem[]> | null = null;
   let cancelling: Promise<readonly PhotoUploadItem[]> | null = null;
@@ -113,7 +146,20 @@ export function createPhotoUploadController<Intent>(ports: PhotoUploadPorts<Inte
     update(entry, { status: "validating" });
     const task = finalizeTail.then(async () => {
       if (disposed || signal.aborted) throw new PhotoUploadError("This upload session has ended. Select the photos again after signing in.", false);
-      const result = await ports.finalize(intent, signal, () => update(entry, { status: "finalizing" }));
+      let result: PhotoUploadOutcome;
+      for (let attempt = 0;; attempt += 1) {
+        try {
+          result = await ports.finalize(intent, signal, () => update(entry, { status: "finalizing" }));
+          break;
+        } catch (error: unknown) {
+          if (!(error instanceof PhotoUploadError) || error.code !== "IMAGE_INSPECTION_BUSY"
+            || attempt >= PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS.length) throw error;
+          await waitBeforeInspectionRetry(inspectionBusyRetryDelay(entry.item.operationId, attempt), signal);
+          if (disposed || signal.aborted) throw new PhotoUploadError(
+            "This upload session has ended. Select the photos again after signing in.", false,
+          );
+        }
+      }
       if (disposed) return result;
       if (result.status !== "upload_required") {
         update(entry, { status: "finalizing" });

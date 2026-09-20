@@ -15,6 +15,18 @@ export type StoreHistoryWorkOrder = {
   updatedAt?: string | null;
 };
 
+/**
+ * Recognizes an exact numeric 7-Eleven store lookup entered into the shared
+ * work-order search. Free-text and six-plus-digit legacy references remain
+ * ordinary searches instead of silently changing list scope.
+ */
+export function normalizeExactStoreNumberSearch(
+  value: string | null | undefined,
+): string | null {
+  const match = String(value || "").trim().match(/^(?:store\s*#?\s*)?(\d{1,5})$/i);
+  return match?.[1] || null;
+}
+
 const workOrderTime = (workOrder: StoreHistoryWorkOrder): number => {
   const value = workOrder.createdAt || workOrder.updatedAt || "";
   const timestamp = new Date(value).getTime();

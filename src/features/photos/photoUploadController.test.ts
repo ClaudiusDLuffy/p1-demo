@@ -8,7 +8,7 @@ import ts from "typescript";
 import { createBrowserPhotoStorageAdapter } from "./browserPhotoStorageAdapter";
 import {
   createPhotoUploadController, PhotoUploadError,
-  type PhotoUploadItem, type PhotoUploadPorts,
+  PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS, type PhotoUploadItem, type PhotoUploadPorts,
 } from "./photoUploadController";
 import { PHOTO_ACCEPTED_FORMAT_GUIDANCE, PHOTO_INPUT_ACCEPT } from "../../lib/photoContentPolicy";
 
@@ -22,7 +22,9 @@ async function until(check: () => boolean) {
   for (let attempt = 0; attempt < 100 && !check(); attempt++) await new Promise<void>(resolvePromise => setImmediate(resolvePromise));
   assert.ok(check(), "Synthetic operation did not reach the expected boundary");
 }
-function harness(overrides: Partial<PhotoUploadPorts<string>> = {}) {
+function harness(overrides: Partial<PhotoUploadPorts<string>> = {}, options: {
+  waitBeforeInspectionRetry?: (delayMs: number, signal: AbortSignal) => Promise<void>;
+} = {}) {
   const calls: string[] = [];
   const snapshots: (readonly PhotoUploadItem[])[] = [];
   const objects = new Set<string>();
@@ -39,7 +41,7 @@ function harness(overrides: Partial<PhotoUploadPorts<string>> = {}) {
     },
     cancel: async intent => { calls.push(`cancel:${intent}`); objects.delete(intent); },
     ...overrides,
-  }, { createId: () => `id-${++id}`, onChange: items => snapshots.push(items) });
+  }, { createId: () => `id-${++id}`, onChange: items => snapshots.push(items), ...options });
   return { controller, calls, snapshots, objects };
 }
 
@@ -82,6 +84,63 @@ test("parallel mobile uploads serialize image finalization to server decoder cap
   const items = await h.controller.start(Array.from({ length: 8 }, (_, index) => file(`${index}.jpg`)));
   assert.equal(items.filter(item => item.status === "confirmed").length, 8);
   assert.equal(peakFinalizations, 1);
+});
+
+test("inspection backpressure retries the same intent with bounded jittered delays", async () => {
+  let finalizations = 0;
+  const delays: number[] = [];
+  const h = harness({ finalize: async intent => {
+    h.calls.push(`finalize:${intent}`);
+    if (++finalizations <= 2) throw new PhotoUploadError(
+      "Image verification is busy. Retry this upload shortly.", true, "IMAGE_INSPECTION_BUSY",
+    );
+    return { status: "confirmed", storagePath: `synthetic/${intent}` };
+  } }, { waitBeforeInspectionRetry: async (delayMs, signal) => {
+    assert.equal(signal.aborted, false);
+    delays.push(delayMs);
+  } });
+
+  const [confirmed] = await h.controller.start([file()]);
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(finalizations, 3);
+  assert.equal(new Set(h.calls.filter(call => call.startsWith("finalize:"))).size, 1);
+  assert.equal(delays.length, 2);
+  assert.ok(delays[0] >= PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS[0]);
+  assert.ok(delays[0] < PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS[0] * 1.5);
+  assert.ok(delays[1] >= PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS[1]);
+  assert.ok(delays[1] < PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS[1] * 1.5);
+});
+
+test("only image-inspection backpressure is retried automatically", async () => {
+  let finalizations = 0;
+  let waits = 0;
+  const h = harness({ finalize: async () => {
+    finalizations++;
+    throw new PhotoUploadError("The image could not be verified.", true, "IMAGE_INSPECTION_FAILED");
+  } }, { waitBeforeInspectionRetry: async () => { waits++; } });
+
+  const [failed] = await h.controller.start([file()]);
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.retryable, true);
+  assert.equal(finalizations, 1);
+  assert.equal(waits, 0);
+});
+
+test("inspection backpressure remains visible after the bounded retry budget", async () => {
+  let finalizations = 0;
+  let waits = 0;
+  const h = harness({ finalize: async () => {
+    finalizations++;
+    throw new PhotoUploadError(
+      "Image verification is busy. Retry this upload shortly.", true, "IMAGE_INSPECTION_BUSY",
+    );
+  } }, { waitBeforeInspectionRetry: async () => { waits++; } });
+
+  const [failed] = await h.controller.start([file()]);
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.retryable, true);
+  assert.equal(finalizations, PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS.length + 1);
+  assert.equal(waits, PHOTO_INSPECTION_BUSY_RETRY_DELAYS_MS.length);
 });
 
 test("ending a session does not start a photo that was waiting for image inspection", async () => {

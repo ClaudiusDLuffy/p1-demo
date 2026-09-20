@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildStoreWorkOrderHistory,
+  normalizeExactStoreNumberSearch,
   storeWorkOrderHistoryTotal,
 } from "./storeWorkOrderHistory";
 
@@ -10,6 +11,15 @@ const current = {
   store: "35042",
   createdAt: "2026-08-24T12:00:00Z",
 };
+
+test("exact numeric store searches are normalized without capturing other references", () => {
+  assert.equal(normalizeExactStoreNumberSearch(" 38839 "), "38839");
+  assert.equal(normalizeExactStoreNumberSearch("Store #0003"), "0003");
+  assert.equal(normalizeExactStoreNumberSearch("store 42"), "42");
+  for (const value of ["", "E2E001", "WOT1361901", "111111", "38839 extra"]) {
+    assert.equal(normalizeExactStoreNumberSearch(value), null, value);
+  }
+});
 
 test("store history pins the current call and orders exact-store history newest first", () => {
   assert.deepEqual(

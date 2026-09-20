@@ -33,7 +33,7 @@ test("capital classification survives every portal lifecycle label", () => {
 });
 
 test("Work orders includes capital while the focused Capital view remains", () => {
-  assert.match(list, /scope: hideClosed \? "active" : "all"/);
+  assert.match(list, /scope: exactStoreNumber \? "all" : hideClosed \? "active" : "all"/);
   assert.doesNotMatch(
     list,
     /fallbackStateFilteredWOs\.filter\(\(w: any\) =>[\s\S]{0,120}pending_capital_completion/,

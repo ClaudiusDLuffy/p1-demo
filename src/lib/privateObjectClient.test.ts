@@ -13,7 +13,7 @@ import { PHOTO_ACCEPTED_FORMAT_GUIDANCE } from "./photoContentPolicy";
 
 const ids = { intent: "10000000-0000-4000-8000-000000000001", operation: "10000000-0000-4000-8000-000000000002", batch: "10000000-0000-4000-8000-000000000003", photo: "10000000-0000-4000-8000-000000000004" };
 const image = () => new File([new Uint8Array([255, 216, 255, 0, 255, 217])], "camera.heic", { type: "application/octet-stream" });
-function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean } = {}) {
+function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean; rejectBusy?: boolean } = {}) {
   const filename = resolve("src/lib/privateObjectClient.ts");
   const requireHere = createRequire(import.meta.url);
   const exports: Partial<typeof Client> = {};
@@ -56,6 +56,7 @@ function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean
       }
       assert.ok(intent);
       if (target.endsWith("finalize")) {
+        if (options.rejectBusy) return Response.json({ code: "IMAGE_INSPECTION_BUSY", error: "Safe projected error" }, { status: 409 });
         if (!uploaded) return Response.json({ status: "upload_required", intent });
         if (options.rejectFormat) return Response.json({ status: "cleanup_required", intentId: intent.intentId,
           code: "UNSUPPORTED_IMAGE_FORMAT", message: "Convert this photo. Existing uploaded photos are not affected." });
@@ -114,4 +115,15 @@ test("same bytes selected twice in one batch cannot reserve another object", asy
   await assert.rejects(h.ports.begin(image(), ids.photo, ids.batch, signal), /already included in this batch/);
   assert.equal(h.calls.length, 1);
   assert.deepEqual(h.counts(), { uploads: 0, confirmations: 0 });
+});
+
+test("finalize preserves the safe image-inspection backpressure code for narrow retry", async () => {
+  const h = harness({ rejectBusy: true });
+  const signal = new AbortController().signal;
+  const authorization = await h.ports.begin(image(), ids.operation, ids.batch, signal);
+  await assert.rejects(h.ports.finalize(authorization.intent, signal, () => undefined), error => {
+    assert.equal((error as { code?: unknown }).code, "IMAGE_INSPECTION_BUSY");
+    assert.equal((error as { retryable?: unknown }).retryable, true);
+    return true;
+  });
 });

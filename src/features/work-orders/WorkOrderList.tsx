@@ -33,6 +33,7 @@ import {
   type WorkOrderTableSort,
 } from "../../lib/workOrderTable";
 import { normalizeExactPortalWorkOrderId } from "../../lib/workOrderIdentity";
+import { normalizeExactStoreNumberSearch } from "../../lib/storeWorkOrderHistory";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery } from "./queries";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
@@ -77,14 +78,18 @@ export default function WorkOrderList(props: any) {
   const deferredSearch = useDeferredValue(search);
   const deferredColumnFilters = useDeferredValue(columnFilters);
   const exactWorkOrderId = normalizeExactPortalWorkOrderId(deferredSearch);
+  const exactStoreNumber = exactWorkOrderId
+    ? null
+    : normalizeExactStoreNumberSearch(deferredSearch);
+  const scopedStoreNumber = exactStoreNumber || storeView?.storeNumber || null;
 
   const exactStoreFilteredWOs = useMemo(
-    () => storeView?.storeNumber
+    () => scopedStoreNumber
       ? filteredWOs.filter((workOrder: Record<string, unknown>) =>
-          String(workOrder.store || "") === storeView.storeNumber
+          String(workOrder.store || "") === scopedStoreNumber
         )
       : filteredWOs,
-    [filteredWOs, storeView],
+    [filteredWOs, scopedStoreNumber],
   );
 
   const fallbackStateFilteredWOs = useMemo(
@@ -117,6 +122,8 @@ export default function WorkOrderList(props: any) {
 
   const cursorSignature = JSON.stringify(exactWorkOrderId
     ? { exactWorkOrderId }
+    : exactStoreNumber
+      ? { exactStoreNumber }
     : {
         search: deferredSearch.trim(),
         filterC,
@@ -145,32 +152,32 @@ export default function WorkOrderList(props: any) {
     page === "work_orders" && !selectedWO && Boolean(exactWorkOrderId),
   );
   const workOrderPageQuery = useWorkOrdersPageQuery({
-    scope: hideClosed ? "active" : "all",
-    search: deferredSearch,
-    contractorId: filterC !== "all" ? filterC : null,
-    priority: deferredColumnFilters.priority && deferredColumnFilters.priority !== "all"
+    scope: exactStoreNumber ? "all" : hideClosed ? "active" : "all",
+    search: exactStoreNumber ? "" : deferredSearch,
+    contractorId: exactStoreNumber ? null : filterC !== "all" ? filterC : null,
+    priority: exactStoreNumber ? "all" : deferredColumnFilters.priority && deferredColumnFilters.priority !== "all"
       ? deferredColumnFilters.priority
       : filterP,
-    status: deferredColumnFilters.status && deferredColumnFilters.status !== "all"
+    status: exactStoreNumber ? "all" : deferredColumnFilters.status && deferredColumnFilters.status !== "all"
       ? deferredColumnFilters.status
       : filterStatus,
-    state: filterState,
-    needsAction: viewMode === "needs_action",
-    sort: sortBy,
-    pendingFirst: isManager,
+    state: exactStoreNumber ? "all" : filterState,
+    needsAction: exactStoreNumber ? false : viewMode === "needs_action",
+    sort: exactStoreNumber ? "newest" : sortBy,
+    pendingFirst: exactStoreNumber ? false : isManager,
     limit: pageSize,
     cursor: effectiveCursor.cursor,
-    storeNumber: storeView?.storeNumber || null,
-    tableSortColumn: tableSort.column,
-    tableSortDirection: tableSort.direction,
-    workOrderFilter: deferredColumnFilters.workOrder,
-    incidentFilter: deferredColumnFilters.incident,
-    storeFilter: deferredColumnFilters.store,
-    summaryFilter: deferredColumnFilters.summary,
-    contractorFilter: deferredColumnFilters.contractor,
-    createdDateFilter: deferredColumnFilters.createdDate,
-    updatedDateFilter: deferredColumnFilters.updatedDate,
-    slaFilter: deferredColumnFilters.sla === "overdue" ? "overdue" : "all",
+    storeNumber: scopedStoreNumber,
+    tableSortColumn: exactStoreNumber ? "created" : tableSort.column,
+    tableSortDirection: exactStoreNumber ? "desc" : tableSort.direction,
+    workOrderFilter: exactStoreNumber ? "" : deferredColumnFilters.workOrder,
+    incidentFilter: exactStoreNumber ? "" : deferredColumnFilters.incident,
+    storeFilter: exactStoreNumber ? "" : deferredColumnFilters.store,
+    summaryFilter: exactStoreNumber ? "" : deferredColumnFilters.summary,
+    contractorFilter: exactStoreNumber ? "" : deferredColumnFilters.contractor,
+    createdDateFilter: exactStoreNumber ? undefined : deferredColumnFilters.createdDate,
+    updatedDateFilter: exactStoreNumber ? undefined : deferredColumnFilters.updatedDate,
+    slaFilter: exactStoreNumber ? "all" : deferredColumnFilters.sla === "overdue" ? "overdue" : "all",
   }, listQueryEnabled);
 
   const serverPage = workOrderPageQuery.data;
@@ -200,13 +207,19 @@ export default function WorkOrderList(props: any) {
   });
   const loadingStateMessage = exactWorkOrderId
     ? `Looking up ${exactWorkOrderId}…`
-    : "Loading work orders…";
+    : exactStoreNumber
+      ? `Looking up Store #${exactStoreNumber}…`
+      : "Loading work orders…";
   const errorStateMessage = exactWorkOrderId
     ? `Could not look up ${exactWorkOrderId}. Please try again.`
-    : "Work orders could not be loaded. Your filters have not been cleared; retry the request.";
+    : exactStoreNumber
+      ? `Could not look up Store #${exactStoreNumber}. Please try again.`
+      : "Work orders could not be loaded. Your filters have not been cleared; retry the request.";
   const emptyStateMessage = exactWorkOrderId
     ? `No accessible work order found for ${exactWorkOrderId}.`
-    : "No work orders match your filters.";
+    : exactStoreNumber
+      ? `No accessible work orders found for Store #${exactStoreNumber}.`
+      : "No work orders match your filters.";
   const retryWorkOrders = () => { void activeWorkOrderQuery.refetch(); };
 
   const goToPage = (direction: "prev" | "next") => {
@@ -480,6 +493,24 @@ export default function WorkOrderList(props: any) {
             >
               Exact lookup for <strong>{exactWorkOrderId}</strong>. Other filters and “Hide closed calls” are temporarily ignored.
               {!exactWorkOrderId.includes("-") && " Authorized reassignment copies are included."}
+            </div>
+          )}
+
+          {exactStoreNumber && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                margin: "-8px 0 14px",
+                padding: "9px 12px",
+                borderRadius: 8,
+                border: `1px solid ${T.accentRing}`,
+                background: T.accentSoft,
+                color: T.inkSoft,
+                fontSize: 12,
+              }}
+            >
+              Store lookup for <strong>Store #{exactStoreNumber}</strong>. Current and historical calls are included; other filters and “Hide closed calls” are temporarily ignored.
             </div>
           )}
 
