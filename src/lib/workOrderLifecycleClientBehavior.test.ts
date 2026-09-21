@@ -15,7 +15,13 @@ const compiled = ts.transpileModule(readFileSync(filename, "utf8"), {
 const requireHere = createRequire(import.meta.url);
 type Command = (...args: unknown[]) => Promise<unknown>;
 
-function harness(status = "assigned", fail = false) {
+function harness(status = "assigned", fail = false, options: {
+  workOrder?: Record<string, unknown>;
+  startDateInput?: string;
+  startTimeInput?: string;
+  pauseDateInput?: string;
+  pauseTimeInput?: string;
+} = {}) {
   const messages: string[] = [];
   const loading: Record<string, boolean>[] = [];
   const invalidations: unknown[] = [];
@@ -24,6 +30,7 @@ function harness(status = "assigned", fail = false) {
     id: "WOTTEST001", status, functionalStatus: status === "parts" ? "Awaiting Parts" : status === "assigned" ? "Dispatched" : "Work in Progress",
     contractorAssignmentVersion: 2, workflowCycle: 1, lifecycleVersion: 3,
     contractor: "00000000-0000-4000-8000-000000000001", activities: [],
+    ...options.workOrder,
   };
   const workOrders = [workOrder];
   const cache = new Map<unknown, unknown>();
@@ -70,7 +77,8 @@ function harness(status = "assigned", fail = false) {
     USERS: [], workOrdersData: workOrders, invoices: [], setInvoices: () => undefined,
     fire: (message: string) => messages.push(message), isManager: false,
     dateNow: () => "Synthetic time", fmt: (value: unknown) => String(value),
-    startDateInput: "", startTimeInput: "", pauseDateInput: "", pauseTimeInput: "",
+    startDateInput: options.startDateInput || "", startTimeInput: options.startTimeInput || "",
+    pauseDateInput: options.pauseDateInput || "", pauseTimeInput: options.pauseTimeInput || "",
   });
   return { hook, messages, loading, invalidations, calls, cache, keys, workOrders };
 }
@@ -147,6 +155,33 @@ test("pause remains unavailable outside Work in Progress", async () => {
   const h = harness("assigned");
   assert.equal(await h.hook.doPauseWork("WOTTEST001", "Awaiting parts", "", "", "", ""), false);
   assert.deepEqual(h.messages, ["Only work in progress can be paused for parts"]);
+  assert.equal(h.calls.length, 0);
+});
+
+test("invalid future arrival is kept in the modal and never reaches a lifecycle command", async () => {
+  const h = harness("assigned", false, { startDateInput: "2099-01-01", startTimeInput: "12:00" });
+  const inlineFailures: string[] = [];
+  assert.equal(await h.hook.doStartWork("WOTTEST001", "Synthetic future", (message: string) => inlineFailures.push(message)), false);
+  assert.deepEqual(inlineFailures, ["Arrival time cannot be more than 5 minutes in the future."]);
+  assert.equal(h.calls.length, 0);
+});
+
+test("invalid future and pre-check-in completions never reach the database command", async () => {
+  const h = harness("wip", false, { workOrder: {
+    visits: [{ checkInAt: "2026-09-21T14:00:00Z", checkOutAt: null }],
+  } });
+  const inlineFailures: string[] = [];
+  const args = ["Make", "Model", "Serial", "Current Asset Repaired", 2026] as const;
+  assert.equal(await h.hook.doCloseComplete(
+    "WOTTEST001", ...args, "2099-01-01T12:00:00Z", "Future", (message: string) => inlineFailures.push(message),
+  ), false);
+  assert.equal(await h.hook.doCloseComplete(
+    "WOTTEST001", ...args, "2026-09-21T13:59:00Z", "Early", (message: string) => inlineFailures.push(message),
+  ), false);
+  assert.deepEqual(inlineFailures, [
+    "Completion time cannot be more than 5 minutes in the future.",
+    "Completion time cannot be before this visit's check-in time.",
+  ]);
   assert.equal(h.calls.length, 0);
 });
 

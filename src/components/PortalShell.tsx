@@ -1331,6 +1331,7 @@ export default function PortalShell() {
   const [startWorkError, setStartWorkError] = useState("");
   const [pauseReasonInput, setPauseReasonInput] = useState("");
   const [pauseWorkError, setPauseWorkError] = useState("");
+  const [closeCompleteError, setCloseCompleteError] = useState("");
   const [partDescInput, setPartDescInput] = useState("");
   const [partNumInput, setPartNumInput] = useState("");
   const [partEtaInput, setPartEtaInput] = useState("");
@@ -2045,6 +2046,7 @@ export default function PortalShell() {
       setAssetYearInput(woData.assetYear || "");
       setResolutionInput("");
       setResolutionNotesInput(woData.resolutionNotes || "");
+      setCloseCompleteError("");
     }
     shellFormBaseline.current = shellFormSnapshot(modal, initial);
   }, [modal, woData, shellScope, shellFormState]);
@@ -4219,8 +4221,8 @@ export default function PortalShell() {
               </Sel></Field>
             )}
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Stamp-out date"><DatePickerField value={pauseDateInput} onChange={setPauseDateInput} /></Field>
-              <Field label="Stamp-out time"><TimePickerField value={pauseTimeInput} onChange={setPauseTimeInput} /></Field>
+              <Field label="Stamp-out date"><DatePickerField value={pauseDateInput} onChange={(value: string) => { setPauseDateInput(value); setPauseWorkError(""); }} /></Field>
+              <Field label="Stamp-out time"><TimePickerField value={pauseTimeInput} onChange={(value: string) => { setPauseTimeInput(value); setPauseWorkError(""); }} /></Field>
             </div>
             {!capitalReviewCheckout && pauseReasonInput === "Awaiting parts" && (
               <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
@@ -4318,18 +4320,18 @@ export default function PortalShell() {
           <div style={{ display: "grid", gap: 14 }}>
             <div style={{ padding: "14px 16px", background: T.accentSoft, borderRadius: 10, border: `1px solid ${T.accentRing}` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Asset information (required)</div>
-              <Field label="Equipment make"><Input value={assetMakeInput} onChange={(e: any) => setAssetMakeInput(e.target.value)} placeholder="e.g. Taylor" /></Field>
+              <Field label="Equipment make"><Input value={assetMakeInput} onChange={(e: any) => { setAssetMakeInput(e.target.value); setCloseCompleteError(""); }} placeholder="e.g. Taylor" /></Field>
               <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-                <Field label="Asset model"><Input value={assetModelInput} onChange={(e: any) => setAssetModelInput(e.target.value)} placeholder="e.g. Taylor 340" /></Field>
-                <Field label="Serial number"><Input value={assetSerialInput} onChange={(e: any) => setAssetSerialInput(e.target.value)} placeholder="e.g. TY-2022-81402" /></Field>
+                <Field label="Asset model"><Input value={assetModelInput} onChange={(e: any) => { setAssetModelInput(e.target.value); setCloseCompleteError(""); }} placeholder="e.g. Taylor 340" /></Field>
+                <Field label="Serial number"><Input value={assetSerialInput} onChange={(e: any) => { setAssetSerialInput(e.target.value); setCloseCompleteError(""); }} placeholder="e.g. TY-2022-81402" /></Field>
               </div>
               <div style={{ marginTop: 12 }}>
-                <Field label="Equipment year *"><Input type="number" value={assetYearInput} onChange={(e: any) => setAssetYearInput(e.target.value)} placeholder="e.g. 2019" /></Field>
+                <Field label="Equipment year *"><Input type="number" value={assetYearInput} onChange={(e: any) => { setAssetYearInput(e.target.value); setCloseCompleteError(""); }} placeholder="e.g. 2019" /></Field>
               </div>
             </div>
             <div style={{ padding: "14px 16px", background: T.successSoft, borderRadius: 10, border: `1px solid ${T.success}33` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.success, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>DSP closure</div>
-              <Field label="Resolution code"><Sel value={resolutionInput} onChange={(e: any) => setResolutionInput(e.target.value)}>
+              <Field label="Resolution code"><Sel value={resolutionInput} onChange={(e: any) => { setResolutionInput(e.target.value); setCloseCompleteError(""); }}>
                 <option value="">Select...</option>
                 <option>Nuisance</option>
                 <option>Current Asset Repaired</option>
@@ -4338,23 +4340,29 @@ export default function PortalShell() {
                 <option>Other</option>
               </Sel></Field>
             </div>
-            <Field label="Closing notes" controlId="resolution-notes"><TA id="resolution-notes" rows={3} value={resolutionNotesInput} onChange={(e: any) => setResolutionNotesInput(e.target.value)} placeholder="Brief summary of what was found and done..." /></Field>
+            <Field label="Closing notes" controlId="resolution-notes"><TA id="resolution-notes" rows={3} value={resolutionNotesInput} onChange={(e: any) => { setResolutionNotesInput(e.target.value); setCloseCompleteError(""); }} placeholder="Brief summary of what was found and done..." /></Field>
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="End date"><DatePickerField value={closeDateInput} onChange={setCloseDateInput} /></Field>
-              <Field label="End time"><TimePickerField value={closeTimeInput} onChange={setCloseTimeInput} /></Field>
+              <Field label="End date"><DatePickerField value={closeDateInput} onChange={(value: string) => { setCloseDateInput(value); setCloseCompleteError(""); }} /></Field>
+              <Field label="End time"><TimePickerField value={closeTimeInput} onChange={(value: string) => { setCloseTimeInput(value); setCloseCompleteError(""); }} /></Field>
             </div>
           </div>
+          {closeCompleteError && (
+            <div role="alert" aria-live="assertive" style={{ color: T.danger, background: T.dangerSoft, borderRadius: 9, padding: "10px 12px", fontSize: 12, lineHeight: 1.5, marginTop: 16 }}>
+              {closeCompleteError}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 22, justifyContent: "flex-end" }}>
             <button onClick={() => shellDismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
+              setCloseCompleteError("");
               setModalLoading(true);
               try {
               const mk = assetMakeInput.trim();
               const m = assetModelInput.trim();
               const s = assetSerialInput.trim();
               const y = parseInt(assetYearInput, 10);
-              if (!mk || !m || !s) { fire("Equipment make, model, and serial number are required"); return; }
+              if (!mk || !m || !s) { setCloseCompleteError("Equipment make, model, and serial number are required."); return; }
               const completedAt = closeDateInput && closeTimeInput
                 ? storeLocalDateTimeToIso(
                     closeDateInput,
@@ -4362,7 +4370,17 @@ export default function PortalShell() {
                     timezoneForWorkOrder(woData),
                   )
                 : new Date().toISOString();
-              const completed = await doCloseComplete(woData.id, mk, m, s, resolutionInput, isFinite(y) ? y : null, completedAt, resolutionNotesInput);
+              const completed = await doCloseComplete(
+                woData.id,
+                mk,
+                m,
+                s,
+                resolutionInput,
+                isFinite(y) ? y : null,
+                completedAt,
+                resolutionNotesInput,
+                setCloseCompleteError,
+              );
               if (completed !== false) setModal(null);
               } finally {
                 setModalLoading(false);
