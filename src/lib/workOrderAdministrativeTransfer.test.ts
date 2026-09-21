@@ -92,6 +92,44 @@ test("administrative adapter sends one explicit RPC with versions and operation,
   assert.equal(result.durationReviewRequired, true);
 });
 
+test("administrative adapter accepts a capital parent without flattening its workflow stage", async () => {
+  const capitalResponse = {
+    ...response,
+    status: "capital",
+    functionalStatus: "Work in Progress",
+    isCapital: true,
+  };
+  const commands = createAssignmentCommands(async () => ({ data: capitalResponse, error: null }));
+  const result = await commands.administrativeTransfer(
+    context,
+    { contractorId, reason: "Capital visit emergency", confirmed: true },
+  );
+  assert.equal(result.status, "capital");
+  assert.equal(result.functionalStatus, "Work in Progress");
+  assert.equal(result.receivingVisitRequired, true);
+});
+
+test("administrative adapter rejects mismatched preserved capital states", async () => {
+  for (const patch of [
+    { status: "capital", functionalStatus: "Pending Capital Completion" },
+    { status: "pending_capital_completion", functionalStatus: "Work in Progress" },
+    { status: "wip", functionalStatus: "Pending Capital Approval" },
+  ]) {
+    const commands = createAssignmentCommands(async () => ({
+      data: { ...response, ...patch },
+      error: null,
+    }));
+    await assert.rejects(
+      commands.administrativeTransfer(
+        context,
+        { contractorId, reason: "Invalid state pair", confirmed: true },
+      ),
+      error => error instanceof AssignmentCommandError
+        && error.code === "ASSIGNMENT_UNCONFIRMED",
+    );
+  }
+});
+
 test("administrative adapter rejects missing provenance, wrong target, versions or unverified response", async () => {
   for (const patch of [{ administrativeClosedVisitId: null }, { administrativeClosureActivityId: null },
     { administrativeClosedAt: "yesterday" }, { durationReviewRequired: false }, { receivingVisitRequired: false },

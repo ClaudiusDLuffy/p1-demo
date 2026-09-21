@@ -136,6 +136,28 @@ test("mobile staff store-number lookup includes current and historical calls des
   await expect(page.getByText("No work orders match your filters.", { exact: true })).toHaveCount(0);
 });
 
+test("mobile company administrator can sort and filter My Jobs without losing the queue", async ({ page }) => {
+  await login(page, accounts.companyAdmin);
+  const search = page.getByRole("searchbox", { name: "Search my jobs" });
+  const sort = page.getByRole("combobox", { name: "Sort work orders by" });
+  await expect(search).toBeVisible();
+  await expect(sort).toBeVisible();
+
+  for (const column of ["work_order", "status", "priority", "store", "summary", "updated", "sla", "created"]) {
+    await sort.selectOption(column);
+    await waitForApplicationRequestsToSettle(page);
+    await expect(page.locator(".card-hover:visible").first()).toBeVisible();
+  }
+
+  await search.fill("Synthetic");
+  await waitForApplicationRequestsToSettle(page);
+  await expect(page.getByText("No work orders match your search.", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Sort (?:ascending|descending)/ }).click();
+  await waitForApplicationRequestsToSettle(page);
+  await expect(page.locator(".card-hover:visible").first()).toBeVisible();
+});
+
 test("mobile technician can clock in, clock out, resume, and complete across refreshes", async ({ page }) => {
   await login(page, accounts.reportTech);
   await openWorkOrder(page, mobileFieldWorkOrderId);

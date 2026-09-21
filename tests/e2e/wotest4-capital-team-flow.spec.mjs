@@ -274,7 +274,11 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await dialog.getByLabel("Work performed *").fill("WOTEST4 documented capital preparation without changing visit state.");
     await dialog.getByRole("button", { name: "Submit report", exact: true }).click();
     await expect(dialog).toBeHidden();
-    await expect(page.locator(".app-toast")).toContainText("Work report submitted");
+    await waitForApplicationRequestsToSettle(page);
+    await page.reload();
+    await expect(page.locator(".app-root")).toBeVisible();
+    await openWorkOrder(page, WORK_ORDER_ID);
+    await expect(page.getByText("Work report submitted for Synthetic Team Member.", { exact: true })).toBeVisible();
     await expect(page.getByText("7-Eleven FSM: Work in Progress", { exact: true })).toBeVisible();
     await expect(page.getByText("Visit 1", { exact: true })).toBeVisible();
     await expect(page.getByText("Visit 2", { exact: true })).toHaveCount(0);

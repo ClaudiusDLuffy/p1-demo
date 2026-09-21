@@ -902,7 +902,7 @@ export default function WorkOrderDetail(props: any) {
                         <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
                           {isLoading("capitalDecline_" + woData.id)
                             ? <><BtnSpinnerDark />Returning...</>
-                            : `Capital declined - return to ${woData.contractor ? "dispatched" : "unassigned"}`}
+                            : "Capital declined - restore field workflow"}
                         </button>
                       )}
                       {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
