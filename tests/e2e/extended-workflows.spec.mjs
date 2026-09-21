@@ -72,6 +72,7 @@ test("invoice-capable technician can upload and submit a synthetic PDF invoice",
   await openWorkOrder(page, "E2E-TECH-INVOICE");
   await page.getByRole("button", { name: "Create or upload invoice", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create invoice" });
+  await expect(dialog.getByLabel("Invoice #")).toHaveValue(/^\d+$/);
 
   const suppliedPdfPath = process.env.P1_E2E_INVOICE_PDF_PATH;
   if (suppliedPdfPath) {
@@ -117,6 +118,9 @@ test("invoice dropdown and actions remain visible on a narrow viewport", async (
   await openWorkOrder(page, "E2E-MOBILE-INVOICE");
   await page.getByRole("button", { name: "Create or upload invoice", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create invoice" });
+  const invoiceNumber = dialog.getByLabel("Invoice #");
+  await expect(invoiceNumber).toHaveValue(/^\d+$/);
+  const assignedNumber = await invoiceNumber.inputValue();
   await dialog.getByRole("button", { name: "+ Labor", exact: true }).click();
 
   const lineType = dialog.getByRole("combobox", { name: "Line 1 type" });
@@ -142,6 +146,9 @@ test("invoice dropdown and actions remain visible on a narrow viewport", async (
   expect(actionBox).not.toBeNull();
   expect(actionBox.x).toBeGreaterThanOrEqual(0);
   expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(390);
+  await saveDraft.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(`#${assignedNumber}`, { exact: true })).toBeVisible();
 });
 
 test("back-office staff can select territory and save a linked billing draft", async ({ page }) => {
