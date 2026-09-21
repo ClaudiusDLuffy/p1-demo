@@ -1534,7 +1534,13 @@ export default function useWorkOrders({
       fire("Capital decline was not applied. Refresh and try again.");
       return false;
     }
-    const destination = result.contractorId ? "dispatched" : "the unassigned queue";
+    const destination = result.functionalStatus === "Work in Progress"
+      ? "work in progress"
+      : result.functionalStatus === "Awaiting Parts"
+        ? "awaiting parts"
+        : result.functionalStatus === "Completed"
+          ? "completed field work"
+          : result.contractorId ? "dispatched" : "the unassigned queue";
     const text = `Capital replacement declined by ${currentUser.name}. Work order returned to ${destination}.`;
     const patch = {
       status: result.status,

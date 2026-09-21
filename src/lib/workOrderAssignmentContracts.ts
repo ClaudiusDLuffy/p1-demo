@@ -25,10 +25,24 @@ export const administrativeTransferRequestSchema = z.object({
   contractorId: z.uuid().nullable(), reason: z.string().trim().min(1).max(500), confirmed: z.literal(true),
 }).strict();
 export const administrativeTransferResultSchema = assignmentTransitionResultSchema.extend({
-  status: z.literal("wip"), functionalStatus: z.literal("Work in Progress"),
+  status: z.enum(["wip", "capital", "pending_capital_completion"]),
+  functionalStatus: z.enum(["Work in Progress", "Pending Capital Approval", "Pending Capital Completion"]),
   receivingVisitRequired: z.literal(true),
   administrativeClosedVisitId: z.uuid(), administrativeClosedAt: z.iso.datetime({ offset: true }),
   administrativeClosureActivityId: z.uuid(), durationReviewRequired: z.literal(true),
+}).superRefine((result, context) => {
+  const validParentState = result.status === "wip"
+    ? result.functionalStatus === "Work in Progress"
+    : result.status === "capital"
+      ? ["Work in Progress", "Pending Capital Approval"].includes(result.functionalStatus)
+      : result.functionalStatus === "Pending Capital Completion";
+  if (!validParentState) {
+    context.addIssue({
+      code: "custom",
+      path: ["functionalStatus"],
+      message: "Administrative transfer did not preserve a valid field state",
+    });
+  }
 });
 export const assignmentRejectionResultSchema = z.object({
   ...common, rejectedAt: z.iso.datetime({ offset: true }), rejectedBy: z.uuid(),

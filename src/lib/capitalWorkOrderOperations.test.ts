@@ -66,7 +66,7 @@ test("capital detail exposes guarded assignment controls and a classification ba
   assert.match(detail, /woData\.status === "pending_capital_completion" && isManager && !invoiceController/);
   assert.match(shell, /The capital identity, approval state, and P1 capital quote stay on this work order/);
   assert.match(shell, /remain in its current[\s\S]*Capital[\s\S]*stage with no contractor/);
-  assert.match(detail, /return to \$\{woData\.contractor \? "dispatched" : "unassigned"\}/);
+  assert.match(detail, /Capital declined - restore field workflow/);
   assert.match(capitalView, /getUser\(wo\.contractor\)\?\.name \|\| "Unassigned"/);
 });
 

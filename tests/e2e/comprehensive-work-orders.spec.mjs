@@ -133,7 +133,7 @@ test("staff work-order lifecycle controls reach their intended queues", async ({
 
   await openSidebarPage(page, "Work orders");
   await openWorkOrder(page, "E2E-CAPITAL-DECLINE");
-  await page.getByRole("button", { name: /Capital declined - return to dispatched/ }).click();
+  await page.getByRole("button", { name: "Capital declined - restore field workflow", exact: true }).click();
   await expect(page.getByText("Portal: Assigned", { exact: true })).toBeVisible();
 
   await openSidebarPage(page, "Work orders");
