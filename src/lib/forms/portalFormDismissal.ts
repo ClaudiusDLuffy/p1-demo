@@ -26,7 +26,7 @@ export function validatePauseWorkForm(
   reason: string,
   parts: readonly { description?: string }[],
 ): string | null {
-  if (reason !== "Awaiting parts" && reason !== "Temporary fix") {
+  if (!["Awaiting parts", "Temporary fix", "Capital review"].includes(reason)) {
     return "Choose why work is being paused.";
   }
   if (reason === "Awaiting parts" && !parts.some(part => part.description?.trim())) {

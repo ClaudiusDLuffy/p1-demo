@@ -24,7 +24,7 @@ export const visitCommandSchema = lifecycleContextSchema.extend({
 });
 export const pauseCommandSchema = lifecycleContextSchema.extend({
   checkedOutAt: timestamp,
-  reason: z.enum(["Awaiting parts", "Temporary fix"]),
+  reason: z.enum(["Awaiting parts", "Temporary fix", "Capital review"]),
   parts: z.array(lifecyclePartSchema),
   notes: z.string(),
   legacyPartNeeded: z.string().nullable(),
