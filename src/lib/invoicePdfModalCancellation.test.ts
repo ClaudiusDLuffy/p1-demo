@@ -64,7 +64,7 @@ function harness(draft: Record<string, unknown> | null = null) {
         },
       };
       if (name === "react-hook-form") return {
-        useForm: () => ({ control: {}, register: (field: string) => ({ name: field }), formState: { errors: {} },
+        useForm: () => ({ control: {}, register: (field: string, options?: { onChange?: (event: unknown) => void }) => ({ name: field, onChange: options?.onChange }), formState: { errors: {} },
           watch: (field: string) => form[field], reset,
           setValue: (field: string, value: unknown) => { form[field] = value; formCalls.push({ field, value }); },
           handleSubmit: (fn: (data: unknown) => unknown) => () => fn(form),
@@ -131,7 +131,7 @@ test("late number suggestion from the same invoice's previous open cannot popula
   h.unmount();
 });
 
-test("focusing the invoice number protects authored input from a late suggestion", async () => {
+test("automatic focus does not suppress a late invoice number suggestion", async () => {
   const h = harness();
   let finish: (value: string) => void = () => undefined;
   h.props.nextInvNumFromDb = () => new Promise<string>(resolve => { finish = resolve; });
@@ -139,8 +139,27 @@ test("focusing the invoice number protects authored input from a late suggestion
   h.render();
   h.props.modal = "createInvoice";
   const input = h.render().find(node => node.type === "input" && node.props.placeholder === "e.g. 6557");
-  assert.ok(input && typeof input.props.onFocus === "function");
-  input.props.onFocus();
+  assert.ok(input);
+  assert.equal(input.props.onFocus, undefined);
+  finish("6501");
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(h.form.num, "6501");
+  h.unmount();
+});
+
+test("editing the invoice number protects authored input from a late suggestion", async () => {
+  const h = harness();
+  let finish: (value: string) => void = () => undefined;
+  h.props.nextInvNumFromDb = () => new Promise<string>(resolve => { finish = resolve; });
+  h.props.modal = null;
+  h.render();
+  h.props.modal = "createInvoice";
+  const input = h.render().find(node => node.type === "input" && node.props.placeholder === "e.g. 6557");
+  assert.ok(input && typeof input.props.onChange === "function");
+  input.props.onChange({ target: { value: "AUTHORED-1042" } });
   h.form.num = "AUTHORED-1042";
   finish("6501");
   await Promise.resolve();

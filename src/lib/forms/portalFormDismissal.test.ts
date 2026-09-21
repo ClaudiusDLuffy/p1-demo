@@ -97,6 +97,15 @@ test("invoice number suggestion is fenced by identity plus a monotonically incre
   assert.match(source, /setValue\("num", suggested, \{ shouldDirty: false \}\)/);
 });
 
+test("invoice modal distinguishes automatic focus from a manual number edit", () => {
+  const source = readFileSync("src/features/invoices/InvoiceCreateModal.tsx", "utf8");
+  const marker = 'placeholder="e.g. 6557"';
+  const end = source.indexOf(marker);
+  const input = source.slice(source.lastIndexOf("<input", end), end + marker.length);
+  assert.match(input, /register\("num", \{ onChange:/);
+  assert.doesNotMatch(input, /onFocus=/);
+});
+
 test("failed ETA/start/pause commands do not close the authored shell form", () => {
   const source = readFileSync("src/components/PortalShell.tsx", "utf8");
   for (const result of ["saved", "started", "paused"]) assert.match(source, new RegExp(`if \\(${result}\\) setModal\\(null\\)`));
