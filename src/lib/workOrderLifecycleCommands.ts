@@ -22,6 +22,12 @@ const exactLifecycleConflicts = new Map<string, string>([
   ["Work order cannot start or resume from its current state", "This work order can no longer be started or resumed from its current state. Refresh it before taking another action."],
   ["The requested visit overlaps existing work", "The selected arrival time overlaps another active visit. Adjust the arrival time or close the other visit first."],
   ["The active visit does not match this completion", "The active visit changed before completion. Refresh the work order and review the current visit."],
+  ["Check-in time cannot be in the future", "Arrival time cannot be more than 5 minutes in the future."],
+  ["Checkout time cannot be in the future", "Checkout time cannot be more than 5 minutes in the future."],
+  ["Completion time cannot be in the future", "Completion time cannot be more than 5 minutes in the future."],
+  ["Checkout time cannot be before active visit check-in", "Checkout time cannot be before this visit's check-in time."],
+  ["Completion time cannot be before active visit check-in", "Completion time cannot be before this visit's check-in time."],
+  ["The active visit contractor does not match this work order", "The contractor assignment changed. Refresh the work order before trying again."],
 ]);
 
 const exactLifecycleAccessConflicts = new Map<string, string>([

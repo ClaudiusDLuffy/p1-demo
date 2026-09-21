@@ -75,6 +75,7 @@ import {
 } from "../../lib/activityNotificationPolicy";
 import { assignmentBoundaryPatch } from "../../lib/workOrderAssignmentBoundary";
 import { lifecycleContextFor, safeLifecycleError } from "../../lib/workOrderLifecycleCommands";
+import { validateFieldEventTime } from "../../lib/workOrderVisitTimePolicy";
 import { createBillingReadyAttempt } from "../../lib/workOrderBillingCommands";
 import { createAssignmentAttempts, safeAssignmentError } from "../../lib/workOrderAssignmentCommands";
 import { createWorkOrderPhotoPorts } from "../../lib/privateObjectClient";
@@ -728,6 +729,12 @@ export default function useWorkOrders({
     const requestedStartIso = !existing?.assignmentTransferPendingVisit && startDateInput && startTimeInput
       ? storeLocalDateTimeToIso(startDateInput, startTimeInput, timeZone)
       : new Date().toISOString();
+    const startTimeError = validateFieldEventTime({ eventAt: requestedStartIso, kind: "arrival" });
+    if (startTimeError) {
+      onFailure?.(startTimeError);
+      fire(startTimeError);
+      return false;
+    }
     const firstStartIso = existing?.startTimeRaw || requestedStartIso;
     const formattedStart = new Date(requestedStartIso).toLocaleString("en-US", {
       timeZone,
@@ -798,6 +805,17 @@ export default function useWorkOrders({
     const pauseIso = pauseDateInput && pauseTimeInput
       ? storeLocalDateTimeToIso(pauseDateInput, pauseTimeInput, timeZone)
       : new Date().toISOString();
+    const activeVisit = (existing?.visits || []).find((visit: { checkOutAt?: string | null }) => !visit.checkOutAt);
+    const pauseTimeError = validateFieldEventTime({
+      eventAt: pauseIso,
+      kind: "checkout",
+      activeVisitCheckInAt: activeVisit?.checkInAt,
+    });
+    if (pauseTimeError) {
+      onFailure?.(pauseTimeError);
+      fire(pauseTimeError);
+      return false;
+    }
     const cleanParts = (partsList || []).filter(p => (p.description || "").trim());
     // Legacy fallback fields: first structured row wins when present, else
     // fall back to the single-field inputs (preserves old API for callers
@@ -1025,13 +1043,34 @@ export default function useWorkOrders({
     }
   };
 
-  const doCloseComplete = async (woId: string, make: string, model: string, serial: string, resolution: string, assetYear?: number | null, completedAt?: string, resolutionNotes?: string) => {
+  const doCloseComplete = async (
+    woId: string,
+    make: string,
+    model: string,
+    serial: string,
+    resolution: string,
+    assetYear?: number | null,
+    completedAt?: string,
+    resolutionNotes?: string,
+    onFailure?: (message: string) => void,
+  ) => {
     if (lifecycleInFlight.current.has(woId)) return false;
     lifecycleInFlight.current.add(woId);
     setLoading("closeComplete_" + woId, true);
     try {
       const endIso = completedAt || new Date().toISOString();
       const existing = workOrders.find(w => w.id === woId);
+      const activeVisit = (existing?.visits || []).find((visit: { checkOutAt?: string | null }) => !visit.checkOutAt);
+      const completionTimeError = validateFieldEventTime({
+        eventAt: endIso,
+        kind: "completion",
+        activeVisitCheckInAt: activeVisit?.checkInAt,
+      });
+      if (completionTimeError) {
+        onFailure?.(completionTimeError);
+        fire(completionTimeError);
+        return false;
+      }
       const timeZone = timezoneForWorkOrder(existing);
       const formattedEnd = new Date(endIso).toLocaleString("en-US", {
         timeZone,
@@ -1074,7 +1113,10 @@ export default function useWorkOrders({
           activityText: text,
           context: lifecycleContextFor(existing),
         });
-      }, "Close failed", () => restoreWorkOrders(snapshot), invalidateWorkOrders);
+      }, "Close failed", (error) => {
+        restoreWorkOrders(snapshot);
+        onFailure?.(`Completion failed: ${safeLifecycleError(error).message}`);
+      }, invalidateWorkOrders, error => `Close failed: ${safeLifecycleError(error).message}`);
       if (saved && completionResult?.applied === false) {
         restoreWorkOrders(snapshot);
         invalidateWorkOrders();

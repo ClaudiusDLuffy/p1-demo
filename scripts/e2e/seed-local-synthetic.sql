@@ -303,7 +303,9 @@ from (values
   ('WOTEST8-INVOICE-ACTIVE',  '077', 'HVAC',          'HVAC',                     'Invoice review during active visit',  'p2', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          3300::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz),
   ('WOTEST8-PAUSED-CAPITAL',  '078', 'Refrigeration', 'Refrigeration equipment',  'Paused visit enters capital review', 'p1', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          6100::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz),
   ('WOTEST8-PAUSED-TRANSFER', '079', 'General',       'General Maintenance',      'Paused visit changes contractor',     'p3', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          1700::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz),
-  ('WOTEST8-OPEN-CLOSE',      '080', 'Refrigeration', 'Refrigeration equipment',  'Open visit staff close guard',        'p2', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          2400::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz)
+  ('WOTEST8-OPEN-CLOSE',      '080', 'Refrigeration', 'Refrigeration equipment',  'Open visit staff close guard',        'p2', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          2400::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz),
+  ('E2E-TIME-START',          '081', 'Refrigeration', 'Refrigeration equipment',  'Future arrival policy',               'p3', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1800::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 0::bigint, null::timestamptz),
+  ('E2E-TIME-COMPLETE',       '082', 'HVAC',          'HVAC',                     'Completion chronology policy',        'p2', 'wip',                       'Work in Progress',            :'company_admin_id'::uuid,   2800::numeric, false, null,                    false, now() - interval '1 hour',   null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 1::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
@@ -420,6 +422,11 @@ values
     '00000000-0000-4000-8000-00000000f211', 'WOTEST6',
     :'company_admin_id'::uuid, now() - interval '30 days', now() - interval '30 days' + interval '90 minutes',
     :'invoice_tech_id'::uuid, :'invoice_tech_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f212', 'E2E-TIME-COMPLETE',
+    :'company_admin_id'::uuid, now() - interval '1 hour', null,
+    :'report_tech_id'::uuid, null
   );
 
 insert into public.activities (

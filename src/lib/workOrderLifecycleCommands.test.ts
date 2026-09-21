@@ -111,6 +111,12 @@ test("reviewed lifecycle conflicts provide actionable guidance without exposing 
     ["Work order cannot start or resume from its current state", /current state/i],
     ["The requested visit overlaps existing work", /overlaps another active visit/i],
     ["The active visit does not match this completion", /active visit changed/i],
+    ["Check-in time cannot be in the future", /arrival time cannot be more than 5 minutes/i],
+    ["Checkout time cannot be in the future", /checkout time cannot be more than 5 minutes/i],
+    ["Completion time cannot be in the future", /completion time cannot be more than 5 minutes/i],
+    ["Checkout time cannot be before active visit check-in", /checkout time cannot be before this visit's check-in/i],
+    ["Completion time cannot be before active visit check-in", /completion time cannot be before this visit's check-in/i],
+    ["The active visit contractor does not match this work order", /assignment changed/i],
   ] as const) {
     const error = safeLifecycleError({ code: "PT409", message });
     assert.match(error.message, guidance);
