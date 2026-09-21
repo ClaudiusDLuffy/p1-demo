@@ -433,9 +433,17 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   }
   html,
   body {
+    height: 100%;
     overflow-x: hidden;
     overflow-x: clip;
     max-width: 100%;
+  }
+  .app-root {
+    height: 100vh !important;
+    height: 100dvh !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    overflow: hidden !important;
   }
   .desktop-sidebar { display: none !important; }
   .mobile-bottom-nav { display: flex !important; }
@@ -456,9 +464,12 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     margin-left: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
-    overflow-x: hidden !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
   }
-  .topbar-shell { padding: 0 !important; display: block !important; }
+  .topbar-shell { flex: 0 0 auto; padding: 0 !important; display: block !important; }
   .desktop-only-header { display: none !important; }
   .mobile-only-header { display: block !important; }
   .mobile-header-top {
@@ -484,9 +495,13 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
   }
   .mobile-drawer-panel { display: flex !important; }
   .content-pad {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
     overflow-x: hidden !important;
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y pinch-zoom;
     max-width: 100% !important;
     padding-bottom: var(--mobile-bottom-nav-space) !important;
     box-sizing: border-box !important;
