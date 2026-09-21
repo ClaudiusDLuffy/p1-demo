@@ -279,6 +279,10 @@ export default function WorkOrderDetail(props: any) {
   // status; RLS still remains the authoritative visibility boundary.
   const contractorHistoryReadOnly = !isManager
     && (page === "history" || woData?.status === "closed");
+  const capitalStageActive = ["capital", "pending_capital_completion"].includes(woData?.status);
+  const hasOpenVisit = (woData?.visits || []).some(
+    (visit: { checkOutAt?: string | null }) => !visit.checkOutAt,
+  );
   const invoicingComplete = Boolean(
     woData?.contractorInvoicingCompletedAt
       && woData.contractorInvoicingAssignmentVersion === woData.contractorAssignmentVersion
@@ -787,6 +791,14 @@ export default function WorkOrderDetail(props: any) {
                               : "Create P1 to 7-Eleven invoice"}
                         </button>
                       )}
+                      {!contractorHistoryReadOnly
+                        && !invoiceController
+                        && capitalStageActive
+                        && hasOpenVisit && (
+                        <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-accent" style={loadingStyle("pauseWork_" + woData.id)}>
+                          {isLoading("pauseWork_" + woData.id) ? <><BtnSpinner />Clocking out...</> : "Clock out for capital review"}
+                        </button>
+                      )}
                       {canAssignCurrentWorkOrder && <DirectorySelect domain="assignable_contractors" value=""
                         emptyLabel={isLoading("assign_" + woData.id) ? "Assigning…" : "Assign to contractor…"}
                         disabled={isLoading("assign_" + woData.id)} style={{ width: 240 }}
@@ -894,13 +906,17 @@ export default function WorkOrderDetail(props: any) {
                         </button>
                       )}
                       {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
-                        <button onClick={() => void doCapitalResume(woData.id)} disabled={isLoading("capitalResume_" + woData.id)} className="btn-accent" style={loadingStyle("capitalResume_" + woData.id)}>
-                          {isLoading("capitalResume_" + woData.id) ? <><BtnSpinner />Authorizing...</> : "Authorize & resume capital work"}
+                        <button onClick={() => void doCapitalResume(woData.id)} disabled={hasOpenVisit || isLoading("capitalResume_" + woData.id)} className="btn-accent" style={{ ...loadingStyle("capitalResume_" + woData.id), opacity: hasOpenVisit ? 0.55 : undefined }}>
+                          {isLoading("capitalResume_" + woData.id)
+                            ? <><BtnSpinner />Authorizing...</>
+                            : hasOpenVisit ? "Waiting for active visit checkout" : "Authorize & resume capital work"}
                         </button>
                       )}
                       {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
-                        <button onClick={() => void doCapitalComplete(woData.id)} disabled={isLoading("capitalComplete_" + woData.id)} className="btn-accent" style={loadingStyle("capitalComplete_" + woData.id)}>
-                          {isLoading("capitalComplete_" + woData.id) ? <><BtnSpinner />Completing...</> : "Capital Completed"}
+                        <button onClick={() => void doCapitalComplete(woData.id)} disabled={hasOpenVisit || isLoading("capitalComplete_" + woData.id)} className="btn-accent" style={{ ...loadingStyle("capitalComplete_" + woData.id), opacity: hasOpenVisit ? 0.55 : undefined }}>
+                          {isLoading("capitalComplete_" + woData.id)
+                            ? <><BtnSpinner />Completing...</>
+                            : hasOpenVisit ? "Checkout required before completion" : "Capital Completed"}
                         </button>
                       )}
                       {!contractorHistoryReadOnly && (visitAction === "resume" || visitAction === "receiving_start") && (
@@ -944,7 +960,9 @@ export default function WorkOrderDetail(props: any) {
                       <div role="status" className="card" style={{ padding: "14px 16px", marginBottom: 16, background: T.warnSoft, borderColor: `${T.warn}44` }}>
                         <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Capital work is waiting for P1 authorization</div>
                         <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
-                          P1 must record 7-Eleven approval before the contractor can start the next field visit. This hold cannot be bypassed from a contractor account.
+                          {hasOpenVisit
+                            ? "Clock out the current visit first. P1 can then record 7-Eleven approval and release the next field visit."
+                            : "P1 must record 7-Eleven approval before the contractor can start the next field visit. This hold cannot be bypassed from a contractor account."}
                         </div>
                       </div>
                     )}

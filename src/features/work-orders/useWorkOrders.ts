@@ -786,7 +786,9 @@ export default function useWorkOrders({
     setLoading("pauseWork_" + woId, true);
     try {
     const existing = workOrders.find(w => w.id === woId);
-    if (existing?.functionalStatus !== "Work in Progress") {
+    const capitalReviewCheckout = ["capital", "pending_capital_completion"].includes(existing?.status)
+      && reason === "Capital review";
+    if (!capitalReviewCheckout && existing?.functionalStatus !== "Work in Progress") {
       const message = "Only work in progress can be paused for parts";
       onFailure?.(message);
       fire(message);
@@ -801,12 +803,14 @@ export default function useWorkOrders({
     // fall back to the single-field inputs (preserves old API for callers
     // that haven't moved to the parts grid yet).
     const firstPart = cleanParts[0];
-    const partLabel = firstPart
-      ? `${firstPart.description}${firstPart.partNumber ? ` (${firstPart.partNumber})` : ""}`
-      : partDesc
-        ? `${partDesc}${partNum ? ` (${partNum})` : ""}`
-        : null;
-    const legacyEta = firstPart?.expectedReturnDate || partEta || "";
+    const partLabel = capitalReviewCheckout
+      ? null
+      : firstPart
+        ? `${firstPart.description}${firstPart.partNumber ? ` (${firstPart.partNumber})` : ""}`
+        : partDesc
+          ? `${partDesc}${partNum ? ` (${partNum})` : ""}`
+          : null;
+    const legacyEta = capitalReviewCheckout ? "" : firstPart?.expectedReturnDate || partEta || "";
     const partsSummary = cleanParts.length > 1
       ? ` Parts needed: ${cleanParts.map(p => p.description).join(", ")}.`
       : (partLabel ? ` Part needed: ${partLabel}.` : "");
@@ -817,12 +821,18 @@ export default function useWorkOrders({
       hour: "numeric",
       minute: "2-digit",
     });
-    const text = `Work paused at ${formattedPause}: ${reason}.${partsSummary}${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
+    const text = capitalReviewCheckout
+      ? `Clocked out for capital review at ${formattedPause}.${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`
+      : `Work paused at ${formattedPause}: ${reason}.${partsSummary}${notes.trim() ? ` Notes: ${notes.trim()}` : ""}`;
     const updates: Record<string, unknown> = {
-      status: ["pending_invoice", "pending_approval", "pending_payment"].includes(existing?.status)
-        ? existing.status
-        : "parts",
-      functionalStatus: "Awaiting Parts",
+      status: capitalReviewCheckout
+        ? existing?.status
+        : ["pending_invoice", "pending_approval", "pending_payment"].includes(existing?.status)
+          ? existing.status
+          : "parts",
+      functionalStatus: capitalReviewCheckout
+        ? existing?.status === "capital" ? "Pending Capital Approval" : "Pending Capital Completion"
+        : "Awaiting Parts",
     };
     if (partLabel) updates.partNeeded = partLabel;
     if (legacyEta) updates.partEta = legacyEta;
@@ -832,7 +842,9 @@ export default function useWorkOrders({
     const pauseFailureMessage = (error: unknown) =>
       `Pause failed: ${safeLifecycleError(error).message}`;
     const paused = await dbCall(async () => {
-      if (reason !== "Awaiting parts" && reason !== "Temporary fix") throw safeLifecycleError({ code: "22023" });
+      if (reason !== "Awaiting parts" && reason !== "Temporary fix" && reason !== "Capital review") {
+        throw safeLifecycleError({ code: "22023" });
+      }
       const result = await pauseWorkOrderForParts({
         ...lifecycleContextFor(existing), checkedOutAt: pauseIso, reason, notes,
         parts: cleanParts.map(part => ({
@@ -850,7 +862,9 @@ export default function useWorkOrders({
       if (partsSnapshot) qc.setQueryData(WO_PARTS_KEY, partsSnapshot);
       onFailure?.(pauseFailureMessage(error));
     }, undefined, pauseFailureMessage);
-    if (paused) fire("Paused — awaiting parts · 7-Eleven update pending");
+    if (paused) fire(capitalReviewCheckout
+      ? "Clocked out — capital status preserved"
+      : "Paused — awaiting parts · 7-Eleven update pending");
     return paused;
     } finally {
       lifecycleInFlight.current.delete(woId);

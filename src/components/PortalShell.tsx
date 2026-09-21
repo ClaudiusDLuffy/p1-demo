@@ -1854,6 +1854,11 @@ export default function PortalShell() {
       : null,
     [maskedWorkOrders, selectedWO, selectedWorkOrderForView]
   );
+  const capitalReviewCheckout = Boolean(
+    woData
+    && ["capital", "pending_capital_completion"].includes(woData.status)
+    && (woData.visits || []).some((visit: { checkOutAt?: string | null }) => !visit.checkOutAt),
+  );
   const resetReopenForm = useCallback(() => {
     setReopenTarget(null);
     setReopenMode("");
@@ -4195,19 +4200,29 @@ export default function PortalShell() {
       )}
 
       {modal === "pauseWork" && woData && (
-        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title="Pause work" width={500}>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Why can't the job be completed this trip?</div>
+        <Modal onRequestClose={shellDismissal.requestClose} dismissDisabled={modalLoading} title={capitalReviewCheckout ? "Clock out for capital review" : "Pause work"} width={500}>
+          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
+            {capitalReviewCheckout
+              ? "Record the real checkout for this visit. The capital quote and authorization stage will remain unchanged."
+              : "Why can't the job be completed this trip?"}
+          </div>
           <div style={{ display: "grid", gap: 14 }}>
-            <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => { setPauseReasonInput(e.target.value); setPauseWorkError(""); }}>
-              <option value="">Select...</option>
-              <option value="Temporary fix">Temporary fix - equipment partially working</option>
-              <option value="Awaiting parts">Awaiting parts - equipment completely down</option>
-            </Sel></Field>
+            {capitalReviewCheckout ? (
+              <div role="note" style={{ padding: "11px 12px", borderRadius: 9, background: T.warnSoft, color: "#73560C", fontSize: 12, lineHeight: 1.5 }}>
+                Reason: Capital review. P1 must authorize the next field visit before Resume becomes available.
+              </div>
+            ) : (
+              <Field label="Reason"><Sel value={pauseReasonInput} onChange={(e: any) => { setPauseReasonInput(e.target.value); setPauseWorkError(""); }}>
+                <option value="">Select...</option>
+                <option value="Temporary fix">Temporary fix - equipment partially working</option>
+                <option value="Awaiting parts">Awaiting parts - equipment completely down</option>
+              </Sel></Field>
+            )}
             <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Stamp-out date"><DatePickerField value={pauseDateInput} onChange={setPauseDateInput} /></Field>
               <Field label="Stamp-out time"><TimePickerField value={pauseTimeInput} onChange={setPauseTimeInput} /></Field>
             </div>
-            {pauseReasonInput === "Awaiting parts" && (
+            {!capitalReviewCheckout && pauseReasonInput === "Awaiting parts" && (
               <div style={{ padding: "14px 16px", background: T.warnSoft, borderRadius: 10, border: `1px solid ${T.warn}33` }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: T.warn, textTransform: "uppercase", letterSpacing: 0.8 }}>Parts on order</div>
@@ -4261,15 +4276,16 @@ export default function PortalShell() {
               type="button"
               onClick={async () => {
                 setPauseWorkError("");
-                const validationError = validatePauseWorkForm(pauseReasonInput, pausePartsList);
+                const effectiveReason = capitalReviewCheckout ? "Capital review" : pauseReasonInput;
+                const validationError = validatePauseWorkForm(effectiveReason, pausePartsList);
                 if (validationError) {
                   setPauseWorkError(validationError);
                   return;
                 }
                 setModalLoading(true);
                 try {
-                  const paused = await doPauseWork(woData.id, pauseReasonInput, partDescInput, partNumInput, partEtaInput, pauseNotesInput,
-                    pausePartsList.map(({ description, partNumber, qty, expectedReturnDate }) => ({ description, partNumber, qty, expectedReturnDate })),
+                  const paused = await doPauseWork(woData.id, effectiveReason, partDescInput, partNumInput, partEtaInput, pauseNotesInput,
+                    capitalReviewCheckout ? [] : pausePartsList.map(({ description, partNumber, qty, expectedReturnDate }) => ({ description, partNumber, qty, expectedReturnDate })),
                     setPauseWorkError);
                   if (paused) setModal(null);
                   else setPauseWorkError((current) => current || "Pause could not be confirmed. Refresh the work order and try again.");
@@ -4282,7 +4298,9 @@ export default function PortalShell() {
               disabled={modalLoading}
               className="btn-accent"
               style={modalActionStyle}
-            >{modalLoading ? <><BtnSpinner />Pausing...</> : "Pause work"}</button>
+            >{modalLoading
+              ? <><BtnSpinner />{capitalReviewCheckout ? "Clocking out..." : "Pausing..."}</>
+              : capitalReviewCheckout ? "Clock out visit" : "Pause work"}</button>
           </div>
         </Modal>
       )}
