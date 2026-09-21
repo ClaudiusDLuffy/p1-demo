@@ -151,6 +151,29 @@ test("invoice dropdown and actions remain visible on a narrow viewport", async (
   await expect(page.getByText(`#${assignedNumber}`, { exact: true })).toBeVisible();
 });
 
+test("focused staff invoice number still hydrates after a delayed preview", async ({ page }) => {
+  let releasePreview;
+  const previewMayContinue = new Promise(resolve => { releasePreview = resolve; });
+  await page.route(url => url.pathname.endsWith("/api/billing-invoices")
+    && url.searchParams.get("nextNumber") === "1", async route => {
+    await previewMayContinue;
+    await route.continue();
+  });
+
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "Work orders");
+  await openWorkOrder(page, "E2E-STAFF-BILLING");
+  await page.getByRole("button", { name: "Create P1 to 7-Eleven invoice", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice" });
+  const invoiceNumber = dialog.getByLabel("Invoice #");
+  await expect(invoiceNumber).toHaveAttribute("placeholder", "Loading…");
+  await invoiceNumber.focus();
+  await expect(invoiceNumber).toBeFocused();
+  releasePreview();
+  await expect(invoiceNumber).toHaveValue(/^P1-/);
+  await expect(invoiceNumber).toBeFocused();
+});
+
 test("back-office staff can select territory and save a linked billing draft", async ({ page }) => {
   await login(page, accounts.backoffice);
   await openSidebarPage(page, "Work orders");
