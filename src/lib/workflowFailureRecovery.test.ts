@@ -60,7 +60,8 @@ test("visit correction errors expose only exact reviewed business guidance", () 
     code: "P0001",
     message: "private customer/token/path detail",
   });
-  assert.equal(unknown.code, "VISIT_CORRECTION_UNCONFIRMED");
+  assert.equal(unknown.code, "VISIT_POLICY_REJECTED");
+  assert.match(unknown.message, /field-time policy/i);
   assert.doesNotMatch(unknown.message, /customer|token|path/i);
 });
 
@@ -113,7 +114,17 @@ test("an unchanged rejected visit correction cannot generate repeated conflict r
   const timeline = readFileSync("src/features/work-orders/VisitTimeline.tsx", "utf8");
   assert.match(timeline, /const \[rejectedCorrection, setRejectedCorrection\] = useState<string \| null>\(null\)/);
   assert.match(timeline, /rejectedCorrection === correctionFingerprint/);
-  assert.match(timeline, /failure\.code === "VISIT_TIME_OVERLAP" \|\| failure\.code === "VISIT_CHANGED"/);
+  assert.match(timeline, /\["VISIT_TIME_OVERLAP", "VISIT_CHANGED", "VISIT_POLICY_REJECTED"\]\.includes\(failure\.code\)/);
+});
+
+test("visit correction reason validation remains actionable instead of disabling its submit", () => {
+  const timeline = readFileSync("src/features/work-orders/VisitTimeline.tsx", "utf8");
+  assert.match(timeline, /Required · enter at least 5 characters\./);
+  assert.match(timeline, /<textarea required minLength=\{5\}/);
+  assert.doesNotMatch(
+    timeline,
+    /disabled=\{saving \|\| form\.reason\.trim\(\)\.length < 5/,
+  );
 });
 
 test("capital quote saves capture an exact work-order version and handle thrown API rejections", () => {

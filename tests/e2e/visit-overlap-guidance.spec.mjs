@@ -25,10 +25,18 @@ function addLocalMinutes(date, time, minutes) {
 }
 
 test("mobile visit correction names the accessible conflicting work order", async ({ page }) => {
+  let correctionRequests = 0;
+  page.on("request", request => {
+    if (request.url().includes("/rpc/correct_work_order_visit")) correctionRequests += 1;
+  });
   await login(page, accounts.direct);
   await openWorkOrder(page, "E2E-VISIT-OVERLAP-TARGET");
 
   await page.getByRole("button", { name: "Correct actual time", exact: true }).click();
+  await page.getByRole("button", { name: "Save correction", exact: true }).click();
+  await expect(page.getByText("Enter a correction reason of at least 5 characters.", { exact: true })).toBeVisible();
+  expect(correctionRequests).toBe(0);
+
   const checkoutDate = page.getByLabel("Actual check-out date");
   const checkoutTime = page.getByLabel("Actual check-out time");
   const expanded = addLocalMinutes(
