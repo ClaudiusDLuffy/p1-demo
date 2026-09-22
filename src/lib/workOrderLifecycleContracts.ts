@@ -75,6 +75,11 @@ export type LifecycleFunctions = {
     p_completed_at: string; p_asset_make: string; p_asset_model: string; p_asset_serial: string;
     p_asset_year: number | null; p_resolution_code: string | null; p_resolution_notes: string | null;
   }>;
+  record_missed_work_order_visit_checkout_v1: Routine<Omit<CommonArgs, "p_work_order_id"> & {
+    p_visit_id: string;
+    p_check_out_at: string;
+    p_reason: string;
+  }>;
   mark_work_order_activity_synced_v1: Routine<{ p_activity_id: string; p_synced: boolean }>;
   flag_work_order_capital_v1: Routine<Omit<CommonArgs, "p_operation_id">>;
   return_completed_work_order_to_field_v1: Routine<CommonArgs & { p_reason: string }>;

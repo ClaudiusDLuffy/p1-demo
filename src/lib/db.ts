@@ -1204,6 +1204,39 @@ export async function correctWorkOrderVisit(
   return data;
 }
 
+export type MissedVisitCheckoutCommand = {
+  visitId: string;
+  expectedAssignmentVersion: number;
+  expectedWorkflowCycle: number;
+  expectedLifecycleVersion: number;
+  operationId: string;
+  checkedOutAt: string;
+  reason: string;
+};
+
+export async function recordMissedWorkOrderVisitCheckout(
+  input: MissedVisitCheckoutCommand,
+): Promise<void> {
+  const context = lifecycleContextSchema.parse({
+    workOrderId: "visit-checkout-repair",
+    expectedAssignmentVersion: input.expectedAssignmentVersion,
+    expectedWorkflowCycle: input.expectedWorkflowCycle,
+    expectedLifecycleVersion: input.expectedLifecycleVersion,
+    operationId: input.operationId,
+  });
+  const sb = supabase();
+  const { error } = await sb.rpc("record_missed_work_order_visit_checkout_v1", {
+    p_visit_id: input.visitId,
+    p_expected_assignment_version: context.expectedAssignmentVersion,
+    p_expected_workflow_cycle: context.expectedWorkflowCycle,
+    p_expected_lifecycle_version: context.expectedLifecycleVersion,
+    p_operation_id: context.operationId,
+    p_check_out_at: input.checkedOutAt,
+    p_reason: input.reason.trim(),
+  });
+  if (error) throw safeVisitCorrectionError(error);
+}
+
 export type ActivityAuditOptions = {
   staffOverride?: boolean;
   staffOnly?: boolean;
