@@ -3292,7 +3292,7 @@ export default function PortalShell() {
             onClearStoreView={() => setWorkOrderStoreView(null)}
           />
 
-          <CapitalProjects page={page} isManager={isManager} capitalCount={capitalCount} workOrders={maskedWorkOrders} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} getUser={getUser} fmt={fmt} />
+          <CapitalProjects page={page} isManager={isManager} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} />
 
           <MyJobs page={page} isManager={isManager} myWOs={myWOs} currentUser={currentUser} activeStatuses={activeStatuses} slaLabel={slaLabel} setSelectedWO={setSelectedWO} setPage={setPage} setAiNote={setAiNote} woParts={woParts} />
 

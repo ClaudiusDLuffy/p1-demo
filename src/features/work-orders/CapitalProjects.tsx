@@ -1,9 +1,7 @@
 "use client";
-// @ts-nocheck
 
 import { COUNT_FRESHNESS_DESCRIPTION } from "../../lib/counts/countContracts";
 
-import { Badge } from "../../components/ui/Badge";
 import { useDirectoryLabels } from "../directory/queries";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
@@ -19,12 +17,33 @@ import { useWorkOrdersPageQuery } from "./queries";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderSortControls from "./WorkOrderSortControls";
 import type { WorkOrderTableSortColumn } from "../../lib/db";
+import { CAPITAL_PROJECT_FILTERS, capitalProjectStage, type CapitalProjectFilter } from "./capitalProjectStage";
+import type { WorkOrderReadModel } from "./data/workOrderReadContracts";
 
-export default function CapitalProjects(props: any) {
+const capitalStageColors = {
+  waiting: { color: "#7C2D12", background: "#FFF7ED", border: "#FDBA74" },
+  submitted: { color: "#166534", background: "#F0FDF4", border: "#86EFAC" },
+  authorized: { color: "#1D4ED8", background: "#EFF6FF", border: "#93C5FD" },
+  ordered: { color: "#92400E", background: "#FFFBEB", border: "#FCD34D" },
+  received: { color: "#0F766E", background: "#F0FDFA", border: "#5EEAD4" },
+  scheduled: { color: "#6D28D9", background: "#F5F3FF", border: "#C4B5FD" },
+  installed: { color: "#334155", background: "#F8FAFC", border: "#CBD5E1" },
+} as const;
+
+type CapitalProjectsProps = {
+  page: string;
+  isManager: boolean;
+  setSelectedWO: (workOrderId: string) => void;
+  setPage: (page: string) => void;
+  setAiNote: (note: null) => void;
+};
+
+export default function CapitalProjects(props: CapitalProjectsProps) {
   const { page, isManager, setSelectedWO, setPage, setAiNote } = props;
   const [position, setPosition] = useState(firstCursorPosition);
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [capitalFilter, setCapitalFilter] = useState<CapitalProjectFilter>("all");
   const updateSortColumn = (value: WorkOrderTableSortColumn) => {
     setPosition(firstCursorPosition);
     setSortColumn(value);
@@ -36,13 +55,14 @@ export default function CapitalProjects(props: any) {
   };
   const capitalQuery = useWorkOrdersPageQuery({
     scope: "capital",
+    status: capitalFilter,
     sort: "newest",
     tableSortColumn: sortColumn,
     tableSortDirection: sortDirection,
     limit: 24,
     cursor: position.cursor,
   }, page === "capital" && isManager);
-  const capitalWOs: any[] = (capitalQuery.data?.items || []) as any[];
+  const capitalWOs: WorkOrderReadModel[] = capitalQuery.data?.items || [];
   const { getUser } = useDirectoryLabels(capitalWOs.map(workOrder => workOrder.contractor), page === "capital" && isManager);
   const exactCapitalCount = capitalQuery.data?.totalCount ?? "—";
   const collectionState = resolveWorkOrderCollectionState({
@@ -64,7 +84,17 @@ export default function CapitalProjects(props: any) {
                   <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Focused capital view — these calls also remain searchable in Work orders</div>
                 </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                <label style={{ display: "grid", gap: 5, minWidth: 280, maxWidth: "100%", color: T.muted, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7 }}>
+                  Capital status
+                  <select aria-label="Capital status" value={capitalFilter}
+                    onChange={event => { setPosition(firstCursorPosition); setCapitalFilter(event.target.value as CapitalProjectFilter); }}
+                    style={{ width: "100%", minHeight: 38, borderRadius: 9, border: `1px solid ${T.border}`,
+                      background: T.surface, color: T.ink, padding: "8px 34px 8px 11px", font: "inherit",
+                      fontSize: 12, fontWeight: 600, textTransform: "none", letterSpacing: 0 }}>
+                    {CAPITAL_PROJECT_FILTERS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
                 <WorkOrderSortControls
                   column={sortColumn}
                   direction={sortDirection}
@@ -99,7 +129,10 @@ export default function CapitalProjects(props: any) {
                 />
               )}
               <div className="capital-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                {capitalWOs.map((wo, i) => (
+                {capitalWOs.map((wo, i) => {
+                  const stage = capitalProjectStage(wo);
+                  const stageColor = capitalStageColors[stage.tone];
+                  return (
                   <div key={wo.id} className="card card-hover mobile-card" onClick={() => { setSelectedWO(wo.id); setPage("work_orders"); setAiNote(null); }} style={{ padding: 22, cursor: "pointer", animation: `fadeUp 0.3s ${i * 0.06}s both` }}>
                     <div className="mobile-card-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -108,15 +141,13 @@ export default function CapitalProjects(props: any) {
                       </span>
                       <span style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
                         <CapitalWorkOrderBadge workOrder={wo} />
-                        {/* The quote workflow no longer stores "Pending approval" when flagged. */}
-                        {(wo.capitalStatus || wo.status === "capital") && <Badge conf={{ label: wo.capitalStatus || "Quote preparation", color: T.violet, bg: T.violetSoft, ring: "#D4C9E8" }} />}
                       </span>
                     </div>
-                    {wo.status === "pending_capital_completion" && (
-                      <div style={{ marginBottom: 9 }}>
-                        <Badge conf={{ label: "Pending capital completion", color: T.danger, bg: T.dangerSoft, ring: "#EBC3BC" }} />
-                      </div>
-                    )}
+                    <div data-capital-stage={stage.filter} style={{ marginBottom: 12, padding: "9px 11px", borderRadius: 9,
+                      border: `1px solid ${stageColor.border}`, color: stageColor.color,
+                      background: stageColor.background, fontSize: 11, fontWeight: 800 }}>
+                      {stage.label}
+                    </div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{[wo.store ? `Store #${wo.store}` : null, wo.city || null].filter(Boolean).join(" · ") || wo.id}</div>
                     <div style={{ fontSize: 12, color: T.muted, marginBottom: 14, lineHeight: 1.5 }}>{wo.summary || "—"}</div>
                     <div style={{ paddingTop: 12, borderTop: `1px solid ${T.borderSoft}` }}>
@@ -127,7 +158,7 @@ export default function CapitalProjects(props: any) {
                     </div>
                     <div style={{ fontSize: 11, color: T.subtle, marginTop: 10 }}>Contractor: {getUser(wo.contractor)?.name || "Unassigned"}</div>
                   </div>
-                ))}
+                );})}
                 {capitalWOs.length === 0 && (
                   <WorkOrderCollectionNotice
                     state={collectionState}

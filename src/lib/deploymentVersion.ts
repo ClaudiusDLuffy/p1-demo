@@ -21,6 +21,12 @@ export function deploymentChanged(running: string, available: unknown): availabl
   return normalized !== null && normalized !== running;
 }
 
+export function deploymentRefreshUrl(currentUrl: string, deploymentVersion: string): string {
+  const next = new URL("/", currentUrl);
+  next.searchParams.set("p1-build", deploymentVersion);
+  return next.toString();
+}
+
 export function normalizeDeploymentUpdatedAt(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   const date = new Date(value);
@@ -46,7 +52,13 @@ export function formatDeploymentUpdatedAt(value: unknown): string | null {
 }
 
 export const RUNNING_DEPLOYMENT_VERSION =
-  normalizeDeploymentVersion(process.env.NEXT_PUBLIC_P1_BUILD_VERSION) || FALLBACK_VERSION;
+  normalizeDeploymentVersion(process.env.NEXT_PUBLIC_P1_DEPLOYMENT_ID)
+  || normalizeDeploymentVersion(process.env.NEXT_PUBLIC_P1_BUILD_VERSION)
+  || FALLBACK_VERSION;
+
+export const RUNNING_DISPLAY_VERSION =
+  normalizeDeploymentVersion(process.env.NEXT_PUBLIC_P1_BUILD_VERSION)
+  || shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION);
 
 export const RUNNING_DEPLOYMENT_UPDATED_AT =
   normalizeDeploymentUpdatedAt(process.env.NEXT_PUBLIC_P1_BUILD_UPDATED_AT);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   RUNNING_DEPLOYMENT_UPDATED_AT,
   RUNNING_DEPLOYMENT_VERSION,
-  shortDeploymentVersion,
+  RUNNING_DISPLAY_VERSION,
 } from "../../../lib/deploymentVersion";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ const NO_CACHE_HEADERS = {
 export async function GET() {
   return NextResponse.json({
     deploymentVersion: RUNNING_DEPLOYMENT_VERSION,
-    displayVersion: shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION),
+    displayVersion: RUNNING_DISPLAY_VERSION,
     updatedAt: RUNNING_DEPLOYMENT_UPDATED_AT,
   }, { headers: NO_CACHE_HEADERS });
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deploymentChanged,
+  deploymentRefreshUrl,
   formatDeploymentUpdatedAt,
   normalizeDeploymentUpdatedAt,
   normalizeDeploymentVersion,
@@ -26,6 +27,13 @@ test("display versions preserve package release numbers", () => {
   assert.equal(shortDeploymentVersion("0.1.0"), "0.1.0");
   assert.equal(shortDeploymentVersion("12.34.56"), "12.34.56");
   assert.equal(shortDeploymentVersion("1.2.3-release.10"), "1.2.3-release.10");
+});
+
+test("deployment refresh returns to a cache-busted clean portal root", () => {
+  assert.equal(
+    deploymentRefreshUrl("https://portal.example.test/?view=work_orders&wo=WOT1#photos", "dpl_next-123"),
+    "https://portal.example.test/?p1-build=dpl_next-123",
+  );
 });
 
 test("build timestamps are validated and displayed in Miami time with DST", () => {

@@ -7,7 +7,7 @@ import {
   formatDeploymentUpdatedAt,
   RUNNING_DEPLOYMENT_UPDATED_AT,
   RUNNING_DEPLOYMENT_VERSION,
-  shortDeploymentVersion,
+  RUNNING_DISPLAY_VERSION,
 } from "../../lib/deploymentVersion";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 
@@ -103,7 +103,7 @@ export default function LoginForm({
             }
           </button>
           <div
-            aria-label={`Sign-in portal version ${shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}`}
+            aria-label={`Sign-in portal version ${RUNNING_DISPLAY_VERSION}`}
             title={`Portal version ${RUNNING_DEPLOYMENT_VERSION}`}
             style={{
               marginTop: 14,
@@ -113,7 +113,7 @@ export default function LoginForm({
               textAlign: "center",
             }}
           >
-            <div>Version {shortDeploymentVersion(RUNNING_DEPLOYMENT_VERSION)}</div>
+            <div>Version {RUNNING_DISPLAY_VERSION}</div>
             {buildUpdatedAt && (
               <div style={{ marginTop: 2, fontSize: 9 }}>
                 Last updated {buildUpdatedAt} · Miami

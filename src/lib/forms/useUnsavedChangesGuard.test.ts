@@ -22,6 +22,14 @@ test("actual guard keeps dirty form mounted, then deliberately discards (DOM_SIM
   assert.equal(closed, 1); assert.equal(purged, 1);
   h.unmount(); assert.equal(h.listenerCount(), 0); assert.equal(h.registeredCount(), 0);
 });
+test("an approved deployment replacement bypasses the dirty-form unload prompt", () => {
+  const h = createUnsavedChangesHarness();
+  h.useGuard({ dirty: true, onClose: () => undefined });
+  assert.equal(h.dispatchBeforeUnload().prevented, true);
+  h.beginForcedDeploymentReload();
+  assert.deepEqual(h.dispatchBeforeUnload(), { prevented: false, returnValue: "untouched" });
+  h.unmount();
+});
 test("keep-draft is checked again and cannot use a pending or failed persistence claim", async () => {
   const h = createUnsavedChangesHarness(); let closed = 0, confirmed = false;
   const options: UnsavedChangesOptions = { dirty: true, persistence: "dirty_persisted", onClose: () => { closed += 1; }, onKeepDraft: () => confirmed };
