@@ -64,6 +64,43 @@ test("visit correction errors expose only exact reviewed business guidance", () 
   assert.doesNotMatch(unknown.message, /customer|token|path/i);
 });
 
+test("visit overlap guidance identifies only reviewed conflicting work-order ids", () => {
+  const conflict = safeVisitCorrectionError({
+    code: "PT409",
+    message: "The corrected time overlaps another visit for this technician",
+    details: JSON.stringify({
+      code: "VISIT_TIME_OVERLAP",
+      conflictingWorkOrderIds: ["WOT1407041", "WOT1352952"],
+      conflictCount: 2,
+    }),
+  });
+  assert.equal(conflict.code, "VISIT_TIME_OVERLAP");
+  assert.equal(
+    conflict.message,
+    "These times overlap another visit on WOT1407041, WOT1352952. Review the conflicting visit before saving.",
+  );
+
+  const bounded = safeVisitCorrectionError({
+    code: "PT409",
+    message: "The corrected time overlaps another visit for this technician",
+    details: JSON.stringify({
+      code: "VISIT_TIME_OVERLAP",
+      conflictingWorkOrderIds: ["WOT1", "WOT2", "WOT3", "WOT4", "<private>"],
+      conflictCount: 4,
+    }),
+  });
+  assert.match(bounded.message, /WOT1, WOT2, WOT3 and 1 more/);
+  assert.doesNotMatch(bounded.message, /WOT4|private/);
+
+  const malformed = safeVisitCorrectionError({
+    code: "PT409",
+    message: "The corrected time overlaps another visit for this technician",
+    details: "private customer/token/path detail",
+  });
+  assert.equal(malformed.code, "VISIT_TIME_OVERLAP");
+  assert.doesNotMatch(malformed.message, /customer|token|path/i);
+});
+
 test("database adapters use workflow-specific safe error boundaries", () => {
   const db = readFileSync("src/lib/db.ts", "utf8");
   const visitStart = db.indexOf("export async function correctWorkOrderVisit");

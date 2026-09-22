@@ -94,6 +94,34 @@ const exactServerMessages = new Map<string, readonly [string, string]>([
   ["Work order is unavailable", ["WORK_ORDER_UNAVAILABLE", "This work order is no longer available. Refresh the work-order list."]],
 ]);
 
+const SAFE_WORK_ORDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function reviewedOverlapMessage(cause: unknown): string | null {
+  const rawDetails = errorData(cause, "details");
+  if (typeof rawDetails !== "string" || rawDetails.length > 8_192) return null;
+
+  try {
+    const details: unknown = JSON.parse(rawDetails);
+    if (errorData(details, "code") !== "VISIT_TIME_OVERLAP") return null;
+    const rawIds = errorData(details, "conflictingWorkOrderIds");
+    if (!Array.isArray(rawIds)) return null;
+    const workOrderIds = [...new Set(rawIds
+      .filter((value): value is string => typeof value === "string" && SAFE_WORK_ORDER_ID.test(value)))]
+      .slice(0, 3);
+    if (workOrderIds.length === 0) return null;
+
+    const rawCount = errorData(details, "conflictCount");
+    const conflictCount = typeof rawCount === "number" && Number.isSafeInteger(rawCount) && rawCount > 0
+      ? rawCount
+      : workOrderIds.length;
+    const additional = Math.max(0, conflictCount - workOrderIds.length);
+    const listed = workOrderIds.join(", ");
+    return `These times overlap another visit on ${listed}${additional > 0 ? ` and ${additional} more` : ""}. Review the conflicting visit before saving.`;
+  } catch {
+    return null;
+  }
+}
+
 export function validateVisitCorrection(input: VisitCorrectionInput): void {
   if (input.reason.trim().length < 5) {
     throw new VisitCorrectionError(
@@ -153,6 +181,10 @@ export function safeVisitCorrectionError(cause: unknown): VisitCorrectionError {
 
   const message = errorData(cause, "message");
   if (typeof message === "string") {
+    if (message === "The corrected time overlaps another visit for this technician") {
+      const reviewed = reviewedOverlapMessage(cause);
+      if (reviewed) return new VisitCorrectionError("VISIT_TIME_OVERLAP", reviewed, cause);
+    }
     const known = exactServerMessages.get(message);
     if (known) return new VisitCorrectionError(known[0], known[1], cause);
   }
