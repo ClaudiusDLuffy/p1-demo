@@ -114,6 +114,12 @@ export default function VisitTimeline({
     [visits],
   );
 
+  const setCorrectionField = (field: keyof typeof form, value: string) => {
+    setForm(current => ({ ...current, [field]: value }));
+    setError("");
+    setRejectedCorrection(null);
+  };
+
   const startEditing = (visit: VisitTimelineVisit) => {
     if (!visit.checkOutAt) return;
     const checkIn = inputParts(visit.checkInAt, timeZone);
@@ -187,7 +193,7 @@ export default function VisitTimeline({
     } catch (caught: unknown) {
       const failure = safeVisitCorrectionError(caught);
       setError(failure.message);
-      if (failure.code === "VISIT_TIME_OVERLAP" || failure.code === "VISIT_CHANGED") {
+      if (["VISIT_TIME_OVERLAP", "VISIT_CHANGED", "VISIT_POLICY_REJECTED"].includes(failure.code)) {
         setRejectedCorrection(attemptedCorrection);
       }
     } finally {
@@ -306,29 +312,32 @@ export default function VisitTimeline({
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))", gap: 8 }}>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-in date
-                      <input type="date" value={form.checkInDate} onChange={event => setForm(current => ({ ...current, checkInDate: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="date" value={form.checkInDate} onChange={event => setCorrectionField("checkInDate", event.target.value)} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-in time
-                      <input type="time" value={form.checkInTime} onChange={event => setForm(current => ({ ...current, checkInTime: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="time" value={form.checkInTime} onChange={event => setCorrectionField("checkInTime", event.target.value)} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-out date
-                      <input type="date" value={form.checkOutDate} onChange={event => setForm(current => ({ ...current, checkOutDate: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="date" value={form.checkOutDate} onChange={event => setCorrectionField("checkOutDate", event.target.value)} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-out time
-                      <input type="time" value={form.checkOutTime} onChange={event => setForm(current => ({ ...current, checkOutTime: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="time" value={form.checkOutTime} onChange={event => setCorrectionField("checkOutTime", event.target.value)} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                   </div>
                   <label style={{ fontSize: 10, color: T.muted }}>
                     Correction reason
-                    <textarea value={form.reason} onChange={event => setForm(current => ({ ...current, reason: event.target.value }))} rows={2} placeholder="Explain why the recorded time was inaccurate" style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit", resize: "vertical" }} />
+                    <textarea required minLength={5} aria-describedby={`visit-correction-reason-help-${visit.id}`} value={form.reason} onChange={event => setCorrectionField("reason", event.target.value)} rows={2} placeholder="Explain why the recorded time was inaccurate" style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit", resize: "vertical" }} />
+                    <span id={`visit-correction-reason-help-${visit.id}`} style={{ display: "block", marginTop: 4, color: T.subtle }}>
+                      Required · enter at least 5 characters.
+                    </span>
                   </label>
                   {error && <div role="alert" style={{ fontSize: 11, color: T.danger }}>{error}</div>}
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                     <button type="button" className="btn-soft" disabled={saving} onClick={() => { setEditingId(null); setRejectedCorrection(null); }}>Cancel</button>
-                    <button type="button" className="btn-primary" disabled={saving || form.reason.trim().length < 5 || rejectedCorrection === correctionFingerprint} onClick={save} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <button type="button" className="btn-primary" disabled={saving || rejectedCorrection === correctionFingerprint} onClick={save} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {saving ? <><BtnSpinnerDark />Saving...</> : "Save correction"}
                     </button>
                   </div>

@@ -190,6 +190,13 @@ export function safeVisitCorrectionError(cause: unknown): VisitCorrectionError {
   }
 
   const providerCode = errorData(cause, "code");
+  if (providerCode === "P0001") {
+    return new VisitCorrectionError(
+      "VISIT_POLICY_REJECTED",
+      "The visit correction was rejected by a field-time policy. Refresh the work order, verify the technician and times, then try again.",
+      cause,
+    );
+  }
   if (providerCode === "42501" || providerCode === "PT403") {
     return new VisitCorrectionError(
       "VISIT_ACCESS_DENIED",
