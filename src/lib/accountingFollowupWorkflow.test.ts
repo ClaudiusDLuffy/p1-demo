@@ -51,5 +51,6 @@ test("estimate forms stay private, assignment-scoped, and limited to xlsx drafts
 
 test("status guidance and capital completion visibility are present in list views", () => {
   assert.match(workOrderList, /<WorkOrderStatusLegend/);
-  assert.match(capitalProjects, /Pending capital completion/);
+  assert.match(capitalProjects, /capitalProjectStage/);
+  assert.match(capitalProjects, /Capital status/);
 });

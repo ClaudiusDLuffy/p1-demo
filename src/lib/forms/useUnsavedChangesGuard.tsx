@@ -5,6 +5,7 @@ import { DiscardChangesDialog } from "../../components/ui/DiscardChangesDialog";
 import { decideDismissal, needsUnloadWarning } from "./dismissal";
 import type { DirtyPersistenceState, ModalDismissReason } from "./dismissal";
 import { registerDirtySensitiveForm } from "./dirtyFormRegistry";
+import { isForcedDeploymentReload } from "../deploymentReload";
 
 export type UnsavedChangesOptions = {
   dirty: boolean;
@@ -47,6 +48,7 @@ export function useUnsavedChangesGuard(options: UnsavedChangesOptions) {
   useEffect(() => {
     if (!enabled || !needsUnloadWarning(dirty, persistence)) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (isForcedDeploymentReload()) return;
       event.preventDefault();
       event.returnValue = "";
     };

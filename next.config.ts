@@ -46,6 +46,9 @@ const nextConfig: NextConfig = {
     // The opaque per-deployment identifier above remains private to Next.js
     // cache busting and version-skew protection.
     NEXT_PUBLIC_P1_BUILD_VERSION: portalVersion,
+    // Unlike the human release number, this changes for every deployment so
+    // browsers can never mistake a new build for the one already running.
+    NEXT_PUBLIC_P1_DEPLOYMENT_ID: deploymentVersion,
     NEXT_PUBLIC_P1_BUILD_UPDATED_AT: portalBuildUpdatedAt,
   },
   serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],

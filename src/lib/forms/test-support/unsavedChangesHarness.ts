@@ -20,6 +20,7 @@ export function createUnsavedChangesHarness() {
   const queue: (() => void)[] = [];
   const listeners = new Map<string, Set<(event: { preventDefault(): void; returnValue: string }) => void>>();
   let stateIndex = 0, refIndex = 0, effectIndex = 0, registered = 0;
+  let forcedDeploymentReload = false;
   const exports: { useUnsavedChangesGuard?: (options: UnsavedChangesOptions) => Guard } = {};
   runInNewContext(compiled, { exports,
     window: {
@@ -31,6 +32,7 @@ export function createUnsavedChangesHarness() {
     require: (name: string) => {
       if (name === "./dismissal") return dismissal;
       if (name === "./dirtyFormRegistry") return { registerDirtySensitiveForm: () => { registered += 1; return () => { registered -= 1; }; } };
+      if (name === "../deploymentReload") return { isForcedDeploymentReload: () => forcedDeploymentReload };
       if (name.endsWith("/DiscardChangesDialog")) return { DiscardChangesDialog: "DiscardChangesDialog" };
       if (name === "react/jsx-runtime") return { jsx: (type: unknown, props: unknown) => ({ type, props }) };
       if (name === "react") return {
@@ -62,5 +64,12 @@ export function createUnsavedChangesHarness() {
     unmount: () => { for (const effect of effects) effect.cleanup?.(); },
     listenerCount: () => listeners.get("beforeunload")?.size || 0,
     registeredCount: () => registered,
+    beginForcedDeploymentReload: () => { forcedDeploymentReload = true; },
+    dispatchBeforeUnload: () => {
+      let prevented = false;
+      const event = { preventDefault: () => { prevented = true; }, returnValue: "untouched" };
+      for (const listener of listeners.get("beforeunload") || []) listener(event);
+      return { prevented, returnValue: event.returnValue };
+    },
   };
 }
