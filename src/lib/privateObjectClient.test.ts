@@ -13,7 +13,7 @@ import { PHOTO_ACCEPTED_FORMAT_GUIDANCE } from "./photoContentPolicy";
 
 const ids = { intent: "10000000-0000-4000-8000-000000000001", operation: "10000000-0000-4000-8000-000000000002", batch: "10000000-0000-4000-8000-000000000003", photo: "10000000-0000-4000-8000-000000000004" };
 const image = () => new File([new Uint8Array([255, 216, 255, 0, 255, 217])], "camera.heic", { type: "application/octet-stream" });
-function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean; rejectBusy?: boolean } = {}) {
+function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean; rejectContent?: boolean; rejectBusy?: boolean } = {}) {
   const filename = resolve("src/lib/privateObjectClient.ts");
   const requireHere = createRequire(import.meta.url);
   const exports: Partial<typeof Client> = {};
@@ -60,6 +60,8 @@ function harness(options: { loseUploadResponse?: boolean; rejectFormat?: boolean
         if (!uploaded) return Response.json({ status: "upload_required", intent });
         if (options.rejectFormat) return Response.json({ status: "cleanup_required", intentId: intent.intentId,
           code: "UNSUPPORTED_IMAGE_FORMAT", message: "Convert this photo. Existing uploaded photos are not affected." });
+        if (options.rejectContent) return Response.json({ status: "cleanup_required", intentId: intent.intentId,
+          code: "INVALID_IMAGE_CONTENT", message: "The image could not be fully read. Export a new JPEG or PNG copy and try again." });
         if (intent.status !== "finalized") confirmations++;
         intent = { ...intent, status: "finalized", storageObjectId: ids.photo, photoId: ids.photo, bindingId: ids.photo };
         return Response.json({ status: "confirmed", intent });
@@ -106,6 +108,18 @@ test("trusted rejection exposes compatible conversion guidance and no client con
   const result = await h.ports.finalize(first.intent, signal, () => undefined);
   assert.equal(result.status, "cleanup_required");
   if (result.status === "cleanup_required") assert.equal(result.message, PHOTO_ACCEPTED_FORMAT_GUIDANCE);
+  assert.equal(h.counts().confirmations, 0);
+});
+
+test("trusted rejection preserves the safe server reason instead of hiding it behind cleanup pending", async () => {
+  const h = harness({ rejectContent: true }); const file = image(); const signal = new AbortController().signal;
+  const first = await h.ports.begin(file, ids.operation, ids.batch, signal);
+  await h.ports.upload(first.intent, file, signal);
+  const result = await h.ports.finalize(first.intent, signal, () => undefined);
+  assert.equal(result.status, "cleanup_required");
+  if (result.status === "cleanup_required") {
+    assert.equal(result.message, "The image could not be fully read. Export a new JPEG or PNG copy and try again.");
+  }
   assert.equal(h.counts().confirmations, 0);
 });
 
