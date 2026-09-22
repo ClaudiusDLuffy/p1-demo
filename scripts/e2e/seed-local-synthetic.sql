@@ -10,6 +10,12 @@ begin;
 truncate table public.controller_invoice_export_batches cascade;
 truncate table public.work_orders cascade;
 
+-- One fixture deliberately represents a pre-0163 stranded visit. Disable only
+-- the new deferred invariant while loading synthetic history; every browser
+-- mutation still runs with both constraint triggers enabled.
+alter table public.work_orders disable trigger work_orders_offsite_visit_closed;
+alter table public.work_order_visits disable trigger work_order_visits_offsite_parent_consistent;
+
 -- The tax-rule CRUD browser case writes real local rows outside the work-order
 -- foreign-key graph. Remove only its synthetic fixture so repeated runs stay
 -- deterministic without resetting migration-installed billing policy.
@@ -305,7 +311,8 @@ from (values
   ('WOTEST8-PAUSED-TRANSFER', '079', 'General',       'General Maintenance',      'Paused visit changes contractor',     'p3', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          1700::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz),
   ('WOTEST8-OPEN-CLOSE',      '080', 'Refrigeration', 'Refrigeration equipment',  'Open visit staff close guard',        'p2', 'assigned',                  'Dispatched',                  :'direct_id'::uuid,          2400::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 0::bigint, null::timestamptz),
   ('E2E-TIME-START',          '081', 'Refrigeration', 'Refrigeration equipment',  'Future arrival policy',               'p3', 'assigned',                  'Dispatched',                  :'company_admin_id'::uuid,   1800::numeric, false, null,                    false, null::timestamptz,              null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 0::bigint, null::timestamptz),
-  ('E2E-TIME-COMPLETE',       '082', 'HVAC',          'HVAC',                     'Completion chronology policy',        'p2', 'wip',                       'Work in Progress',            :'company_admin_id'::uuid,   2800::numeric, false, null,                    false, now() - interval '1 hour',   null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 1::bigint, null::timestamptz)
+  ('E2E-TIME-COMPLETE',       '082', 'HVAC',          'HVAC',                     'Completion chronology policy',        'p2', 'wip',                       'Work in Progress',            :'company_admin_id'::uuid,   2800::numeric, false, null,                    false, now() - interval '1 hour',   null::timestamptz,              :'report_tech_id'::uuid, 'Synthetic Report Technician', 0, 1::bigint, null::timestamptz),
+  ('E2E-MISSED-CHECKOUT',     '083', 'Refrigeration', 'Refrigeration equipment',  'Legacy stranded missed checkout',     'p2', 'parts',                     'Awaiting Parts',              :'company_admin_id'::uuid,   2800::numeric, false, null,                    false, now() - interval '2 hours',   null::timestamptz,              :'team_member_id'::uuid, 'Synthetic Team Member', 0, 1::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
@@ -427,7 +434,15 @@ values
     '00000000-0000-4000-8000-00000000f212', 'E2E-TIME-COMPLETE',
     :'company_admin_id'::uuid, now() - interval '1 hour', null,
     :'report_tech_id'::uuid, null
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f213', 'E2E-MISSED-CHECKOUT',
+    :'company_admin_id'::uuid, now() - interval '2 hours', null,
+    :'team_member_id'::uuid, null
   );
+
+alter table public.work_orders enable trigger work_orders_offsite_visit_closed;
+alter table public.work_order_visits enable trigger work_order_visits_offsite_parent_consistent;
 
 insert into public.activities (
   id, work_order_id, author_id, author_name, text, type,

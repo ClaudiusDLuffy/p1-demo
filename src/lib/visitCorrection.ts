@@ -14,6 +14,10 @@ type VisitCorrectionInput = {
 };
 
 const STAFF_ROLES = new Set(["manager", "dispatcher", "back_office"]);
+const OFFSITE_FIELD_STATUSES = new Set([
+  "Awaiting Parts",
+  "Completed",
+]);
 
 export function canOfferVisitCorrection({
   role,
@@ -27,6 +31,35 @@ export function canOfferVisitCorrection({
   if (!checkOutAt) return false;
   if (role && STAFF_ROLES.has(role)) return true;
   return role === "contractor" && workOrderStatus !== "closed";
+}
+
+export function canOfferMissedVisitCheckout({
+  userId,
+  role,
+  canManageTeam,
+  workOrderStatus,
+  functionalStatus,
+  checkOutAt,
+  checkedInBy,
+  technicianProfileId,
+}: {
+  userId?: string | null;
+  role?: string | null;
+  canManageTeam?: boolean;
+  workOrderStatus?: string | null;
+  functionalStatus?: string | null;
+  checkOutAt?: string | null;
+  checkedInBy?: string | null;
+  technicianProfileId?: string | null;
+}): boolean {
+  if (checkOutAt || workOrderStatus === "closed" || !functionalStatus
+      || !OFFSITE_FIELD_STATUSES.has(functionalStatus)) return false;
+  if (role && STAFF_ROLES.has(role)) return true;
+  return role === "contractor" && Boolean(
+    canManageTeam
+    || (userId && userId === checkedInBy)
+    || (userId && userId === technicianProfileId),
+  );
 }
 
 export class VisitCorrectionError extends Error {
@@ -51,6 +84,12 @@ const exactServerMessages = new Map<string, readonly [string, string]>([
   ["You cannot correct this visit", ["VISIT_ACCESS_DENIED", "This visit is not available for correction with your current work-order access."]],
   ["Visit time is locked after the P1 invoice is approved", ["VISIT_LOCKED_BY_INVOICE", "Visit time is locked because the P1 invoice is already approved or paid."]],
   ["The corrected time overlaps another visit for this technician", ["VISIT_TIME_OVERLAP", "These times overlap another visit for this technician. Review both visits before saving."]],
+  ["The checkout time overlaps another visit for this technician", ["VISIT_TIME_OVERLAP", "This checkout overlaps another visit for this technician. Review both visits before saving."]],
+  ["This visit is already checked out", ["VISIT_CHANGED", "This visit was already checked out. Refresh the work order."]],
+  ["Missed checkout is available only after field work has moved off site", ["VISIT_CHANGED", "This work order is no longer eligible for missed-checkout recovery. Refresh it before trying again."]],
+  ["Only the visit technician, acting lead, or company admin can record this checkout", ["VISIT_ACCESS_DENIED", "Only the visit technician, their team lead, company administrator, or P1 operations staff can record this checkout."]],
+  ["Checkout time cannot be before active visit check-in", ["VISIT_TIME_ORDER", "Actual check-out cannot be before this visit's check-in."]],
+  ["Checkout time cannot be in the future", ["VISIT_TIME_FUTURE", "Actual check-out cannot be more than 5 minutes in the future."]],
   ["Visit not found", ["VISIT_NOT_FOUND", "This visit is no longer available. Refresh the work order."]],
   ["Work order is unavailable", ["WORK_ORDER_UNAVAILABLE", "This work order is no longer available. Refresh the work-order list."]],
 ]);

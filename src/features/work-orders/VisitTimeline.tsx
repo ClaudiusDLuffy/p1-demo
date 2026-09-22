@@ -9,8 +9,9 @@ import {
   storeLocalDateTimeToIso,
   timezoneForWorkOrder,
 } from "../../lib/billingRules";
-import { correctWorkOrderVisit } from "../../lib/db";
+import { correctWorkOrderVisit, recordMissedWorkOrderVisitCheckout } from "../../lib/db";
 import {
+  canOfferMissedVisitCheckout,
   canOfferVisitCorrection,
   safeVisitCorrectionError,
   validateVisitCorrection,
@@ -53,13 +54,20 @@ type VisitTimelineVisit = {
 };
 
 type VisitTimelineProps = {
-  workOrder: Record<string, unknown> & { id: string; status?: string | null };
+  workOrder: Record<string, unknown> & {
+    id: string;
+    status?: string | null;
+    functionalStatus?: string | null;
+    contractorAssignmentVersion?: number | null;
+    workflowCycle?: number | null;
+    lifecycleVersion?: number | null;
+  };
   visits?: VisitTimelineVisit[];
   totalCount?: number | null;
   hasMore?: boolean;
   onLoadMore?: () => void;
   loadingMore?: boolean;
-  currentUser?: { role?: string | null } | null;
+  currentUser?: { id?: string | null; role?: string | null; canManageTeam?: boolean } | null;
   fire?: (message: string) => void;
 };
 
@@ -86,9 +94,17 @@ export default function VisitTimeline({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [rejectedCorrection, setRejectedCorrection] = useState<string | null>(null);
+  const [repairingId, setRepairingId] = useState<string | null>(null);
+  const [repairOperationId, setRepairOperationId] = useState<string | null>(null);
+  const [repairForm, setRepairForm] = useState({ checkOutDate: "", checkOutTime: "", reason: "" });
+  const [repairError, setRepairError] = useState("");
+  const [rejectedRepair, setRejectedRepair] = useState<string | null>(null);
   const displayedTotal: number | null = typeof totalCount === "number" ? totalCount : null;
   const correctionFingerprint = editingId ? JSON.stringify([
     editingId, form.checkInDate, form.checkInTime, form.checkOutDate, form.checkOutTime, form.reason.trim(),
+  ]) : "";
+  const repairFingerprint = repairingId ? JSON.stringify([
+    repairingId, repairForm.checkOutDate, repairForm.checkOutTime, repairForm.reason.trim(),
   ]) : "";
 
   const orderedVisits = useMemo(
@@ -112,6 +128,26 @@ export default function VisitTimeline({
     });
     setError("");
     setRejectedCorrection(null);
+  };
+
+  const startRepair = (visit: VisitTimelineVisit) => {
+    if (visit.checkOutAt) return;
+    setEditingId(null);
+    setRepairingId(visit.id);
+    setRepairOperationId(crypto.randomUUID());
+    setRepairForm({ checkOutDate: "", checkOutTime: "", reason: "" });
+    setRepairError("");
+    setRejectedRepair(null);
+  };
+
+  const refreshVisitEvidence = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: workOrderDetailsKey(workOrder.id) }),
+      queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
+      queryClient.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
+      queryClient.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
+      queryClient.invalidateQueries({ queryKey: ["work-order-visits", "billing", workOrder.id] }),
+    ]);
   };
 
   const save = async () => {
@@ -145,13 +181,7 @@ export default function VisitTimeline({
       await correctWorkOrderVisit(editingId, checkInAt, checkOutAt, form.reason);
       setEditingId(null);
       fire?.("Visit times corrected and recorded in the audit history");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: workOrderDetailsKey(workOrder.id) }),
-        queryClient.invalidateQueries({ queryKey: WORK_ORDERS_KEY }),
-        queryClient.invalidateQueries({ queryKey: WORK_ORDER_PAGES_KEY }),
-        queryClient.invalidateQueries({ queryKey: WORK_ORDER_BY_ID_KEY }),
-        queryClient.invalidateQueries({ queryKey: ["work-order-visits", "billing", workOrder.id] }),
-      ]).catch(() => {
+      await refreshVisitEvidence().catch(() => {
         fire?.("Visit times were corrected, but the refreshed timeline is unavailable. Refresh the work order to see the saved times.");
       });
     } catch (caught: unknown) {
@@ -159,6 +189,53 @@ export default function VisitTimeline({
       setError(failure.message);
       if (failure.code === "VISIT_TIME_OVERLAP" || failure.code === "VISIT_CHANGED") {
         setRejectedCorrection(attemptedCorrection);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveRepair = async () => {
+    if (!repairingId || !repairOperationId || saving || rejectedRepair === repairFingerprint) return;
+    const attemptedRepair = repairFingerprint;
+    setSaving(true);
+    setRepairError("");
+    try {
+      const visit = visits.find(candidate => candidate.id === repairingId);
+      if (!visit?.checkInAt) throw new Error("The visit check-in is unavailable. Refresh the work order.");
+      const checkOutAt = storeLocalDateTimeToIso(
+        repairForm.checkOutDate,
+        repairForm.checkOutTime,
+        timeZone,
+      );
+      validateVisitCorrection({
+        checkInAt: visit.checkInAt,
+        checkOutAt,
+        reason: repairForm.reason,
+        originalCheckInAt: visit.checkInAt,
+        originalCheckOutAt: null,
+      });
+      await recordMissedWorkOrderVisitCheckout({
+        visitId: repairingId,
+        expectedAssignmentVersion: Number(workOrder.contractorAssignmentVersion),
+        expectedWorkflowCycle: Number(workOrder.workflowCycle),
+        expectedLifecycleVersion: Number(workOrder.lifecycleVersion),
+        operationId: repairOperationId,
+        checkedOutAt: checkOutAt,
+        reason: repairForm.reason,
+      });
+      setRepairingId(null);
+      setRepairOperationId(null);
+      setRepairForm({ checkOutDate: "", checkOutTime: "", reason: "" });
+      fire?.("Missed checkout recorded with its reason in the audit history");
+      await refreshVisitEvidence().catch(() => {
+        fire?.("Checkout was recorded, but the refreshed timeline is unavailable. Refresh the work order to see it.");
+      });
+    } catch (caught: unknown) {
+      const failure = safeVisitCorrectionError(caught);
+      setRepairError(failure.message);
+      if (["VISIT_TIME_OVERLAP", "VISIT_CHANGED", "VISIT_LOCKED_BY_INVOICE"].includes(failure.code)) {
+        setRejectedRepair(attemptedRepair);
       }
     } finally {
       setSaving(false);
@@ -179,10 +256,21 @@ export default function VisitTimeline({
       <div style={{ display: "grid", gap: 8 }}>
         {orderedVisits.map((visit, index) => {
           const editing = editingId === visit.id;
+          const repairing = repairingId === visit.id;
           const canOfferCorrection = canOfferVisitCorrection({
             role: currentUser?.role,
             workOrderStatus: workOrder.status,
             checkOutAt: visit.checkOutAt,
+          });
+          const canOfferRepair = canOfferMissedVisitCheckout({
+            userId: currentUser?.id,
+            role: currentUser?.role,
+            canManageTeam: currentUser?.canManageTeam,
+            workOrderStatus: workOrder.status,
+            functionalStatus: workOrder.functionalStatus,
+            checkOutAt: visit.checkOutAt,
+            checkedInBy: visit.createdBy,
+            technicianProfileId: visit.technicianProfileId,
           });
           return (
             <div key={visit.id} style={{ padding: "10px 12px", border: `1px solid ${T.borderSoft}`, borderRadius: 9, background: T.surfaceSoft }}>
@@ -203,6 +291,11 @@ export default function VisitTimeline({
                     Correct actual time
                   </button>
                 )}
+                {canOfferRepair && !repairing && (
+                  <button type="button" className="btn-accent" onClick={() => startRepair(visit)} style={{ padding: "6px 9px", fontSize: 10 }}>
+                    Record missed checkout
+                  </button>
+                )}
               </div>
 
               {requiresVisitDurationReview(visit) && (
@@ -210,22 +303,22 @@ export default function VisitTimeline({
               )}
               {editing && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "grid", gap: 10 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))", gap: 8 }}>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-in date
-                      <input type="date" value={form.checkInDate} onChange={event => setForm(current => ({ ...current, checkInDate: event.target.value }))} style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="date" value={form.checkInDate} onChange={event => setForm(current => ({ ...current, checkInDate: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-in time
-                      <input type="time" value={form.checkInTime} onChange={event => setForm(current => ({ ...current, checkInTime: event.target.value }))} style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="time" value={form.checkInTime} onChange={event => setForm(current => ({ ...current, checkInTime: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-out date
-                      <input type="date" value={form.checkOutDate} onChange={event => setForm(current => ({ ...current, checkOutDate: event.target.value }))} style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="date" value={form.checkOutDate} onChange={event => setForm(current => ({ ...current, checkOutDate: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                     <label style={{ fontSize: 10, color: T.muted }}>
                       Actual check-out time
-                      <input type="time" value={form.checkOutTime} onChange={event => setForm(current => ({ ...current, checkOutTime: event.target.value }))} style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                      <input type="time" value={form.checkOutTime} onChange={event => setForm(current => ({ ...current, checkOutTime: event.target.value }))} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
                     </label>
                   </div>
                   <label style={{ fontSize: 10, color: T.muted }}>
@@ -237,6 +330,34 @@ export default function VisitTimeline({
                     <button type="button" className="btn-soft" disabled={saving} onClick={() => { setEditingId(null); setRejectedCorrection(null); }}>Cancel</button>
                     <button type="button" className="btn-primary" disabled={saving || form.reason.trim().length < 5 || rejectedCorrection === correctionFingerprint} onClick={save} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {saving ? <><BtnSpinnerDark />Saving...</> : "Save correction"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {repairing && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.borderSoft}`, display: "grid", gap: 10 }}>
+                  <div role="note" style={{ fontSize: 11, color: T.muted, lineHeight: 1.5 }}>
+                    Enter when the technician actually left. This closes only the stranded visit; it does not change the work order&apos;s current field or billing status.
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))", gap: 8 }}>
+                    <label style={{ fontSize: 10, color: T.muted }}>
+                      Actual check-out date
+                      <input type="date" value={repairForm.checkOutDate} onChange={event => { setRepairForm(current => ({ ...current, checkOutDate: event.target.value })); setRepairError(""); setRejectedRepair(null); }} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                    </label>
+                    <label style={{ fontSize: 10, color: T.muted }}>
+                      Actual check-out time
+                      <input type="time" value={repairForm.checkOutTime} onChange={event => { setRepairForm(current => ({ ...current, checkOutTime: event.target.value })); setRepairError(""); setRejectedRepair(null); }} style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit" }} />
+                    </label>
+                  </div>
+                  <label style={{ fontSize: 10, color: T.muted }}>
+                    Missed-checkout reason
+                    <textarea value={repairForm.reason} onChange={event => { setRepairForm(current => ({ ...current, reason: event.target.value })); setRepairError(""); setRejectedRepair(null); }} rows={2} placeholder="Explain why checkout was not recorded at the time" style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: 8, borderRadius: 8, border: `1px solid ${T.border}`, fontFamily: "inherit", resize: "vertical" }} />
+                  </label>
+                  {repairError && <div role="alert" style={{ fontSize: 11, color: T.danger }}>{repairError}</div>}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                    <button type="button" className="btn-soft" disabled={saving} onClick={() => { setRepairingId(null); setRepairOperationId(null); setRejectedRepair(null); }}>Cancel</button>
+                    <button type="button" className="btn-primary" disabled={saving || !repairForm.checkOutDate || !repairForm.checkOutTime || repairForm.reason.trim().length < 5 || rejectedRepair === repairFingerprint} onClick={saveRepair} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {saving ? <><BtnSpinnerDark />Saving...</> : "Record checkout"}
                     </button>
                   </div>
                 </div>
