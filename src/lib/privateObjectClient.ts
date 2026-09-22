@@ -109,7 +109,7 @@ export function createWorkOrderPhotoPorts(workOrderId: string, expectedAssignmen
       }
       if ((result.status === "cleanup_required" ? result.intentId : result.intent.intentId) !== intent.intentId) throw new PhotoUploadError("The upload receipt could not be verified.");
       return result.status === "cleanup_required" ? { status: "cleanup_required", message: result.code === "UNSUPPORTED_IMAGE_FORMAT"
-        ? PHOTO_ACCEPTED_FORMAT_GUIDANCE : "Cleanup is pending. Retry to check this same upload." } : { status: "upload_required" };
+        ? PHOTO_ACCEPTED_FORMAT_GUIDANCE : result.message } : { status: "upload_required" };
     },
     async cancel(intent) {
       const result = await cancelUnattachedUpload(intent);
