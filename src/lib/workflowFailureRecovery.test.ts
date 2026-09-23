@@ -63,6 +63,13 @@ test("visit correction errors expose only exact reviewed business guidance", () 
   assert.equal(unknown.code, "VISIT_POLICY_REJECTED");
   assert.match(unknown.message, /field-time policy/i);
   assert.doesNotMatch(unknown.message, /customer|token|path/i);
+
+  const reversedProviderRange = safeVisitCorrectionError({
+    code: "22000",
+    message: "range lower bound must be less than or equal to range upper bound",
+  });
+  assert.equal(reversedProviderRange.code, "VISIT_POLICY_REJECTED");
+  assert.match(reversedProviderRange.message, /legacy visit/i);
 });
 
 test("visit overlap guidance identifies only reviewed conflicting work-order ids", () => {

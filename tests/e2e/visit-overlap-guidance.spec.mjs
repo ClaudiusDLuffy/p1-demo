@@ -39,13 +39,28 @@ test("mobile visit correction names the accessible conflicting work order", asyn
 
   const checkoutDate = page.getByLabel("Actual check-out date");
   const checkoutTime = page.getByLabel("Actual check-out time");
-  const expanded = addLocalMinutes(
+  const safeCorrection = addLocalMinutes(
     await checkoutDate.inputValue(),
     await checkoutTime.inputValue(),
+    15,
+  );
+  await checkoutDate.fill(safeCorrection.date);
+  await checkoutTime.fill(safeCorrection.time);
+  await page.getByLabel("Correction reason").fill("Corrected without crossing another completed visit.");
+  await page.getByRole("button", { name: "Save correction", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Correct actual time", exact: true })).toBeVisible();
+  expect(correctionRequests).toBe(1);
+
+  await page.getByRole("button", { name: "Correct actual time", exact: true }).click();
+  const overlapCheckoutDate = page.getByLabel("Actual check-out date");
+  const overlapCheckoutTime = page.getByLabel("Actual check-out time");
+  const expanded = addLocalMinutes(
+    await overlapCheckoutDate.inputValue(),
+    await overlapCheckoutTime.inputValue(),
     90,
   );
-  await checkoutDate.fill(expanded.date);
-  await checkoutTime.fill(expanded.time);
+  await overlapCheckoutDate.fill(expanded.date);
+  await overlapCheckoutTime.fill(expanded.time);
   await page.getByLabel("Correction reason").fill("Corrected from the technician service record.");
   await page.getByRole("button", { name: "Save correction", exact: true }).click();
 
