@@ -14,8 +14,8 @@ test('final migration inventory permits only the exact byte-pinned historical pa
   const names = validateMigrationInventory(input);
   assert.deepEqual(names, [...input.keys()].sort());
   assert.deepEqual(names.filter(name => name.startsWith('0029_')), Object.keys(HISTORICAL_0029));
-  assert.equal(names.length, 166);
-  assert.equal(names.at(-1), '0165_identify_visit_correction_overlap.sql');
+  assert.equal(names.length, 167);
+  assert.equal(names.at(-1), '0166_stabilize_visit_overlap_ranges.sql');
   for (const [name, hash] of Object.entries(HISTORICAL_0029)) {
     assert.equal(createHash('sha256').update(input.get(name)!).digest('hex'), hash);
   }

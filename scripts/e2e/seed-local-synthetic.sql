@@ -316,7 +316,8 @@ from (values
   ('E2E-CAPITAL-BOARD-SUBMITTED','084','Refrigeration','Refrigeration equipment',  'Capital board submitted quote',       'p2', 'pending_capital_completion','Pending Capital Completion',  :'direct_id'::uuid,          5200::numeric, true,  null,                    false, now() - interval '3 days',    null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 2::bigint, null::timestamptz),
   ('E2E-CAPITAL-BOARD-ORDERED','085', 'Refrigeration', 'Refrigeration equipment',  'Capital board ordered equipment',     'p2', 'parts',                     'Awaiting Parts',              :'direct_id'::uuid,          6100::numeric, true,  'Equipment ordered',     false, now() - interval '2 days',    null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 2::bigint, null::timestamptz),
   ('E2E-VISIT-OVERLAP-TARGET','086',  'Refrigeration', 'Refrigeration equipment',  'Visit overlap guidance target',       'p3', 'pending_invoice',           'Completed',                   :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '6 hours',  now() - interval '5 hours',    null::uuid, 'Synthetic Direct Contractor', 0, 2::bigint, null::timestamptz),
-  ('E2E-VISIT-OVERLAP-SOURCE','087',  'Refrigeration', 'Refrigeration equipment',  'Visit overlap guidance source',       'p3', 'pending_invoice',           'Completed',                   :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '4 hours',  now() - interval '3 hours',    null::uuid, 'Synthetic Direct Contractor', 0, 2::bigint, null::timestamptz)
+  ('E2E-VISIT-OVERLAP-SOURCE','087',  'Refrigeration', 'Refrigeration equipment',  'Visit overlap guidance source',       'p3', 'pending_invoice',           'Completed',                   :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() - interval '4 hours',  now() - interval '3 hours',    null::uuid, 'Synthetic Direct Contractor', 0, 2::bigint, null::timestamptz),
+  ('E2E-VISIT-FUTURE-OPEN',  '088',  'Refrigeration', 'Refrigeration equipment',  'Legacy future-open visit interval',   'p3', 'wip',                       'Work in Progress',            :'direct_id'::uuid,          1800::numeric, false, null,                    false, now() + interval '2 hours',  null::timestamptz,              null::uuid, 'Synthetic Direct Contractor', 0, 1::bigint, null::timestamptz)
 ) as fixture(
   id, sequence, line_of_service, business_service, summary, priority, status,
   functional_status, contractor_id, nte, is_capital, capital_status,
@@ -453,6 +454,11 @@ values
     '00000000-0000-4000-8000-00000000f215', 'E2E-VISIT-OVERLAP-SOURCE',
     :'direct_id'::uuid, now() - interval '4 hours', now() - interval '3 hours',
     :'direct_id'::uuid, :'direct_id'::uuid
+  ),
+  (
+    '00000000-0000-4000-8000-00000000f216', 'E2E-VISIT-FUTURE-OPEN',
+    :'direct_id'::uuid, now() + interval '2 hours', null,
+    :'direct_id'::uuid, null
   );
 
 alter table public.work_orders enable trigger work_orders_offsite_visit_closed;

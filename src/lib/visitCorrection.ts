@@ -79,6 +79,7 @@ const exactServerMessages = new Map<string, readonly [string, string]>([
   ["Both actual start and stop times are required", ["VISIT_TIMES_REQUIRED", "Enter both the actual check-in and check-out date and time."]],
   ["Actual stop time cannot be before actual start time", ["VISIT_TIME_ORDER", "Actual check-out cannot be before actual check-in."]],
   ["Visit times cannot be in the future", ["VISIT_TIME_FUTURE", "Actual visit times cannot be in the future."]],
+  ["range lower bound must be less than or equal to range upper bound", ["VISIT_POLICY_REJECTED", "A legacy visit contains an invalid time interval. Refresh after the portal update, then try the correction again."]],
   ["A single visit cannot exceed 72 hours", ["VISIT_DURATION_LIMIT", "A single visit cannot exceed 72 hours."]],
   ["The corrected times are unchanged", ["VISIT_TIMES_UNCHANGED", "Change at least one actual visit time before saving."]],
   ["You cannot correct this visit", ["VISIT_ACCESS_DENIED", "This visit is not available for correction with your current work-order access."]],
