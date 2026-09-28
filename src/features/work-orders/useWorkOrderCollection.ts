@@ -9,7 +9,8 @@ import { loadWorkOrdersPage } from "./data/workOrderReadRepository";
 import type { WorkOrderPageParams } from "./data/workOrderReadContracts";
 import { retryWorkOrderRead } from "./workOrderQueryPolicy";
 
-/** User-requested cursor pages, shared by the focused list and calendar.
+/** User-requested cursor pages for the focused work-order list.
+ * The schedule owns a separate date-window read and unscheduled queue.
  * Never silently cap the collection or scan every page on opening a tab.
  */
 export function useWorkOrderCollection(

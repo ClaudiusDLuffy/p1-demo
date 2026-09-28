@@ -40,7 +40,7 @@ import useWorkOrders from "../features/work-orders/useWorkOrders";
 import KanbanBoard from "../features/work-orders/KanbanBoard";
 import WorkOrderList from "../features/work-orders/WorkOrderList";
 import WorkOrderDetail from "../features/work-orders/WorkOrderDetail";
-import { FocusedPortalNavigation } from "../features/simplified-work/FocusedPortalNavigation";
+import { PortalNavigation } from "./PortalNavigation";
 import { BetaBadge } from "./ui/BetaBadge";
 import AdministrativeTransferAction from "../features/work-orders/AdministrativeTransferAction";
 import CloseReopenedFollowUpModal from "../features/work-orders/CloseReopenedFollowUpModal";
@@ -360,9 +360,6 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
 .btn-danger { padding: 12px 18px; min-height: 44px; border-radius: 10px; background: ${T.danger}; color: #fff; border: 1px solid ${T.danger}; cursor: pointer; font-weight: 650; font-size: 12px; font-family: inherit; transition: filter 140ms, opacity 140ms; }
 .btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
 .btn-danger:disabled { cursor: default; opacity: 0.65; }
-.side-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; border: none; background: transparent; color: ${T.sidebarText}; cursor: pointer; font-size: 13px; font-family: inherit; margin-bottom: 2px; transition: background 140ms, color 140ms; }
-.side-btn:hover { background: rgba(250,247,242,0.06); color: ${T.sidebarActive}; }
-.side-btn.active { background: rgba(250,247,242,0.08); color: ${T.sidebarActive}; font-weight: 600; }
 .sla-bar { height: 3px; border-radius: 2px; background: ${T.borderSoft}; overflow: hidden; }
 .sla-fill { height: 100%; transition: width 300ms ease; }
 .desktop-only-table { display: block; }
@@ -2661,7 +2658,8 @@ export default function PortalShell() {
     [invoices, submittedInvoiceNum]
   );
   const navigationRole = portalNavigationRole({ invoiceController, isManager });
-  const focusedNavigation = isManager && !invoiceController && (page === "simplified"
+  // Focused pages simplify their content/actions, not the role-based navigation.
+  const focusedWorkspace = isManager && !invoiceController && (page === "simplified"
     || page === "my_schedule" || (page === "wo_detail" && ["simplified", "my_schedule"].includes(workOrderReturnPage || ""))
     || (page === "billing" && focusedBilling));
   const sideItems = useMemo(() => buildPortalNavigationItems({
@@ -2819,52 +2817,11 @@ export default function PortalShell() {
             </div>
           </div>
         </div>
-        <div style={{ padding: "14px 0", flex: 1 }}>
-          <FocusedPortalNavigation items={sideItems} enabled={focusedNavigation}>{item => {
-            const active = page === item.id;
-            return (
-              <button
-                key={item.id}
-                aria-label={item.label}
-                onClick={() => {
-                  nav(item.id);
-                  if (focusedNavigation && item.id === "billing") setFocusedBilling(true);
-                  closeMobileDrawer();
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  width: "calc(100% - 20px)",
-                  padding: "12px 20px",
-                  cursor: "pointer",
-                  borderRadius: 10,
-                  margin: "2px 10px",
-                  background: active ? `${T.accent}1F` : "transparent",
-                  color: active ? T.accent : T.sidebarText,
-                  fontWeight: active ? 600 : 400,
-                  fontSize: 14,
-                  transition: "background 0.15s ease",
-                  border: "none",
-                  fontFamily: "inherit",
-                }}
-              >
-                <Ico d={item.icon} size={17} color={active ? T.accent : T.sidebarText} />
-                <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
-                {item.beta && <BetaBadge />}
-                {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
-                {item.attentionBadge != null && item.attentionBadge > 0 && (
-                  <span
-                    title={`${item.attentionBadge} update${item.attentionBadge === 1 ? "" : "s"} need your attention`}
-                    style={{ minWidth: 20, textAlign: "center", fontSize: 10, background: T.success, color: "#fff", borderRadius: 10, padding: "2px 6px", fontWeight: 800 }}
-                  >
-                    {item.attentionBadge}
-                  </span>
-                )}
-              </button>
-            );
-          }}</FocusedPortalNavigation>
-        </div>
+        <PortalNavigation items={sideItems} selectedPage={page} onNavigate={destination => {
+          nav(destination);
+          if (focusedWorkspace && destination === "billing") setFocusedBilling(true);
+          closeMobileDrawer();
+        }} />
         <div style={{ borderTop: "1px solid rgba(250,247,242,0.06)", padding: "14px 0 10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px 12px" }}>
             <Avatar initials={currentUser.initials} color={currentUser.color} size={34} />
@@ -2975,24 +2932,10 @@ export default function PortalShell() {
             </div>
           </div>
         </div>
-        <div style={{ padding: "14px 12px", flex: 1 }}>
-          <FocusedPortalNavigation items={sideItems} enabled={focusedNavigation}>{item => (
-            <button key={item.id} aria-label={item.label} onClick={() => { nav(item.id); if (focusedNavigation && item.id === "billing") setFocusedBilling(true); }} className={`side-btn ${page === item.id ? "active" : ""}`}>
-              <Ico d={item.icon} size={16} color={page === item.id ? T.accent : T.sidebarText} />
-              <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
-              {item.beta && <BetaBadge />}
-              {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
-              {item.attentionBadge != null && item.attentionBadge > 0 && (
-                <span
-                  title={`${item.attentionBadge} update${item.attentionBadge === 1 ? "" : "s"} need your attention`}
-                  style={{ minWidth: 20, textAlign: "center", fontSize: 10, background: T.success, color: "#fff", borderRadius: 10, padding: "2px 6px", fontWeight: 800 }}
-                >
-                  {item.attentionBadge}
-                </span>
-              )}
-            </button>
-          )}</FocusedPortalNavigation>
-        </div>
+        <PortalNavigation items={sideItems} selectedPage={page} onNavigate={destination => {
+          nav(destination);
+          if (focusedWorkspace && destination === "billing") setFocusedBilling(true);
+        }} />
         <div style={{ padding: 16, borderTop: "1px solid rgba(250,247,242,0.06)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <Avatar initials={currentUser.initials} color={currentUser.color} size={32} />
@@ -3108,7 +3051,7 @@ export default function PortalShell() {
                     </span>
                   )}
                 </button>
-                {!focusedNavigation && <>
+                {!focusedWorkspace && <>
                   <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
                   <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
                 </>}
@@ -3171,7 +3114,7 @@ export default function PortalShell() {
                 )}
               </div>
             </div>
-            {isManager && !invoiceController && !focusedNavigation && (
+            {isManager && !invoiceController && !focusedWorkspace && (
               <div className="mobile-header-actions">
                 <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
                 <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>

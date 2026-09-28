@@ -42,7 +42,8 @@ test("an oversized picker is constrained to a short viewport", () => {
     viewportHeight: 320,
   });
 
-  assert.equal(position.maxHeight, 288);
+  assert.equal(position.maxHeight, 196);
+  assert.ok(position.top + position.maxHeight <= 212);
   assert.ok(position.top >= 16);
   assert.ok(position.top + position.maxHeight <= 304);
 });
@@ -59,6 +60,26 @@ test("a right picker falls back to the left at the viewport edge", () => {
 
   assert.equal(position.placement, "left");
   assert.equal(position.left, 674);
+});
+
+test("a preferred top picker falls below when the trigger is near the top", () => {
+  const position = getFloatingPanelPosition({
+    trigger: { top: 12, right: 300, bottom: 56, left: 20, width: 280 },
+    panelWidth: 318, panelHeight: 430, viewportWidth: 320, viewportHeight: 568,
+    preferredPlacement: "top",
+  });
+  assert.equal(position.placement, "bottom");
+  assert.equal(position.top, 64);
+  assert.ok(position.maxHeight > 0);
+});
+
+test("short mobile dropdowns fit beside their trigger instead of overlapping it", () => {
+  for (const top of [60, 200, 420]) {
+    const position = getFloatingPanelPosition({ trigger: { top, right: 300, bottom: top + 44, left: 20, width: 280 },
+      panelWidth: 318, panelHeight: 360, viewportWidth: 320, viewportHeight: 568 });
+    assert.ok(position.left >= 16 && position.left + position.width <= 304);
+    assert.ok(position.placement === "top" ? position.top + position.maxHeight <= top - 8 : position.top >= top + 52);
+  }
 });
 
 test("the floating profit calculator stays below the shared modal fallback layer", () => {

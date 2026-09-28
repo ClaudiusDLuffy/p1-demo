@@ -214,10 +214,10 @@ export function DatePickerField({ value, onChange, placeholder = "Select date", 
           textAlign: "left",
         }}
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span className="min-w-0 flex-1 truncate">
           {selected ? format(selected, "MMM d, yyyy") : placeholder}
         </span>
-        <span style={{ color: T.accent, fontSize: 15 }}>Cal</span>
+        <span aria-hidden="true" className="shrink-0" style={{ color: T.accent, fontSize: 15 }}>Cal</span>
       </button>
       {open && !disabled && pos && createPortal(
         <FieldContext.Provider value={null}>
@@ -385,8 +385,8 @@ export function TimePickerField({ value, onChange, placeholder = "Select time", 
           textAlign: "left",
         }}
       >
-        <span>{displayValue || placeholder}</span>
-        <span style={{ color: T.accent, fontSize: 15 }}>Time</span>
+        <span className="min-w-0 flex-1 truncate">{displayValue || placeholder}</span>
+        <span aria-hidden="true" className="shrink-0" style={{ color: T.accent, fontSize: 15 }}>Time</span>
       </button>
       {open && !disabled && pos && createPortal(
         <FieldContext.Provider value={null}>
