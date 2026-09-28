@@ -33,7 +33,10 @@ function renderDetail(document: Record<string, unknown>, permissions: string[] =
   runInNewContext(ts.transpileModule(readFileSync(filename, "utf8"), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText, { exports, require: (name: string): unknown => {
-    if (name === "react") return { useState: (initial: unknown) => [initial, () => undefined] };
+    if (name === "react") return {
+      useState: (initial: unknown) => [initial, () => undefined],
+      useRef: (initial: unknown) => ({ current: initial }),
+    };
     if (name === "react/jsx-runtime") return { jsx: element, jsxs: element };
     if (name === "../invoices/invoiceLineQueries") return { useInvoiceLinePage: () => ({ lines: [], hasMore: false, loading: false }) };
     if (componentImports.has(name)) return new Proxy({}, { get: (_target, property) => String(property) });

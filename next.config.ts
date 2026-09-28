@@ -36,6 +36,8 @@ function localE2eConnectSources() {
 const e2eConnectSources = localE2eConnectSources();
 
 const nextConfig: NextConfig = {
+  // Keep disposable browser-test output separate from ordinary local development.
+  distDir: e2eConnectSources ? ".next/e2e" : ".next",
   /* config options here */
   // Next.js uses this for asset cache-busting and automatic hard navigation
   // when a client-side request crosses deployment versions.

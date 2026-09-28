@@ -5,6 +5,7 @@ import test from "node:test";
 const read = (path: string) => readFileSync(path, "utf8");
 const migration = read("supabase/migrations/0159_preserve_active_visit_during_capital_review.sql");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
+const capitalActions = read("src/features/work-orders/WorkOrderCapitalActions.tsx");
 const shell = read("src/components/PortalShell.tsx");
 const hook = read("src/features/work-orders/useWorkOrders.ts");
 
@@ -21,8 +22,9 @@ test("capital authorization and completion cannot skip an active visit checkout"
   assert.ok((migration.match(/visit\.check_out_at is null/g) || []).length >= 2);
   assert.match(migration, /Clock out the active visit before authorizing the next capital visit/);
   assert.match(migration, /Clock out the active visit before completing capital work/);
-  assert.match(detail, /hasOpenVisit \? "Waiting for active visit checkout" : "Authorize & resume capital work"/);
-  assert.match(detail, /hasOpenVisit \? "Checkout required before completion" : "Capital Completed"/);
+  assert.match(detail, /hasOpenVisit=\{hasOpenVisit\}/);
+  assert.match(capitalActions, /hasOpenVisit \? "Waiting for active visit checkout" : "Authorize & resume capital work"/);
+  assert.match(capitalActions, /hasOpenVisit \? "Checkout required before completion" : "Capital Completed"/);
 });
 
 test("authorization after an earlier visit exposes Resume and creates a genuine return visit", () => {

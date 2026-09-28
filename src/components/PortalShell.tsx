@@ -40,11 +40,15 @@ import useWorkOrders from "../features/work-orders/useWorkOrders";
 import KanbanBoard from "../features/work-orders/KanbanBoard";
 import WorkOrderList from "../features/work-orders/WorkOrderList";
 import WorkOrderDetail from "../features/work-orders/WorkOrderDetail";
+import { FocusedPortalNavigation } from "../features/simplified-work/FocusedPortalNavigation";
+import { BetaBadge } from "./ui/BetaBadge";
 import AdministrativeTransferAction from "../features/work-orders/AdministrativeTransferAction";
 import CloseReopenedFollowUpModal from "../features/work-orders/CloseReopenedFollowUpModal";
 import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
+import SimplifiedWorkspace from "../features/simplified-work/SimplifiedWorkspace";
+import MySchedule from "../features/schedule/MySchedule";
 import {
   WORK_ORDER_BY_ID_KEY,
   WORK_ORDERS_KEY,
@@ -86,6 +90,12 @@ import { directoryActorScope } from "../lib/counts/queryKeys";
 import {
   T, PRIORITY, MONTHS, WEEKDAYS,
 } from "../lib/constants";
+import {
+  buildBottomNavigationItems,
+  buildPortalNavigationItems,
+  portalNavigationRole,
+  portalPageTitle,
+} from "../lib/portalNavigationItems";
 import {
   dateTimeInputPartsInTimeZone,
   storeLocalDateTimeToIso,
@@ -1184,6 +1194,8 @@ export default function PortalShell() {
   const [staffWorkFilter, setStaffWorkFilter] = useState<StaffWorkFilter>("all");
   const [staffWorkBusyId, setStaffWorkBusyId] = useState<string | null>(null);
   const [workOrderReturnPage, setWorkOrderReturnPage] = useState<string | null>(null);
+  const [attachmentTarget, setAttachmentTarget] = useState<string | null>(null);
+  const [focusedBilling, setFocusedBilling] = useState(false);
   const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
   const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
   const [billingWorkOrderToStart, setBillingWorkOrderToStart] = useState<string | null>(null);
@@ -2067,6 +2079,7 @@ export default function PortalShell() {
   }, [modal, woData, shellScope, shellFormState]);
 
   const nav = useCallback((p: string) => {
+    setFocusedBilling(false);
     setPage(p);
     setSelectedWO(null);
     setSelectedBillingInvoice(null);
@@ -2647,42 +2660,31 @@ export default function PortalShell() {
     () => invoices.find(i => i.num === submittedInvoiceNum),
     [invoices, submittedInvoiceNum]
   );
-  const sideItems = useMemo(() => invoiceController
-    ? [
-      { id: "dashboard", label: "Controller", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
-      { id: "invoices", label: "Contractor bills", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8" },
-    ]
-    : isManager
-    ? [
-      { id: "dashboard", label: "Dashboard", icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" },
-      { id: "staff_work", label: "My Work", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11", badge: navigationSummary?.staffWorkCount || null },
-      { id: "work_orders", label: "Work orders", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: openCount },
-      { id: "capital", label: "Capital", icon: "M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4", badge: capitalCount || null },
-      { id: "invoices", label: "Contractor bills", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: pendAppr || null },
-      { id: "billing", label: "7-Eleven billing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6M9 9h1" },
-      { id: "contractors", label: "Contractors", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
-      { id: "contractor_preview", label: "Contractor view", icon: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" },
-      { id: "history", label: "History", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
-    ]
-    : [
-      { id: "my_jobs", label: "My jobs", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", badge: contractorActiveBadge, attentionBadge: contractorAttentionBadge },
-      { id: "history", label: "Closed jobs", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z", badge: historyCount || null },
-      ...(currentUser?.canLeadTeam || currentUser?.canManageTeam ? [
-        { id: "team_dispatch", label: "My Team", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
-      ] : []),
-      ...(currentUser?.canInvoice ? [
-        { id: "invoices", label: "Invoices", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8", badge: contractorInvoiceBadge },
-      ] : []),
-    ],
-    [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]
+  const navigationRole = portalNavigationRole({ invoiceController, isManager });
+  const focusedNavigation = isManager && !invoiceController && (page === "simplified"
+    || page === "my_schedule" || (page === "wo_detail" && ["simplified", "my_schedule"].includes(workOrderReturnPage || ""))
+    || (page === "billing" && focusedBilling));
+  const sideItems = useMemo(() => buildPortalNavigationItems({
+    invoiceController,
+    isManager,
+    canInvoice: currentUser?.canInvoice,
+    canLeadTeam: currentUser?.canLeadTeam,
+    canManageTeam: currentUser?.canManageTeam,
+    counts: {
+      capital: capitalCount || null,
+      contractorActive: contractorActiveBadge,
+      contractorAttention: contractorAttentionBadge,
+      contractorInvoice: contractorInvoiceBadge,
+      history: historyCount || null,
+      open: openCount,
+      pendingApproval: pendAppr || null,
+      staffWork: navigationSummary?.staffWorkCount || null,
+    },
+  }), [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
+  const bottomNavItems = useMemo(
+    () => buildBottomNavigationItems(sideItems, navigationRole),
+    [navigationRole, sideItems],
   );
-  const bottomNavItems = useMemo(() => {
-    const preferred = ["dashboard", "staff_work", "work_orders", "invoices"];
-    const items = preferred
-      .map(id => sideItems.find(item => item.id === id))
-      .filter((item): item is NonNullable<typeof item> => item != null);
-    return items.length ? items : sideItems.slice(0, 4);
-  }, [sideItems]);
 
   useEffect(() => {
     if (!invoiceController || page === "dashboard" || page === "invoices") return;
@@ -2717,7 +2719,10 @@ export default function PortalShell() {
   // ===============================================================
   //  APP SHELL
   // ===============================================================
-  const pageTitle: any = { dashboard: "Dashboard", staff_work: "My Work", work_orders: selectedWO ? woData?.id : "Work orders", invoices: isManager ? "Contractor bills" : "Invoices", billing: "7-Eleven billing", contractors: "Contractors", contractor_preview: "Contractor view", my_jobs: "My jobs", team_dispatch: "My Team", wo_detail: woData?.id || "Work order", capital: "Capital projects", history: isManager ? "History" : "Closed jobs" };
+  const pageTitle = portalPageTitle(page, {
+    isManager,
+    selectedWorkOrderTitle: selectedWO ? woData?.id : null,
+  });
   const isWorkOrderPageTitle = Boolean(
     selectedWO
     && woData?.id
@@ -2815,13 +2820,15 @@ export default function PortalShell() {
           </div>
         </div>
         <div style={{ padding: "14px 0", flex: 1 }}>
-          {sideItems.map(item => {
+          <FocusedPortalNavigation items={sideItems} enabled={focusedNavigation}>{item => {
             const active = page === item.id;
             return (
               <button
                 key={item.id}
+                aria-label={item.label}
                 onClick={() => {
                   nav(item.id);
+                  if (focusedNavigation && item.id === "billing") setFocusedBilling(true);
                   closeMobileDrawer();
                 }}
                 style={{
@@ -2844,6 +2851,7 @@ export default function PortalShell() {
               >
                 <Ico d={item.icon} size={17} color={active ? T.accent : T.sidebarText} />
                 <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
+                {item.beta && <BetaBadge />}
                 {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
                 {item.attentionBadge != null && item.attentionBadge > 0 && (
                   <span
@@ -2855,7 +2863,7 @@ export default function PortalShell() {
                 )}
               </button>
             );
-          })}
+          }}</FocusedPortalNavigation>
         </div>
         <div style={{ borderTop: "1px solid rgba(250,247,242,0.06)", padding: "14px 0 10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px 12px" }}>
@@ -2968,10 +2976,11 @@ export default function PortalShell() {
           </div>
         </div>
         <div style={{ padding: "14px 12px", flex: 1 }}>
-          {sideItems.map(item => (
-            <button key={item.id} onClick={() => nav(item.id)} className={`side-btn ${page === item.id ? "active" : ""}`}>
+          <FocusedPortalNavigation items={sideItems} enabled={focusedNavigation}>{item => (
+            <button key={item.id} aria-label={item.label} onClick={() => { nav(item.id); if (focusedNavigation && item.id === "billing") setFocusedBilling(true); }} className={`side-btn ${page === item.id ? "active" : ""}`}>
               <Ico d={item.icon} size={16} color={page === item.id ? T.accent : T.sidebarText} />
               <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
+              {item.beta && <BetaBadge />}
               {item.badge != null && <span style={{ fontSize: 10, background: item.id === "capital" ? T.violet : T.accent, color: "#fff", borderRadius: 10, padding: "2px 8px", fontWeight: 700 }}>{item.badge}</span>}
               {item.attentionBadge != null && item.attentionBadge > 0 && (
                 <span
@@ -2982,7 +2991,7 @@ export default function PortalShell() {
                 </span>
               )}
             </button>
-          ))}
+          )}</FocusedPortalNavigation>
         </div>
         <div style={{ padding: 16, borderTop: "1px solid rgba(250,247,242,0.06)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -3064,7 +3073,7 @@ export default function PortalShell() {
           <button key={item.id} onClick={() => nav(item.id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "8px 0", gap: 3, cursor: "pointer", color: page === item.id ? T.accent : T.sidebarText, background: "none", border: "none", fontFamily: "inherit" }}>
             <div style={{ width: 4, height: 4, borderRadius: "50%", background: page === item.id ? T.accent : "transparent", marginBottom: 2 }} />
             <Ico d={item.icon} size={22} color={page === item.id ? T.accent : T.sidebarText} />
-            <span style={{ fontSize: 9, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.accent : T.sidebarText }}>{item.label.split(" ")[0]}</span>
+            <span className="flex items-center gap-1" style={{ fontSize: 9, fontWeight: page === item.id ? 600 : 400, color: page === item.id ? T.accent : T.sidebarText }}>{item.id === "my_schedule" ? "Schedule" : item.label.split(" ")[0]}{item.beta && <BetaBadge />}</span>
           </button>
         ))}
       </div>
@@ -3075,7 +3084,7 @@ export default function PortalShell() {
         <div className="topbar-shell" style={{ padding: "20px 28px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 20 }}>
           <div className="desktop-only-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
             <div>
-              <div className={`display topbar-title${isWorkOrderPageTitle ? " work-order-page-title" : ""}`} style={{ fontSize: 28, color: T.ink, letterSpacing: isWorkOrderPageTitle ? -0.2 : -0.5, lineHeight: 1 }}>{pageTitle[page]}</div>
+              <div className={`display topbar-title${isWorkOrderPageTitle ? " work-order-page-title" : ""}`} style={{ fontSize: 28, color: T.ink, letterSpacing: isWorkOrderPageTitle ? -0.2 : -0.5, lineHeight: 1 }}>{pageTitle}</div>
               <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -3099,8 +3108,10 @@ export default function PortalShell() {
                     </span>
                   )}
                 </button>
-                <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
-                <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
+                {!focusedNavigation && <>
+                  <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
+                  <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
+                </>}
                 </>
               )}
             </div>
@@ -3130,7 +3141,7 @@ export default function PortalShell() {
                 </svg>
               </button>
               <div className="mobile-header-title">
-                <div className={`display${isWorkOrderPageTitle ? " work-order-page-title" : ""}`} style={{ fontSize: 22, color: T.ink, letterSpacing: isWorkOrderPageTitle ? -0.1 : -0.3, lineHeight: 1 }}>{pageTitle[page]}</div>
+                <div className={`display${isWorkOrderPageTitle ? " work-order-page-title" : ""}`} style={{ fontSize: 22, color: T.ink, letterSpacing: isWorkOrderPageTitle ? -0.1 : -0.3, lineHeight: 1 }}>{pageTitle}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{isManager ? dateLong() : currentUser.company}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -3160,7 +3171,7 @@ export default function PortalShell() {
                 )}
               </div>
             </div>
-            {isManager && !invoiceController && (
+            {isManager && !invoiceController && !focusedNavigation && (
               <div className="mobile-header-actions">
                 <button onClick={doAutoAssign} className="btn-soft">Auto-dispatch</button>
                 <button onClick={() => setModal("newWO")} className="btn-primary">+ Create Work Order</button>
@@ -3219,6 +3230,35 @@ export default function PortalShell() {
             setSearch={setSearch}
             woParts={woParts}
           />
+
+          {!invoiceController && (
+            <SimplifiedWorkspace
+              active={page === "simplified"}
+              currentUser={currentUser}
+              isManager={isManager}
+              onOpenWorkOrder={(workOrderId: string) => {
+                setWorkOrderReturnPage("simplified");
+                setSelectedWO(workOrderId);
+                setAiNote(null);
+                setPage("wo_detail");
+              }}
+              onOpenInvoices={() => { nav("billing"); setFocusedBilling(true); }}
+            />
+          )}
+
+          {!invoiceController && (
+            <MySchedule
+              active={page === "my_schedule"}
+              currentUser={currentUser}
+              isManager={isManager}
+              onOpenWorkOrder={(workOrderId: string) => {
+                setWorkOrderReturnPage("my_schedule");
+                setSelectedWO(workOrderId);
+                setAiNote(null);
+                setPage("wo_detail");
+              }}
+            />
+          )}
 
           {page === "staff_work" && isManager && !invoiceController && (
             <ReceivingDispatchQueue profile={currentUser} onOpenWorkOrder={(workOrderId: string) => {
@@ -3339,6 +3379,8 @@ export default function PortalShell() {
 
           {isManager && !invoiceController && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
+              focused={focusedBilling}
+              onBackToSimplified={() => nav("simplified")}
               page={page}
               currentUser={currentUser}
               invoices={billingInvoices}
@@ -3395,6 +3437,15 @@ export default function PortalShell() {
                 } catch (error) { fire(`Invoice could not be opened: ${safeErrorMessage(error)}`); }
               }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
+              onOpenAttachments={() => {
+                const id = selectedBillingInvoiceData?.wot;
+                if (!id) return;
+                setAttachmentTarget(id);
+                setWorkOrderReturnPage("billing");
+                setSelectedWO(id);
+                setAiNote(null);
+                setPage("wo_detail");
+              }}
               onDownloadCsv={() => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv(selectedBillingInvoiceData)}
               onMarkBilled={() => selectedBillingInvoiceData && doMarkBillingInvoiceBilled(selectedBillingInvoiceData)}
               onMarkReady={() => selectedBillingInvoiceData && doMarkBillingInvoiceReady(selectedBillingInvoiceData)}
@@ -3476,6 +3527,9 @@ export default function PortalShell() {
           )}
 
           <WorkOrderDetail
+            focused={workOrderReturnPage === "simplified" || workOrderReturnPage === "my_schedule" || (workOrderReturnPage === "billing" && focusedBilling)}
+            attachmentTarget={attachmentTarget}
+            onAttachmentsFocused={() => setAttachmentTarget(null)}
             key={`work-order-detail:${currentUser.id}:${selectedWO || ""}`}
             page={page}
             selectedWO={selectedWO}

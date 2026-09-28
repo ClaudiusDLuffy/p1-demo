@@ -1,7 +1,8 @@
 "use client";
 // @ts-nocheck
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { Badge } from "../../components/ui/Badge";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
@@ -14,6 +15,7 @@ import InvoiceLineTypeSubtotals from "./InvoiceLineTypeSubtotals";
 import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
 import { useInvoiceLinePage } from "../invoices/invoiceLineQueries";
 import InvoiceLinePagination from "../invoices/InvoiceLinePagination";
+import { AttachmentsButton } from "../work-orders/WorkOrderAttachments";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -35,6 +37,8 @@ export default function BillingInvoiceDetail(props: any) {
   const [markingReady, setMarkingReady] = useState(false);
   const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
   const [billing, setBilling] = useState(false);
+  const billingInFlight = useRef(false);
+  const [billingError, setBillingError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const lineQuery = useInvoiceLinePage({ ...invoice, staff: true });
 
@@ -61,12 +65,13 @@ export default function BillingInvoiceDetail(props: any) {
       <div className="invoice-action-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, maxWidth: 860 }}>
         <button onClick={onBack} className="invoice-back-button" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}><Ico d="M15 18l-6-6 6-6" size={14} /> {backLabel}</button>
         <div className="invoice-action-buttons" style={{ display: "flex", gap: 8 }}>
+          {invoice.wot && props.onOpenAttachments && <AttachmentsButton onClick={props.onOpenAttachments} />}
           <button onClick={onDownloadPdf} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Ico d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" size={13} color="currentColor" />
             Download PDF
           </button>
           {canMarkBilled && (
-            <button onClick={() => setConfirmBilled(true)} className="btn-accent">
+            <button onClick={() => { setBillingError(""); setConfirmBilled(true); }} className="btn-accent">
               {capitalHandoff ? "Submit Quote to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           )}
@@ -135,15 +140,23 @@ export default function BillingInvoiceDetail(props: any) {
               <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven and close its linked work order? Linked contractor invoices will remain Approved.</>
             )}
           </div>
+          <p className="mb-3 text-xs text-p1-muted">Only confirm after sending it in 7-Eleven. This records the handoff in P1; it does not upload the document to 7-Eleven.</p>
+          {billingError && <p role="alert" className="mb-3 text-sm text-p1-danger">{billingError}</p>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setConfirmBilled(false)} disabled={billing} className="btn-soft">Cancel</button>
             <button
               onClick={async () => {
+                if (billingInFlight.current) return;
+                billingInFlight.current = true;
                 setBilling(true);
+                setBillingError("");
                 try {
                   await onMarkBilled?.();
                   setConfirmBilled(false);
+                } catch (error) {
+                  setBillingError(safeErrorMessage(error));
                 } finally {
+                  billingInFlight.current = false;
                   setBilling(false);
                 }
               }}

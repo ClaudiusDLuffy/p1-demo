@@ -6,6 +6,7 @@ import test from "node:test";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 const shell = read("src/components/PortalShell.tsx");
+const navigation = read("src/lib/portalNavigationItems.ts");
 const historyView = read("src/features/work-orders/HistoryView.tsx");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
 const activityPanels = read("src/features/work-orders/WorkOrderActivityPanels.tsx");
@@ -16,10 +17,12 @@ const historyReadMigration = read(
 
 test("contractors have a clearly labeled closed-jobs navigation entry", () => {
   assert.match(
-    shell,
-    /\{ id: "history", label: "Closed jobs",[\s\S]*badge: historyCount \|\| null \}/,
+    navigation,
+    /\{ id: "history", label: "Closed jobs",[\s\S]*badge: options.counts.history \}/,
   );
-  assert.match(shell, /history: isManager \? "History" : "Closed jobs"/);
+  assert.match(navigation, /history: options.isManager \? "History" : "Closed jobs"/);
+  assert.match(shell, /buildPortalNavigationItems\(/);
+  assert.match(shell, /portalPageTitle\(page/);
   assert.match(shell, /<HistoryView[\s\S]*currentUser=\{currentUser\}/);
   assert.match(historyView, /isContractorHistory \? "Closed jobs" : "History"/);
   assert.match(

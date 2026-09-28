@@ -12,6 +12,8 @@ import {
 import { DEMO_ACCOUNTS } from "../../lib/constants";
 import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { directoryActorScope } from "../../lib/counts/queryKeys";
+import { initialFocusedPortalPage, portalNavigationRole } from "../../lib/portalNavigationItems";
+import { isInvoiceController } from "../../lib/staffPermissions";
 import { parseAuthProfile, type PortalAuthProfile } from "./authProfile";
 import { activateBrowserDraftSession, draftActivationTicket, revokeBrowserDraftSession, suspendBrowserDraftSession } from "../../lib/drafts/browserDraftSession";
 
@@ -128,7 +130,13 @@ export default function useAuth({
       lastLoadedUserIdRef.current = prof.id;
       currentProfileRef.current = next;
       setCurrentUser(next);
-      if (initial || changed) setPage(prof.role === "contractor" ? "my_jobs" : "dashboard");
+      if (initial || changed) {
+        const role = portalNavigationRole({
+          invoiceController: isInvoiceController(next),
+          isManager: ["manager", "dispatcher", "back_office"].includes(next.role),
+        });
+        setPage(initialFocusedPortalPage(role, initial && !changed ? window.location.search : ""));
+      }
       return next.active && !changed;
     } catch (err: unknown) {
       if (expectedUserIdRef.current !== userId || request !== profileRequestRef.current) return false;

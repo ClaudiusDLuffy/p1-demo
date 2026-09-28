@@ -70,6 +70,10 @@ import StoreWorkOrderHistory from "./StoreWorkOrderHistory";
 import VisitTimeline from "./VisitTimeline";
 import WorkOrderActivityPanels from "./WorkOrderActivityPanels";
 import { useInvoicePartHints } from "./useInvoicePartHints";
+import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
+import { WorkOrderCapitalActions } from "./WorkOrderCapitalActions";
+import { FocusedWorkOrderHeader } from "../simplified-work/FocusedWorkOrderHeader";
+import { AttachmentsButton, WorkOrderAttachments } from "./WorkOrderAttachments";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -110,6 +114,8 @@ const formatEta = (v: any, workOrder?: any): string => {
 };
 
 export default function WorkOrderDetail(props: any) {
+  const [layoutOverride, setLayoutOverride] = useState<{ id: string; focused: boolean } | null>(null);
+  const focused = layoutOverride?.id === props.selectedWO ? layoutOverride.focused : props.focused === true;
   const { photoUploadItems = [], retryPhotoUploads, cancelPhotoUploads, photoDeleteError = "", retryPhotoDeletion } = props;
   const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doReturnCompletedToField, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
   const detailEnabled = Boolean(
@@ -408,6 +414,10 @@ export default function WorkOrderDetail(props: any) {
   const rejectionDismissal = useUnsavedChangesGuard({ dirty: rejectReason.length > 0,
     busy: rejectingBusy, enabled: detailEnabled && Boolean(rejectingInv),
     onClose: () => { setRejectingInv(null); setRejectReason(""); } });
+  const capitalActions = <WorkOrderCapitalActions workOrderId={woData?.id} status={woData?.status}
+    enabled={isManager && !invoiceController} canFlag={Boolean(woData && canFlagWorkOrderCapital(woData))}
+    hasOpenVisit={hasOpenVisit} isLoading={isLoading} onFlag={doCapitalFlag} onDecline={doCapitalDecline}
+    onResume={doCapitalResume} onComplete={doCapitalComplete} />;
   return (
     <>
           {/* ═════ WO DETAIL ═════ */}
@@ -418,91 +428,8 @@ export default function WorkOrderDetail(props: any) {
             const sla2 = computeSlaState(woData.responseBreachAt, woData.resolutionBreachAt, woData.startTimeRaw);
             const dates = getWorkOrderDateMeta(woData);
             const aging = getSlaAgingStyle(woData);
-            return (
-              <div style={{ animation: "fadeUp 0.25s" }}>
-                {props.paginationError && (
-                  <div role="alert" style={{ color: T.danger, marginBottom: 12, fontSize: 12 }}>
-                    Could not load more history. {safeErrorMessage(props.paginationError)} Use Load more to retry, or refresh the work order.
-                  </div>
-                )}
-                <div style={{ marginBottom: 16 }}>
-                  <button
-                    type="button"
-                    aria-label="Back to previous view"
-                    onClick={() => onBackFromWorkOrder?.()}
-                    className="btn-soft"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 36, padding: "7px 12px", borderRadius: 999, fontSize: 11, color: T.muted }}
-                  >
-                    <Ico d="M15 18l-6-6 6-6" size={14} /> Back
-                  </button>
-                </div>
-
-                {isManager && woData.billingOnly && (
-                  <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
-                    <div style={{ color: "#92400E", fontSize: 12, fontWeight: 800 }}>Billing only · do not dispatch</div>
-                    <div style={{ color: "#A16207", fontSize: 10, marginTop: 3 }}>
-                      This work order was sent directly to Ready to Bill. Contractor assignment and dispatch notifications are disabled.
-                    </div>
-                  </div>
-                )}
-
-                {woData.status === "closed" && isManager && !invoiceController && (
-                  <div className="card" style={{ padding: "14px 16px", marginBottom: 12, background: T.surface, border: `1px solid ${T.accentRing}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
-                    <div style={{ flex: "1 1 280px" }}>
-                      <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>This work order is closed</div>
-                      <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
-                        Reopen it only when field work must resume or billing needs correction. A purpose and audit reason are required.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onRequestReopen?.(woData)}
-                      disabled={isLoading("reopen_" + woData.id)}
-                      className="btn-primary"
-                      style={loadingStyle("reopen_" + woData.id)}
-                    >
-                      {isLoading("reopen_" + woData.id)
-                        ? <><BtnSpinner />Reopening...</>
-                        : "Reopen work order"}
-                    </button>
-                  </div>
-                )}
-
-                {canReturnToField && (
-                  <div className="card" style={{ padding: "14px 16px", marginBottom: 12, background: T.surface, border: `1px solid ${T.accentRing}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
-                    <div style={{ flex: "1 1 280px" }}>
-                      <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>Field work is marked complete</div>
-                      <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
-                        If another visit is required, return this job to field work. Existing invoices and visit history stay unchanged, and a reason is recorded.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReturnToFieldReason("");
-                        setReturnToFieldError("");
-                        setReturnToFieldOpen(true);
-                      }}
-                      disabled={isLoading("returnToField_" + woData.id)}
-                      className="btn-primary"
-                      style={loadingStyle("returnToField_" + woData.id)}
-                    >
-                      {isLoading("returnToField_" + woData.id)
-                        ? <><BtnSpinner />Returning...</>
-                        : "Return to field work"}
-                    </button>
-                  </div>
-                )}
-
-                {contractorHistoryReadOnly && (
-                  <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: T.surfaceSoft, borderColor: T.borderSoft }}>
-                    <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>Closed job · read only</div>
-                    <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
-                      This record remains available for reference. Work-order, invoice, note, photo, part, and assignment changes are disabled here.
-                    </div>
-                  </div>
-                )}
-
+            const secondaryAlerts = (<>
+                <DetailDisclosure focused={focused} title="Staff follow-up">
                 {isManager && woData.status !== "closed" && (
                   <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 16px", marginBottom: 12 }}>
                     <div>
@@ -550,6 +477,8 @@ export default function WorkOrderDetail(props: any) {
                   </div>
                 )}
 
+                </DetailDisclosure>
+                <DetailDisclosure focused={focused} title="SLA and additional alerts">
                 {/* Alert stack — two-breach SLA replaces the single-deadline view */}
                 {woData?.duplicateRootWorkOrderId && (
                   <div role="status" className="card" style={{ background: T.accentSoft, border: `1px solid ${T.accentRing}`, padding: "14px 20px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -650,8 +579,10 @@ export default function WorkOrderDetail(props: any) {
                     </div>
                   </div>
                 )}
-                <div className="detail-two-col" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
-                  <div>
+                </DetailDisclosure>
+            </>);
+            const jobInformation = (<>
+                    <DetailDisclosure focused={focused} title="Job information and equipment">
                     {/* Header card */}
                     <div className="card" style={{ padding: 24, marginBottom: 16 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
@@ -736,6 +667,8 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                     </div>
 
+                    </DetailDisclosure>
+                    <DetailDisclosure focused={focused} title="Store history">
                     {isManager && woData.store && (
                       <StoreWorkOrderHistory
                         currentWorkOrderId={woData.id}
@@ -755,218 +688,10 @@ export default function WorkOrderDetail(props: any) {
                       />
                     )}
 
-                    {!woData.billingOnly && <ReceivingDispatchStatus key={`${woData.id}:${woData.contractorAssignmentVersion}`} profile={currentUser}
-                      workOrderId={woData.id} assignmentVersion={woData.contractorAssignmentVersion} />}
-
-                    {/* Actions */}
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                      {woData.status === "unassigned" && isManager && !invoiceController && (
-                        <button
-                          onClick={() => doStraightToBilling(woData.id)}
-                          disabled={isLoading("straightToBilling_" + woData.id)}
-                          className="btn-accent"
-                          style={loadingStyle("straightToBilling_" + woData.id)}
-                        >
-                          {isLoading("straightToBilling_" + woData.id)
-                            ? <><BtnSpinnerDark />Moving...</>
-                            : "Straight to Billing"}
-                        </button>
-                      )}
-                      {isManager
-                        && !invoiceController
-                        && woData.status !== "closed"
-                        && !(woData.isCapital && woData.status === "completed")
-                        && onOpenBillingForWorkOrder && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenBillingForWorkOrder(woData.id, currentBillingDocument?.id || null)}
-                          className="btn-primary"
-                        >
-                          {currentBillingDocument
-                            ? currentBillingDocument.documentKind === "capital_quote"
-                              ? "Open capital quote"
-                              : "Open P1 to 7-Eleven invoice"
-                            : woData.status === "capital"
-                              ? "Create capital quote"
-                              : "Create P1 to 7-Eleven invoice"}
-                        </button>
-                      )}
-                      {!contractorHistoryReadOnly
-                        && !invoiceController
-                        && capitalStageActive
-                        && hasOpenVisit && (
-                        <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-accent" style={loadingStyle("pauseWork_" + woData.id)}>
-                          {isLoading("pauseWork_" + woData.id) ? <><BtnSpinner />Clocking out...</> : "Clock out for capital review"}
-                        </button>
-                      )}
-                      {canAssignCurrentWorkOrder && <DirectorySelect domain="assignable_contractors" value=""
-                        emptyLabel={isLoading("assign_" + woData.id) ? "Assigning…" : "Assign to contractor…"}
-                        disabled={isLoading("assign_" + woData.id)} style={{ width: 240 }}
-                        onChange={event => { if (event.target.value) void doAssign(woData.id, event.target.value); }} />}
-                      {canRejectDuringDispatch && (
-                        <button
-                          type="button"
-                          onClick={() => setModal("rejectUnassignedWO")}
-                          disabled={isLoading("rejectUnassignedWO_" + woData.id)}
-                          className="btn-soft"
-                          style={{
-                            ...loadingStyle("rejectUnassignedWO_" + woData.id),
-                            color: T.danger,
-                            borderColor: `${T.danger}55`,
-                          }}
-                        >
-                          {isLoading("rejectUnassignedWO_" + woData.id)
-                            ? <><BtnSpinnerDark />Rejecting...</>
-                            : "Reject work order"}
-                        </button>
-                      )}
-                      {canChangeCurrentAssignment && (
-                        <>
-                          <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} disabled={isLoading("reassign_" + woData.id)} className="btn-soft" style={loadingStyle("reassign_" + woData.id)}>
-                            {isLoading("reassign_" + woData.id) ? <><BtnSpinnerDark />Reassigning...</> : "Reassign"}
-                          </button>
-                          <button onClick={() => setModal("unassign")} disabled={isLoading("unassign_" + woData.id)} className="btn-soft" style={loadingStyle("unassign_" + woData.id)}>
-                            {isLoading("unassign_" + woData.id) ? <><BtnSpinnerDark />Unassigning...</> : "Unassign"}
-                          </button>
-                        </>
-                      )}
-                      {canDuplicateForReassignment && (
-                        <button
-                          type="button"
-                          onClick={() => setModal("duplicateForReassignment")}
-                          disabled={isLoading("duplicateForReassignment_" + woData.id)}
-                          className="btn-soft"
-                          style={loadingStyle("duplicateForReassignment_" + woData.id)}
-                        >
-                          {isLoading("duplicateForReassignment_" + woData.id)
-                            ? <><BtnSpinnerDark />Duplicating...</>
-                            : "Duplicate for reassignment"}
-                        </button>
-                      )}
-                      {!contractorHistoryReadOnly && visitAction === "start" && (
-                        <>
-                          {canSetCurrentEta && (
-                            <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
-                              {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
-                            </button>
-                          )}
-                          <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
-                            {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Starting...</> : "Start work"}
-                          </button>
-                        </>
-                      )}
-                      {/* Field completion is independent of invoice permission.
-                          Invoice-capable technicians retain the separate invoice
-                          workflow after marking the field work complete. */}
-                      {!contractorHistoryReadOnly && !isManager && jobOpen && fieldWorkInProgress && !woData.assignmentTransferPendingVisit && !["assigned", "parts"].includes(woData.status) && (
-                        <>
-                          {woData.functionalStatus === "Work in Progress" && (
-                            <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
-                              {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
-                            </button>
-                          )}
-                          <button type="button" onClick={() => setModal("workReport")} className="btn-soft">
-                            Submit work report
-                          </button>
-                          {contractorCompletionControl.visible && (
-                            <button
-                              type="button"
-                              onClick={() => setModal("closeComplete")}
-                              disabled={isLoading("closeComplete_" + woData.id)}
-                              className="btn-primary"
-                              style={{
-                                ...loadingStyle("closeComplete_" + woData.id),
-                                opacity: isLoading("closeComplete_" + woData.id) ? 0.58 : 1,
-                                cursor: isLoading("closeComplete_" + woData.id) ? "default" : "pointer",
-                              }}
-                            >
-                              {isLoading("closeComplete_" + woData.id)
-                                ? <><BtnSpinner />Completing...</>
-                                : "Mark work complete"}
-                            </button>
-                          )}
-                        </>
-                      )}
-                      {isManager
-                        && !woData.assignmentTransferPendingVisit
-                        && woData.functionalStatus === "Work in Progress"
-                        && ["wip", "pending_invoice", "pending_approval"].includes(woData.status) && (
-                        <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
-                          {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
-                        </button>
-                      )}
-                      {isManager && !invoiceController && canFlagWorkOrderCapital(woData) && (
-                        <button onClick={() => void doCapitalFlag(woData.id)} disabled={isLoading("capitalFlag_" + woData.id)} className="btn-soft" style={loadingStyle("capitalFlag_" + woData.id)}>{isLoading("capitalFlag_" + woData.id) ? <><BtnSpinnerDark />Flagging...</> : "Flag capital"}</button>
-                      )}
-                      {woData.status === "capital" && isManager && !invoiceController && (
-                        <button onClick={() => doCapitalDecline(woData.id)} disabled={isLoading("capitalDecline_" + woData.id)} className="btn-soft" style={loadingStyle("capitalDecline_" + woData.id)}>
-                          {isLoading("capitalDecline_" + woData.id)
-                            ? <><BtnSpinnerDark />Returning...</>
-                            : "Capital declined - restore field workflow"}
-                        </button>
-                      )}
-                      {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
-                        <button onClick={() => void doCapitalResume(woData.id)} disabled={hasOpenVisit || isLoading("capitalResume_" + woData.id)} className="btn-accent" style={{ ...loadingStyle("capitalResume_" + woData.id), opacity: hasOpenVisit ? 0.55 : undefined }}>
-                          {isLoading("capitalResume_" + woData.id)
-                            ? <><BtnSpinner />Authorizing...</>
-                            : hasOpenVisit ? "Waiting for active visit checkout" : "Authorize & resume capital work"}
-                        </button>
-                      )}
-                      {woData.status === "pending_capital_completion" && isManager && !invoiceController && (
-                        <button onClick={() => void doCapitalComplete(woData.id)} disabled={hasOpenVisit || isLoading("capitalComplete_" + woData.id)} className="btn-accent" style={{ ...loadingStyle("capitalComplete_" + woData.id), opacity: hasOpenVisit ? 0.55 : undefined }}>
-                          {isLoading("capitalComplete_" + woData.id)
-                            ? <><BtnSpinner />Completing...</>
-                            : hasOpenVisit ? "Checkout required before completion" : "Capital Completed"}
-                        </button>
-                      )}
-                      {!contractorHistoryReadOnly && (visitAction === "resume" || visitAction === "receiving_start") && (
-                        <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
-                          {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : woData.assignmentTransferPendingVisit ? "Start new visit after transfer" : "Resume work"}
-                        </button>
-                      )}
-                      {woData.status === "completed" && isManager && (
-                        <button onClick={() => doMoveToInvoice(woData.id)} disabled={isLoading("moveToInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("moveToInvoice_" + woData.id)}>
-                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated - pending 7-Eleven submission"}
-                        </button>
-                      )}
-                      {/* Staff retain only the explicit no-invoice exception.
-                          Invoice-backed work orders close from Billing when staff
-                          records Billed to 7-Eleven. */}
-                      {canCloseReopenedFollowUp && (
-                        <button
-                          type="button"
-                          onClick={() => setModal("closeReopenedFollowUp")}
-                          disabled={isLoading("closeReopenedFollowUp_" + woData.id)}
-                          className="btn-primary"
-                          style={loadingStyle("closeReopenedFollowUp_" + woData.id)}
-                        >
-                          {isLoading("closeReopenedFollowUp_" + woData.id)
-                            ? <><BtnSpinnerDark />Closing...</>
-                            : "Close follow-up — no additional billing"}
-                        </button>
-                      )}
-                      {isManager && woData.status !== "closed" && !hasAnyLiveInvoice && (
-                        <button onClick={() => setModal("closeWithoutInvoice")} disabled={isLoading("closeWithoutInvoice_" + woData.id)} className="btn-primary" style={loadingStyle("closeWithoutInvoice_" + woData.id)}>
-                          {isLoading("closeWithoutInvoice_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close — no invoice"}
-                        </button>
-                      )}
-                      {/* Closed job: invoice download remains available. Reopen is
-                          deliberately prominent in the closed-state banner. */}
-                      {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
-
-                    </div>
-
-                    {!isManager && woData.status === "pending_capital_completion" && (
-                      <div role="status" className="card" style={{ padding: "14px 16px", marginBottom: 16, background: T.warnSoft, borderColor: `${T.warn}44` }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Capital work is waiting for P1 authorization</div>
-                        <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
-                          {hasOpenVisit
-                            ? "Clock out the current visit first. P1 can then record 7-Eleven approval and release the next field visit."
-                            : "P1 must record 7-Eleven approval before the contractor can start the next field visit. This hold cannot be bypassed from a contractor account."}
-                        </div>
-                      </div>
-                    )}
-
+                    </DetailDisclosure>
+            </>);
+            const billingDocuments = (<>
+                    <DetailDisclosure focused={focused} title="Invoices, estimates and documents" id="work-order-documents">
                     {!contractorHistoryReadOnly && woData.status !== "closed" && !isManager && canInvoice && (
                       <div className="card contractor-invoice-cta" style={{ padding: "16px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
                         <div>
@@ -1209,6 +934,375 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                     )}
 
+                    </DetailDisclosure>
+            </>);
+            const administrativeRecords = (<>
+                    <DetailDisclosure focused={focused} title="Administrative records">
+                    {/* Keep the staff-only soft-delete separate from the header's
+                        Edit work order action so it is not a primary control. */}
+                    {isManager && (
+                      <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}`, display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                        <button onClick={() => setModal("deleteWO")} disabled={isLoading("deleteWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: isLoading("deleteWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("deleteWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                          {isLoading("deleteWO_" + woData.id) ? <><BtnSpinnerDark />Deleting...</> : "Delete work order"}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Technician on Job — contractor picks who was on site (text
+                        snapshot, optional). Staff see it read-only. Locked at closed
+                        (Completion Record carries it then). */}
+                    {isManager && (woData.assignmentHistory || []).length > 0 && (
+                      <div className="card" style={{ padding: 18, marginBottom: 16 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>
+                          Prior assignment history
+                        </div>
+                        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, marginBottom: 12 }}>
+                          Staff-only archive. Contractors cannot query these records or prior assignment artifacts.
+                        </div>
+                        {(woData.assignmentHistory || []).map((assignment: any) => {
+                          const snapshot = assignment.workflowSnapshot || {};
+                          const details = [
+                            ["ETA", snapshot.eta],
+                            ["Started", snapshot.startTime],
+                            ["Completed", snapshot.endTime],
+                            ["Technician", snapshot.technicianOnJob],
+                            ["Equipment make", snapshot.assetMake],
+                            ["Asset model", snapshot.assetModel],
+                            ["Serial number", snapshot.assetSerial],
+                            ["Asset year", snapshot.assetYear],
+                            ["Resolution", snapshot.resolutionCode],
+                            ["Part needed", snapshot.partNeeded],
+                            ["Part ETA", snapshot.partEta],
+                            ["Invoice total", snapshot.invoiceTotal != null ? fmt(Number(snapshot.invoiceTotal)) : null],
+                            ["Repair quote", snapshot.repairQuote != null ? fmt(Number(snapshot.repairQuote)) : null],
+                            ["Install quote", snapshot.installQuote != null ? fmt(Number(snapshot.installQuote)) : null],
+                          ].filter(([, value]) => value !== null && value !== undefined && value !== "");
+                          return (
+                            <details key={assignment.id} style={{ borderTop: `1px solid ${T.borderSoft}`, padding: "12px 0" }}>
+                              <summary style={{ cursor: "pointer", color: T.ink, fontSize: 12, fontWeight: 700 }}>
+                                <DirectoryProfileName id={assignment.contractorId} company fallback="Former contractor" />
+                                {" to "}{assignment.nextContractorId ? <DirectoryProfileName id={assignment.nextContractorId} company /> : "Unassigned"}
+                                <span style={{ color: T.subtle, fontWeight: 500, marginLeft: 8 }}>
+                                  {new Date(assignment.assignmentEndedAt).toLocaleString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                    hour: "numeric",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              </summary>
+                              {details.length > 0 && (
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 12 }}>
+                                  {details.map(([label, value]) => (
+                                    <div key={String(label)}>
+                                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle, marginBottom: 2 }}>{label}</div>
+                                      <div style={{ fontSize: 12, color: T.inkSoft, overflowWrap: "anywhere" }}>{String(value)}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {(snapshot.resolutionNotes || snapshot.capitalNotes) && (
+                                <div style={{ marginTop: 12, color: T.inkSoft, fontSize: 12, lineHeight: 1.5 }}>
+                                  {snapshot.resolutionNotes || snapshot.capitalNotes}
+                                </div>
+                              )}
+                            </details>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    </DetailDisclosure>
+            </>);
+            return (
+              <div style={{ animation: "fadeUp 0.25s" }}>
+                {props.paginationError && (
+                  <div role="alert" style={{ color: T.danger, marginBottom: 12, fontSize: 12 }}>
+                    Could not load more history. {safeErrorMessage(props.paginationError)} Use Load more to retry, or refresh the work order.
+                  </div>
+                )}
+                <div className="mb-4 flex flex-wrap justify-between gap-2">
+                  <button
+                    type="button"
+                    aria-label="Back to previous view"
+                    onClick={() => onBackFromWorkOrder?.()}
+                    className="btn-soft"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 36, padding: "7px 12px", borderRadius: 999, fontSize: 11, color: T.muted }}
+                  >
+                    <Ico d="M15 18l-6-6 6-6" size={14} /> Back
+                  </button>
+                  {!focused && <AttachmentsButton />}
+                  <button type="button" className="btn-soft min-h-11" onClick={() => setLayoutOverride({ id: selectedWO, focused: !focused })}>
+                    {focused ? "Show full details" : "Show simplified details"}
+                  </button>
+                </div>
+
+                {focused && <FocusedWorkOrderHeader workOrder={woData} eta={formatEta(woData.eta, woData)} />}
+                {isManager && woData.billingOnly && (
+                  <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
+                    <div style={{ color: "#92400E", fontSize: 12, fontWeight: 800 }}>Billing only · do not dispatch</div>
+                    <div style={{ color: "#A16207", fontSize: 10, marginTop: 3 }}>
+                      This work order was sent directly to Ready to Bill. Contractor assignment and dispatch notifications are disabled.
+                    </div>
+                  </div>
+                )}
+
+                {woData.status === "closed" && isManager && !invoiceController && (
+                  <div className="card" style={{ padding: "14px 16px", marginBottom: 12, background: T.surface, border: `1px solid ${T.accentRing}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 280px" }}>
+                      <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>This work order is closed</div>
+                      <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                        Reopen it only when field work must resume or billing needs correction. A purpose and audit reason are required.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRequestReopen?.(woData)}
+                      disabled={isLoading("reopen_" + woData.id)}
+                      className="btn-primary"
+                      style={loadingStyle("reopen_" + woData.id)}
+                    >
+                      {isLoading("reopen_" + woData.id)
+                        ? <><BtnSpinner />Reopening...</>
+                        : "Reopen work order"}
+                    </button>
+                  </div>
+                )}
+
+                {canReturnToField && (
+                  <div className="card" style={{ padding: "14px 16px", marginBottom: 12, background: T.surface, border: `1px solid ${T.accentRing}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 280px" }}>
+                      <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>Field work is marked complete</div>
+                      <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                        If another visit is required, return this job to field work. Existing invoices and visit history stay unchanged, and a reason is recorded.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReturnToFieldReason("");
+                        setReturnToFieldError("");
+                        setReturnToFieldOpen(true);
+                      }}
+                      disabled={isLoading("returnToField_" + woData.id)}
+                      className="btn-primary"
+                      style={loadingStyle("returnToField_" + woData.id)}
+                    >
+                      {isLoading("returnToField_" + woData.id)
+                        ? <><BtnSpinner />Returning...</>
+                        : "Return to field work"}
+                    </button>
+                  </div>
+                )}
+
+                {contractorHistoryReadOnly && (
+                  <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: T.surfaceSoft, borderColor: T.borderSoft }}>
+                    <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>Closed job · read only</div>
+                    <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
+                      This record remains available for reference. Work-order, invoice, note, photo, part, and assignment changes are disabled here.
+                    </div>
+                  </div>
+                )}
+
+                    {!focused && secondaryAlerts}
+                <div className={focused ? "grid min-w-0 gap-4" : "detail-two-col"} style={focused ? undefined : { display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
+                  <div className="min-w-0">
+                    {!focused && jobInformation}
+                    {!woData.billingOnly && <ReceivingDispatchStatus key={`${woData.id}:${woData.contractorAssignmentVersion}`} profile={currentUser}
+                      workOrderId={woData.id} assignmentVersion={woData.contractorAssignmentVersion} />}
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                      <DetailDisclosure focused={focused} title="Dispatch and billing actions">
+                      {woData.status === "unassigned" && isManager && !invoiceController && (
+                        <button
+                          onClick={() => doStraightToBilling(woData.id)}
+                          disabled={isLoading("straightToBilling_" + woData.id)}
+                          className="btn-accent"
+                          style={loadingStyle("straightToBilling_" + woData.id)}
+                        >
+                          {isLoading("straightToBilling_" + woData.id)
+                            ? <><BtnSpinnerDark />Moving...</>
+                            : "Straight to Billing"}
+                        </button>
+                      )}
+                      {isManager
+                        && !invoiceController
+                        && woData.status !== "closed"
+                        && !(woData.isCapital && woData.status === "completed")
+                        && onOpenBillingForWorkOrder && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenBillingForWorkOrder(woData.id, currentBillingDocument?.id || null)}
+                          className="btn-primary"
+                        >
+                          {currentBillingDocument
+                            ? currentBillingDocument.documentKind === "capital_quote"
+                              ? "Open capital quote"
+                              : "Open P1 to 7-Eleven invoice"
+                            : woData.status === "capital"
+                              ? "Create capital quote"
+                              : "Create P1 to 7-Eleven invoice"}
+                        </button>
+                      )}
+                      {canAssignCurrentWorkOrder && <DirectorySelect domain="assignable_contractors" value=""
+                        emptyLabel={isLoading("assign_" + woData.id) ? "Assigning…" : "Assign to contractor…"}
+                        disabled={isLoading("assign_" + woData.id)} style={{ width: 240 }}
+                        onChange={event => { if (event.target.value) void doAssign(woData.id, event.target.value); }} />}
+                      {canRejectDuringDispatch && (
+                        <button
+                          type="button"
+                          onClick={() => setModal("rejectUnassignedWO")}
+                          disabled={isLoading("rejectUnassignedWO_" + woData.id)}
+                          className="btn-soft"
+                          style={{
+                            ...loadingStyle("rejectUnassignedWO_" + woData.id),
+                            color: T.danger,
+                            borderColor: `${T.danger}55`,
+                          }}
+                        >
+                          {isLoading("rejectUnassignedWO_" + woData.id)
+                            ? <><BtnSpinnerDark />Rejecting...</>
+                            : "Reject work order"}
+                        </button>
+                      )}
+                      {canChangeCurrentAssignment && (
+                        <>
+                          <button onClick={() => { setReassignTarget(woData.contractor || ""); setModal("reassign"); }} disabled={isLoading("reassign_" + woData.id)} className="btn-soft" style={loadingStyle("reassign_" + woData.id)}>
+                            {isLoading("reassign_" + woData.id) ? <><BtnSpinnerDark />Reassigning...</> : "Reassign"}
+                          </button>
+                          <button onClick={() => setModal("unassign")} disabled={isLoading("unassign_" + woData.id)} className="btn-soft" style={loadingStyle("unassign_" + woData.id)}>
+                            {isLoading("unassign_" + woData.id) ? <><BtnSpinnerDark />Unassigning...</> : "Unassign"}
+                          </button>
+                        </>
+                      )}
+                      {canDuplicateForReassignment && (
+                        <button
+                          type="button"
+                          onClick={() => setModal("duplicateForReassignment")}
+                          disabled={isLoading("duplicateForReassignment_" + woData.id)}
+                          className="btn-soft"
+                          style={loadingStyle("duplicateForReassignment_" + woData.id)}
+                        >
+                          {isLoading("duplicateForReassignment_" + woData.id)
+                            ? <><BtnSpinnerDark />Duplicating...</>
+                            : "Duplicate for reassignment"}
+                        </button>
+                      )}
+                      </DetailDisclosure>
+                      {!contractorHistoryReadOnly
+                        && !invoiceController
+                        && capitalStageActive
+                        && hasOpenVisit && (
+                        <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-accent" style={loadingStyle("pauseWork_" + woData.id)}>
+                          {isLoading("pauseWork_" + woData.id) ? <><BtnSpinner />Clocking out...</> : "Clock out for capital review"}
+                        </button>
+                      )}
+                      {!contractorHistoryReadOnly && visitAction === "start" && (
+                        <>
+                          {canSetCurrentEta && (
+                            <button onClick={() => setModal("setEta")} disabled={isLoading("setEta_" + woData.id)} className="btn-soft" style={loadingStyle("setEta_" + woData.id)}>
+                              {isLoading("setEta_" + woData.id) ? <><BtnSpinnerDark />Setting...</> : "Set ETA"}
+                            </button>
+                          )}
+                          <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
+                            {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Starting...</> : "Start work"}
+                          </button>
+                        </>
+                      )}
+                      {/* Field completion is independent of invoice permission.
+                          Invoice-capable technicians retain the separate invoice
+                          workflow after marking the field work complete. */}
+                      {!contractorHistoryReadOnly && !isManager && jobOpen && fieldWorkInProgress && !woData.assignmentTransferPendingVisit && !["assigned", "parts"].includes(woData.status) && (
+                        <>
+                          {woData.functionalStatus === "Work in Progress" && (
+                            <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
+                              {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
+                            </button>
+                          )}
+                          <button type="button" onClick={() => setModal("workReport")} className="btn-soft">
+                            Submit work report
+                          </button>
+                          {contractorCompletionControl.visible && (
+                            <button
+                              type="button"
+                              onClick={() => setModal("closeComplete")}
+                              disabled={isLoading("closeComplete_" + woData.id)}
+                              className="btn-primary"
+                              style={{
+                                ...loadingStyle("closeComplete_" + woData.id),
+                                opacity: isLoading("closeComplete_" + woData.id) ? 0.58 : 1,
+                                cursor: isLoading("closeComplete_" + woData.id) ? "default" : "pointer",
+                              }}
+                            >
+                              {isLoading("closeComplete_" + woData.id)
+                                ? <><BtnSpinner />Completing...</>
+                                : "Mark work complete"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {isManager
+                        && !woData.assignmentTransferPendingVisit
+                        && woData.functionalStatus === "Work in Progress"
+                        && ["wip", "pending_invoice", "pending_approval"].includes(woData.status) && (
+                        <button onClick={() => setModal("pauseWork")} disabled={isLoading("pauseWork_" + woData.id)} className="btn-soft" style={loadingStyle("pauseWork_" + woData.id)}>
+                          {isLoading("pauseWork_" + woData.id) ? <><BtnSpinnerDark />Pausing...</> : "Pause (parts)"}
+                        </button>
+                      )}
+                      {!focused && capitalActions}
+                      {!contractorHistoryReadOnly && (visitAction === "resume" || visitAction === "receiving_start") && (
+                        <button onClick={() => setModal("startWork")} disabled={isLoading("startWork_" + woData.id)} className="btn-accent" style={loadingStyle("startWork_" + woData.id)}>
+                          {isLoading("startWork_" + woData.id) ? <><BtnSpinner />Resuming...</> : woData.assignmentTransferPendingVisit ? "Start new visit after transfer" : "Resume work"}
+                        </button>
+                      )}
+                      <DetailDisclosure focused={focused} title="Completion and billing handoff">
+                      {woData.status === "completed" && isManager && (
+                        <button onClick={() => doMoveToInvoice(woData.id)} disabled={isLoading("moveToInvoice_" + woData.id)} className="btn-accent" style={loadingStyle("moveToInvoice_" + woData.id)}>
+                          {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated - pending 7-Eleven submission"}
+                        </button>
+                      )}
+                      {/* Staff retain only the explicit no-invoice exception.
+                          Invoice-backed work orders close from Billing when staff
+                          records Billed to 7-Eleven. */}
+                      {canCloseReopenedFollowUp && (
+                        <button
+                          type="button"
+                          onClick={() => setModal("closeReopenedFollowUp")}
+                          disabled={isLoading("closeReopenedFollowUp_" + woData.id)}
+                          className="btn-primary"
+                          style={loadingStyle("closeReopenedFollowUp_" + woData.id)}
+                        >
+                          {isLoading("closeReopenedFollowUp_" + woData.id)
+                            ? <><BtnSpinnerDark />Closing...</>
+                            : "Close follow-up — no additional billing"}
+                        </button>
+                      )}
+                      {isManager && woData.status !== "closed" && !hasAnyLiveInvoice && (
+                        <button onClick={() => setModal("closeWithoutInvoice")} disabled={isLoading("closeWithoutInvoice_" + woData.id)} className="btn-primary" style={loadingStyle("closeWithoutInvoice_" + woData.id)}>
+                          {isLoading("closeWithoutInvoice_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close — no invoice"}
+                        </button>
+                      )}
+                      {/* Closed job: invoice download remains available. Reopen is
+                          deliberately prominent in the closed-state banner. */}
+                      {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
+
+                      </DetailDisclosure>
+                    </div>
+
+                    {!isManager && woData.status === "pending_capital_completion" && (
+                      <div role="status" className="card" style={{ padding: "14px 16px", marginBottom: 16, background: T.warnSoft, borderColor: `${T.warn}44` }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Capital work is waiting for P1 authorization</div>
+                        <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
+                          {hasOpenVisit
+                            ? "Clock out the current visit first. P1 can then record 7-Eleven approval and release the next field visit."
+                            : "P1 must record 7-Eleven approval before the contractor can start the next field visit. This hold cannot be bypassed from a contractor account."}
+                        </div>
+                      </div>
+                    )}
+
+                    {!focused && billingDocuments}
                     {/* Reject-invoice confirmation modal — staff-only, reason required. */}
                     {rejectingInv && (
                       <Modal onRequestClose={rejectionDismissal.requestClose} dismissDisabled={rejectingBusy} title={`Reject invoice #${rejectingInv.num}`} width={460}>
@@ -1299,86 +1393,13 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    {/* Keep the staff-only soft-delete separate from the header's
-                        Edit work order action so it is not a primary control. */}
-                    {isManager && (
-                      <div style={{ marginBottom: 16, paddingTop: 2, borderTop: `1px solid ${T.borderSoft}`, display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                        <button onClick={() => setModal("deleteWO")} disabled={isLoading("deleteWO_" + woData.id)} style={{ marginTop: 12, background: "none", border: "none", color: T.danger, fontSize: 12, fontWeight: 600, cursor: isLoading("deleteWO_" + woData.id) ? "default" : "pointer", fontFamily: "inherit", padding: "4px 2px", textDecoration: "underline", textUnderlineOffset: 3, opacity: isLoading("deleteWO_" + woData.id) ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
-                          {isLoading("deleteWO_" + woData.id) ? <><BtnSpinnerDark />Deleting...</> : "Delete work order"}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Technician on Job — contractor picks who was on site (text
-                        snapshot, optional). Staff see it read-only. Locked at closed
-                        (Completion Record carries it then). */}
-                    {isManager && (woData.assignmentHistory || []).length > 0 && (
-                      <div className="card" style={{ padding: 18, marginBottom: 16 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 6 }}>
-                          Prior assignment history
-                        </div>
-                        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, marginBottom: 12 }}>
-                          Staff-only archive. Contractors cannot query these records or prior assignment artifacts.
-                        </div>
-                        {(woData.assignmentHistory || []).map((assignment: any) => {
-                          const snapshot = assignment.workflowSnapshot || {};
-                          const details = [
-                            ["ETA", snapshot.eta],
-                            ["Started", snapshot.startTime],
-                            ["Completed", snapshot.endTime],
-                            ["Technician", snapshot.technicianOnJob],
-                            ["Equipment make", snapshot.assetMake],
-                            ["Asset model", snapshot.assetModel],
-                            ["Serial number", snapshot.assetSerial],
-                            ["Asset year", snapshot.assetYear],
-                            ["Resolution", snapshot.resolutionCode],
-                            ["Part needed", snapshot.partNeeded],
-                            ["Part ETA", snapshot.partEta],
-                            ["Invoice total", snapshot.invoiceTotal != null ? fmt(Number(snapshot.invoiceTotal)) : null],
-                            ["Repair quote", snapshot.repairQuote != null ? fmt(Number(snapshot.repairQuote)) : null],
-                            ["Install quote", snapshot.installQuote != null ? fmt(Number(snapshot.installQuote)) : null],
-                          ].filter(([, value]) => value !== null && value !== undefined && value !== "");
-                          return (
-                            <details key={assignment.id} style={{ borderTop: `1px solid ${T.borderSoft}`, padding: "12px 0" }}>
-                              <summary style={{ cursor: "pointer", color: T.ink, fontSize: 12, fontWeight: 700 }}>
-                                <DirectoryProfileName id={assignment.contractorId} company fallback="Former contractor" />
-                                {" to "}{assignment.nextContractorId ? <DirectoryProfileName id={assignment.nextContractorId} company /> : "Unassigned"}
-                                <span style={{ color: T.subtle, fontWeight: 500, marginLeft: 8 }}>
-                                  {new Date(assignment.assignmentEndedAt).toLocaleString("en-US", {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "numeric",
-                                    hour: "numeric",
-                                    minute: "2-digit",
-                                  })}
-                                </span>
-                              </summary>
-                              {details.length > 0 && (
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 12 }}>
-                                  {details.map(([label, value]) => (
-                                    <div key={String(label)}>
-                                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", color: T.subtle, marginBottom: 2 }}>{label}</div>
-                                      <div style={{ fontSize: 12, color: T.inkSoft, overflowWrap: "anywhere" }}>{String(value)}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {(snapshot.resolutionNotes || snapshot.capitalNotes) && (
-                                <div style={{ marginTop: 12, color: T.inkSoft, fontSize: 12, lineHeight: 1.5 }}>
-                                  {snapshot.resolutionNotes || snapshot.capitalNotes}
-                                </div>
-                              )}
-                            </details>
-                          );
-                        })}
-                      </div>
-                    )}
-
+                    {!focused && administrativeRecords}
                     {!contractorHistoryReadOnly && woData.status !== "closed" && <WorkOrderTechnicianPicker
                       key={`${woData.id}:${woData.contractor || ""}`}
                       workOrder={woData} actor={currentUser} isManager={isManager}
                       doAssignPortalTechnician={doAssignPortalTechnician} doSetTechnician={doSetTechnician} />}
 
+                    <DetailDisclosure focused={focused} title="Completion record and visit corrections">
                     {/* Completion Record — the self-contained closure file. Shown
                         on completed/closed jobs; identical from the board and History
                         (same detail component). */}
@@ -1431,6 +1452,10 @@ export default function WorkOrderDetail(props: any) {
                       fire={fire}
                     />
 
+                    </DetailDisclosure>
+                    <WorkOrderAttachments canViewDocuments={isManager || canInvoice}
+                      focusRequested={props.attachmentTarget === woData.id && selectedWO === woData.id}
+                      onFocused={props.onAttachmentsFocused}>
                     <PhotoGallery
                       woId={woData.id}
                       photos={woData.photos || []}
@@ -1453,6 +1478,7 @@ export default function WorkOrderDetail(props: any) {
                       readOnly={contractorHistoryReadOnly}
                     />
 
+                    </WorkOrderAttachments>
                     <WorkOrderActivityPanels
                       key={woData.id}
                       activities={allVisibleActivities}
@@ -1483,11 +1509,17 @@ export default function WorkOrderDetail(props: any) {
                       doAcknowledgeContractorAttention={doAcknowledgeContractorAttention}
                       readOnly={contractorHistoryReadOnly}
                     />
-
+                    {focused && <>
+                      {billingDocuments}
+                      <DetailDisclosure focused title="More job information">
+                        {jobInformation}{secondaryAlerts}{administrativeRecords}
+                      </DetailDisclosure>
+                    </>}
                   </div>
 
-                  {/* Right sidebar */}
-                  <div>
+                  {/* Secondary information remains available in both layouts. */}
+                  <DetailDisclosure focused={focused} title="SLA, contacts, progress and parts">
+                  <div className="min-w-0">
                     {sla2 ? (
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
@@ -1625,7 +1657,14 @@ export default function WorkOrderDetail(props: any) {
                       )
                     )}
                   </div>
+                  </DetailDisclosure>
                 </div>
+                {focused && isManager && !invoiceController && (canFlagWorkOrderCapital(woData) || capitalStageActive) && (
+                  <section aria-label="Capital actions" className="mt-4 rounded-xl border border-p1-border bg-p1-surface p-4">
+                    <h2 className="mb-3 text-base font-semibold text-p1-ink">Capital actions</h2>
+                    <div className="flex flex-wrap gap-2">{capitalActions}</div>
+                  </section>
+                )}
               </div>
             );
           })()}
