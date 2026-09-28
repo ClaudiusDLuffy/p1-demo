@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { syntheticBmp } from "../src/lib/photo-test-support/syntheticFormats";
 import { syntheticHeic } from "../src/lib/photo-test-support/syntheticHeic";
+import type { UploadIntent } from "../src/lib/privateObjectContracts";
 
 // Run in a fresh process after a production webpack build. No environment file
 // is read; every Auth, profile, RPC and Storage request is replaced locally.
@@ -23,6 +24,7 @@ const ids = {
   claim: "55555555-5555-4555-8555-555555555555",
   binding: "66666666-6666-4666-8666-666666666666",
   photo: "77777777-7777-4777-8777-777777777777",
+  storageObject: "88888888-8888-4888-8888-888888888888",
 };
 const token = ["e30", Buffer.from(JSON.stringify({ sub: ids.actor })).toString("base64url"), "synthetic"].join(".");
 const secret = "synthetic-service-key";
@@ -79,11 +81,13 @@ async function verify(): Promise<void> {
   let authentications = 0;
   let downloads = 0;
   let failures: string[] = [];
-  const intent = (status: string) => ({
+  const intent = (status: UploadIntent["status"]): UploadIntent => ({
     intentId: ids.intent, operationId: ids.operation, batchId: ids.batch, purpose: "photo",
     workOrderId: "WOT-SYNTHETIC", parentId: null, bucket: "photos", objectPath, status,
     expiresAt: "2099-09-09T00:00:00Z", claimId: status === "validating" ? ids.claim : null,
     bindingId: status === "finalized" ? ids.binding : null, photoId: status === "finalized" ? ids.photo : null,
+    // This fixture starts after upload; claim must prove the object exists too.
+    storageObjectId: ids.storageObject,
     attachmentId: null,
     file: { name: "disguised.jpg", mimeType: "image/jpeg", sizeBytes: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex") },

@@ -5,12 +5,14 @@ import test from "node:test";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
+const capitalActions = read("src/features/work-orders/WorkOrderCapitalActions.tsx");
 const hook = read("src/features/work-orders/useWorkOrders.ts");
 const correctiveMigration = read("supabase/migrations/0152_allow_guarded_capital_reclassification.sql");
 
 test("flag capital is immediate and does not require the retired intake modal", () => {
   assert.doesNotMatch(detail, /CapitalFlagModal|setModal\("capitalFlag"\)/);
-  assert.match(detail, /onClick=\{\(\) => void doCapitalFlag\(woData\.id\)\}/);
+  assert.match(detail, /onFlag=\{doCapitalFlag\}/);
+  assert.match(capitalActions, /onClick=\{\(\) => void onFlag\(id\)\}/);
   assert.match(hook, /const doCapitalFlag = async \(woId: string\) =>/);
 });
 

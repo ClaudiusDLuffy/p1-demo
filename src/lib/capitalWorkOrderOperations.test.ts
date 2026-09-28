@@ -12,6 +12,7 @@ import { assignmentBoundaryPatch } from "./workOrderAssignmentBoundary";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const list = read("src/features/work-orders/WorkOrderList.tsx");
 const detail = read("src/features/work-orders/WorkOrderDetail.tsx");
+const capitalActions = read("src/features/work-orders/WorkOrderCapitalActions.tsx");
 const capitalView = read("src/features/work-orders/CapitalProjects.tsx");
 const dashboard = read("src/features/dashboard/DashboardWorkBuckets.tsx");
 const history = read("src/features/work-orders/HistoryView.tsx");
@@ -62,11 +63,13 @@ test("capital detail exposes guarded assignment controls and a classification ba
   assert.match(detail, /if \(event\.target\.value\) void doAssign\(woData\.id, event\.target\.value\)/);
   assert.match(detail, /canChangeCurrentAssignment && \(/);
   assert.match(detail, /<CapitalWorkOrderBadge workOrder=\{woData\}/);
-  assert.match(detail, /isManager && !invoiceController && canFlagWorkOrderCapital\(woData\)/);
-  assert.match(detail, /woData\.status === "pending_capital_completion" && isManager && !invoiceController/);
+  assert.match(detail, /enabled=\{isManager && !invoiceController\}/);
+  assert.match(detail, /canFlag=\{Boolean\(woData && canFlagWorkOrderCapital\(woData\)\)\}/);
+  assert.match(capitalActions, /if \(!enabled\) return null/);
+  assert.match(capitalActions, /status === "pending_capital_completion"/);
   assert.match(shell, /The capital identity, approval state, and P1 capital quote stay on this work order/);
   assert.match(shell, /remain in its current[\s\S]*Capital[\s\S]*stage with no contractor/);
-  assert.match(detail, /Capital declined - restore field workflow/);
+  assert.match(capitalActions, /Capital declined - restore field workflow/);
   assert.match(capitalView, /getUser\(wo\.contractor\)\?\.name \|\| "Unassigned"/);
 });
 

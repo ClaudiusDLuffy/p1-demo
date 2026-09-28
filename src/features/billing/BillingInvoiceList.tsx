@@ -18,6 +18,8 @@ import { useWorkOrdersCountQuery, useWorkOrdersPageQuery } from "../work-orders/
 import BillingTaxRulePanel from "./BillingTaxRulePanel";
 import { useBillingInvoiceCountQuery, useBillingInvoicePageQuery } from "./queries";
 import { BILLING_SEARCH_MAX_LENGTH } from "./billingReadContracts";
+import { FocusedBillingNavigation, focusedBillingQueue, type FocusedBillingQueue } from "./FocusedBillingNavigation";
+import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
 
 type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
 
@@ -220,6 +222,9 @@ function BillingInvoiceRows({
 }
 
 export default function BillingInvoiceList(props: any) {
+  const focused = props.focused === true;
+  const [focusedQueue, setFocusedQueue] = useState<FocusedBillingQueue>("submitted");
+  const [focusedCollapsed, setFocusedCollapsed] = useState(false);
   const {
     page,
     currentUser,
@@ -236,7 +241,7 @@ export default function BillingInvoiceList(props: any) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<BillingSortKey>("invoice");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+  const [expandedBuckets, setExpanded] = useState<Record<string, boolean>>({
     ready: true,
     all: true,
     draft: false,
@@ -244,6 +249,13 @@ export default function BillingInvoiceList(props: any) {
     sent: false,
     recently_approved: false,
   });
+  const expanded = focused
+    ? Object.fromEntries(BILLING_PAGE_KEYS.map(key => [key, key === focusedQueue && !focusedCollapsed]))
+    : expandedBuckets;
+  const toggleBucket = (key: string) => {
+    if (focused) setFocusedCollapsed(current => !current);
+    else setExpanded(current => ({ ...current, [key]: current[key] === false }));
+  };
   const controller = isInvoiceController(currentUser);
   const deferredSearch = useDeferredValue(search.trim());
   const staffSort = sortKey;
@@ -275,7 +287,7 @@ export default function BillingInvoiceList(props: any) {
   const sentQuery = useBillingInvoicePageQuery({ queue: "sent", search: deferredSearch, sort: staffSort, direction: sortDirection, limit: 20, cursor: positions.sent.cursor }, queryEnabled && expanded.sent !== false);
   const approvedQuery = useInvoicesPageQuery({ state: "approved", search: deferredSearch, sort: contractorSort, direction: sortDirection, limit: 20, cursor: positions.recently_approved.cursor }, queryEnabled && expanded.recently_approved !== false, currentUser, { countEnabled: false });
   // Collapsed headers show totals, but never load their invoice rows/lines.
-  const allCount = useBillingInvoiceCountQuery({ queue: "all", search: deferredSearch }, queryEnabled);
+  const allCount = useBillingInvoiceCountQuery({ queue: "all", search: deferredSearch }, queryEnabled && !focused);
   const draftCount = useBillingInvoiceCountQuery({ queue: "draft", search: deferredSearch }, queryEnabled);
   const submittedCount = useBillingInvoiceCountQuery({ queue: "submitted", search: deferredSearch }, queryEnabled);
   const sentCount = useBillingInvoiceCountQuery({ queue: "sent", search: deferredSearch }, queryEnabled);
@@ -342,6 +354,9 @@ export default function BillingInvoiceList(props: any) {
 
   return (
     <div style={{ animation: "fadeUp 0.25s" }}>
+      {focused && <FocusedBillingNavigation value={focusedQueue} onChange={value => {
+        setFocusedQueue(value); setFocusedCollapsed(false);
+      }} onBack={props.onBackToSimplified} />}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 850, color: T.ink }}>Billing queues</div>
@@ -390,23 +405,25 @@ export default function BillingInvoiceList(props: any) {
         </div>
       </div>
 
-      <BillingTaxRulePanel enabled={!controller} fire={fire} />
+      <DetailDisclosure focused={focused} title="Billing tax settings">
+        <BillingTaxRulePanel enabled={!controller} fire={fire} />
+      </DetailDisclosure>
 
       <div style={{ display: "grid", gap: 12 }}>
-        {!controller && (readyCount.data === undefined || readyCount.data.totalCount > 0 || visibleReadyWorkOrders.length > 0 || Boolean(deferredSearch)) && (
+        {!controller && (!focused || focusedQueue === "ready") && (focused || readyCount.data === undefined || readyCount.data.totalCount > 0 || visibleReadyWorkOrders.length > 0 || Boolean(deferredSearch)) && (
           <article className="card" style={{ overflow: "hidden" }}>
             <button
               type="button"
               aria-expanded={expanded.ready !== false}
               aria-controls="billing-bucket-ready"
-              onClick={() => setExpanded(current => ({ ...current, ready: current.ready === false }))}
+              onClick={() => toggleBucket("ready")}
               style={{ width: "100%", border: 0, background: T.surface, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                 <span aria-hidden="true" style={{ color: T.accent, fontSize: 18, transform: expanded.ready !== false ? "rotate(90deg)" : "none" }}>›</span>
                 <span>
-                  <span style={{ display: "block", color: T.ink, fontSize: 13, fontWeight: 800 }}>Ready to Bill</span>
-                  <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3 }}>Every work order pending 7-Eleven submission, including legacy rows.</span>
+                  <span style={{ display: "block", color: T.ink, fontSize: 13, fontWeight: 800 }}>{focused ? "Prepare invoice" : "Ready to Bill"}</span>
+                  <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3 }}>{focused ? focusedBillingQueue("ready")?.description : "Every work order pending 7-Eleven submission, including legacy rows."}</span>
                 </span>
               </span>
               <span title={countFreshness} style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: T.accentSoft, color: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>
@@ -480,7 +497,7 @@ export default function BillingInvoiceList(props: any) {
           </article>
         )}
 
-        {buckets.map(bucket => {
+        {buckets.filter(bucket => !focused || bucket.id === focusedQueue).map(bucket => {
           const bucketId = bucket.id as keyof typeof positions;
           const isExpanded = expanded[bucket.id] !== false;
           const contractorBucket = bucket.kind === "contractor";
@@ -493,14 +510,14 @@ export default function BillingInvoiceList(props: any) {
                 type="button"
                 aria-expanded={isExpanded}
                 aria-controls={`billing-bucket-${bucket.id}`}
-                onClick={() => setExpanded(current => ({ ...current, [bucket.id]: !isExpanded }))}
+                onClick={() => toggleBucket(bucket.id)}
                 style={{ width: "100%", border: 0, background: T.surface, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                   <span aria-hidden="true" style={{ color: bucket.color, fontSize: 18, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
                   <span>
-                    <span style={{ display: "block", color: T.ink, fontSize: 13, fontWeight: 800 }}>{bucket.label}</span>
-                    <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3 }}>{bucket.description}</span>
+                    <span style={{ display: "block", color: T.ink, fontSize: 13, fontWeight: 800 }}>{focused ? focusedBillingQueue(bucket.id)?.label : bucket.label}</span>
+                    <span style={{ display: "block", color: T.subtle, fontSize: 10, marginTop: 3 }}>{focused ? focusedBillingQueue(bucket.id)?.description : bucket.description}</span>
                   </span>
                 </span>
                 <span title={countFreshness} style={{ minWidth: 28, height: 24, padding: "0 8px", borderRadius: 999, background: `${bucket.color}18`, color: bucket.color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 850 }}>

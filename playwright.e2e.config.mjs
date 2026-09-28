@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import { localSupabaseRuntime } from "./scripts/e2e/local-supabase-runtime.mjs";
 
 const runtime = localSupabaseRuntime();
-const baseURL = runtime.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000";
+// Separate from a developer's ordinary (possibly unconfigured) port 3000 server.
+const baseURL = "http://127.0.0.1:3100";
 
 // Prevent a developer's ordinary .env.local provider settings from becoming
 // active inside the synthetic browser server. These explicit empty values win
@@ -59,7 +60,7 @@ export default defineConfig({
     navigationTimeout: 20_000,
   },
   webServer: {
-    command: "node_modules/.bin/next dev --hostname 127.0.0.1 --port 3000",
+    command: "node_modules/.bin/next dev --hostname 127.0.0.1 --port 3100",
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,

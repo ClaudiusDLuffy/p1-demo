@@ -6,8 +6,8 @@ const migration = readFileSync(
   "supabase/migrations/0160_restore_capital_sequence_state.sql",
   "utf8",
 );
-const detail = readFileSync(
-  "src/features/work-orders/WorkOrderDetail.tsx",
+const capitalActions = readFileSync(
+  "src/features/work-orders/WorkOrderCapitalActions.tsx",
   "utf8",
 );
 const hook = readFileSync(
@@ -23,7 +23,7 @@ test("capital decline restores open, paused, completed, and receiving-assignment
   assert.match(migration, /elsif v_has_closed_visit then/);
   assert.match(migration, /v_invoice_status := public\.contractor_invoice_work_order_status/);
   assert.match(migration, /'restoredFromVisitState', true/);
-  assert.match(detail, /Capital declined - restore field workflow/);
+  assert.match(capitalActions, /Capital declined - restore field workflow/);
   assert.match(hook, /result\.functionalStatus === "Work in Progress"/);
   assert.match(hook, /result\.functionalStatus === "Awaiting Parts"/);
   assert.match(hook, /result\.functionalStatus === "Completed"/);
