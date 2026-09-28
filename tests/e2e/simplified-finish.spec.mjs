@@ -162,20 +162,21 @@ test("leaving Simplified cancels an export even if its response arrives later", 
 
 test("an initial schedule read failure is retryable and an empty schedule is usable", async ({ page }) => {
   await login(page, accounts.manager);
-  await page.route("**/rest/v1/rpc/list_work_orders_rows_v1", route => route.fulfill({
+  await page.route("**/rest/v1/work_orders?*", route => route.fulfill({
     status: 400, contentType: "application/json", body: JSON.stringify({ code: "22023", message: "Synthetic read failure" }),
   }));
   await openSidebarPage(page, "My Schedule");
   await expect(page.getByText("Your schedule could not be loaded. No work-order data was changed.", { exact: true })).toBeVisible();
-  await page.unroute("**/rest/v1/rpc/list_work_orders_rows_v1");
-  await page.route("**/rest/v1/rpc/list_work_orders_rows_v1", route => route.fulfill({
-    status: 200, contentType: "application/json", body: JSON.stringify({ items: [], hasMore: false, nextCursor: null }),
+  await page.unroute("**/rest/v1/work_orders?*");
+  await page.route("**/rest/v1/work_orders?*", route => route.fulfill({
+    status: 200, contentType: "application/json", headers: { "content-range": "*/0" }, body: JSON.stringify([]),
   }));
-  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByRole("button", { name: "Retry schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Retry counts", exact: true }).click();
   const calendar = page.getByRole("region", { name: "Work schedule calendar" });
   await expect(calendar).toBeVisible();
-  await page.getByRole("button", { name: /Pending schedule/ }).click();
-  await expect(page.getByText("No currently loaded work is awaiting an ETA.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Unscheduled/ }).click();
+  await expect(page.getByText("No matching work is awaiting an ETA.", { exact: true })).toBeVisible();
   await calendar.getByRole("button", { name: "day", exact: true }).click();
   await expect(calendar.getByText("No work is scheduled for this day.", { exact: true })).toBeVisible();
   await calendar.getByRole("button", { name: "Next day", exact: true }).click();
@@ -187,7 +188,7 @@ test("Beta is visible and double-click ETA submission sends only one request", a
   await expect(sidebar(page).getByRole("button", { name: "My Schedule", exact: true })).toContainText("Beta");
   await openSidebarPage(page, "My Schedule");
   await expect(page.getByRole("region", { name: "My Schedule", exact: true }).getByText("Beta", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /Pending schedule/ }).click();
+  await page.getByRole("button", { name: /Unscheduled/ }).click();
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
   const dialog = page.getByRole("dialog", { name: /^Schedule / });
   let release;

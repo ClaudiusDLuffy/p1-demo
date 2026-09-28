@@ -128,7 +128,7 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
     directory.setSearch("");
     trigger.current?.focus({ preventScroll: true });
   };
-  return <div ref={wrapper} style={{ position: "relative", width: style?.width || "100%", minWidth: 0 }}
+  return <div ref={wrapper} style={{ position: "relative", width: style?.width || "100%", minWidth: 0, maxWidth: "100%" }}
     onKeyDown={event => {
       if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); setPosition(null); trigger.current?.focus({ preventScroll: true }); return; }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -150,13 +150,15 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
         setPosition(null);
         setOpen(current => !current);
       }}
-      style={{ width: "100%", minHeight: 40, padding: "9px 12px", borderRadius: 9, border: `1px solid ${T.border}`,
-        background: T.surface, color: T.ink, fontFamily: "inherit", textAlign: "left", ...style }}>
-      {caption} <span aria-hidden="true" style={{ float: "right" }}>▾</span>
+      style={{ width: "100%", minHeight: 44, padding: "9px 12px", borderRadius: 9, border: `1px solid ${T.border}`,
+        background: T.surface, color: T.ink, fontFamily: "inherit", textAlign: "left", ...style,
+        display: "flex", alignItems: "center", gap: 8, minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
+      <span className="min-w-0 flex-1 truncate" title={caption}>{caption}</span>
+      <span aria-hidden="true" className="shrink-0">▾</span>
     </button>
     {open && !disabled && createPortal(<div ref={panel} data-directory-panel="true" onPointerDown={event => event.stopPropagation()}
       style={{ position: "fixed", top: position?.top ?? 0, left: position?.left ?? 0, width: position?.width ?? 230,
-      minWidth: 0, maxWidth: "calc(100vw - 16px)", maxHeight: position?.maxHeight ?? 360, overflowY: "auto",
+      minWidth: 0, maxWidth: "calc(100vw - 16px)", maxHeight: position?.maxHeight ?? 360, overflowY: "auto", overflowX: "hidden", overflowWrap: "anywhere",
       visibility: position ? "visible" : "hidden", pointerEvents: position ? "auto" : "none", boxSizing: "border-box",
       zIndex: 220, border: `1px solid ${T.border}`, borderRadius: 10, padding: 8, background: T.surface,
       boxShadow: "0 12px 28px #0002", overscrollBehavior: "contain" }}>

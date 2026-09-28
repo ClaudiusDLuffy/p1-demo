@@ -64,16 +64,21 @@ export function getFloatingPanelPosition({
   const spaceBelow = viewportHeight - margin - trigger.bottom - gap;
   const spaceAbove = trigger.top - gap - margin;
   const openAbove = preferredPlacement === "top"
-    || (spaceBelow < maxHeight && spaceAbove > spaceBelow);
+    ? spaceAbove >= maxHeight || spaceAbove >= spaceBelow
+    : spaceBelow < maxHeight && spaceAbove > spaceBelow;
+  // Size to the chosen side before positioning. Clamping a full-height panel
+  // into the viewport could otherwise cover its own trigger/adjacent controls.
+  const availableHeight = Math.max(0, openAbove ? spaceAbove : spaceBelow);
+  const fittedHeight = Math.min(maxHeight, availableHeight);
   const requestedTop = openAbove
-    ? trigger.top - gap - maxHeight
+    ? trigger.top - gap - fittedHeight
     : trigger.bottom + gap;
 
   return {
     width,
-    maxHeight,
+    maxHeight: fittedHeight,
     left: clamp(trigger.left + (trigger.width - width) / 2, margin, maxLeft),
-    top: clamp(requestedTop + offsetY, margin, maxTop),
+    top: clamp(requestedTop + offsetY, margin, viewportHeight - fittedHeight - margin),
     placement: openAbove ? "top" : "bottom",
   };
 }

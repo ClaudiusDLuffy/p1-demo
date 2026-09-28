@@ -21,6 +21,7 @@ type ScheduleCalendarProps = {
   onOpenWorkOrder: (workOrderId: string) => void;
   onViewChange: (view: CalendarView) => void;
   view: CalendarView;
+  loading?: boolean;
 };
 
 type CalendarViewProps = Pick<
@@ -89,10 +90,11 @@ function MonthScheduleView({ activeDate, itemsByDate, onDateChange, onDropPendin
                     {timeLabel(item.time)} · {item.workOrder.id}
                   </span>
                 ))}
+                {dateEvents.length > 2 && <span className="text-[10px] text-p1-muted">+{dateEvents.length - 2} more</span>}
               </span>
               {dateEvents.length > 0 && (
-                <span className="absolute right-1 bottom-1 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-p1-accent text-[10px] font-black text-white min-[481px]:hidden">
-                  {dateEvents.length}
+                <span className="absolute right-1 bottom-1 grid h-[15px] min-w-[15px] place-items-center rounded-full bg-p1-accent px-0.5 text-[10px] font-black text-white min-[481px]:hidden">
+                  {dateEvents.length > 99 ? "99+" : dateEvents.length}
                 </span>
               )}
             </button>
@@ -203,7 +205,7 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
           ))}
         </div>
       </div>
-      <ActiveView {...props} itemsByDate={itemsByDate} />
+      {!props.loading && <ActiveView {...props} itemsByDate={itemsByDate} />}
     </section>
   );
 }

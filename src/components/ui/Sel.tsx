@@ -306,7 +306,7 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
           minWidth: 0,
           maxWidth: "100%",
           minHeight: style?.minHeight ?? 42,
-          padding: style?.padding ?? "10px 38px 10px 13px",
+          padding: style?.padding ?? "10px 13px",
           borderRadius: style?.borderRadius ?? 10,
           border: style?.border ?? `1px solid ${T.border}`,
           background: style?.background ?? T.surface,

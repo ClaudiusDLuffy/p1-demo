@@ -56,7 +56,7 @@ test("staff simplified workspace exposes focused filters and real work-order det
 test("desktop pending work stays compact and dragging requests confirmation without writing", async ({ page }) => {
   await login(page, accounts.companyAdmin);
   await openSidebarPage(page, "My Schedule");
-  const pending = page.getByRole("button", { name: /Pending schedule/ });
+  const pending = page.getByRole("button", { name: /Unscheduled/ });
   await expect(pending).toHaveAttribute("aria-expanded", "false");
   await pending.click();
   await expect(page.locator("#pending-schedule-work article")).toHaveCount(3);
@@ -75,29 +75,27 @@ test("desktop pending work stays compact and dragging requests confirmation with
   expect(writes).toHaveLength(0);
 });
 
-test("schedule can load beyond the first page and surfaces a continuation failure", async ({ page }) => {
+test("schedule uses ETA date windows and recovers from a window read failure", async ({ page }) => {
   await login(page, accounts.manager);
   await openSidebarPage(page, "My Schedule");
-  const more = page.getByRole("button", { name: "Load more work orders" });
-  await expect(more).toBeVisible();
-  // Fail continuation only. Existing local rows must remain usable and retryable.
-  await page.route("**/rest/v1/rpc/list_work_orders_rows_v1", async route => {
-    if (!route.request().postDataJSON()?.p_cursor) return route.fallback();
-    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "22023", message: "Synthetic continuation failure" }) });
+  await waitForApplicationRequestsToSettle(page);
+  await expect(page.getByRole("button", { name: "Load more work orders" })).toHaveCount(0);
+  await page.route("**/rest/v1/work_orders?*", async route => {
+    const query = new URL(route.request().url()).searchParams;
+    if (!query.getAll("eta").some(value => value.startsWith("gte."))) return route.fallback();
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "22023", message: "Synthetic date-window failure" }) });
   });
-  await more.click();
-  await expect(page.getByRole("region", { name: "My Schedule", exact: true }).getByRole("alert")).toContainText("More work could not be loaded");
-  await expect(page.getByRole("region", { name: "Work schedule calendar" })).toBeVisible();
-  await page.unroute("**/rest/v1/rpc/list_work_orders_rows_v1");
-  await page.getByRole("button", { name: "Retry loading work" }).click();
-  await expect(page.getByRole("button", { name: "Retry loading work" })).toBeHidden();
-  await loadRemainingWork(page);
+  await page.getByRole("button", { name: "Next month" }).click();
+  await expect(page.getByRole("region", { name: "My Schedule", exact: true }).getByRole("alert")).toContainText("Your schedule could not be loaded");
+  await page.unroute("**/rest/v1/work_orders?*");
+  await page.getByRole("button", { name: "Retry schedule" }).click();
+  await expect(page.getByRole("button", { name: "Retry schedule" })).toBeHidden();
 });
 
 test("technician schedule stays assignment-scoped and links to the real start and pause workflow", async ({ page }) => {
   await login(page, accounts.reportTech);
   await openSidebarPage(page, "My Schedule");
-  await page.getByRole("button", { name: /Pending schedule/ }).click();
+  await page.getByRole("button", { name: /Unscheduled/ }).click();
   const pending = page.locator("#pending-schedule-work");
   await waitForApplicationRequestsToSettle(page);
   for (let batch = 0; batch < 5 && !await pending.getByText("E2E-FOCUSED-FIELD", { exact: true }).isVisible(); batch += 1) {
@@ -128,7 +126,7 @@ test("technician schedule stays assignment-scoped and links to the real start an
   await expect(page.getByRole("heading", { name: "My Schedule", exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "My Schedule", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /Pending schedule/ }).click();
+  await page.getByRole("button", { name: /Unscheduled/ }).click();
   await expect(pending.getByText("E2E-FOCUSED-FIELD", { exact: true })).toHaveCount(0);
 });
 
@@ -166,7 +164,7 @@ test.describe("320x568 My Schedule", () => {
     await openMobilePage(page, "My Schedule");
 
     await expect(page.getByRole("heading", { name: "My Schedule" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Pending schedule/ })).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("button", { name: /Unscheduled/ })).toHaveAttribute("aria-expanded", "false");
     await expect(page.locator("#pending-schedule-work")).toBeHidden();
     await expect(page.getByRole("button", { name: "month", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "week", exact: true }).click();
@@ -175,7 +173,7 @@ test.describe("320x568 My Schedule", () => {
 
     await page.reload();
     await expect(page.getByRole("heading", { name: "My Schedule" })).toBeVisible();
-    await page.getByRole("button", { name: /Pending schedule/ }).click();
+    await page.getByRole("button", { name: /Unscheduled/ }).click();
 
     const scheduleButton = page.getByRole("button", { name: "Schedule", exact: true }).first();
     await expect(scheduleButton).toBeVisible();
@@ -236,7 +234,7 @@ test.describe("320x568 My Schedule", () => {
   test("failed ETA save retains the dialog and values without false success", async ({ page }) => {
     await login(page, accounts.companyAdmin);
     await openMobilePage(page, "My Schedule");
-    await page.getByRole("button", { name: /Pending schedule/ }).click();
+    await page.getByRole("button", { name: /Unscheduled/ }).click();
     await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
     const dialog = page.getByRole("dialog", { name: /^Schedule / });
     await page.route("**/rest/v1/rpc/set_work_order_eta_v1", route => route.fulfill({
