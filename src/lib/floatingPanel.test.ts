@@ -86,7 +86,7 @@ test("the floating profit calculator stays below the shared modal fallback layer
   const calculator = source("src/features/billing/FloatingProfitCalculator.tsx");
   const portalShell = source("src/components/PortalShell.tsx");
   const modal = source("src/components/ui/Modal.tsx");
-  assert.match(calculator, /zIndex: 45/);
+  assert.match(calculator, /z-\[45\]/);
   assert.match(portalShell, /\.app-toast \{[\s\S]*?z-index: 45;/);
   assert.match(modal, /zIndex: 50/);
 });

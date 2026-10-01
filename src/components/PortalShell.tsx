@@ -1196,6 +1196,7 @@ export default function PortalShell() {
   const [billingDraftToEdit, setBillingDraftToEdit] = useState<any>(null);
   const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
   const [billingWorkOrderToStart, setBillingWorkOrderToStart] = useState<string | null>(null);
+  const [billingCalculatorHost, setBillingCalculatorHost] = useState<HTMLDivElement | null>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
   const [histContractor, setHistContractor] = useState("all");
@@ -4418,6 +4419,7 @@ export default function PortalShell() {
           editingInvoice={billingDraftToEdit}
           initialSourceInvoiceId={billingSourceToStart}
           initialWorkOrderId={billingWorkOrderToStart}
+          onProfitCalculatorHostChange={setBillingCalculatorHost}
           onClose={closeBillingInvoiceEditor}
           onCreated={(invoice: any) => {
             if (invoice?.id) {
@@ -4497,7 +4499,9 @@ export default function PortalShell() {
       )}
 
       <FloatingProfitCalculator
-        visible={isManager && !invoiceController && page === "billing"}
+        key={currentUser?.id || "signed-out"}
+        visible={isManager && !invoiceController && (page === "billing" || modal === "createBillingInvoice")}
+        editorHost={billingCalculatorHost}
         fmt={fmt}
       />
 

@@ -1,23 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-
-import { T } from "../../lib/constants";
+import { useEffect, useId, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { calculateProfit } from "./profitCalculator";
 
 const STORAGE_KEY = "p1-billing-profit-calculator-open";
-const number = (value: string) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-};
-const money = (value: number) => Math.round(value * 100) / 100;
+const inputClass = "mt-1 w-full min-w-0 rounded-lg border border-p1-border bg-p1-surface px-2 py-2 text-base text-p1-ink min-h-11";
 
 export default function FloatingProfitCalculator({
   visible,
   fmt,
+  editorHost = null,
 }: {
   visible: boolean;
   fmt: (value: number) => string;
+  /** Owned by the invoice dialog, outside its form. Never a global overlay. */
+  editorHost?: HTMLElement | null;
 }) {
+  const panelId = useId();
   const [open, setOpen] = useState(false);
   const [cost, setCost] = useState("");
   const [sell, setSell] = useState("");
@@ -43,59 +43,58 @@ export default function FloatingProfitCalculator({
     }
   };
 
-  const values = useMemo(() => {
-    const costValue = number(cost);
-    const sellValue = number(sell);
-    const requestedMargin = Math.min(number(targetMargin), 99.99);
-    const profit = money(sellValue - costValue);
-    const actualMargin = sellValue > 0 ? (profit / sellValue) * 100 : null;
-    const targetSell = requestedMargin < 100
-      ? money(costValue / (1 - requestedMargin / 100))
-      : null;
-    return { profit, actualMargin, targetSell };
-  }, [cost, sell, targetMargin]);
+  const values = useMemo(() => calculateProfit(cost, sell, targetMargin), [cost, sell, targetMargin]);
 
   if (!visible) return null;
 
-  return (
+  const calculator = (
     <aside
       aria-label="Profit calculator"
-      style={{ position: "fixed", right: 18, bottom: 18, zIndex: 45, width: open ? 310 : "auto", maxWidth: "calc(100vw - 28px)" }}
+      className={editorHost ? "w-full min-w-0" : "fixed right-[18px] bottom-[18px] z-[45] max-w-[calc(100vw-36px)] max-h-[calc(100dvh-36px)] overflow-y-auto"}
+      style={!editorHost && open ? { width: 310 } : undefined}
     >
-      {open ? (
-        <div className="card" style={{ padding: 16, boxShadow: "0 16px 46px rgba(31,30,28,0.22)", border: `1px solid ${T.accentRing}`, background: T.surface }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-            <div>
-              <div style={{ color: T.ink, fontSize: 13, fontWeight: 800 }}>Profit calculator</div>
-              <div style={{ color: T.subtle, fontSize: 9, marginTop: 2 }}>Staff only · values are not saved</div>
+      <div className={open ? "rounded-xl border border-p1-accent-ring bg-p1-surface p-3 shadow-lg" : ""}>
+        <button type="button" onClick={event => {
+          // Safari does not focus clicked buttons. Keep focus on the disclosure
+          // before hiding an input that may still own the keyboard focus.
+          event.currentTarget.focus({ preventScroll: true });
+          setOpenPersisted(!open);
+        }}
+          aria-label={open ? "Collapse profit calculator" : "Profit calculator"}
+          aria-expanded={open} aria-controls={panelId}
+          className={open ? "flex min-h-11 w-full items-center justify-between gap-3 rounded-lg text-left text-sm font-bold text-p1-ink" : "btn-accent min-h-11 px-3 py-2"}>
+          <span>Profit calculator</span>
+          {open && <span aria-hidden="true">−</span>}
+        </button>
+        <div id={panelId} hidden={!open}>
+          <p className="mb-3 text-xs text-p1-muted">Staff only · values are not saved or added to the invoice</p>
+          <div className={editorHost ? "grid min-w-0 gap-3 sm:grid-cols-2" : "grid min-w-0 gap-3"}>
+            <div className="grid min-w-0 grid-cols-2 gap-2">
+              <label className="min-w-0 text-xs text-p1-muted">
+                Cost
+                <input value={cost} onChange={event => setCost(event.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" className={inputClass} />
+              </label>
+              <label className="min-w-0 text-xs text-p1-muted">
+                Sell price
+                <input value={sell} onChange={event => setSell(event.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" className={inputClass} />
+              </label>
+              <label className="col-span-2 min-w-0 text-xs text-p1-muted">
+                Target margin %
+                <input value={targetMargin} onChange={event => setTargetMargin(event.target.value)} type="number" min="0" max="99.99" step="0.1" inputMode="decimal" className={inputClass} />
+              </label>
             </div>
-            <button type="button" className="btn-soft" onClick={() => setOpenPersisted(false)} aria-label="Collapse profit calculator" style={{ width: 32, height: 32, padding: 0 }}>−</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <label style={{ color: T.muted, fontSize: 10 }}>
-              Cost
-              <input value={cost} onChange={event => setCost(event.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" style={{ width: "100%", marginTop: 5, padding: "8px 9px", borderRadius: 8, border: `1px solid ${T.border}`, color: T.ink, background: T.surface }} />
-            </label>
-            <label style={{ color: T.muted, fontSize: 10 }}>
-              Sell price
-              <input value={sell} onChange={event => setSell(event.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" style={{ width: "100%", marginTop: 5, padding: "8px 9px", borderRadius: 8, border: `1px solid ${T.border}`, color: T.ink, background: T.surface }} />
-            </label>
-            <label style={{ color: T.muted, fontSize: 10, gridColumn: "1 / -1" }}>
-              Target margin %
-              <input value={targetMargin} onChange={event => setTargetMargin(event.target.value)} type="number" min="0" max="99.99" step="0.1" inputMode="decimal" style={{ width: "100%", marginTop: 5, padding: "8px 9px", borderRadius: 8, border: `1px solid ${T.border}`, color: T.ink, background: T.surface }} />
-            </label>
-          </div>
-          <div style={{ marginTop: 12, padding: "10px 11px", borderRadius: 9, background: T.surfaceSoft, border: `1px solid ${T.borderSoft}`, display: "grid", gap: 6, fontSize: 11 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.muted }}>Profit</span><strong className="mono" style={{ color: values.profit >= 0 ? T.success : T.danger }}>{fmt(values.profit)}</strong></div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.muted }}>Actual margin</span><strong className="mono" style={{ color: T.ink }}>{values.actualMargin == null ? "−" : `${values.actualMargin.toFixed(1)}%`}</strong></div>
-            <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6, borderTop: `1px solid ${T.borderSoft}` }}><span style={{ color: T.muted }}>Sell for target</span><strong className="mono" style={{ color: T.accent }}>{values.targetSell == null ? "−" : fmt(values.targetSell)}</strong></div>
+            <dl aria-live="polite" className="grid content-center gap-2 rounded-lg border border-p1-border-soft bg-p1-surface-soft p-3 text-xs text-p1-muted">
+              <div className="flex flex-wrap justify-between gap-2"><dt>Profit</dt><dd className={`mono break-all font-bold ${values.profit >= 0 ? "text-p1-success" : "text-p1-danger"}`}>{fmt(values.profit)}</dd></div>
+              <div className="flex flex-wrap justify-between gap-2"><dt>Actual margin</dt><dd className="mono break-all font-bold text-p1-ink">{values.actualMargin == null ? "−" : `${values.actualMargin.toFixed(1)}%`}</dd></div>
+              <div className="flex flex-wrap justify-between gap-2 border-t border-p1-border-soft pt-2"><dt>Sell for target</dt><dd className="mono break-all font-bold text-p1-accent">{fmt(values.targetSell)}</dd></div>
+            </dl>
           </div>
         </div>
-      ) : (
-        <button type="button" className="btn-accent" onClick={() => setOpenPersisted(true)} style={{ minHeight: 44, padding: "10px 14px", boxShadow: "0 10px 28px rgba(31,30,28,0.18)" }}>
-          Profit calculator
-        </button>
-      )}
+      </div>
     </aside>
   );
+
+  // A native modal makes the background inert regardless of z-index. Move the
+  // same calculator into its owned slot; component state survives both moves.
+  return editorHost ? createPortal(calculator, editorHost) : calculator;
 }

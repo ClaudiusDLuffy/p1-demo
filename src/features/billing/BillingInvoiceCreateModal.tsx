@@ -219,6 +219,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     initialWorkOrderId,
     onClose,
     onCreated,
+    onProfitCalculatorHostChange,
     fire,
     fmt,
   } = props;
@@ -1487,6 +1488,8 @@ export default function BillingInvoiceCreateModal(props: any) {
         width={1240}
         closeOnBackdrop={false}
       >
+      {/* Outside the invoice form: calculator input/Enter cannot submit or dirty it. */}
+      <div ref={onProfitCalculatorHostChange} className="mb-4 empty:hidden" />
       <form ref={formRef} onSubmit={submitValidInvoice("submitted")}>
         <fieldset disabled={submitting || pullingLines} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
