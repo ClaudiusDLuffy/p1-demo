@@ -21,7 +21,7 @@ export { workOrderReadArgs };
 import { parseNavigationSummaryV2 } from "./counts/navigationSummary";
 import { parseInvoiceSummary, invoiceSummaryForLegacyUi, invoiceDocumentForLegacyUi } from "../features/invoices/invoiceReadContracts";
 import { readInvoiceSummary, readInvoiceDocument } from "../features/invoices/invoiceReads";
-import { supabase } from "./supabase/client";
+import { beginBrowserSignIn, beginBrowserSignOut, supabase } from "./supabase/client";
 import { cancelUnattachedUpload, createWorkOrderPhotoPorts, deleteBoundObject, uploadBoundAttachment } from "./privateObjectClient";
 import { createPhotoUploadController } from "../features/photos/photoUploadController";
 import { createContractorInvoiceCommands, safeContractorInvoiceError } from "./contractorInvoiceCommands";
@@ -73,6 +73,7 @@ import {
 
 export async function signIn(email: string, password: string): Promise<any> {
   const sb = supabase();
+  beginBrowserSignIn();
   const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw normalizeUnknownError(error);
   return data;
@@ -82,8 +83,13 @@ export type SignOutScope = "global" | "local" | "others";
 
 export async function signOut(scope: SignOutScope = "local"): Promise<void> {
   const sb = supabase();
-  const { error } = await sb.auth.signOut({ scope });
-  if (error) throw normalizeUnknownError(error);
+  const finish = scope === "others" ? () => undefined : beginBrowserSignOut();
+  try {
+    const { error } = await sb.auth.signOut({ scope });
+    if (error) throw normalizeUnknownError(error);
+  } finally {
+    finish();
+  }
 }
 
 export async function getSession(): Promise<any> {

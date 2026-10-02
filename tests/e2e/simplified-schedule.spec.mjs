@@ -157,6 +157,7 @@ test.describe("320x568 My Schedule", () => {
     expect((await download).suggestedFilename()).toMatch(/\.csv$/);
     await page.getByPlaceholder("Search WO, store, city, keyword…").fill("no-such-job");
     await expect(page.getByRole("button", { name: "Export filtered list" })).toBeDisabled();
+    await waitForApplicationRequestsToSettle(page);
   });
 
   test("calendar views and ETA confirmation work without horizontal overflow", async ({ page }) => {

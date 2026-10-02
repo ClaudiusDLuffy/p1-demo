@@ -95,6 +95,10 @@ export async function waitForApplicationRequestsToSettle(page, {
 }
 
 export async function login(page, account) {
+  // Normal role-switch scenarios wait for the previous server sign-out.
+  // Immediate-reload coverage deliberately bypasses this helper.
+  const signingOut = page.getByRole("button", { name: "Signing out...", exact: true });
+  if (await signingOut.isVisible()) await expect(signingOut).toBeHidden();
   // The disposable local GoTrue/PostgREST pair can briefly disagree at the JWT
   // issue second. Retry only that local PGRST303 response so the test observes
   // application behavior instead of a container-clock race. Hosted

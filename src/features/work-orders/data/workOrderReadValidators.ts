@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workOrderStatusSchema } from "../../../lib/schemas/workOrderStatus";
 import { AppError } from "../../../lib/errors/AppError";
 import { MAX_PAGE_SIZE, type CursorPage } from "../../../lib/cursorPagination";
 import type { WorkOrderReadRow, WorkOrderReadJson, WorkOrderIncidentReuse } from "./workOrderReadContracts";
@@ -37,8 +38,7 @@ const todo = z.object({
 
 const rowSchema: z.ZodType<WorkOrderReadRow> = z.object({
   id: parentId,
-  status: z.enum(["unassigned", "assigned", "wip", "parts", "capital", "pending_capital_completion", "completed",
-    "pending_invoice", "pending_approval", "pending_payment", "closed"]),
+  status: workOrderStatusSchema,
   priority: z.enum(["p1", "p2", "p3", "p4", "p5"]),
   functional_status: z.enum(["New", "Dispatched", "Work in Progress", "Pending Capital Approval", "Pending Capital Completion",
     "Awaiting Parts", "Completed", "Cancelled"]).nullable().optional(),

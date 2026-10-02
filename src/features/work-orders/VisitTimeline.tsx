@@ -17,6 +17,7 @@ import {
   validateVisitCorrection,
 } from "../../lib/visitCorrection";
 import { requiresVisitDurationReview, VISIT_DURATION_REVIEW_MESSAGE } from "../../lib/visitDurationReview";
+import { resolveVisitCorrectionTime } from "../../lib/visitCorrectionInput";
 import {
   WORK_ORDER_BY_ID_KEY,
   WORK_ORDER_PAGES_KEY,
@@ -162,21 +163,19 @@ export default function VisitTimeline({
     setSaving(true);
     setError("");
     try {
-      const checkInAt = storeLocalDateTimeToIso(
+      const visit = visits.find(candidate => candidate.id === editingId);
+      const checkInAt = resolveVisitCorrectionTime(
         form.checkInDate,
         form.checkInTime,
         timeZone,
+        visit?.checkInAt,
       );
-      const checkOutAt = storeLocalDateTimeToIso(
+      const checkOutAt = resolveVisitCorrectionTime(
         form.checkOutDate,
         form.checkOutTime,
         timeZone,
+        visit?.checkOutAt,
       );
-      const visit = (visits as Array<{
-        id?: string;
-        checkInAt?: string | null;
-        checkOutAt?: string | null;
-      }>).find(candidate => candidate.id === editingId);
       validateVisitCorrection({
         checkInAt,
         checkOutAt,

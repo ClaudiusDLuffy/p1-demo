@@ -148,8 +148,20 @@ test("staff can correct a completed visit and persist the audit reason", async (
   const save = page.getByRole("button", { name: "Save correction", exact: true });
   await expect(save).toBeEnabled();
   await save.click();
+  await expect(page.getByText("Change at least one actual visit time before saving.", { exact: true })).toBeVisible();
+  // Change only checkout. Check-in touches the preceding visit exactly and
+  // must retain its stored seconds rather than manufacturing an overlap.
+  const date = await page.getByLabel("Actual check-out date", { exact: true }).inputValue();
+  const time = await page.getByLabel("Actual check-out time", { exact: true }).inputValue();
+  const earlier = new Date(Date.parse(`${date}T${time}:00Z`) - 5 * 60_000).toISOString();
+  await page.getByLabel("Actual check-out date", { exact: true }).fill(earlier.slice(0, 10));
+  await page.getByLabel("Actual check-out time", { exact: true }).fill(earlier.slice(11, 16));
+  const correction = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/correct_work_order_visit"));
+  await save.click();
+  expect((await correction).ok()).toBe(true);
   await expect(reason).toBeHidden();
   await expect(page.getByRole("button", { name: "Correct actual time", exact: true })).toBeVisible();
+  await expect(page.getByText("Synthetic Manager corrected visit time: Synthetic correction verified against dispatch notes.", { exact: true })).toBeVisible();
 });
 
 test("contractor can correct an aged visit and the audit reason persists", async ({ page }) => {

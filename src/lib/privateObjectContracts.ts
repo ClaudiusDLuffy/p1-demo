@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AssignmentDatabase } from "./workOrderAssignmentContracts";
 import type { EmailIntakeServerDatabase } from "./emailIntakeLogContracts";
 import type { Json } from "./supabase/database.types";
+import type { ExternalBillingFunctions } from "../features/billing/externalBillingContracts";
 
 export const objectPurposeSchema = z.enum(["photo", "invoice_original", "invoice_generated", "estimate_attachment"]);
 export type ObjectPurpose = z.infer<typeof objectPurposeSchema>;
@@ -73,7 +74,7 @@ export type PrivateObjectServiceFunctions = {
   complete_private_object_deletion_v1: Routine<{ p_deletion_id: string; p_claim_id: string; p_outcome: string }>;
   list_private_object_reconciliation_v1: Routine<{ p_limit: number; p_dry_run: boolean }>;
 };
-export type PrivateObjectDatabase = AssignmentDatabase & { public: { Functions: PrivateObjectFunctions } };
+export type PrivateObjectDatabase = AssignmentDatabase & { public: { Functions: PrivateObjectFunctions & ExternalBillingFunctions } };
 export type PrivateObjectServerDatabase = EmailIntakeServerDatabase & { public: { Functions: PrivateObjectFunctions & PrivateObjectServiceFunctions } };
 
 export class PrivateObjectError extends Error {

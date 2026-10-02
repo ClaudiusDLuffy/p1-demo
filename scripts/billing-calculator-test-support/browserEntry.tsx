@@ -3,7 +3,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import BillingInvoiceCreateModal from "../../src/features/billing/BillingInvoiceCreateModal";
-import FloatingProfitCalculator from "../../src/features/billing/FloatingProfitCalculator";
+import BillingProfitCalculator from "../../src/features/billing/BillingProfitCalculator";
 import { Modal } from "../../src/components/ui/Modal";
 import { DirectoryScopeProvider } from "../../src/features/directory/queries";
 import { parseAuthProfile } from "../../src/features/auth/authProfile";
@@ -18,6 +18,7 @@ const fmt = (value: number) => "$" + value.toLocaleString("en-US");
 function Harness() {
   const [modal, setModal] = useState<string | null>(null);
   const [editorHost, setEditorHost] = useState<HTMLDivElement | null>(null);
+  const [billingHost, setBillingHost] = useState<HTMLDivElement | null>(null);
   const [page, setPage] = useState("billing");
   const [otherDialog, setOtherDialog] = useState(false);
   const [actor, setActor] = useState("staff");
@@ -33,12 +34,14 @@ function Harness() {
         <option value="staff">Ordinary staff</option><option value="second-staff">Second staff</option>
         <option value="contractor">Contractor</option><option value="controller">Restricted controller</option>
       </select></label>
+      {allowed && page === "billing" && <div ref={setBillingHost} className="mt-4 min-w-0 empty:hidden" />}
+      <div aria-hidden="true" className="h-[1200px]" />
     </main>
     {allowed && <BillingInvoiceCreateModal modal={modal} currentUser={user} onClose={() => setModal(null)}
       onCreated={() => { throw new Error("Unexpected invoice mutation"); }} fmt={fmt}
       onProfitCalculatorHostChange={setEditorHost} />}
-    <FloatingProfitCalculator key={actor} visible={allowed && (page === "billing" || modal === "createBillingInvoice")}
-      editorHost={editorHost} fmt={fmt} />
+    <BillingProfitCalculator key={actor} visible={allowed && (page === "billing" || modal === "createBillingInvoice")}
+      host={modal === "createBillingInvoice" ? editorHost : billingHost} fmt={fmt} />
     {otherDialog && <Modal title="Unrelated confirmation" onClose={() => setOtherDialog(false)}>
       <button type="button" onClick={() => setOtherDialog(false)}>Return to billing</button>
     </Modal>}

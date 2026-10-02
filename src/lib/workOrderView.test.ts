@@ -229,3 +229,10 @@ test("closed-by attribution does not guess from unrelated system activity", () =
     text: "Contractor bill #460 entered in QuickBooks by Emily Barnhart.",
   }]), null);
 });
+
+test("external billing has distinct internal closure attribution", () => {
+  const activity = { author: "Synthetic Billing Staff", eventKey: "work_order_billed_externally",
+    text: "Billed outside the portal in QuickBooks." };
+  assert.equal(resolveWorkOrderClosedBy([activity]), "Synthetic Billing Staff");
+  assert.equal(isInternalWorkOrderActivity(activity), true);
+});

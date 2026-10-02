@@ -82,13 +82,11 @@ test("short mobile dropdowns fit beside their trigger instead of overlapping it"
   }
 });
 
-test("the floating profit calculator stays below the shared modal fallback layer", () => {
-  const calculator = source("src/features/billing/FloatingProfitCalculator.tsx");
-  const portalShell = source("src/components/PortalShell.tsx");
-  const modal = source("src/components/ui/Modal.tsx");
-  assert.match(calculator, /z-\[45\]/);
-  assert.match(portalShell, /\.app-toast \{[\s\S]*?z-index: 45;/);
-  assert.match(modal, /zIndex: 50/);
+test("the calculator requires an owned host and cannot fall back to a floating overlay", () => {
+  const calculator = source("src/features/billing/BillingProfitCalculator.tsx");
+  assert.match(calculator, /if \(!visible \|\| !host\) return null/);
+  assert.match(calculator, /return createPortal\(calculator, host\)/);
+  assert.doesNotMatch(calculator, /\bfixed\b|\bsticky\b|z-\[|zIndex/);
 });
 
 test("work-order activity menus stay above mobile navigation and below modals", () => {

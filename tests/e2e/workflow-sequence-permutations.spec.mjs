@@ -116,6 +116,7 @@ async function completeWork(page, prefix) {
 
 async function fillInvoice(dialog, number) {
   await dialog.getByLabel("Invoice #").fill(number);
+  await expect(dialog.getByLabel("Invoice #")).toHaveValue(number);
   await dialog.getByRole("button", { name: "+ Labor", exact: true }).click();
   await dialog.getByLabel("Line 1 description").fill(`${number} sequence labor`);
   await dialog.getByLabel("Line 1 quantity").fill("2");
@@ -519,6 +520,7 @@ test("invoice approval during an active visit does not interrupt pause and resum
     await openStaffWorkOrder(manager.page, workOrderId);
     await expect(manager.page.getByText("Portal: In Progress", { exact: true })).toBeVisible();
     await manager.page.getByRole("button", { name: "Approve", exact: true }).click();
+    await expect(manager.page.locator(".app-toast")).toHaveText(`Invoice #${invoiceNumber} approved`);
     await expect(manager.page.getByText("Approved", { exact: true }).first()).toBeVisible();
     await expect(manager.page.getByText("Portal: In Progress", { exact: true })).toBeVisible();
 

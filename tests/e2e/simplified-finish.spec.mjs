@@ -166,10 +166,11 @@ test("an initial schedule read failure is retryable and an empty schedule is usa
     status: 400, contentType: "application/json", body: JSON.stringify({ code: "22023", message: "Synthetic read failure" }),
   }));
   await openSidebarPage(page, "My Schedule");
-  await expect(page.getByText("Your schedule could not be loaded. No work-order data was changed.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Your schedule could not be loaded." })).toContainText("No work-order data was changed.");
   await page.unroute("**/rest/v1/work_orders?*");
   await page.route("**/rest/v1/work_orders?*", route => route.fulfill({
-    status: 200, contentType: "application/json", headers: { "content-range": "*/0" }, body: JSON.stringify([]),
+    status: 200, contentType: "application/json",
+    headers: { "content-range": "*/0", "access-control-expose-headers": "content-range" }, body: JSON.stringify([]),
   }));
   await page.getByRole("button", { name: "Retry schedule", exact: true }).click();
   await page.getByRole("button", { name: "Retry counts", exact: true }).click();
@@ -221,14 +222,25 @@ test.describe("mobile schedule scenarios at 320x568", () => {
     });
     let ids = [];
     // Synthetic presentation fixture: retain authorized real local IDs, set two equal ETAs.
-    await page.route("**/rest/v1/rpc/list_work_orders_rows_v1", async route => {
-      const response = await route.fetch();
+    await page.route("**/rest/v1/work_orders?*", async route => {
+      const url = new URL(route.request().url());
+      const bounds = url.searchParams.getAll("eta");
+      if (route.request().method() !== "GET" || !bounds.some(value => value.startsWith("gte."))) return route.fallback();
+      const eta = `${today}T14:00:00Z`;
+      const from = bounds.find(value => value.startsWith("gte.")).slice(4);
+      const to = bounds.find(value => value.startsWith("lt.")).slice(3);
+      // Only the schedule presentation response is synthetic. Fetch actual
+      // locally authorized rows and respect the requested date window.
+      url.searchParams.delete("eta");
+      url.searchParams.set("limit", "2");
+      const response = await route.fetch({ url: url.toString() });
       if (!response.ok()) return route.fulfill({ response });
       const body = await response.json();
-      if (!Array.isArray(body.items)) return route.fulfill({ response });
-      ids = body.items.slice(0, 2).map(row => row.id);
-      body.items = body.items.map((row, index) => ({ ...row, store_timezone: "America/Chicago", eta: index < 2 ? `${today}T14:00:00Z` : null }));
-      await route.fulfill({ response, json: body });
+      expect(Array.isArray(body)).toBe(true);
+      ids = body.slice(0, 2).map(row => row.id);
+      const rows = Date.parse(eta) >= Date.parse(from) && Date.parse(eta) < Date.parse(to)
+        ? body.slice(0, 2).map(row => ({ ...row, store_timezone: "America/Chicago", eta })) : [];
+      await route.fulfill({ response, json: rows, headers: { ...response.headers(), "content-range": rows.length ? "0-1/2" : "*/0" } });
     });
     await page.getByRole("button", { name: "Open menu", exact: true }).tap();
     const menu = page.getByRole("dialog", { name: "Navigation menu" });

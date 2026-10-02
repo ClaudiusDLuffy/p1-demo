@@ -102,7 +102,9 @@ test("invoice modal distinguishes automatic focus from a manual number edit", ()
   const marker = 'placeholder="e.g. 6557"';
   const end = source.indexOf(marker);
   const input = source.slice(source.lastIndexOf("<input", end), end + marker.length);
-  assert.match(input, /register\("num", \{ onChange:/);
+  assert.match(source, /const numberField = register\("num", \{ onChange:/);
+  assert.match(input, /\.\.\.numberField/);
+  assert.match(input, /numberField\.ref\(input\)/);
   assert.doesNotMatch(input, /onFocus=/);
 });
 

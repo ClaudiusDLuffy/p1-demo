@@ -1,14 +1,11 @@
 import { z } from "zod";
+import { workOrderStatusSchema } from "./workOrderStatus";
 
 export const WorkOrderSchema = z.object({
   id: z.string().min(1),
   summary: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
-  status: z.enum([
-    "unassigned", "assigned", "wip", "parts", "capital", "pending_capital_completion",
-    "completed", "pending_invoice", "pending_approval",
-    "pending_payment", "closed"
-  ]),
+  status: workOrderStatusSchema,
   priority: z.enum(["p1", "p2", "p3", "p4", "p5"]).optional().nullable(),
   contractor_id: z.string().optional().nullable(),
   nte: z.number().optional().nullable(),

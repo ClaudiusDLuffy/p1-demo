@@ -102,6 +102,7 @@ async function completeWork(page, prefix) {
 
 async function fillKnownInvoice(dialog, number) {
   await dialog.getByLabel("Invoice #").fill(number);
+  await expect(dialog.getByLabel("Invoice #")).toHaveValue(number);
   await dialog.getByRole("button", { name: "+ Labor", exact: true }).click();
   await dialog.getByLabel("Line 1 description").fill(`${number} verified mobile labor`);
   await dialog.getByLabel("Line 1 quantity").fill("2.5");

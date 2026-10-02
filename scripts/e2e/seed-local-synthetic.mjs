@@ -60,6 +60,12 @@ async function ensureUsers(runtime) {
 
 async function main() {
   const runtime = localSupabaseRuntime();
+  const preflight = readFileSync(resolve(process.cwd(), "scripts/e2e/assert-local-private-object-baseline.sql"), "utf8");
+  execFileSync(
+    "docker",
+    ["exec", "-i", "supabase_db_p1-demo-e2e", "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"],
+    { input: preflight, stdio: ["pipe", "pipe", "inherit"] },
+  );
   const ids = await ensureUsers(runtime);
   const sql = readFileSync(resolve(process.cwd(), "scripts/e2e/seed-local-synthetic.sql"), "utf8");
   const variables = Object.entries(ids).flatMap(([name, value]) => ["--set", `${name}=${value}`]);

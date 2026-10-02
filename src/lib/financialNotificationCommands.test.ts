@@ -59,6 +59,46 @@ test("approval produces no notification and legacy caller obtains a bounded revi
   assert.equal(result.notificationStatus, "not_required"); assert.equal(result.notifications.length, 0);
   assert.equal(f.reads().revisionReads, 1);
 });
+test("approve, reject and retract accept committed results that preserve the field lifecycle", async () => {
+  const statuses = ["unassigned", "assigned", "wip", "parts", "capital", "pending_capital_completion",
+    "completed", "pending_invoice", "pending_approval", "pending_payment", "closed", null];
+  for (const workOrderStatus of statuses) {
+    for (const action of ["approve", "reject", "retract"] as const) {
+      const f = fixture();
+      f.respond(async (name, args) => ({ data: { ...review(args, name), workOrderStatus }, error: null }));
+      const result = action === "retract" ? await f.commands.retract(invoiceId, 1)
+        : await f.commands.review(invoiceId, action, "Reviewed source document", 1);
+      assert.equal(result.workOrderStatus, workOrderStatus, `${action}: ${workOrderStatus}`);
+      assert.equal(f.calls.length, 1);
+    }
+  }
+});
+test("batch review accepts mixed field and capital states without a second mutation", async () => {
+  for (const action of ["approve", "reject"] as const) {
+    const f = fixture();
+    const statuses = ["wip", "parts", "capital", "pending_capital_completion", "completed"];
+    const ids = statuses.map((_, index) => uuid(index + 1));
+    f.respond(async (_name, args) => ({ data: { action, operationId: args.p_operation_id, replayed: false,
+      count: ids.length, invoiceIds: ids, results: ids.map((id, index) => ({
+        ...review({ p_invoice_id: id, p_action: action, p_operation_id: uuid(200 + index) }),
+        workOrderStatus: statuses[index],
+      })),
+    }, error: null }));
+    const result = await f.commands.batch(ids, action, "Reviewed source documents",
+      Object.fromEntries(ids.map(id => [id, 1])));
+    assert.deepEqual(result.results.map(item => item.workOrderStatus), statuses);
+    assert.equal(f.calls.length, 1);
+  }
+});
+test("unknown work-order status still rejects a success response and preserves its replay identity", async () => {
+  const f = fixture();
+  f.respond(async (name, args) => ({ data: { ...review(args, name), workOrderStatus: "not-a-status" }, error: null }));
+  await assert.rejects(f.commands.review(invoiceId, "approve", null, 1), isCode("RESULT_UNCONFIRMED"));
+  await assert.rejects(f.commands.review(invoiceId, "reject", "Changed action", 1), isCode("OPERATION_REUSED"));
+  f.respond(async (name, args) => ({ data: { ...review(args, name), workOrderStatus: "wip" }, error: null }));
+  await f.commands.review(invoiceId, "approve", null, 2);
+  assert.deepEqual(f.calls[0], f.calls[1]);
+});
 test("retraction binds revision and its own event family", async () => {
   const f = fixture(); const result = await f.commands.retract(invoiceId, 9);
   assert.equal(f.calls[0].name, "retract_contractor_invoice_rejection_with_notification_v1");

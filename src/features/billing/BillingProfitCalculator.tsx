@@ -7,15 +7,15 @@ import { calculateProfit } from "./profitCalculator";
 const STORAGE_KEY = "p1-billing-profit-calculator-open";
 const inputClass = "mt-1 w-full min-w-0 rounded-lg border border-p1-border bg-p1-surface px-2 py-2 text-base text-p1-ink min-h-11";
 
-export default function FloatingProfitCalculator({
+export default function BillingProfitCalculator({
   visible,
   fmt,
-  editorHost = null,
+  host,
 }: {
   visible: boolean;
   fmt: (value: number) => string;
-  /** Owned by the invoice dialog, outside its form. Never a global overlay. */
-  editorHost?: HTMLElement | null;
+  /** Owned by the Billing page or invoice dialog, outside any form. */
+  host: HTMLElement | null;
 }) {
   const panelId = useId();
   const [open, setOpen] = useState(false);
@@ -45,13 +45,12 @@ export default function FloatingProfitCalculator({
 
   const values = useMemo(() => calculateProfit(cost, sell, targetMargin), [cost, sell, targetMargin]);
 
-  if (!visible) return null;
+  if (!visible || !host) return null;
 
   const calculator = (
     <aside
       aria-label="Profit calculator"
-      className={editorHost ? "w-full min-w-0" : "fixed right-[18px] bottom-[18px] z-[45] max-w-[calc(100vw-36px)] max-h-[calc(100dvh-36px)] overflow-y-auto"}
-      style={!editorHost && open ? { width: 310 } : undefined}
+      className="w-full min-w-0"
     >
       <div className={open ? "rounded-xl border border-p1-accent-ring bg-p1-surface p-3 shadow-lg" : ""}>
         <button type="button" onClick={event => {
@@ -68,7 +67,7 @@ export default function FloatingProfitCalculator({
         </button>
         <div id={panelId} hidden={!open}>
           <p className="mb-3 text-xs text-p1-muted">Staff only · values are not saved or added to the invoice</p>
-          <div className={editorHost ? "grid min-w-0 gap-3 sm:grid-cols-2" : "grid min-w-0 gap-3"}>
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <div className="grid min-w-0 grid-cols-2 gap-2">
               <label className="min-w-0 text-xs text-p1-muted">
                 Cost
@@ -96,5 +95,5 @@ export default function FloatingProfitCalculator({
 
   // A native modal makes the background inert regardless of z-index. Move the
   // same calculator into its owned slot; component state survives both moves.
-  return editorHost ? createPortal(calculator, editorHost) : calculator;
+  return createPortal(calculator, host);
 }
