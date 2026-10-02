@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workOrderStatusSchema } from "./schemas/workOrderStatus";
 
 export const financialNotificationReceiptSchema = z.object({
   operationId: z.uuid(), replayed: z.boolean(),
@@ -12,7 +13,7 @@ export const financialReviewResultSchema = financialNotificationReceiptSchema.ex
   invoiceId: z.uuid(), invoiceNum: z.string().max(256),
   invoiceState: z.enum(["submitted", "approved", "rejected", "revised", "paid"]),
   workOrderId: z.string().max(128),
-  workOrderStatus: z.enum(["pending_invoice", "pending_approval", "closed"]).nullable(),
+  workOrderStatus: workOrderStatusSchema.nullable(),
   reviewRevision: z.number().int().positive(), rejectionReason: z.string().nullable().optional(),
   total: z.number().finite().optional(), pdfStoragePath: z.string().max(1000).nullable().optional(),
 });

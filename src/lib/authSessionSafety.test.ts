@@ -36,7 +36,8 @@ test("stale profile responses cannot overwrite the newly signed-in identity", ()
   const body = authHook.slice(start, authHook.indexOf("// Real Supabase auth", start));
   assert.match(body, /expectedUserIdRef\.current\s*!==\s*userId/);
   assert.match(body, /expectedUserIdRef\.current\s*!==\s*prof\.id/);
-  assert.match(authHook, /await signOut\("local"\)/);
+  assert.match(authHook, /pendingSignOut = signOut\("local"\)/);
+  assert.match(authHook, /await pendingSignOut/);
   assert.match(authHook, /expectedUserIdRef\.current\s*=\s*nextUserId/);
   assert.match(authHook, /authTransitionRef\.current\s*===\s*"login"/);
   assert.match(authHook, /authTransitionRef\.current\s*===\s*"logout"/);

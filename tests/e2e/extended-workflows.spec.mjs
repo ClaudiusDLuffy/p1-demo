@@ -109,6 +109,9 @@ test("invoice-capable technician can upload and submit a synthetic PDF invoice",
   }
   await dialog.getByRole("button", { name: "Submit", exact: true }).click();
   await expect(dialog).toBeHidden();
+  const confirmation = page.getByRole("dialog", { name: "Invoice #E2E-PDF-001 submitted", exact: true });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Done", exact: true }).click();
   await expect(page.getByText("#E2E-PDF-001", { exact: true })).toBeVisible();
 });
 

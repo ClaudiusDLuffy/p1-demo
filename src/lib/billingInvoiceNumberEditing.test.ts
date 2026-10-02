@@ -33,7 +33,7 @@ test("auto-populated P1 invoice numbers are editable before lifecycle lock", () 
 test("an untouched invoice-number preview refreshes every time create opens", () => {
   assert.match(modal, /const numberEditedRef = useRef\(false\)/);
   assert.match(modal, /billing-invoices\?nextNumber=1[\s\S]*cache: "no-store"/);
-  assert.match(modal, /if \(!numberEditedRef\.current\) \{\s*setValue\("num", preview/);
+  assert.match(modal, /if \(!numberEditedRef\.current\) \{[^}]*setValue\("num", preview/);
   assert.match(modal, /num: editingInvoice\?\.num \|\| ""/);
   assert.doesNotMatch(modal, /num: editingInvoice\?\.num \|\| numberPreview/);
   assert.match(modal, /numberEditedRef\.current = restoredNumberEdited/);
@@ -43,7 +43,9 @@ test("automatic focus cannot suppress a late invoice-number preview", () => {
   const marker = 'title="Auto-populated, but editable until approval or QuickBooks sync.';
   const end = modal.indexOf(marker);
   const input = modal.slice(modal.lastIndexOf("<input", end), end + marker.length);
-  assert.match(input, /register\("num", \{\s*onChange:/);
+  assert.match(modal, /const numberField = register\("num", \{\s*onChange:/);
+  assert.match(input, /\.\.\.numberField/);
+  assert.match(input, /numberField\.ref\(input\)/);
   assert.doesNotMatch(input, /onFocus=/);
   assert.doesNotMatch(modal, /numberInputFocusedRef|pendingNumberPreviewRef/);
 });

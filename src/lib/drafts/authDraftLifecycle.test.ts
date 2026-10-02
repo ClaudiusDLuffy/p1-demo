@@ -72,7 +72,7 @@ test("actual auth hook activates only active identity, retains ordinary token re
 test("actual explicit logout purges before failing SDK signout without blocking the attempt", async () => {
   const h = harness(); await h.emit("INITIAL_SESSION", { user: { id: user } });
   const lease = h.draft.open("staff-billing", "new", validate)!; lease.save("synthetic"); h.failSignout();
-  await assert.rejects(h.auth.logout()); assert.equal(h.signouts(), 1); assert.equal(lease.isPersisted(), false);
+  await h.auth.logout(); assert.equal(h.signouts(), 1); assert.equal(lease.isPersisted(), false);
   assert.equal(h.draft.hasDrafts(), false);
 });
 test("same-user authorization change fences old draft writes before slow query cancellation", async () => {

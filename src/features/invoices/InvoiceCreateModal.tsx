@@ -113,6 +113,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
   const pdfParseController = useRef<AbortController | null>(null);
   const pdfParsingFile = useRef<File | null>(null);
   const numTouchedRef = useRef(false);
+  const numberInputRef = useRef<HTMLInputElement | null>(null);
   const submitLockRef = useRef(false);
   const submissionKeyRef = useRef("");
   const draftOperationKeyRef = useRef("");
@@ -153,6 +154,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       lines: initialLines(),
     },
   });
+  const numberField = register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } });
   const { fields, append, remove, replace } = useFieldArray({ control, name: "lines" });
   const watchedLines = watch("lines") || [];
   const watchedTax = watch("tax");
@@ -310,8 +312,14 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
             const suggested = await nextInvNumFromDb();
             if (hydratedFormSessionRef.current !== formSession || hydrationGenerationRef.current !== hydrationGeneration) return;
             if (!numTouchedRef.current) {
+              const input = numberInputRef.current;
+              const replaceOnTyping = input?.value === "" && input.ownerDocument.activeElement === input;
               // Write only the suggestion; preserve all authored fields.
               setValue("num", suggested, { shouldDirty: false });
+              // RHF writes the DOM value synchronously. Preserve replacement
+              // selection if the suggestion arrives between focus/select and
+              // the first input event, rather than prefixing the user's text.
+              if (replaceOnTyping) input.select();
             }
           } catch { /* keep blank — submit-side retry still saves us */ }
         })();
@@ -581,7 +589,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input aria-invalid={Boolean(errors.num)} aria-describedby={errors.num ? `${formId}-number-error` : undefined} {...register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } })} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span id={`${formId}-number-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input aria-invalid={Boolean(errors.num)} aria-describedby={errors.num ? `${formId}-number-error` : undefined} {...numberField} ref={input => { numberField.ref(input); numberInputRef.current = input; }} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span id={`${formId}-number-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel aria-label="Terms" {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>

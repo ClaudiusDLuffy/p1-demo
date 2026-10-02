@@ -108,6 +108,26 @@ test("searchable Sel uses named combobox, bounded search, no-results and disable
   assert.equal(String(find(tree, node => node.type === "input" && node.props.role === "combobox").props.value).length, 200);
   assert.match(uiText(tree), /No options found/);
 });
+test("Sel preserves touch default actions and ignores touch hover while retaining mouse focus protection", () => {
+  const h = primitiveHarness("src/components/ui/Sel.tsx");
+  const props = { value: "a", children: [option("a", "Alpha"), option("b", "Beta")] };
+  let tree = h.render("Sel", props);
+  uiInvoke(find(tree, node => node.type === "button"), "onClick");
+  tree = h.render("Sel", props);
+  const beta = find(tree, node => node.props.role === "option" && uiText(node) === "Beta");
+  let prevented = 0;
+  uiInvoke(beta, "onPointerDown", { pointerType: "touch", preventDefault() { prevented++; } });
+  assert.equal(prevented, 0);
+  uiInvoke(beta, "onPointerDown", { pointerType: "mouse", preventDefault() { prevented++; } });
+  assert.equal(prevented, 1);
+  const activeId = find(tree, node => node.type === "button").props["aria-activedescendant"];
+  uiInvoke(beta, "onPointerMove", { pointerType: "touch" });
+  tree = h.render("Sel", props);
+  assert.equal(find(tree, node => node.type === "button").props["aria-activedescendant"], activeId);
+  uiInvoke(beta, "onPointerMove", { pointerType: "mouse" });
+  tree = h.render("Sel", props);
+  assert.equal(find(tree, node => node.type === "button").props["aria-activedescendant"], beta.props.id);
+});
 test("forwarded selection ref focuses visible control for RHF errors", () => {
   const h = primitiveHarness("src/components/ui/Sel.tsx"); let focused = 0;
   const tree = h.render("Sel", { children: [option("a", "Alpha")] });
@@ -130,6 +150,36 @@ test("RHF-style reset/setValue through uncontrolled ref updates the visible opti
   h.imperative[0](); input.value = "a"; tree = h.render("Sel", props);
   assert.match(uiText(tree), /Net 30/);
 });
+
+for (const controlled of [true, false]) {
+  test(`Sel updates its registered input before change notification (${controlled ? "controlled" : "uncontrolled"})`, () => {
+    const h = primitiveHarness("src/components/ui/Sel.tsx");
+    const input = { value: "", focus() {} };
+    let selected = "";
+    const changes: string[] = [];
+    const props = () => ({ name: "workOrderId", ...(controlled ? { value: selected } : { defaultValue: "" }),
+      children: [option("", "Standalone"), option("first", "First work order"), option("second", "Second work order")],
+      onChange: (event: { target: { name: string; value: string } }) => {
+        // RHF reads the registered ref for events with a native target.type.
+        // Its value must already match the option being announced.
+        assert.equal(input.value, event.target.value);
+        assert.equal(event.target.name, "workOrderId");
+        selected = input.value; changes.push(selected);
+      },
+    });
+    let tree = h.render("Sel", props());
+    (find(tree, node => node.type === "input" && node.props.type === "hidden").props.ref as { current: unknown }).current = input;
+    for (const [value, label] of [["first", "First work order"], ["second", "Second work order"], ["", "Standalone"]]) {
+      uiInvoke(find(tree, node => node.type === "button"), "onClick");
+      tree = h.render("Sel", props());
+      uiInvoke(find(tree, node => node.props.role === "option" && uiText(node) === label), "onClick");
+      assert.equal(selected, value);
+      tree = h.render("Sel", props());
+      assert.equal(find(tree, node => node.type === "input" && node.props.type === "hidden").props.value, value);
+    }
+    assert.deepEqual(changes, ["first", "second", ""]);
+  });
+}
 
 test("Field keeps legacy required marker once and warns for zero/multiple associations", () => {
   const html = renderToStaticMarkup(createElement(Field, { label: "Reason *", required: true }, createElement(Input)));

@@ -21,6 +21,10 @@ test("shell connects the staff calculator to the real editor and scopes memory t
   const shell = readFileSync("src/components/PortalShell.tsx", "utf8");
   const editor = readFileSync("src/features/billing/BillingInvoiceCreateModal.tsx", "utf8");
   assert.match(shell, /onProfitCalculatorHostChange=\{setBillingCalculatorHost\}/);
-  assert.match(shell, /<FloatingProfitCalculator\s+key=\{currentUser\?\.id \|\| "signed-out"\}\s+visible=\{isManager && !invoiceController && \(page === "billing" \|\| modal === "createBillingInvoice"\)\}\s+editorHost=\{billingCalculatorHost\}/);
+  assert.match(shell, /<BillingProfitCalculator\s+key=\{currentUser\?\.id \|\| "signed-out"\}\s+visible=\{isManager && !invoiceController && \(page === "billing" \|\| modal === "createBillingInvoice"\)\}/);
+  assert.match(shell, /host=\{modal === "createBillingInvoice" \? billingCalculatorHost : billingPageCalculatorHost\}/);
+  assert.match(shell, /<BillingInvoiceList\s+onProfitCalculatorHostChange=\{setBillingPageCalculatorHost\}/);
+  const list = readFileSync("src/features/billing/BillingInvoiceList.tsx", "utf8");
+  assert.match(list, /!controller && <div ref=\{onProfitCalculatorHostChange\}/);
   assert.match(editor, /<div ref=\{onProfitCalculatorHostChange\}[^>]*\/>\s*<form ref=\{formRef\}/);
 });

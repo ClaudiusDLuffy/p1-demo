@@ -5,12 +5,11 @@ import postcss from "postcss";
 import tailwind from "@tailwindcss/postcss";
 import { chromium, webkit, expect } from "@playwright/test";
 import { createServer } from "node:http";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const reproduce = process.argv.includes("--reproduce");
-const evidence = "/Users/nxs/p1-stabilization-recovery/billing-calculator-2026-10-02";
-mkdirSync(evidence, { recursive: true });
+const evidence = mkdtempSync("/Users/nxs/p1-stabilization-recovery/billing-calculator-inline-");
 let javascript;
 let stylesheet;
 const server = createServer((request, response) => {
@@ -76,14 +75,16 @@ try {
         const calculator = page.locator('aside[aria-label="Profit calculator"]');
         const activate = locator => mobile ? locator.tap() : locator.click();
         const editor = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
-        const checkLayout = async () => {
+        const checkLayout = async (inDialog = true) => {
           const layout = await calculator.evaluate(element => {
             const bounds = element.getBoundingClientRect();
             return { fits: element.scrollWidth <= element.clientWidth, left: bounds.left, right: bounds.right, width: innerWidth,
-              inDialog: Boolean(element.closest("dialog[open]")), inForm: Boolean(element.closest("form")) };
+              inDialog: Boolean(element.closest("dialog[open]")), inForm: Boolean(element.closest("form")),
+              position: getComputedStyle(element).position };
           });
           expect(layout.fits).toBe(true); expect(layout.left).toBeGreaterThanOrEqual(0);
-          expect(layout.right).toBeLessThanOrEqual(layout.width); expect(layout.inDialog).toBe(true); expect(layout.inForm).toBe(false);
+          expect(layout.right).toBeLessThanOrEqual(layout.width); expect(layout.inDialog).toBe(inDialog); expect(layout.inForm).toBe(false);
+          expect(layout.position).toBe("static");
           const controls = await calculator.locator("input, button").evaluateAll(elements => elements.map(element => ({
             label: element.getAttribute("aria-label") || element.closest("label")?.textContent.trim(),
             height: element.getBoundingClientRect().height,
@@ -96,6 +97,13 @@ try {
           await activate(page.getByRole("button", { name: "Profit calculator", exact: true }));
           await calculator.getByLabel("Cost", { exact: true }).fill("100");
           await calculator.getByLabel("Sell price", { exact: true }).fill("200");
+          await checkLayout(false);
+          await page.evaluate(() => scrollTo(0, 0));
+          const beforeScroll = await calculator.boundingBox();
+          await page.evaluate(() => scrollTo(0, 400));
+          await expect.poll(async () => (await calculator.boundingBox()).y).toBeLessThan(beforeScroll.y - 300);
+          await page.evaluate(() => scrollTo(0, 0));
+          await page.screenshot({ path: `${evidence}/${engine}-${mobile ? "mobile" : "desktop"}-billing.png` });
           await activate(page.getByRole("button", { name: "Create invoice", exact: true }));
           await expect(editor).toBeVisible();
           await expect(editor.locator('input[name="num"]')).toHaveValue("SYNTHETIC-100");
@@ -202,7 +210,7 @@ try {
           expect(await calculator.evaluate(element => Boolean(element.closest("dialog")))).toBe(false);
           expect(mutations).toEqual([]); expect(errors).toEqual([]);
           results.push({ engine, viewport: mobile ? "320x568 touch" : "1440x900", passed: true,
-            scopes: ["invoice-owned calculator", "math", "keyboard", "no implicit submit", "collapse focus", "unrelated modal isolation",
+            scopes: ["inline billing calculator", "scrolls with page", "invoice-owned calculator", "math", "keyboard", "no implicit submit", "collapse focus", "unrelated modal isolation",
               "work-order entry", "nested confirmation", "draft keep/reopen/discard", "no amount persistence", "actor reset", "preference failure", "Escape cleanup"], mutations: 0, errors: 0 });
         } catch (error) {
           await page.screenshot({ path: `${evidence}/failure-${engine}-${mobile ? "mobile" : "desktop"}.png` });

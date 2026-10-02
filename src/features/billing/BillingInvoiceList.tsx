@@ -20,6 +20,8 @@ import { useBillingInvoiceCountQuery, useBillingInvoicePageQuery } from "./queri
 import { BILLING_SEARCH_MAX_LENGTH } from "./billingReadContracts";
 import { FocusedBillingNavigation, focusedBillingQueue, type FocusedBillingQueue } from "./FocusedBillingNavigation";
 import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
+import { ExternalBillingModal } from "./ExternalBillingModal";
+import { canRecordExternalBilling } from "./externalBillingContracts";
 
 type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
 
@@ -222,6 +224,7 @@ function BillingInvoiceRows({
 }
 
 export default function BillingInvoiceList(props: any) {
+  const [externalBillingWorkOrderId, setExternalBillingWorkOrderId] = useState<string | null>(null);
   const focused = props.focused === true;
   const [focusedQueue, setFocusedQueue] = useState<FocusedBillingQueue>("submitted");
   const [focusedCollapsed, setFocusedCollapsed] = useState(false);
@@ -235,6 +238,7 @@ export default function BillingInvoiceList(props: any) {
     onCreateFromApproved,
     onCreateFromWorkOrder,
     onOpenReadyInvoice,
+    onProfitCalculatorHostChange,
     fmt,
     fire,
   } = props;
@@ -405,6 +409,10 @@ export default function BillingInvoiceList(props: any) {
         </div>
       </div>
 
+      {!controller && <div ref={onProfitCalculatorHostChange} className="mb-4 min-w-0 empty:hidden" />}
+      {externalBillingWorkOrderId && canRecordExternalBilling(currentUser) && <ExternalBillingModal
+        key={externalBillingWorkOrderId} workOrderId={externalBillingWorkOrderId} onClose={() => setExternalBillingWorkOrderId(null)} />}
+
       <DetailDisclosure focused={focused} title="Billing tax settings">
         <BillingTaxRulePanel enabled={!controller} fire={fire} />
       </DetailDisclosure>
@@ -462,6 +470,7 @@ export default function BillingInvoiceList(props: any) {
                         {workOrder.summary || "Ready for P1 billing"}
                       </span>
                     </span>
+                    <div className="col-span-full flex min-w-0 flex-wrap gap-2 min-[1201px]:col-auto">
                     <button
                       type="button"
                       className="btn-primary"
@@ -471,6 +480,9 @@ export default function BillingInvoiceList(props: any) {
                     >
                       {workOrder.billingInvoice ? "Open invoice" : "Create invoice"}
                     </button>
+                    {!workOrder.billingInvoice && canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
+                      onClick={() => setExternalBillingWorkOrderId(workOrder.id)}>Billed outside the portal</button>}
+                    </div>
                   </div>
                 ))}
                 {visibleReadyWorkOrders.length === 0 && (

@@ -80,7 +80,7 @@ import {
 } from "../features/staff-work/workQueue";
 import Dashboard from "../features/dashboard/Dashboard";
 import AddressBookModal from "../features/contacts/AddressBookModal";
-import FloatingProfitCalculator from "../features/billing/FloatingProfitCalculator";
+import BillingProfitCalculator from "../features/billing/BillingProfitCalculator";
 import {
   BILLING_INVOICES_KEY,
   useBillingInvoiceByIdQuery,
@@ -1197,6 +1197,7 @@ export default function PortalShell() {
   const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
   const [billingWorkOrderToStart, setBillingWorkOrderToStart] = useState<string | null>(null);
   const [billingCalculatorHost, setBillingCalculatorHost] = useState<HTMLDivElement | null>(null);
+  const [billingPageCalculatorHost, setBillingPageCalculatorHost] = useState<HTMLDivElement | null>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
   const [histContractor, setHistContractor] = useState("all");
@@ -2713,7 +2714,7 @@ export default function PortalShell() {
   // ===============================================================
   //  LOGIN
   // ===============================================================
-  if (!currentUser || currentUser.active !== true) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} rememberMe={rememberMe} setRememberMe={setRememberMe} loginLoading={loginLoading} loginError={currentUser?.active === false ? "Your account is inactive. Contact an administrator." : loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
+  if (!currentUser || currentUser.active !== true) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} rememberMe={rememberMe} setRememberMe={setRememberMe} loginLoading={loginLoading} logoutLoading={logoutLoading} loginError={currentUser?.active === false ? "Your account is inactive. Contact an administrator." : loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
 
   // ===============================================================
   //  APP SHELL
@@ -3323,6 +3324,7 @@ export default function PortalShell() {
 
           {isManager && !invoiceController && page === "billing" && !selectedBillingInvoice && (
             <BillingInvoiceList
+              onProfitCalculatorHostChange={setBillingPageCalculatorHost}
               focused={focusedBilling}
               onBackToSimplified={() => nav("simplified")}
               page={page}
@@ -4498,10 +4500,10 @@ export default function PortalShell() {
         />
       )}
 
-      <FloatingProfitCalculator
+      <BillingProfitCalculator
         key={currentUser?.id || "signed-out"}
         visible={isManager && !invoiceController && (page === "billing" || modal === "createBillingInvoice")}
-        editorHost={billingCalculatorHost}
+        host={modal === "createBillingInvoice" ? billingCalculatorHost : billingPageCalculatorHost}
         fmt={fmt}
       />
 

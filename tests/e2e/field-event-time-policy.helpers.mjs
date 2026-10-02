@@ -15,6 +15,14 @@ async function chooseDate(dialog, fieldLabel, date) {
   await dialog.getByRole("button", { name: fieldLabel, exact: true }).click();
   const picker = dialog.getByRole("dialog", { name: "Choose date" });
   await expect(picker).toBeVisible();
+  // Adjacent dates can belong to a different month (including New Year's).
+  for (let attempts = 0; attempts < 24; attempts += 1) {
+    if (await picker.locator(`[data-day="${date}"] button`).isVisible()) break;
+    // Leading grid cells may belong to the previous month. The 15th always
+    // identifies the displayed month rather than an outside/hidden grid day.
+    const shown = await picker.locator('[data-day$="-15"]').getAttribute("data-day");
+    await picker.getByRole("button", { name: date.slice(0, 7) < shown.slice(0, 7) ? /previous month/i : /next month/i }).click();
+  }
   await picker.locator(`[data-day="${date}"] button`).click();
   await expect(picker).toBeHidden();
 }

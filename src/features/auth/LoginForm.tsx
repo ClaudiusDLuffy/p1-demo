@@ -19,6 +19,7 @@ type LoginFormProps = {
   rememberMe: boolean;
   setRememberMe: Dispatch<SetStateAction<boolean>>;
   loginLoading: boolean;
+  logoutLoading?: boolean;
   loginError: string | null;
   fadeIn: boolean;
   imageErrors: Record<string, boolean>;
@@ -30,7 +31,7 @@ type LoginFormProps = {
 export default function LoginForm({
   loginEmail, setLoginEmail, loginPassword, setLoginPassword,
   rememberMe, setRememberMe,
-  loginLoading, loginError, fadeIn, imageErrors, setImageErrors,
+  loginLoading, logoutLoading = false, loginError, fadeIn, imageErrors, setImageErrors,
   doLogin, CSS
 }: LoginFormProps) {
   const buildUpdatedAt = formatDeploymentUpdatedAt(RUNNING_DEPLOYMENT_UPDATED_AT);
@@ -58,7 +59,10 @@ export default function LoginForm({
           <div className="display" style={{ fontSize: 34, color: T.ink, lineHeight: 1.1 }}>P1 Service Portal</div>
           <div style={{ fontSize: 14, color: T.muted, marginTop: 8 }}>Operations for 7-Eleven facility services</div>
         </div>
-        <div className="card" style={{ padding: 28 }}>
+        <form className="card" style={{ padding: 28 }} onSubmit={event => {
+          event.preventDefault();
+          if (!loginLoading && !logoutLoading) void doLogin(loginEmail, loginPassword, rememberMe);
+        }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: T.ink, marginBottom: 18 }}>Sign in to your account</div>
           <div style={{ marginBottom: 14 }}>
             <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 7, display: "block", textTransform: "uppercase", letterSpacing: 0.8 }}>Email</label>
@@ -79,8 +83,8 @@ export default function LoginForm({
           </label>
           {loginError && <div style={{ fontSize: 12, color: T.danger, background: T.dangerSoft, border: `1px solid ${T.dangerSoft}`, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>{loginError}</div>}
           <button
-            onClick={() => doLogin(loginEmail, loginPassword, rememberMe)}
-            disabled={loginLoading}
+            type="submit"
+            disabled={loginLoading || logoutLoading}
             style={{
               width: "100%",
               padding: 13,
@@ -97,7 +101,7 @@ export default function LoginForm({
               justifyContent: "center",
             }}
           >
-            {loginLoading
+            {logoutLoading ? <><BtnSpinner />Signing out...</> : loginLoading
               ? <><BtnSpinner />Signing in...</>
               : "Sign in"
             }
@@ -120,7 +124,7 @@ export default function LoginForm({
               </div>
             )}
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

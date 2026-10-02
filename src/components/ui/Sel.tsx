@@ -156,6 +156,9 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
     if (restore) triggerRef.current?.focus({ preventScroll: true });
   };
   const selectValue = (nextValue: string) => {
+    // Registered form libraries read this ref synchronously for native change
+    // events. Commit before notifying them; React's state update is deferred.
+    if (inputRef.current) inputRef.current.value = nextValue;
     setInnerValue(nextValue);
     // Preserve the existing select-like onChange contract using a real native
     // select target; no untyped fabricated target or domain payload is retained.
@@ -426,8 +429,10 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
                 aria-disabled={option.disabled || undefined}
                 data-option-index={option.index}
                 data-active={active ? "true" : undefined}
-                onPointerDown={event => event.preventDefault()}
-                onPointerMove={() => { if (!option.disabled) setActiveIndex(option.index); }}
+                // Preserve mouse focus without cancelling WebKit's touch click
+                // or changing the highlighted row while a finger scrolls.
+                onPointerDown={event => { if (event.pointerType === "mouse") event.preventDefault(); }}
+                onPointerMove={event => { if (event.pointerType === "mouse" && !option.disabled) setActiveIndex(option.index); }}
                 onClick={() => !option.disabled && selectValue(option.value)}
                 style={{
                   width: "100%",

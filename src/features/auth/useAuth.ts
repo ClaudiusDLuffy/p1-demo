@@ -53,6 +53,7 @@ export default function useAuth({
   const expectedUserIdRef = useRef<string | null>(null);
   const lastLoadedUserIdRef = useRef<string | null>(null);
   const loginAttemptRef = useRef(false);
+  const signingOutRef = useRef(false);
   const authTransitionRef = useRef<"login" | "logout" | null>(null);
 
   useEffect(() => { const t = setTimeout(() => setFadeIn(true), 50); return () => clearTimeout(t); }, []);
@@ -169,7 +170,7 @@ export default function useAuth({
 
   // Real Supabase auth - replaces demo button login
   const doLogin = async (email: string, password: string, remember = rememberMe) => {
-    if (loginLoading) return;
+    if (loginLoading || loginAttemptRef.current || signingOutRef.current) return;
     const v = (email || "").trim();
     if (!v) { setLoginError("Enter an email to sign in"); return; }
     setLoginError(null);
@@ -210,10 +211,15 @@ export default function useAuth({
     }
   };
   const logout = async () => {
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
     // Fence delayed cleanup/autosaves before identity/UI teardown. Failure never blocks sign-out.
     revokeBrowserDraftSession(expectedUserIdRef.current);
     loginAttemptRef.current = false;
     authTransitionRef.current = "logout";
+    // This facade removes persisted credentials synchronously, before any
+    // render/navigation can restore them, then lets the SDK revoke the token.
+    const pendingSignOut = signOut("local");
     expectedUserIdRef.current = null;
     lastLoadedUserIdRef.current = null;
     currentProfileRef.current = null;
@@ -224,12 +230,18 @@ export default function useAuth({
     setPage("dashboard");
     setSelectedWO(null);
     setLoginEmail("");
+    setLoginPassword("");
+    setLoginError(null);
     setAiNote(null);
     setInvoices?.([]);
     try {
-      await signOut("local");
+      await pendingSignOut;
+    } catch {
+      setLoginError("Signed out on this device. Server sign-out could not be confirmed.");
     } finally {
+      signingOutRef.current = false;
       authTransitionRef.current = null;
+      setLoginLoading(false);
     }
   };
 

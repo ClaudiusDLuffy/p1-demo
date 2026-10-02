@@ -114,6 +114,26 @@ async function fillKnownBillingCalculation(dialog, prefix, { includesPurchasedPa
 test("WOTEST4 combines team dispatch, capital approval, field return visits, files, parts, and final billing", async ({ browser }) => {
   test.setTimeout(300_000);
 
+  // The shared seed deliberately includes this technician's stranded visit.
+  // Resolve it through the real audited UI before creating a new visit; do
+  // not bypass the overlap guard to make this separate workflow pass.
+  await asAccount(browser, accounts.teamMember, async page => {
+    await openSidebarPage(page, "My jobs");
+    await openWorkOrder(page, "E2E-MISSED-CHECKOUT");
+    await page.getByRole("button", { name: "Record missed checkout", exact: true }).click();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(new Date(Date.now() - 60 * 60 * 1_000));
+    const part = type => parts.find(value => value.type === type).value;
+    await page.getByLabel("Actual check-out date").fill(`${part("year")}-${part("month")}-${part("day")}`);
+    await page.getByLabel("Actual check-out time").fill(`${part("hour")}:${part("minute")}`);
+    await page.getByLabel("Missed-checkout reason").fill("Synthetic prior visit verified before the new capital assignment.");
+    await page.getByRole("button", { name: "Record checkout", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Record missed checkout", exact: true })).toHaveCount(0);
+    await expect(page.getByText(/recorded a missed checkout/i).first()).toBeVisible();
+  });
+
   // Start from an unassigned P1 emergency record. Confirm that operational
   // edits and staff-only context persist before any contractor gains access.
   await asAccount(browser, accounts.manager, async page => {

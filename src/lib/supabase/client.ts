@@ -5,29 +5,26 @@
 import { createClient as createSb } from "@supabase/supabase-js";
 import type { PrivateObjectDatabase } from "../privateObjectContracts";
 import { getPublicSupabaseConfig } from "../config/public";
+import { createBrowserAuthStorage } from "./browserAuthStorage";
 
 const REMEMBER_ME_KEY = "p1_remember_me";
 const REMEMBERED_EMAIL_KEY = "p1_remembered_email";
 
-const browserStorage = {
-  getItem(key: string) {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
-  },
-  setItem(key: string, value: string) {
-    if (typeof window === "undefined") return;
-    const remember = window.localStorage.getItem(REMEMBER_ME_KEY) !== "false";
-    const primary = remember ? window.localStorage : window.sessionStorage;
-    const secondary = remember ? window.sessionStorage : window.localStorage;
-    secondary.removeItem(key);
-    primary.setItem(key, value);
-  },
-  removeItem(key: string) {
-    if (typeof window === "undefined") return;
-    window.localStorage.removeItem(key);
-    window.sessionStorage.removeItem(key);
-  },
-};
+let browserStorage: ReturnType<typeof createBrowserAuthStorage> | null = null;
+function authStorage() {
+  if (!browserStorage) {
+    const project = new URL(getPublicSupabaseConfig().url).hostname.split(".")[0];
+    browserStorage = createBrowserAuthStorage({
+      key: `sb-${project}-auth-token`,
+      stores: () => typeof window === "undefined" ? [] : [window.localStorage, window.sessionStorage],
+      remember: getRememberMePreference,
+    });
+  }
+  return browserStorage;
+}
+
+export const beginBrowserSignOut = () => authStorage().beginSignOut();
+export const beginBrowserSignIn = () => authStorage().beginSignIn();
 
 export function setRememberMePreference(remember: boolean, email?: string) {
   if (typeof window === "undefined") return;
@@ -59,7 +56,7 @@ export function createClient() {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storage: browserStorage,
+        storage: authStorage(),
       },
     }
   );

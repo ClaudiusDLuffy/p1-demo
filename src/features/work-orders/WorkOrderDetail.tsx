@@ -74,6 +74,7 @@ import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
 import { WorkOrderCapitalActions } from "./WorkOrderCapitalActions";
 import { FocusedWorkOrderHeader } from "../simplified-work/FocusedWorkOrderHeader";
 import { AttachmentsButton, WorkOrderAttachments } from "./WorkOrderAttachments";
+import { ExternalBillingPanel } from "../billing/ExternalBillingPanel";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -1039,6 +1040,8 @@ export default function WorkOrderDetail(props: any) {
                 </div>
 
                 {focused && <FocusedWorkOrderHeader workOrder={woData} eta={formatEta(woData.eta, woData)} />}
+                {isManager && !invoiceController && <ExternalBillingPanel key={woData.id} workOrderId={woData.id}
+                  status={woData.status} workflowCycle={woData.workflowCycle} />}
                 {isManager && woData.billingOnly && (
                   <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
                     <div style={{ color: "#92400E", fontSize: 12, fontWeight: 800 }}>Billing only · do not dispatch</div>
@@ -1263,9 +1266,9 @@ export default function WorkOrderDetail(props: any) {
                           {isLoading("moveToInvoice_" + woData.id) ? <><BtnSpinner />Updating...</> : "Portal updated - pending 7-Eleven submission"}
                         </button>
                       )}
-                      {/* Staff retain only the explicit no-invoice exception.
-                          Invoice-backed work orders close from Billing when staff
-                          records Billed to 7-Eleven. */}
+                      {/* Exception closures keep distinct audit meanings. External
+                          billing is recorded in the staff-only panel above;
+                          portal invoices close through the normal Billing flow. */}
                       {canCloseReopenedFollowUp && (
                         <button
                           type="button"
