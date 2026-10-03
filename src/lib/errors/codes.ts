@@ -9,6 +9,8 @@ const entry = (message: string, status: number, retry: RetryClass, recovery: Rec
   refreshSession: recovery === "sign_in", mutationReplayRequired: retry !== "never",
 });
 export const coreErrorCodes = Object.freeze({
+  LINKED_BILLING_INVOICE_IN_USE: entry("This invoice covers other closed work orders. Reopen those work orders for billing review before removing, rejecting, or moving the invoice.", 409, "never", "refresh_record"),
+  LINKED_BILLING_ALREADY_RECORDED: entry("This work order is already covered by an existing portal invoice. Review its linked billing history before creating another invoice.", 409, "never", "refresh_record"),
   BILLING_VISIT_TIME_REVIEW_REQUIRED: entry("An open visit could not be checked out. Its check-in time or checkout details need review before billing can continue. Contact support to correct the visit record.", 409, "never", "contact_support"),
   BILLING_PRIOR_WORKFLOW: entry("This invoice cannot close the current reopened follow-up because its creation date is missing or predates reopening. Review the billing history with your billing team.", 409, "never", "refresh_record"),
   BILLING_NOT_READY: entry("This invoice is not ready for 7-Eleven. Refresh it and review its current status.", 409, "never", "refresh_record"),

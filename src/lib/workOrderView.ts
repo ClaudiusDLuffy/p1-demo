@@ -100,7 +100,8 @@ export const resolveWorkOrderClosedBy = (
     const isFollowUpClose = activity?.eventKey
       === "work_order_follow_up_closed_without_additional_billing";
     const isExternalBillingClose = activity?.eventKey === "work_order_billed_externally";
-    if (!isBillingClose && !isNoInvoiceClose && !isFollowUpClose && !isExternalBillingClose) continue;
+    const isLinkedBillingClose = activity?.eventKey === "work_order_billed_under_another";
+    if (!isBillingClose && !isNoInvoiceClose && !isFollowUpClose && !isExternalBillingClose && !isLinkedBillingClose) continue;
 
     const author = String(activity?.author || "").trim();
     if (author && author.toLowerCase() !== "system") return author;
@@ -116,6 +117,8 @@ export const isInternalWorkOrderActivity = (
     || activity?.activityChannel === "internal_note"
     || activity?.eventKey === "staff_billing"
     || activity?.eventKey === "work_order_billed_externally"
+    || activity?.eventKey === "work_order_billed_under_another"
+    || activity?.eventKey === "work_order_billing_coverage_added"
     || activity?.eventKey === "work_order_reassigned"
     || activity?.eventKey === "work_order_assignment"
     || activity?.eventKey === "work_order_unassigned"

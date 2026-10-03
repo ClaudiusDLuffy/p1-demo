@@ -2,6 +2,8 @@ import { z } from "zod";
 import { FINANCIAL_BODY_BYTES } from "./staffInvoiceContracts";
 import { normalizeUnknownError } from "./errors/normalizeUnknown";
 import { ConfigurationError } from "./config/shared";
+import { errorData } from "./errors/errorData";
+import { errorMetadata } from "./errors/catalog";
 
 export class FinancialRequestError extends Error {
   constructor(readonly code: string, message: string, readonly status: number, readonly fields?: { path: string; message: string }[]) {
@@ -57,6 +59,15 @@ export function financialErrorResponse(error: unknown): Response {
     return Response.json({ error: safe.message, code: safe.code }, { status: safe.status });
   }
   if (error instanceof FinancialRequestError) return Response.json({ error: error.message, code: error.code, ...(error.fields ? { fields: error.fields } : {}) }, { status: error.status });
+  // Only these exact safe domain codes may cross the provider boundary. Known
+  // command rejections retain their original provider error under `cause`.
+  const domain = errorData(error, "message");
+  const nestedDomain = errorData(errorData(error, "cause"), "message");
+  const linkedCode = [domain, nestedDomain].find(value => value === "LINKED_BILLING_INVOICE_IN_USE" || value === "LINKED_BILLING_ALREADY_RECORDED");
+  if (linkedCode === "LINKED_BILLING_INVOICE_IN_USE" || linkedCode === "LINKED_BILLING_ALREADY_RECORDED") {
+    const safe = errorMetadata(linkedCode);
+    return Response.json({ error: safe.message, code: linkedCode }, { status: safe.status });
+  }
   // Provider messages are deliberately not part of the browser contract.
   const providerCode = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "";
   const mapping: Record<string, [number, string, string]> = {
