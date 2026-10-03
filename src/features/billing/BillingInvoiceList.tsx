@@ -21,6 +21,7 @@ import { BILLING_SEARCH_MAX_LENGTH } from "./billingReadContracts";
 import { FocusedBillingNavigation, focusedBillingQueue, type FocusedBillingQueue } from "./FocusedBillingNavigation";
 import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
 import { ExternalBillingModal } from "./ExternalBillingModal";
+import { LinkedBillingModal } from "./LinkedBillingModal";
 import { canRecordExternalBilling } from "./externalBillingContracts";
 
 type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
@@ -225,6 +226,7 @@ function BillingInvoiceRows({
 
 export default function BillingInvoiceList(props: any) {
   const [externalBillingWorkOrderId, setExternalBillingWorkOrderId] = useState<string | null>(null);
+  const [linkedBillingWorkOrderId, setLinkedBillingWorkOrderId] = useState<string | null>(null);
   const focused = props.focused === true;
   const [focusedQueue, setFocusedQueue] = useState<FocusedBillingQueue>("submitted");
   const [focusedCollapsed, setFocusedCollapsed] = useState(false);
@@ -412,6 +414,8 @@ export default function BillingInvoiceList(props: any) {
       {!controller && <div ref={onProfitCalculatorHostChange} className="mb-4 min-w-0 empty:hidden" />}
       {externalBillingWorkOrderId && canRecordExternalBilling(currentUser) && <ExternalBillingModal
         key={externalBillingWorkOrderId} workOrderId={externalBillingWorkOrderId} onClose={() => setExternalBillingWorkOrderId(null)} />}
+      {linkedBillingWorkOrderId && canRecordExternalBilling(currentUser) && <LinkedBillingModal
+        key={linkedBillingWorkOrderId} workOrderId={linkedBillingWorkOrderId} onClose={() => setLinkedBillingWorkOrderId(null)} />}
 
       <DetailDisclosure focused={focused} title="Billing tax settings">
         <BillingTaxRulePanel enabled={!controller} fire={fire} />
@@ -482,6 +486,8 @@ export default function BillingInvoiceList(props: any) {
                     </button>
                     {!workOrder.billingInvoice && canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
                       onClick={() => setExternalBillingWorkOrderId(workOrder.id)}>Billed outside the portal</button>}
+                    {!workOrder.billingInvoice && canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
+                      onClick={() => setLinkedBillingWorkOrderId(workOrder.id)}>Billed under another work order</button>}
                     </div>
                   </div>
                 ))}

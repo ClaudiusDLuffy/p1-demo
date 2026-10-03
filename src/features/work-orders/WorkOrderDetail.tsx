@@ -75,6 +75,7 @@ import { WorkOrderCapitalActions } from "./WorkOrderCapitalActions";
 import { FocusedWorkOrderHeader } from "../simplified-work/FocusedWorkOrderHeader";
 import { AttachmentsButton, WorkOrderAttachments } from "./WorkOrderAttachments";
 import { ExternalBillingPanel } from "../billing/ExternalBillingPanel";
+import { LinkedBillingPanel } from "../billing/LinkedBillingPanel";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -1042,6 +1043,8 @@ export default function WorkOrderDetail(props: any) {
                 {focused && <FocusedWorkOrderHeader workOrder={woData} eta={formatEta(woData.eta, woData)} />}
                 {isManager && !invoiceController && <ExternalBillingPanel key={woData.id} workOrderId={woData.id}
                   status={woData.status} workflowCycle={woData.workflowCycle} />}
+                {isManager && !invoiceController && <LinkedBillingPanel key={`linked-${woData.id}`} workOrderId={woData.id}
+                  status={woData.status} onOpenWorkOrder={id => { setSelectedWO(id); setPage("wo_detail"); }} />}
                 {isManager && woData.billingOnly && (
                   <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
                     <div style={{ color: "#92400E", fontSize: 12, fontWeight: 800 }}>Billing only · do not dispatch</div>
