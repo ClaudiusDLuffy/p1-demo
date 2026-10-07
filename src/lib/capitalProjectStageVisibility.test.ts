@@ -8,9 +8,9 @@ const capitalView = readFileSync(resolve("src/features/work-orders/CapitalProjec
 
 test("capital project stages describe the complete operational board", () => {
   assert.deepEqual(CAPITAL_PROJECT_FILTERS.map(option => option.label), [
-    "All capital statuses", "Waiting for quote", "Quote submitted — pending capital approval",
+    "Active capital work", "All capital statuses", "Waiting for quote", "Quote submitted — pending capital approval",
     "Approved — work authorized", "Equipment ordered — waiting for equipment", "Equipment received",
-    "Installation scheduled", "Installed",
+    "Installation scheduled", "Installed — awaiting final billing",
   ]);
   assert.deepEqual(capitalProjectStage({ status: "capital", capitalStatus: null }), {
     filter: "capital_waiting_quote", label: "Waiting for quote", tone: "waiting",
@@ -37,5 +37,6 @@ test("capital list sends the selected stage to the server and resets pagination"
   assert.match(capitalView, /setPosition\(firstCursorPosition\); setCapitalFilter/);
   assert.match(capitalView, /data-capital-stage=\{stage\.filter\}/);
   assert.match(capitalView, /scope: "capital"/);
+  assert.match(capitalView, /useState<CapitalProjectFilter>\("capital_active"\)/);
   assert.doesNotMatch(capitalView, /\.filter\([^)]*capitalFilter/);
 });

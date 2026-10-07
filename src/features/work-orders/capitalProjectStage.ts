@@ -1,4 +1,5 @@
 export const CAPITAL_PROJECT_FILTERS = [
+  { value: "capital_active", label: "Active capital work" },
   { value: "all", label: "All capital statuses" },
   { value: "capital_waiting_quote", label: "Waiting for quote" },
   { value: "capital_quote_submitted", label: "Quote submitted — pending capital approval" },
@@ -6,7 +7,7 @@ export const CAPITAL_PROJECT_FILTERS = [
   { value: "capital_equipment_ordered", label: "Equipment ordered — waiting for equipment" },
   { value: "capital_equipment_received", label: "Equipment received" },
   { value: "capital_installation_scheduled", label: "Installation scheduled" },
-  { value: "capital_installed", label: "Installed" },
+  { value: "capital_installed", label: "Installed — awaiting final billing" },
 ] as const;
 
 export type CapitalProjectFilter = typeof CAPITAL_PROJECT_FILTERS[number]["value"];
@@ -17,7 +18,7 @@ type CapitalProjectLike = {
 };
 
 export type CapitalProjectStage = {
-  filter: Exclude<CapitalProjectFilter, "all">;
+  filter: Exclude<CapitalProjectFilter, "all" | "capital_active">;
   label: string;
   tone: "waiting" | "submitted" | "authorized" | "ordered" | "received" | "scheduled" | "installed";
 };
@@ -42,4 +43,3 @@ export function capitalProjectStage(workOrder: CapitalProjectLike): CapitalProje
         : { filter: "capital_waiting_quote", label: "Waiting for quote", tone: "waiting" };
   }
 }
-

@@ -16,6 +16,7 @@ import SourceContractorInvoiceDrawer from "./SourceContractorInvoiceDrawer";
 import { useInvoiceLinePage } from "../invoices/invoiceLineQueries";
 import InvoiceLinePagination from "../invoices/InvoiceLinePagination";
 import { AttachmentsButton } from "../work-orders/WorkOrderAttachments";
+import { CapitalSelfServiceModal } from "../work-orders/CapitalSelfServiceModal";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -33,6 +34,7 @@ export default function BillingInvoiceDetail(props: any) {
     fmt,
   } = props;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [reviseQuote, setReviseQuote] = useState(false);
   const [confirmBilled, setConfirmBilled] = useState(false);
   const [markingReady, setMarkingReady] = useState(false);
   const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
@@ -95,16 +97,19 @@ export default function BillingInvoiceDetail(props: any) {
           {canEdit && (
             <button onClick={onEdit} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Ico d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" size={13} color="currentColor" />
-              Edit invoice
+              {capitalHandoff ? "Edit capital quote" : "Edit invoice"}
             </button>
           )}
+          {capitalHandoff && canDelete && invoice.state === "approved" && workOrder?.status === "pending_capital_completion"
+            && !invoice.qboInvoiceId && !invoice.qboSyncedAt && props.onOpenRevision && <button type="button" className="btn-primary"
+              onClick={() => setReviseQuote(true)}>Create quote revision</button>}
           {!capitalHandoff && (
             <button onClick={onDownloadCsv} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
               Download SaasAnt CSV
             </button>
           )}
-          {canDelete && <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>}
+          {canDelete && ["draft", "submitted"].includes(invoice.state) && <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>}
         </div>
       </div>
 
@@ -131,6 +136,9 @@ export default function BillingInvoiceDetail(props: any) {
         </Modal>
       )}
 
+      {reviseQuote && invoice.wot && <CapitalSelfServiceModal workOrderId={invoice.wot} action="capital_quote_revision"
+        quote={{ id: invoice.id, invoiceVersion: invoice.invoiceVersion }} onClose={() => setReviseQuote(false)}
+        onDone={receipt => props.onOpenRevision(receipt.invoiceId)} />}
       {confirmBilled && (
         <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} dismissDisabled={billing} title={capitalHandoff ? "Confirm capital quote" : "Confirm 7-Eleven billing"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
@@ -228,7 +236,7 @@ export default function BillingInvoiceDetail(props: any) {
                 )}
               </span>
               <span style={{ color: T.muted }}>Territory</span><span style={{ color: invoice.territory ? T.ink : T.subtle }}>{invoice.territory || "-"}</span>
-              <span style={{ color: T.muted }}>Equipment tag</span><span style={{ color: invoice.equipmentTag ? T.ink : T.subtle }}>{invoice.equipmentTag || "-"}</span>
+              <span style={{ color: T.muted }}>Tag</span><span style={{ color: invoice.equipmentTag ? T.ink : T.subtle }}>{invoice.equipmentTag || "-"}</span>
               <span style={{ color: T.muted }}>Status</span><span><Badge conf={STAFF_INV_STATE[invoice.state]} small /></span>
               <span style={{ color: T.muted }}>Tax jurisdiction</span>
               <span className="mono" style={{ color: invoice.taxState ? T.ink : T.subtle }}>

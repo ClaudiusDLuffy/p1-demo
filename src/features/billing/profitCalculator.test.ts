@@ -17,11 +17,14 @@ test("scratch inputs keep the existing empty/invalid input and margin limits", (
   assert.equal(calculateProfit("100", "200", "100").targetSell, 1_000_000);
 });
 
-test("shell connects the staff calculator to the real editor and scopes memory to its actor", () => {
+test("shell connects the staff calculator and scopes values to the actor and current document", () => {
   const shell = readFileSync("src/components/PortalShell.tsx", "utf8");
   const editor = readFileSync("src/features/billing/BillingInvoiceCreateModal.tsx", "utf8");
   assert.match(shell, /onProfitCalculatorHostChange=\{setBillingCalculatorHost\}/);
-  assert.match(shell, /<BillingProfitCalculator\s+key=\{currentUser\?\.id \|\| "signed-out"\}\s+visible=\{isManager && !invoiceController && \(page === "billing" \|\| modal === "createBillingInvoice"\)\}/);
+  assert.match(shell, /key=\{JSON\.stringify\(\[currentUser\?\.id, modal === "createBillingInvoice" \? billingProfitValues : selectedBillingInvoiceData\?\.id\]\)\}/);
+  assert.match(shell, /visible=\{isManager && !invoiceController && \(page === "billing" \|\| modal === "createBillingInvoice"\)\}/);
+  assert.match(shell, /onProfitValuesChange=\{setBillingProfitValues\}/);
+  assert.match(editor, /cost: calculatorCost, sell: subtotal/);
   assert.match(shell, /host=\{modal === "createBillingInvoice" \? billingCalculatorHost : billingPageCalculatorHost\}/);
   assert.match(shell, /<BillingInvoiceList\s+onProfitCalculatorHostChange=\{setBillingPageCalculatorHost\}/);
   const list = readFileSync("src/features/billing/BillingInvoiceList.tsx", "utf8");

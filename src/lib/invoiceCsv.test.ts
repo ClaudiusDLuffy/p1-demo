@@ -45,6 +45,19 @@ test("matches the supplied SaasAnt layout with one row per line item", () => {
   );
 });
 
+test("Tag display rename leaves the saved Fountain value and established import column intact", () => {
+  const invoice = { num: "SYNTHETIC-TAG", equipmentTag: "7-ELEVEN: Fountain", lines: [
+    { type: "Labor", description: "Synthetic import mapping test", qty: 1, rate: 100 },
+    { type: "Parts", description: "Synthetic part", qty: 1, rate: 50 },
+  ] };
+  const rows = staffInvoiceCsvRows(invoice);
+  assert.equal(rows[0].equipmentTag, "7-ELEVEN: Fountain");
+  assert.equal(rows[1].equipmentTag, "");
+  const csv = generateStaffInvoiceCsv(invoice);
+  assert.equal(csv.split("\r\n")[0], HEADER);
+  assert.match(csv.split("\r\n")[1], /,7-ELEVEN: Fountain,/);
+});
+
 test("maps taxable receivable lines to the SaasAnt tax-rate column", () => {
   const csv = generateStaffInvoiceCsv({
     num: "4347",

@@ -7,6 +7,7 @@ const FOLLOW_UP_CLOSE_STATUSES = new Set([
   "wip",
   "parts",
   "completed",
+  "pending_invoice",
 ]);
 
 const FOLLOW_UP_BILLING_ACTIVITY_EVENTS = new Set([
@@ -49,6 +50,8 @@ type InvoiceLike = {
 
 type WorkOrderLike = {
   status?: string | null;
+  functionalStatus?: string | null;
+  functional_status?: string | null;
   workflowCycle?: number | null;
   workflow_cycle?: number | null;
   billingOnly?: boolean | null;
@@ -101,7 +104,7 @@ export function currentResumeWorkCycle(
   const workflowCycle = Number(
     workOrder?.workflowCycle ?? workOrder?.workflow_cycle ?? 0,
   );
-  if (!Number.isInteger(workflowCycle) || workflowCycle <= 0) return null;
+  if (!Number.isInteger(workflowCycle) || workflowCycle < 0) return null;
 
   const matchingReopens = (workOrder?.activities || []).flatMap(activity => {
     const eventKey = activity.eventKey ?? activity.event_key;
@@ -113,7 +116,9 @@ export function currentResumeWorkCycle(
       eventKey !== "work_order_reopened"
       || Boolean(activity.deletedAt ?? activity.deleted_at)
       || activityCycle !== workflowCycle
-      || activityEventData(activity).mode !== "resume_work"
+      || (workflowCycle === 0
+        ? Boolean(activityEventData(activity).mode)
+        : activityEventData(activity).mode !== "resume_work")
       || !reopenedAt
     ) {
       return [];
@@ -180,6 +185,8 @@ export function canCloseReopenedFollowUpWithoutBilling(input: {
     || !hasCompleteEvidence
     || !workOrder
     || !FOLLOW_UP_CLOSE_STATUSES.has(String(workOrder.status || ""))
+    || (workOrder.status === "pending_invoice"
+      && (workOrder.functionalStatus ?? workOrder.functional_status) !== "Completed")
     || Boolean(workOrder.billingOnly ?? workOrder.billing_only)
     || Boolean(workOrder.isCapital ?? workOrder.is_capital)
     || Boolean(
@@ -252,11 +259,11 @@ export function canCloseReopenedFollowUpWithoutBilling(input: {
     );
     if (eventKey === "invoice_submitted"
       && priorContractorInvoiceIds.has(invoiceId)
-      && activityCycle < cycle.workflowCycle) {
+      && (activityCycle < cycle.workflowCycle || (cycle.workflowCycle === 0 && activityCycle === 0))) {
       submittedPriorContractorInvoiceIds.add(invoiceId);
     }
     if (isBilledEvent && priorStaffInvoiceIds.has(invoiceId)
-      && activityCycle < cycle.workflowCycle
+      && (activityCycle < cycle.workflowCycle || (cycle.workflowCycle === 0 && activityCycle === 0))
       && Date.parse(billedAt) < Date.parse(cycle.reopenedAt)) {
       billedPriorStaffInvoiceIds.add(invoiceId);
     }

@@ -220,6 +220,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     onClose,
     onCreated,
     onProfitCalculatorHostChange,
+    onProfitValuesChange,
     fire,
     fmt,
   } = props;
@@ -634,6 +635,17 @@ export default function BillingInvoiceCreateModal(props: any) {
     ),
     0,
   );
+  // Scope scratch values to this document. Unknown costs stay blank rather
+  // than suggesting a zero-cost job; this callback never writes an invoice.
+  const calculatorCost = selectedSourceInvoices.length ? contractorCost
+    : lines.length && lines.every((line: any) => line.sourceUnitCost != null)
+      ? lines.reduce((sum: number, line: any) => sum + Number(line.sourceUnitCost) * Number(line.qty || 0), 0)
+      : null;
+  useEffect(() => {
+    onProfitValuesChange?.({ context: `${editorScope}:${selectedWorkOrderId || "unlinked"}`,
+      cost: calculatorCost, sell: subtotal });
+    return () => onProfitValuesChange?.(null);
+  }, [onProfitValuesChange, editorScope, selectedWorkOrderId, calculatorCost, subtotal]);
   const partsMarkupAmount = lines.reduce((sum: number, line: any) => {
     if (
       !isStaffBillingPartsLine(line.type)
@@ -1627,10 +1639,10 @@ export default function BillingInvoiceCreateModal(props: any) {
         </div>
 
         <label style={{ display: "block", marginBottom: 16 }}>
-          <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>QuickBooks equipment tag</span>
+          <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Tag</span>
           <Sel
             {...register("equipmentTag")}
-            aria-label="QuickBooks equipment tag"
+            aria-label="Tag"
             {...fieldAria("equipmentTag")}
             style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${errors.equipmentTag ? T.danger : T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
           >

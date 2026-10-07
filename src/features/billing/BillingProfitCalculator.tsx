@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { calculateProfit } from "./profitCalculator";
 
@@ -11,28 +11,26 @@ export default function BillingProfitCalculator({
   visible,
   fmt,
   host,
+  initialCost = null,
+  initialSell = null,
 }: {
   visible: boolean;
   fmt: (value: number) => string;
   /** Owned by the Billing page or invoice dialog, outside any form. */
   host: HTMLElement | null;
+  initialCost?: number | null;
+  initialSell?: number | null;
 }) {
   const panelId = useId();
-  const [open, setOpen] = useState(false);
-  const [cost, setCost] = useState("");
-  const [sell, setSell] = useState("");
+  // The portal host is absent during SSR. Read the preference once on the
+  // client so a document-context reset does not briefly flip the disclosure.
+  const [open, setOpen] = useState(() => {
+    try { return typeof window !== "undefined" && window.localStorage.getItem(STORAGE_KEY) === "true"; }
+    catch { return false; }
+  });
+  const [cost, setCost] = useState(initialCost == null ? "" : initialCost.toFixed(2));
+  const [sell, setSell] = useState(initialSell == null ? "" : initialSell.toFixed(2));
   const [targetMargin, setTargetMargin] = useState("30");
-
-  useEffect(() => {
-    let storedOpen = false;
-    try {
-      storedOpen = window.localStorage.getItem(STORAGE_KEY) === "true";
-    } catch {
-      storedOpen = false;
-    }
-    const frame = window.requestAnimationFrame(() => setOpen(storedOpen));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
 
   const setOpenPersisted = (next: boolean) => {
     setOpen(next);
@@ -66,7 +64,7 @@ export default function BillingProfitCalculator({
           {open && <span aria-hidden="true">−</span>}
         </button>
         <div id={panelId} hidden={!open}>
-          <p className="mb-3 text-xs text-p1-muted">Staff only · values are not saved or added to the invoice</p>
+          <p className="mb-3 text-xs text-p1-muted">Starts from this document’s pre-tax values when available. What-if changes are not saved or added to the invoice.</p>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <div className="grid min-w-0 grid-cols-2 gap-2">
               <label className="min-w-0 text-xs text-p1-muted">

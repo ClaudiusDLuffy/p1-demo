@@ -43,7 +43,7 @@ export default function CapitalProjects(props: CapitalProjectsProps) {
   const [position, setPosition] = useState(firstCursorPosition);
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [capitalFilter, setCapitalFilter] = useState<CapitalProjectFilter>("all");
+  const [capitalFilter, setCapitalFilter] = useState<CapitalProjectFilter>("capital_active");
   const updateSortColumn = (value: WorkOrderTableSortColumn) => {
     setPosition(firstCursorPosition);
     setSortColumn(value);
@@ -81,7 +81,7 @@ export default function CapitalProjects(props: CapitalProjectsProps) {
                 <div className="mobile-alert-icon" style={{ width: 40, height: 40, borderRadius: 10, background: T.violet, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#fff" /></div>
                 <div className="mobile-alert-body">
                   <div title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
-                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Focused capital view — these calls also remain searchable in Work orders</div>
+                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Installed jobs leave Active capital work and move to final billing. Use Installed to review them; all jobs remain searchable in Work orders.</div>
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>

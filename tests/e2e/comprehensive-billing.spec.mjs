@@ -78,7 +78,7 @@ test("staff creates and submits a complete P1-to-7-Eleven invoice", async ({ pag
   await expect(dialog.getByRole("combobox", { name: "Invoice territory" })).toContainText("Virginia");
   await dialog.getByRole("combobox", { name: "Invoice territory" }).click();
   await page.getByRole("option", { name: "Texas", exact: true }).click();
-  expect(await popupOptions(page, dialog.getByRole("button", { name: "QuickBooks equipment tag" }))).toEqual(equipmentTags);
+  expect(await popupOptions(page, dialog.getByRole("button", { name: "Tag", exact: true }))).toEqual(equipmentTags);
   expect(await popupOptions(page, dialog.getByRole("combobox", { name: "Invoice payment terms" }))).toEqual([
     "Net 60", "Net 30", "Net 15", "Due on receipt",
   ]);

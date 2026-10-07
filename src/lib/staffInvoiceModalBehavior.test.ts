@@ -149,7 +149,7 @@ test("accepted old billing response cannot reset or announce into a changed acco
 });
 test("billing header selectors/search have accessible names and controls are grouped for pending writes", () => {
   const h = harness(async () => Response.json({ invoice: { id: financialTestIds.invoice } }));
-  for (const label of ["Search work order", "Invoice work order", "Invoice territory", "QuickBooks equipment tag", "Invoice payment terms", "Line 1 type", "Line 1 description", "Line 1 quantity", "Line 1 rate"]) {
+  for (const label of ["Search work order", "Invoice work order", "Invoice territory", "Tag", "Invoice payment terms", "Line 1 type", "Line 1 description", "Line 1 quantity", "Line 1 rate"]) {
     assert.ok(h.nodes.some(node => node.props["aria-label"] === label), label);
   }
   assert.ok(h.nodes.some(node => node.type === "fieldset" && "disabled" in node.props));

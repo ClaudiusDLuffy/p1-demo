@@ -1197,6 +1197,7 @@ export default function PortalShell() {
   const [billingSourceToStart, setBillingSourceToStart] = useState<string | null>(null);
   const [billingWorkOrderToStart, setBillingWorkOrderToStart] = useState<string | null>(null);
   const [billingCalculatorHost, setBillingCalculatorHost] = useState<HTMLDivElement | null>(null);
+  const [billingProfitValues, setBillingProfitValues] = useState<{ context: string; cost: number | null; sell: number } | null>(null);
   const [billingPageCalculatorHost, setBillingPageCalculatorHost] = useState<HTMLDivElement | null>(null);
   // History (closed-job archive) filters
   const [histSearch, setHistSearch] = useState("");
@@ -3382,6 +3383,11 @@ export default function PortalShell() {
                   setModal("createBillingInvoice");
                 } catch (error) { fire(`Invoice could not be opened: ${safeErrorMessage(error)}`); }
               }}
+              onOpenRevision={async (invoiceId: string) => {
+                const complete = await loadCompleteInvoice(invoiceId, "edit", true);
+                setBillingDraftToEdit(complete); setBillingSourceToStart(null); setBillingWorkOrderToStart(null);
+                setSelectedBillingInvoice(invoiceId); setModal("createBillingInvoice");
+              }}
               onDownloadPdf={() => selectedBillingInvoiceData && doDownloadBillingInvoice(selectedBillingInvoiceData)}
               onOpenAttachments={() => {
                 const id = selectedBillingInvoiceData?.wot;
@@ -4422,6 +4428,7 @@ export default function PortalShell() {
           initialSourceInvoiceId={billingSourceToStart}
           initialWorkOrderId={billingWorkOrderToStart}
           onProfitCalculatorHostChange={setBillingCalculatorHost}
+          onProfitValuesChange={setBillingProfitValues}
           onClose={closeBillingInvoiceEditor}
           onCreated={(invoice: any) => {
             if (invoice?.id) {
@@ -4501,10 +4508,12 @@ export default function PortalShell() {
       )}
 
       <BillingProfitCalculator
-        key={currentUser?.id || "signed-out"}
+        key={JSON.stringify([currentUser?.id, modal === "createBillingInvoice" ? billingProfitValues : selectedBillingInvoiceData?.id])}
         visible={isManager && !invoiceController && (page === "billing" || modal === "createBillingInvoice")}
         host={modal === "createBillingInvoice" ? billingCalculatorHost : billingPageCalculatorHost}
         fmt={fmt}
+        initialCost={modal === "createBillingInvoice" ? billingProfitValues?.cost : selectedBillingInvoiceData?.contractorCost ?? null}
+        initialSell={modal === "createBillingInvoice" ? billingProfitValues?.sell : selectedBillingInvoiceData?.subtotal ?? null}
       />
 
       {lightbox && <Modal title="Work-order photo" width={1000} onRequestClose={() => setLightbox(null)}>

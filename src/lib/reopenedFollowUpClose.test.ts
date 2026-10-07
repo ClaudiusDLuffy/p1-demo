@@ -84,6 +84,22 @@ test("allows the WOT1015920-shaped prior-billed follow-up", () => {
   assert.equal(eligibility(), true);
 });
 
+test("legacy cycle-zero reopen can close only with complete prior billing evidence", () => {
+  const legacy = { ...workOrder, workflowCycle: 0, status: "pending_invoice", functionalStatus: "Completed",
+    activities: workOrder.activities.map(activity => ({ ...activity, workflowCycle: 0,
+      eventData: activity.eventKey === "work_order_reopened" ? {} : activity.eventData })) };
+  assert.equal(eligibility({ workOrder: legacy }), true);
+  assert.equal(eligibility({ workOrder: { ...legacy, functionalStatus: "Work in Progress" } }), false);
+  assert.equal(eligibility({ workOrder: legacy, hasCompleteEvidence: false }), false);
+});
+
+test("pending invoice follow-up requires physical completion and no new charges", () => {
+  assert.equal(eligibility({ workOrder: { ...workOrder, status: "pending_invoice", functionalStatus: "Completed" } }), true);
+  assert.equal(eligibility({ workOrder: { ...workOrder, status: "pending_invoice" } }), false);
+  assert.equal(eligibility({ workOrder: { ...workOrder, status: "pending_invoice", functionalStatus: "Completed" },
+    contractorInvoices: [{ ...contractorInvoice, createdAt: "2026-09-03T00:00:00Z" }] }), false);
+});
+
 test("requires resolved prior invoices and a prior staff billing document", () => {
   assert.equal(eligibility({
     contractorInvoices: [{ ...contractorInvoice, state: "submitted" }],
