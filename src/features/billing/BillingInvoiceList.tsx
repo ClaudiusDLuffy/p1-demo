@@ -484,9 +484,12 @@ export default function BillingInvoiceList(props: any) {
                     >
                       {workOrder.billingInvoice ? "Open invoice" : "Create invoice"}
                     </button>
-                    {!workOrder.billingInvoice && canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
+                    {Number(workOrder.workflowCycle) > 0 && workOrder.billingInvoice
+                      && ["approved", "paid"].includes(workOrder.billingInvoice.state) && <button type="button" className="btn-soft"
+                      onClick={() => onCreateFromWorkOrder?.(workOrder)}>Create follow-up invoice</button>}
+                    {canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
                       onClick={() => setExternalBillingWorkOrderId(workOrder.id)}>Billed outside the portal</button>}
-                    {!workOrder.billingInvoice && canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
+                    {canRecordExternalBilling(currentUser) && <button type="button" className="btn-soft"
                       onClick={() => setLinkedBillingWorkOrderId(workOrder.id)}>Billed under another work order</button>}
                     </div>
                   </div>

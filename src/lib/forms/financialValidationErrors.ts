@@ -13,7 +13,7 @@ const labels: Record<string, string> = {
   cme: "Notes / CME",
   terms: "Payment terms",
   territory: "Territory",
-  equipmentTag: "Equipment tag",
+  equipmentTag: "Tag",
   taxState: "Tax state",
   salesTaxOverride: "Sales tax",
   taxRateOverride: "Tax rate",

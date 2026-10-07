@@ -72,6 +72,9 @@ import WorkOrderActivityPanels from "./WorkOrderActivityPanels";
 import { useInvoicePartHints } from "./useInvoicePartHints";
 import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
 import { WorkOrderCapitalActions } from "./WorkOrderCapitalActions";
+import { CapitalSelfServiceModal } from "./CapitalSelfServiceModal";
+import type { CapitalSelfServiceAction } from "./capitalSelfService";
+import { belongsToCurrentBillingWork } from "./currentBillingDocument";
 import { FocusedWorkOrderHeader } from "../simplified-work/FocusedWorkOrderHeader";
 import { AttachmentsButton, WorkOrderAttachments } from "./WorkOrderAttachments";
 import { ExternalBillingPanel } from "../billing/ExternalBillingPanel";
@@ -269,9 +272,14 @@ export default function WorkOrderDetail(props: any) {
     () => woData ? billingInvoices.filter(invoice => invoice.wot === woData.id) : [],
     [billingInvoices, woData],
   );
+  const [capitalSelfService, setCapitalSelfService] = useState<{ id: string; actorId: string; action: CapitalSelfServiceAction } | null>(null);
   const currentBillingDocument = useMemo(() => {
     const wantsCapitalQuote = ["capital", "pending_capital_completion"].includes(woData?.status);
+    const reopenedAt = (woData?.activities || []).filter((activity: any) => activity.eventKey === "work_order_reopened"
+      && !activity.deletedAt && Number(activity.workflowCycle || 0) === Number(woData?.workflowCycle || 0))
+      .reduce((latest: number, activity: any) => Math.max(latest, Date.parse(activity.createdAt) || 0), 0);
     return woBillingInvoices
+      .filter((invoice: any) => belongsToCurrentBillingWork(invoice, reopenedAt))
       .filter((invoice: any) => wantsCapitalQuote
         ? invoice.documentKind === "capital_quote"
         : invoice.documentKind !== "capital_quote")
@@ -279,7 +287,7 @@ export default function WorkOrderDetail(props: any) {
         new Date(b.updatedAt || b.createdAt || 0).getTime()
         - new Date(a.updatedAt || a.createdAt || 0).getTime(),
       )[0] || null;
-  }, [woBillingInvoices, woData?.status]);
+  }, [woBillingInvoices, woData?.status, woData?.workflowCycle, woData?.activities]);
   const hasAnyLiveInvoice = woAllInvoices.length > 0 || woBillingInvoices.length > 0;
   const canInvoice = !isManager && currentUser?.canInvoice === true;
   // Contractor History is a reference archive. Keep every server-changing
@@ -331,7 +339,7 @@ export default function WorkOrderDetail(props: any) {
     canonicalSevenElevenWorkOrderId(workOrderId) !== sevenElevenWorkOrderId
   );
   const invoiceController = isInvoiceController(currentUser);
-  const canCloseReopenedFollowUp = canCloseReopenedFollowUpWithoutBilling({
+  const canCloseReopenedFollowUp = !hasOpenVisit && canCloseReopenedFollowUpWithoutBilling({
     workOrder: woData,
     contractorInvoices: woAllInvoices,
     staffInvoices: woBillingInvoices,
@@ -419,9 +427,14 @@ export default function WorkOrderDetail(props: any) {
   const capitalActions = <WorkOrderCapitalActions workOrderId={woData?.id} status={woData?.status}
     enabled={isManager && !invoiceController} canFlag={Boolean(woData && canFlagWorkOrderCapital(woData))}
     hasOpenVisit={hasOpenVisit} isLoading={isLoading} onFlag={doCapitalFlag} onDecline={doCapitalDecline}
-    onResume={doCapitalResume} onComplete={doCapitalComplete} />;
+    onResume={doCapitalResume} onComplete={() => setCapitalSelfService({ id: woData.id, actorId: currentUser.id, action: "capital_confirmed_completion" })}
+    onRecordExternal={() => setCapitalSelfService({ id: woData.id, actorId: currentUser.id, action: "capital_external_handoff" })} />;
   return (
     <>
+          {capitalSelfService && capitalSelfService.id === woData?.id && capitalSelfService.actorId === currentUser?.id
+            && <CapitalSelfServiceModal key={`${currentUser.id}:${woData.id}:${capitalSelfService.action}`}
+            workOrderId={woData.id} action={capitalSelfService.action} onClose={() => setCapitalSelfService(null)}
+            onDone={receipt => { if (receipt.action === "capital_confirmed_completion") onOpenBillingForWorkOrder?.(woData.id, null); }} />}
           {/* ═════ WO DETAIL ═════ */}
           {(page === "work_orders" || page === "wo_detail" || page === "history") && selectedWO && woData && (() => {
             const repeatCount = storeHistory.length;

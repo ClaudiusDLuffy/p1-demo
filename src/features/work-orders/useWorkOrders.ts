@@ -1322,7 +1322,7 @@ export default function useWorkOrders({
   // Staff-only terminal path for an already-billed work order that was
   // reopened for field follow-up. The RPC validates the expected reopen
   // cycle, prior billing, current-cycle invoices, pending 7-Eleven updates,
-  // and closes the work order plus open visits atomically.
+  // and closes the work order atomically. Active visits require actual checkout.
   const doCloseReopenedFollowUp = async (
     woId: string,
     expectedWorkflowCycle: number,

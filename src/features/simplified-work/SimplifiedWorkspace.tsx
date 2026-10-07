@@ -66,7 +66,7 @@ export default function SimplifiedWorkspace({ active, currentUser, isManager, on
           <button key={option.value} type="button" aria-pressed={view === option.value}
             disabled={exporter.busy}
             className="min-h-11 rounded-lg border border-p1-border px-4 py-2 text-sm font-bold text-p1-muted aria-pressed:border-p1-accent aria-pressed:bg-p1-accent-soft aria-pressed:text-p1-accent disabled:opacity-50"
-            onClick={() => { setView(option.value); setStatus("all"); }}>
+            onClick={() => { setView(option.value); setStatus(option.value === "capital" ? "capital_active" : "all"); }}>
             {option.label}
           </button>
         ))}

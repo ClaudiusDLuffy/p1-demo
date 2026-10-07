@@ -54,6 +54,7 @@ export function LinkedBillingModal({ workOrderId, onClose }: { workOrderId: stri
         <button type="button" className="btn-primary" onClick={onClose}>Done</button>
       </div> : <form noValidate className="space-y-4" onSubmit={save}>
         <p className="text-sm">Use this when an existing portal invoice on another work order already covers this work. This is not external billing and does not merge the jobs.</p>
+        {Boolean(work.data?.workflowCycle) && <p className="text-sm">This links only the current follow-up (cycle {work.data?.workflowCycle}). Previously billed P1 invoices stay unchanged; the selected invoice must cover the additional work.</p>}
         {work.isPending && <p role="status">Loading current work order…</p>}
         {work.isError && <p role="alert">The work order could not be loaded. <button type="button" className="btn-soft" onClick={() => void work.refetch()}>Retry loading</button></p>}
         {unavailable && !uncertain && <p className="text-sm">{unavailable}</p>}

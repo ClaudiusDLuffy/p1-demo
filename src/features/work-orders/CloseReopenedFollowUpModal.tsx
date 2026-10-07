@@ -28,9 +28,11 @@ export default function CloseReopenedFollowUpModal({
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const dismissal = useUnsavedChangesGuard({ dirty: reason !== "", busy: submitting, onClose });
+  const [confirmed, setConfirmed] = useState(false);
+  const dismissal = useUnsavedChangesGuard({ dirty: reason !== "" || confirmed, busy: submitting, onClose });
 
   const submit = async () => {
+    if (!confirmed) { setError("Confirm that the follow-up is resolved and no additional billing is needed."); return; }
     const validationError = validateFollowUpCloseReason(reason);
     if (validationError) {
       setError(validationError);
@@ -67,7 +69,7 @@ export default function CloseReopenedFollowUpModal({
       </div>
 
       <div role="note" style={{ padding: "11px 12px", borderRadius: 10, background: T.warnSoft, color: "#73560C", fontSize: 11, lineHeight: 1.5, marginBottom: 16 }}>
-        Use this only when the reopened field work is finished and the prior 7-Eleven invoice already covers it. Existing contractor and P1 invoices will remain unchanged. Any open visit will be closed, and unresolved 7-Eleven or contractor-attention updates will block the action.
+        Use this only when the reopened field work is finished and the prior 7-Eleven invoice already covers it. Existing contractor and P1 invoices will remain unchanged. Record any active visit's actual checkout first; unresolved 7-Eleven or contractor-attention updates block closure. If work was billed on another WO, use Billed under another work order instead.
       </div>
 
       <Field label="Reason for no additional billing" required error={error}>
@@ -85,6 +87,9 @@ export default function CloseReopenedFollowUpModal({
           aria-invalid={Boolean(error)}
         />
       </Field>
+      <label className="mb-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} disabled={submitting}
+        onChange={event => { setConfirmed(event.target.checked); setError(""); }} />
+        <span>I confirm the follow-up is resolved and the prior billing covers it; no additional billing is required.</span></label>
       <div style={{ marginTop: -8, marginBottom: 14, textAlign: "right", fontSize: 10, color: T.subtle }}>
         {reason.length}/{FOLLOW_UP_CLOSE_REASON_MAX_LENGTH}
       </div>
