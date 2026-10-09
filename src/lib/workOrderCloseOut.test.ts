@@ -33,6 +33,29 @@ test("review links report all relevant prerequisites once, including pending upd
   assert.equal(steps.filter(step => step.target === "updates").length, 1);
 });
 
+test("each regular closeout choice receives only its own short review links without changing eligibility", () => {
+  const input = { ...base, hasCompleteEvidence: false, hasCurrentInvoice: true, hasUnresolvedContractorInvoices: true,
+    workOrder: { ...workOrder, functionalStatus: "Work in Progress", visits: [{ checkOutAt: null }], hasPendingSevenElevenSync: true } };
+  const before = workOrderCloseOutOptions(input);
+  assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, action: "review_billing" }).map(step => step.target), ["billing"]);
+  for (const action of ["linked_billing", "external_billing"] as const) {
+    assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, action }).map(step => step.target), ["history", "billing", "visits", "updates", "documents", "progress"]);
+  }
+  assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, action: "follow_up" }).map(step => step.target), ["history", "visits", "updates", "documents"]);
+  assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, action: "no_invoice" }).map(step => step.target), ["history", "visits", "updates", "documents", "progress"]);
+  assert.deepEqual(workOrderCloseOutOptions(input), before);
+});
+
+test("preparing a new invoice links to missing history and billing handoff, never an imaginary existing invoice", () => {
+  const input = { ...base, hasCompleteEvidence: false, hasCurrentInvoice: false,
+    workOrder: { ...workOrder, status: "wip", functionalStatus: "Work in Progress", visits: [{ checkOutAt: null }] } };
+  assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, action: "review_billing" }).map(step => step.label), ["History", "Job progress"]);
+  assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, workOrder, action: "review_billing" }).map(step => step.label), ["History"]);
+  for (const action of ["capital_complete", "capital_billed", "capital_to_billing", "external_quote"] as const) {
+    assert.deepEqual(workOrderCloseOutReviewSteps({ ...input, action }), []);
+  }
+});
+
 test("capital and closed work have no ordinary review checklist, and billing-only work needs no field-completion link", () => {
   for (const work of [{ ...workOrder, status: "closed" }, { ...workOrder, status: "capital" },
     { ...workOrder, isCapital: true }, { ...workOrder, status: "pending_capital_completion" }]) {

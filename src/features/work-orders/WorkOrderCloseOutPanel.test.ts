@@ -5,6 +5,13 @@ import { primitiveHarness, uiInvoke, uiNodes, uiText, type UiNode } from "../../
 
 const find = (tree: unknown, predicate: (node: UiNode) => boolean) => { const node = uiNodes(tree).find(predicate); assert.ok(node); return node; };
 const button = (tree: unknown, label: string) => find(tree, node => node.type === "button" && uiText(node.props.children) === label);
+const card = (tree: unknown, label: string) => find(tree, node => node.type === "section" && node.props["aria-label"] === label);
+const link = (tree: unknown, label: string) => find(tree, node => node.type === "a" && uiText(node.props.children) === label);
+const followLink = (node: UiNode) => {
+  let prevented = false;
+  uiInvoke(node, "onClick", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, "Section focus must wait for the chooser to unmount, not use native anchor scrolling");
+};
 const base = {
   workOrder: { id: "SYNTHETIC-WO", status: "pending_invoice", functionalStatus: "Completed", workflowCycle: 1,
     contractorAssignmentVersion: 2, updatedAt: "2026-10-01T12:00:00Z", visits: [] },
@@ -57,7 +64,10 @@ test("contextual invoice link opens only the exact existing invoice while blocke
   let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
   tree = h.render("WorkOrderCloseOutPanel", props);
   assert.equal(button(tree, "Billed outside the portal").props.disabled, true);
-  uiInvoke(button(tree, "Review existing P1 invoice"), "onClick");
+  const review = link(card(tree, "Review or finish P1 billing"), "Invoice on this WO");
+  assert.equal(review.props.href, "#work-order-documents");
+  assert.equal(uiNodes(card(tree, "Review or finish P1 billing")).some(node => node.type === "a" && uiText(node.props.children) === "Checkout"), false);
+  followLink(review);
   assert.deepEqual(calls, [[base.workOrder.id, "existing-invoice"]]);
   tree = h.render("WorkOrderCloseOutPanel", props);
   assert.equal(uiNodes(tree).some(node => node.type === "Modal" || node.type === "ExternalForm"), false);
@@ -66,18 +76,21 @@ test("contextual invoice link opens only the exact existing invoice while blocke
 });
 
 for (const [label, section, patch] of [
-  ["Review active visit / checkout", "visits", { workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } }],
-  ["Review activity history", "history", { hasCompleteEvidence: false }],
-  ["Review pending updates", "updates", { workOrder: { ...base.workOrder, hasPendingSevenElevenSync: true } }],
-  ["Review contractor invoices", "documents", { hasUnresolvedContractorInvoices: true }],
-  ["Review job progress and completion", "progress", { workOrder: { ...base.workOrder, functionalStatus: "Work in Progress" } }],
+  ["Checkout", "visits", { workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } }],
+  ["History", "history", { hasCompleteEvidence: false }],
+  ["Updates", "updates", { workOrder: { ...base.workOrder, hasPendingSevenElevenSync: true } }],
+  ["Contractor invoices", "documents", { hasUnresolvedContractorInvoices: true }],
+  ["Job progress", "progress", { workOrder: { ...base.workOrder, functionalStatus: "Work in Progress" } }],
 ] as const) test(`${label} navigates within the same WO without invoking any closeout command`, () => {
   const h = harness(); const calls: unknown[][] = []; let writes = 0;
   const props = { ...base, ...patch, onReviewSection: (...args: unknown[]) => calls.push(args),
     onCloseFollowUp: async () => { writes++; return true; }, onCloseWithoutInvoice: async () => { writes++; return true; } };
   let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
   tree = h.render("WorkOrderCloseOutPanel", props);
-  uiInvoke(button(tree, label), "onClick");
+  const review = link(card(tree, "Billed outside the portal"), label);
+  assert.equal(review.props.className?.toString().includes("btn-"), false);
+  assert.ok(String(review.props.href).startsWith("#work-order-"));
+  followLink(review);
   assert.deepEqual(calls, [[base.workOrder.id, section]]); assert.equal(writes, 0);
   tree = h.render("WorkOrderCloseOutPanel", props);
   assert.equal(uiNodes(tree).some(node => ["Modal", "ExternalForm", "LinkedForm", "NoInvoiceForm"].includes(String(node.type))), false);
@@ -88,9 +101,37 @@ test("no prerequisite links are shown when there is no destination callback or n
   const props = { ...base, hasCompleteEvidence: false, workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } };
   let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
   tree = h.render("WorkOrderCloseOutPanel", props);
-  assert.equal(uiNodes(tree).some(node => node.props["aria-label"] === "Still needs review"), false);
+  assert.equal(uiNodes(tree).some(node => node.type === "a"), false);
   tree = h.render("WorkOrderCloseOutPanel", { ...base, onReviewSection() {} });
+  assert.equal(uiNodes(tree).some(node => node.type === "a"), false);
+});
+
+test("compact review links live under their own billing choice, with no separate helper-button list", () => {
+  const h = harness();
+  const props = { ...base, billingDocument: { id: "existing-invoice" }, onReviewSection() {},
+    workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
   assert.equal(uiNodes(tree).some(node => node.props["aria-label"] === "Still needs review"), false);
+  assert.equal(uiNodes(card(tree, "Review or finish P1 billing")).filter(node => node.type === "a").length, 1);
+  for (const label of ["Billed under another work order", "Billed outside the portal"]) {
+    const choice = card(tree, label);
+    assert.equal(button(choice, label).props.disabled, true);
+    assert.deepEqual(uiNodes(choice).filter(node => node.type === "a").map(node => uiText(node.props.children)), ["Invoice on this WO", "Checkout"]);
+    assert.equal(uiNodes(choice).filter(node => node.type === "button").length, 1, "Only the billing action is a button");
+  }
+  assert.match(uiText(card(tree, "Billed under another work order")), /different work order.*not an invoice on this WO/);
+  assert.match(uiText(card(tree, "Billed outside the portal")), /outside P1.*no P1 billing invoice on this WO/);
+});
+
+test("follow-up choice has only its own required links, not new invoice or field-completion requirements", () => {
+  const h = harness();
+  const props = { ...base, canCloseFollowUp: true, billingDocument: { id: "existing-invoice" }, onReviewSection() {},
+    workOrder: { ...base.workOrder, functionalStatus: "Work in Progress", visits: [{ checkOutAt: null }] } };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  const followUp = card(tree, "Follow-up resolved, prior billing covers it");
+  assert.deepEqual(uiNodes(followUp).filter(node => node.type === "a").map(node => uiText(node.props.children)), ["Checkout"]);
 });
 
 test("paged-history loading remains in the chooser, reports failures, and never clears a guard by itself", async () => {
