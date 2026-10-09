@@ -1,8 +1,8 @@
 import { billingClosureStatusEligible } from "../features/billing/billingClosurePolicy";
 
-export type CloseOutAction = "review_billing" | "external_quote" | "capital_complete" | "external_billing" | "linked_billing" | "follow_up" | "no_invoice";
+export type CloseOutAction = "review_billing" | "external_quote" | "capital_complete" | "capital_billed" | "capital_to_billing" | "external_billing" | "linked_billing" | "follow_up" | "no_invoice";
 export type CloseOutWorkOrder = {
-  id: string; status: string; functionalStatus?: string | null; billingOnly?: boolean;
+  id: string; status: string; functionalStatus?: string | null; billingOnly?: boolean; isCapital?: boolean | null;
   workflowCycle?: number; contractorAssignmentVersion?: number; updatedAt?: string | null;
   hasPendingSevenElevenSync?: boolean; hasPendingContractorAttention?: boolean;
   visits?: { checkOutAt?: string | null }[];
@@ -12,6 +12,10 @@ export type FollowUpCloseSnapshot = {
   id: string; workflowCycle: number; contractorAssignmentVersion: number; updatedAt: string | null;
 };
 export type CloseOutOption = { action: CloseOutAction; label: string; explanation: string; blocked?: string };
+
+export function isCapitalCloseOutWork(work: CloseOutWorkOrder | null | undefined) {
+  return Boolean(work && !work.billingOnly && (work.isCapital === true || ["capital", "pending_capital_completion"].includes(work.status)));
+}
 
 /** A read preflight improves conflict feedback; the RPC still enforces the exact snapshot. */
 export function noInvoiceCloseSnapshotMatches(current: CloseOutWorkOrder | null, snapshot: FollowUpCloseSnapshot) {
@@ -28,7 +32,7 @@ export function workOrderCloseOutOptions(input: {
   workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasCurrentInvoice: boolean;
   hasStaffDocuments: boolean; hasAnyDocuments: boolean; hasUnresolvedContractorInvoices: boolean; canCloseFollowUp: boolean;
 }): CloseOutOption[] {
-  const { workOrder: work, hasCompleteEvidence, hasCurrentInvoice, hasStaffDocuments, hasAnyDocuments,
+  const { workOrder: work, hasCompleteEvidence, hasCurrentInvoice, hasAnyDocuments,
     hasUnresolvedContractorInvoices, canCloseFollowUp } = input;
   if (work.status === "closed") return [];
   const openVisit = work.visits?.some(visit => !visit.checkOutAt);
@@ -41,15 +45,10 @@ export function workOrderCloseOutOptions(input: {
     || (!work.billingOnly && work.functionalStatus !== "Completed" ? "Confirm field work is complete before closing." : undefined);
   const alternateBillingBlocker = closingBlocker || (hasCurrentInvoice
     ? "A P1 invoice already exists for this billing work. Review it before choosing another billing outcome." : undefined);
-  if (work.status === "capital") return [
-    { action: "review_billing", label: "Review or prepare capital quote", explanation: "Record the quote submission before confirming installation. A quote is not final customer billing." },
-    { action: "external_quote", label: "Quote was approved outside the portal", explanation: "Record the real approved quote reference. This does not complete installation or close the WO.",
-      blocked: incompleteEvidence || (hasStaffDocuments ? "A P1 document already exists. Review it instead of recording a duplicate external handoff." : undefined) },
-  ];
-  if (work.status === "pending_capital_completion") return [
-    { action: "capital_complete", label: "Installation is complete", explanation: "Confirm installation and move to final billing. The WO is not closed until its billing outcome is recorded.",
-      blocked: openVisit ? "Record the active visit's actual checkout before confirming installation." : undefined },
-    { action: "review_billing", label: "Review capital quote", explanation: "Review the quote or any outstanding revision before completing installation." },
+  if (isCapitalCloseOutWork(work)) return [
+    { action: "capital_billed", label: "Completed and billed", explanation: "Confirm the existing bill and move straight to History. No second invoice or CSV export.", blocked: financialBlocker },
+    { action: "capital_to_billing", label: "Completed, send to billing", explanation: "For completed capital work not billed yet. Move to billing and keep the WO open.",
+      blocked: incompleteEvidence || (openVisit ? "Record the active visit's actual checkout before confirming completion." : undefined) },
   ];
   const options: CloseOutOption[] = [
     { action: "review_billing", label: hasCurrentInvoice ? "Review or finish P1 billing" : "Review or prepare final P1 invoice",

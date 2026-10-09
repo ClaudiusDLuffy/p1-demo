@@ -8,14 +8,17 @@ import { canRecordExternalBilling } from "../billing/externalBillingContracts";
 import { ExternalBillingModal } from "../billing/ExternalBillingModal";
 import { LinkedBillingModal } from "../billing/LinkedBillingModal";
 import { CapitalSelfServiceModal } from "./CapitalSelfServiceModal";
+import { CapitalCloseOutModal, type CapitalCloseOutDocument } from "./CapitalCloseOutModal";
+import type { CapitalCloseOutOutcome } from "./capitalCloseOut";
 import CloseReopenedFollowUpModal from "./CloseReopenedFollowUpModal";
 import { CloseOutNoInvoiceModal } from "./CloseOutNoInvoiceModal";
-import { workOrderCloseOutOptions, type CloseOutAction, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
+import { isCapitalCloseOutWork, workOrderCloseOutOptions, type CloseOutAction, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
 
 type Props = {
   workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasStaffDocuments: boolean; hasAnyDocuments: boolean;
   hasUnresolvedContractorInvoices: boolean; canCloseFollowUp: boolean;
   billingDocument?: { id: string } | null;
+  capitalDocuments?: readonly CapitalCloseOutDocument[]; onCapitalDone?(outcome: CapitalCloseOutOutcome): void;
   onOpenBilling(workOrderId: string, invoiceId: string | null): void;
   onCloseFollowUp(snapshot: FollowUpCloseSnapshot, reason: string): Promise<boolean>;
   onCloseWithoutInvoice(snapshot: FollowUpCloseSnapshot): Promise<boolean>;
@@ -33,6 +36,7 @@ export function WorkOrderCloseOutPanel(props: Props) {
   if (!canRecordExternalBilling(actor)) return null;
   const work = props.workOrder;
   const options = workOrderCloseOutOptions({ ...props, hasCurrentInvoice: Boolean(props.billingDocument) });
+  const capital = isCapitalCloseOutWork(work);
   const close = () => setSelection(null);
   const choose = (action: CloseOutAction | "choose") => setSelection({ action, scope, snapshot: {
     id: work.id, workflowCycle: work.workflowCycle ?? 0,
@@ -41,11 +45,16 @@ export function WorkOrderCloseOutPanel(props: Props) {
   const selected = selection?.snapshot.id === work.id && selection.scope === scope ? selection : null;
   return <section aria-label="Work order close out" className="card mb-3 space-y-3 p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="font-semibold">Close out</h3><p className="text-sm">One place for installation completion and the correct billing outcome. Original records stay protected.</p></div>
+      <div><h3 className="font-semibold">Close out</h3><p className="text-sm">{capital ? "Completed and billed goes to History. Not billed yet? Send it to billing." : "One place for installation completion and the correct billing outcome. Original records stay protected."}</p></div>
       {work.status !== "closed" && <button type="button" className="btn-primary min-h-11" onClick={() => choose("choose")}>Close out</button>}
       {work.status === "closed" && <p role="status" className="text-sm">This work order is already closed. Review its billing history below.</p>}
     </div>
-    {selected?.action === "choose" && <Modal title="Close out work order" description={work.id} width={600} onRequestClose={close}>
+    {selected?.action === "choose" && capital && <CapitalCloseOutModal workOrderId={work.id} documents={props.capitalDocuments || []}
+      hasCompleteEvidence={props.hasCompleteEvidence} billedBlocker={options.find(option => option.action === "capital_billed")?.blocked}
+      completionBlocker={options.find(option => option.action === "capital_to_billing")?.blocked}
+      canLoadMoreHistory={props.canLoadMoreHistory} historyLoading={props.historyLoading} onLoadMoreHistory={props.onLoadMoreHistory}
+      onReviewDocument={invoiceId => { close(); props.onOpenBilling(work.id, invoiceId); }} onClose={close} onDone={props.onCapitalDone} />}
+    {selected?.action === "choose" && !capital && <Modal title="Close out work order" description={work.id} width={600} onRequestClose={close}>
       <div className="space-y-4">
         <p className="text-sm">Choose what actually happened. Routine audit notes are recorded automatically; references and confirmation are still required. These actions do not submit anything to 7-Eleven for you.</p>
         {!props.hasCompleteEvidence && props.canLoadMoreHistory && props.onLoadMoreHistory && <div className="space-y-2">

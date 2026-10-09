@@ -80,6 +80,7 @@ import { AttachmentsButton, WorkOrderAttachments } from "./WorkOrderAttachments"
 import { ExternalBillingPanel } from "../billing/ExternalBillingPanel";
 import { LinkedBillingPanel } from "../billing/LinkedBillingPanel";
 import { WorkOrderCloseOutPanel } from "./WorkOrderCloseOutPanel";
+import { isCapitalCloseOutWork } from "../../lib/workOrderCloseOut";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -430,7 +431,7 @@ export default function WorkOrderDetail(props: any) {
     onClose: () => { setRejectingInv(null); setRejectReason(""); } });
   const capitalActions = <WorkOrderCapitalActions workOrderId={woData?.id} status={woData?.status}
     enabled={isManager && !invoiceController} canFlag={Boolean(woData && canFlagWorkOrderCapital(woData))}
-    hasOpenVisit={hasOpenVisit} hideCloseOutActions={focused} isLoading={isLoading} onFlag={doCapitalFlag} onDecline={doCapitalDecline}
+    hasOpenVisit={hasOpenVisit} hideCloseOutActions={focused || isCapitalCloseOutWork(woData)} isLoading={isLoading} onFlag={doCapitalFlag} onDecline={doCapitalDecline}
     onResume={doCapitalResume} onComplete={() => setCapitalSelfService({ id: woData.id, actorId: currentUser.id, action: "capital_confirmed_completion" })}
     onRecordExternal={() => setCapitalSelfService({ id: woData.id, actorId: currentUser.id, action: "capital_external_handoff" })} />;
   return (
@@ -1064,6 +1065,12 @@ export default function WorkOrderDetail(props: any) {
                   hasStaffDocuments={woBillingInvoices.length > 0} hasAnyDocuments={hasAnyLiveInvoice}
                   hasUnresolvedContractorInvoices={woAllInvoices.some(invoice => !["approved", "paid"].includes(invoice.state))}
                   canCloseFollowUp={canCloseReopenedFollowUp} billingDocument={currentBillingDocument}
+                  capitalDocuments={woBillingInvoices.map(invoice => ({ ...invoice,
+                    submissionRecorded: (woData.activities || []).some(activity => !activity.deletedAt
+                      && activity.eventKey === "capital_quote_submitted" && activity.eventData?.invoiceId === invoice.id
+                      && Number(activity.workflowCycle || 0) === Number(woData.workflowCycle || 0)),
+                  }))}
+                  onCapitalDone={outcome => { setSelectedWO(null); setPage(outcome === "billed" ? "history" : "billing"); }}
                   onOpenBilling={onOpenBillingForWorkOrder}
                   onCloseFollowUp={props.onCloseReopenedFollowUp}
                   onCloseWithoutInvoice={props.onCloseOutWithoutInvoice}
@@ -1074,9 +1081,9 @@ export default function WorkOrderDetail(props: any) {
                     if (woData.visitPage?.hasMore) await onLoadMoreVisits?.();
                   }} />}
                 {isManager && !invoiceController && <ExternalBillingPanel key={woData.id} workOrderId={woData.id}
-                  status={woData.status} workflowCycle={woData.workflowCycle} showActions={!focused} />}
+                  status={woData.status} workflowCycle={woData.workflowCycle} showActions={!focused && !isCapitalCloseOutWork(woData)} />}
                 {isManager && !invoiceController && <LinkedBillingPanel key={`linked-${woData.id}`} workOrderId={woData.id}
-                  status={woData.status} showActions={!focused} onOpenWorkOrder={id => { setSelectedWO(id); setPage("wo_detail"); }} />}
+                  status={woData.status} showActions={!focused && !isCapitalCloseOutWork(woData)} onOpenWorkOrder={id => { setSelectedWO(id); setPage("wo_detail"); }} />}
                 {isManager && woData.billingOnly && (
                   <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: "#FFFBEB", borderColor: "#F59E0B" }}>
                     <div style={{ color: "#92400E", fontSize: 12, fontWeight: 800 }}>Billing only · do not dispatch</div>
@@ -1304,7 +1311,7 @@ export default function WorkOrderDetail(props: any) {
                       {/* Exception closures keep distinct audit meanings. External
                           billing is recorded in the staff-only panel above;
                           portal invoices close through the normal Billing flow. */}
-                      {!focused && canCloseReopenedFollowUp && (
+                      {!focused && canCloseReopenedFollowUp && !isCapitalCloseOutWork(woData) && (
                         <button
                           type="button"
                           onClick={() => setModal("closeReopenedFollowUp")}
@@ -1317,7 +1324,7 @@ export default function WorkOrderDetail(props: any) {
                             : "Close follow-up — no additional billing"}
                         </button>
                       )}
-                      {!focused && isManager && woData.status !== "closed" && !hasAnyLiveInvoice && (
+                      {!focused && isManager && !isCapitalCloseOutWork(woData) && woData.status !== "closed" && !hasAnyLiveInvoice && (
                         <button onClick={() => setModal("closeWithoutInvoice")} disabled={isLoading("closeWithoutInvoice_" + woData.id)} className="btn-primary" style={loadingStyle("closeWithoutInvoice_" + woData.id)}>
                           {isLoading("closeWithoutInvoice_" + woData.id) ? <><BtnSpinnerDark />Closing...</> : "Close — no invoice"}
                         </button>

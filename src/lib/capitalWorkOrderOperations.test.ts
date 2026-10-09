@@ -43,7 +43,7 @@ test("Work orders includes capital while the focused Capital view remains", () =
   assert.ok((list.match(/<CapitalWorkOrderBadge workOrder=\{wo\}/g) || []).length >= 2);
   assert.match(capitalView, /scope: "capital"/);
   assert.match(capitalView, /all jobs remain searchable in Work orders/);
-  assert.match(capitalView, /Installed jobs leave Active capital work and move to final billing/);
+  assert.match(capitalView, /Installed jobs awaiting billing are available under Installed; closed jobs are in History/);
   assert.match(dashboard, /<CapitalWorkOrderBadge workOrder=\{workOrder\} small/);
   assert.ok((history.match(/<CapitalWorkOrderBadge workOrder=\{w\} small/g) || []).length >= 2);
   assert.match(billingList, /<CapitalWorkOrderBadge workOrder=\{workOrder\} small/);

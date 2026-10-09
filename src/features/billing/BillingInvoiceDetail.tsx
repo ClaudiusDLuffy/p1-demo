@@ -58,6 +58,7 @@ export default function BillingInvoiceDetail(props: any) {
   const canMarkBilled = canDelete && invoice.state === "submitted";
   const canMarkReady = canDelete && invoice.state === "draft";
   const capitalHandoff = invoice.documentKind === "capital_quote";
+  const canExportCapitalCsv = canDelete && currentUser?.active === true;
   const capitalFinalInvoice = Boolean(
     invoice.documentKind === "invoice" && invoice.sourceCapitalQuoteId,
   );
@@ -74,7 +75,7 @@ export default function BillingInvoiceDetail(props: any) {
           </button>
           {canMarkBilled && (
             <button onClick={() => { setBillingError(""); setConfirmBilled(true); }} className="btn-accent">
-              {capitalHandoff ? "Submit Quote to 7-Eleven" : "Billed to 7-Eleven"}
+              {capitalHandoff ? "Mark submitted to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           )}
           {canMarkReady && (
@@ -103,7 +104,7 @@ export default function BillingInvoiceDetail(props: any) {
           {capitalHandoff && canDelete && invoice.state === "approved" && workOrder?.status === "pending_capital_completion"
             && !invoice.qboInvoiceId && !invoice.qboSyncedAt && props.onOpenRevision && <button type="button" className="btn-primary"
               onClick={() => setReviseQuote(true)}>Create quote revision</button>}
-          {!capitalHandoff && (
+          {(!capitalHandoff || canExportCapitalCsv) && (
             <button onClick={onDownloadCsv} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Ico d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8M8 17h8" size={13} color="currentColor" />
               Download SaasAnt CSV
@@ -140,10 +141,10 @@ export default function BillingInvoiceDetail(props: any) {
         quote={{ id: invoice.id, invoiceVersion: invoice.invoiceVersion }} onClose={() => setReviseQuote(false)}
         onDone={receipt => props.onOpenRevision(receipt.invoiceId)} />}
       {confirmBilled && (
-        <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} dismissDisabled={billing} title={capitalHandoff ? "Confirm capital quote" : "Confirm 7-Eleven billing"} width={440}>
+        <Modal onClose={() => { if (!billing) setConfirmBilled(false); }} dismissDisabled={billing} title={capitalHandoff ? "Mark quote submitted to 7-Eleven" : "Confirm 7-Eleven billing"} width={440}>
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
             {capitalHandoff ? (
-              <>Submit quote <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> to 7-Eleven? The work order will remain open in Pending Capital Completion until the capital work is finished.</>
+              <>Mark quote <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as already submitted in 7-Eleven? This only records submission in P1. The capital stays open until the work is finished.</>
             ) : (
               <>Mark invoice <span className="mono" style={{ color: T.ink, fontWeight: 700 }}>#{invoice.num}</span> as sent to 7-Eleven and close its linked work order? Linked contractor invoices will remain Approved.</>
             )}
@@ -174,11 +175,16 @@ export default function BillingInvoiceDetail(props: any) {
             >
               {billing
                 ? <><BtnSpinner />Updating...</>
-                : capitalHandoff ? "Submit Quote to 7-Eleven" : "Billed to 7-Eleven"}
+                : capitalHandoff ? "Mark submitted to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           </div>
         </Modal>
       )}
+
+      {capitalHandoff && canExportCapitalCsv && <p className="mb-3 text-xs text-p1-muted">
+        Optional: download the CSV for a manual QuickBooks import. Downloading does not submit or bill the quote.
+        If you already imported this quote, do not import it again when closing the capital.
+      </p>}
 
       <div className="card invoice-detail-container" style={{ padding: 0, overflow: "hidden", maxWidth: 860 }}>
         <div style={{ padding: "28px 32px", borderBottom: `1px solid ${T.borderSoft}` }}>

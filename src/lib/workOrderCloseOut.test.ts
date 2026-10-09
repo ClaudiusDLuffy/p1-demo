@@ -1,23 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { closeOutAuditNote, noInvoiceCloseSnapshotMatches, workOrderCloseOutOptions, type CloseOutWorkOrder } from "./workOrderCloseOut";
+import { closeOutAuditNote, isCapitalCloseOutWork, noInvoiceCloseSnapshotMatches, workOrderCloseOutOptions, type CloseOutWorkOrder } from "./workOrderCloseOut";
 
 const workOrder: CloseOutWorkOrder = { id: "SYNTHETIC-WO", status: "pending_invoice", functionalStatus: "Completed", workflowCycle: 1, visits: [] };
 const base = { workOrder, hasCompleteEvidence: true, hasCurrentInvoice: false, hasStaffDocuments: false,
   hasAnyDocuments: false, hasUnresolvedContractorInvoices: false, canCloseFollowUp: false };
 const options = (changes: Partial<typeof base> = {}) => workOrderCloseOutOptions({ ...base, ...changes });
 
-test("capital quote handoff and installation have distinct outcomes, never final closure", () => {
+test("capital detection safely handles the initial empty work-order selection", () => {
+  assert.equal(isCapitalCloseOutWork(null), false);
+  assert.equal(isCapitalCloseOutWork(undefined), false);
+  assert.equal(isCapitalCloseOutWork(workOrder), false);
+  assert.equal(isCapitalCloseOutWork({ ...workOrder, status: "capital" }), true);
+  assert.equal(isCapitalCloseOutWork({ ...workOrder, isCapital: true }), true);
+  assert.equal(isCapitalCloseOutWork({ ...workOrder, isCapital: true, billingOnly: true }), false);
+});
+
+test("capital closeout has exactly the billed or still-open billing outcomes", () => {
   const capital = options({ workOrder: { ...workOrder, status: "capital", functionalStatus: "Work in Progress" } });
-  assert.deepEqual(capital.map(option => option.action), ["review_billing", "external_quote"]);
-  assert.match(capital[1].explanation, /does not.*close/);
-  assert.ok(options({ workOrder: { ...workOrder, status: "capital" }, hasStaffDocuments: true }).find(option => option.action === "external_quote")?.blocked);
+  assert.deepEqual(capital.map(option => option.label), ["Completed and billed", "Completed, send to billing"]);
+  assert.equal(options({ workOrder: { ...workOrder, status: "capital" }, hasStaffDocuments: true }).find(option => option.action === "capital_billed")?.blocked, undefined);
   const waiting = options({ workOrder: { ...workOrder, status: "pending_capital_completion", visits: [{ checkOutAt: null }] } });
-  assert.match(waiting.find(option => option.action === "capital_complete")?.blocked ?? "", /actual checkout/);
-  assert.equal(waiting.find(option => option.action === "review_billing")?.blocked, undefined);
+  assert.match(waiting.find(option => option.action === "capital_to_billing")?.blocked ?? "", /actual checkout/);
+  assert.match(waiting.find(option => option.action === "capital_billed")?.blocked ?? "", /actual checkout/);
   const ready = options({ workOrder: { ...workOrder, status: "pending_capital_completion" } });
-  assert.equal(ready.find(option => option.action === "capital_complete")?.blocked, undefined);
+  assert.equal(ready.find(option => option.action === "capital_billed")?.blocked, undefined);
   assert.equal(ready.some(option => ["external_billing", "linked_billing", "no_invoice"].includes(option.action)), false);
+});
+
+test("installed and operational capitals retain the same two choices while regular WOs do not", () => {
+  for (const status of ["pending_invoice", "parts", "wip"]) {
+    assert.deepEqual(options({ workOrder: { ...workOrder, status, isCapital: true } }).map(option => option.action), ["capital_billed", "capital_to_billing"]);
+  }
+  const unresolved = options({ workOrder: { ...workOrder, isCapital: true }, hasUnresolvedContractorInvoices: true });
+  assert.ok(unresolved.find(option => option.action === "capital_billed")?.blocked);
+  assert.equal(unresolved.find(option => option.action === "capital_to_billing")?.blocked, undefined);
 });
 
 test("final billing, linked billing, external billing and unbilled closure are separate choices", () => {

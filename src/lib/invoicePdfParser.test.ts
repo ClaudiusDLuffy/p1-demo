@@ -109,7 +109,7 @@ test("extracts each item from a multi-line invoice PDF", async () => {
       lines: parsed.lines,
     }),
     [
-      "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Equipment Tag,Class",
+      "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Tag,Class",
       "INV-100,7-Eleven Inc,7-ELEVEN STORE - 23995,Net 30,07/30/2026,07/29/2026,,Virginia,,23995,,,WOT0909771,Labor,Labor service,2,80,160,,,",
       "INV-100,,,,,,,,,,,,,Parts/Hardware,Replacement filter,1,50,50,,,",
     ].join("\r\n"),

@@ -21,7 +21,7 @@ function label(value: unknown): string {
 
 // Execute the actual component with only React rendering and child components
 // replaced. This does not claim browser layout or authorize access to the page.
-function renderDetail(document: Record<string, unknown>, permissions: string[] = []) {
+function renderDetail(document: Record<string, unknown>, permissions: string[] = [], actor: Record<string, unknown> = {}) {
   const filename = resolve("src/features/billing/BillingInvoiceDetail.tsx");
   const requireHere = createRequire(import.meta.url);
   const exports: { default?: (props: Record<string, unknown>) => unknown } = {};
@@ -46,7 +46,7 @@ function renderDetail(document: Record<string, unknown>, permissions: string[] =
   let downloads = 0;
   const tree = exports.default({
     invoice: { id: "synthetic-billing-invoice", num: "SYNTH-100", state: "submitted", lines: [], ...document },
-    currentUser: { role: "back_office", staffPermissions: permissions },
+    currentUser: { role: "back_office", active: true, staffPermissions: permissions, ...actor },
     onDownloadCsv: () => { downloads += 1; }, fmt: (amount: number) => amount.toFixed(2),
   });
   return { buttons: elements(tree).filter(node => node.type === "button"), downloads: () => downloads };
@@ -61,20 +61,53 @@ test("ordinary billing invoices retain their existing SaasAnt CSV callback witho
   assert.equal(rendered.downloads(), 1);
 });
 
-test("a capital final invoice retains CSV access while a capital quote is never exported as a customer invoice", () => {
+test("capital quotes restore optional manual CSV access without requiring a QuickBooks handoff grant", () => {
   const finalInvoice = renderDetail({ documentKind: "invoice", sourceCapitalQuoteId: "synthetic-quote" });
   assert.ok(finalInvoice.buttons.some(node => label(node) === "Download SaasAnt CSV"));
-  for (const permissions of [[], ["quickbooks_export"], ["quickbooks_handoff"], ["invoice_controller"]]) {
+  for (const permissions of [[], ["quickbooks_export"], ["quickbooks_handoff"]]) {
     const quote = renderDetail({ documentKind: "capital_quote" }, permissions);
     assert.ok(quote.buttons.some(node => label(node) === "Download PDF"));
-    assert.equal(quote.buttons.some(node => label(node) === "Download SaasAnt CSV"), false);
-    assert.equal(quote.downloads(), 0);
+    const csv = quote.buttons.find(node => label(node) === "Download SaasAnt CSV");
+    assert.ok(csv);
+    assert.equal(quote.downloads(), 0, "Rendering the quote must not export it automatically");
+    assert.equal(typeof csv.props.onClick, "function");
+    (csv.props.onClick as () => void)();
+    assert.equal(quote.downloads(), 1);
+  }
+  const controllerQuote = renderDetail({ documentKind: "capital_quote" }, ["invoice_controller"]);
+  assert.equal(controllerQuote.buttons.some(node => label(node) === "Download SaasAnt CSV"), false);
+  assert.equal(controllerQuote.downloads(), 0);
+  for (const actor of [{ active: false }, { role: "contractor" }]) {
+    const restricted = renderDetail({ documentKind: "capital_quote" }, [], actor);
+    assert.equal(restricted.buttons.some(node => label(node) === "Download SaasAnt CSV"), false);
+    assert.equal(restricted.downloads(), 0);
   }
 });
 
-test("the existing shell and handler preserve controller-page restrictions and quote-export denial", () => {
+test("capital submission is clearly labeled as a record-only action", () => {
+  const quote = renderDetail({ documentKind: "capital_quote" });
+  assert.ok(quote.buttons.some(node => label(node) === "Mark submitted to 7-Eleven"));
+  assert.equal(quote.buttons.some(node => label(node) === "Submit Quote to 7-Eleven"), false);
+  const invoice = renderDetail({ documentKind: "invoice" });
+  assert.ok(invoice.buttons.some(node => label(node) === "Billed to 7-Eleven"));
+});
+
+test("capital quote editor guidance uses the simplified closeout without changing regular-invoice guidance", () => {
+  const editor = readFileSync(resolve("src/features/billing/BillingInvoiceCreateModal.tsx"), "utf8");
+  assert.match(editor, /\{isCapitalQuote\s*\? "Preparing or updating this quote does not upload it to 7-Eleven or confirm billing\./);
+  assert.match(editor, /use Close out to confirm the existing bill or send it to billing/);
+  assert.doesNotMatch(editor, /This capital quote is separate from the final invoice\. Submitting it will move/);
+  assert.match(editor, /Direction is fixed: P1 Pros bills 7-Eleven\. Linking a work order is optional\./);
+});
+
+test("the existing shell retains controller restrictions and full-document validation before an explicit CSV download", () => {
   const shell = readFileSync(resolve("src/components/PortalShell.tsx"), "utf8");
   assert.match(shell, /isManager && !invoiceController && page === "billing" && selectedBillingInvoice && \(\s*<BillingInvoiceDetail/);
   assert.match(shell, /onDownloadCsv=\{\(\) => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv\(selectedBillingInvoiceData\)\}/);
-  assert.match(shell, /if \(exportInvoice\.documentKind === "capital_quote"\) \{\s*throw new Error\("Capital quotes cannot use the SaasAnt customer-invoice format"\)/);
+  assert.match(shell, /if \(exportInvoice\.documentKind === "capital_quote" && \(!isManager \|\| invoiceController \|\| currentUser\?\.active !== true\)\)/);
+  assert.match(shell, /loadBillingInvoiceForExport\(invoice, "csv"\)/);
+  assert.match(shell, /assertStaffInvoiceIntegrity\(exportInvoice\)/);
+  assert.match(shell, /loadCompleteInvoice\.assertCurrent\(\);\s*downloadStaffInvoiceCsv/);
+  const closeOut = readFileSync(resolve("src/features/work-orders/WorkOrderCloseOutPanel.tsx"), "utf8");
+  assert.doesNotMatch(closeOut, /downloadStaffInvoiceCsv|onDownloadCsv|doDownloadBillingInvoiceCsv/);
 });
