@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
+import { closeOutAuditNote } from "../../lib/workOrderCloseOut";
 import { BtnSpinner } from "../../components/ui/BtnSpinner";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { Field } from "../../components/ui/Field";
@@ -18,31 +19,42 @@ type CloseReopenedFollowUpModalProps = {
   workOrderId: string;
   onClose: () => void;
   onConfirm: (reason: string) => Promise<boolean>;
+  guidedCloseOut?: boolean;
+  workflowCycle?: number;
 };
 
 export default function CloseReopenedFollowUpModal({
   workOrderId,
   onClose,
   onConfirm,
+  guidedCloseOut = false,
+  workflowCycle = 0,
 }: CloseReopenedFollowUpModalProps) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const sending = useRef(false);
   const dismissal = useUnsavedChangesGuard({ dirty: reason !== "" || confirmed, busy: submitting, onClose });
 
   const submit = async () => {
+    if (sending.current) return;
     if (!confirmed) { setError("Confirm that the follow-up is resolved and no additional billing is needed."); return; }
-    const validationError = validateFollowUpCloseReason(reason);
+    let auditReason = reason;
+    try {
+      if (guidedCloseOut) auditReason = closeOutAuditNote({ id: workOrderId, workflowCycle }, "follow_up", reason);
+    } catch { setError("Keep additional details to 350 characters and remove control characters."); return; }
+    const validationError = validateFollowUpCloseReason(auditReason);
     if (validationError) {
       setError(validationError);
       return;
     }
 
+    sending.current = true;
     setSubmitting(true);
     setError("");
     try {
-      const closed = await onConfirm(normalizeFollowUpCloseReason(reason));
+      const closed = await onConfirm(normalizeFollowUpCloseReason(auditReason));
       if (closed) {
         onClose();
       } else {
@@ -51,6 +63,7 @@ export default function CloseReopenedFollowUpModal({
     } catch {
       setError("The close request could not be confirmed. Refresh the work order before trying again.");
     } finally {
+      sending.current = false;
       setSubmitting(false);
     }
   };
@@ -69,14 +82,14 @@ export default function CloseReopenedFollowUpModal({
       </div>
 
       <div role="note" style={{ padding: "11px 12px", borderRadius: 10, background: T.warnSoft, color: "#73560C", fontSize: 11, lineHeight: 1.5, marginBottom: 16 }}>
-        Use this only when the reopened field work is finished and the prior 7-Eleven invoice already covers it. Existing contractor and P1 invoices will remain unchanged. Record any active visit's actual checkout first; unresolved 7-Eleven or contractor-attention updates block closure. If work was billed on another WO, use Billed under another work order instead.
+        Use this only when the reopened field work is finished and the prior 7-Eleven invoice already covers it. Existing contractor and P1 invoices will remain unchanged. Record the actual checkout for any active visit first; unresolved 7-Eleven or contractor-attention updates block closure. If work was billed on another WO, use Billed under another work order instead.
       </div>
 
-      <Field label="Reason for no additional billing" required error={error}>
+      <Field label={guidedCloseOut ? "Additional details (optional)" : "Reason for no additional billing"} required={!guidedCloseOut} error={error}>
         <TA
           autoFocus
           rows={3}
-          maxLength={FOLLOW_UP_CLOSE_REASON_MAX_LENGTH}
+          maxLength={guidedCloseOut ? 350 : FOLLOW_UP_CLOSE_REASON_MAX_LENGTH}
           value={reason}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             setReason(event.target.value);
@@ -87,11 +100,12 @@ export default function CloseReopenedFollowUpModal({
           aria-invalid={Boolean(error)}
         />
       </Field>
+      {guidedCloseOut && <p className="mb-3 text-xs">The confirmed resolved follow-up supplies the audit reason automatically. Existing invoices stay unchanged.</p>}
       <label className="mb-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} disabled={submitting}
         onChange={event => { setConfirmed(event.target.checked); setError(""); }} />
         <span>I confirm the follow-up is resolved and the prior billing covers it; no additional billing is required.</span></label>
       <div style={{ marginTop: -8, marginBottom: 14, textAlign: "right", fontSize: 10, color: T.subtle }}>
-        {reason.length}/{FOLLOW_UP_CLOSE_REASON_MAX_LENGTH}
+        {reason.length}/{guidedCloseOut ? 350 : FOLLOW_UP_CLOSE_REASON_MAX_LENGTH}
       </div>
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>

@@ -9,8 +9,8 @@ import { loadExternalBilling } from "./externalBillingRepository";
 import { ExternalBillingModal } from "./ExternalBillingModal";
 import { billingClosureStatusEligible, billingClosureUnavailableReason } from "./billingClosurePolicy";
 
-export function ExternalBillingPanel({ workOrderId, status, workflowCycle }: {
-  workOrderId: string; status: string; workflowCycle: number;
+export function ExternalBillingPanel({ workOrderId, status, workflowCycle, showActions = true }: {
+  workOrderId: string; status: string; workflowCycle: number; showActions?: boolean;
 }) {
   const actor = useDirectoryActor();
   const allowed = canRecordExternalBilling(actor);
@@ -30,8 +30,8 @@ export function ExternalBillingPanel({ workOrderId, status, workflowCycle }: {
       <p className="mt-2 text-xs">Staff-only billing record. This is not a portal invoice or confirmation of submission to 7-Eleven.</p>
     </div>}
     {history.isError && <p role="alert" className="text-sm">External billing history could not be loaded. <button type="button" className="btn-soft" onClick={() => void history.refetch()}>Retry</button></p>}
-    {unavailable && status !== "closed" && <p className="rounded-lg border border-p1-border p-3 text-sm">{unavailable}</p>}
-    {eligible && <button type="button" className="btn-soft" onClick={() => setOpen(true)}>Billed outside the portal</button>}
+    {showActions && unavailable && status !== "closed" && <p className="rounded-lg border border-p1-border p-3 text-sm">{unavailable}</p>}
+    {showActions && eligible && <button type="button" className="btn-soft" onClick={() => setOpen(true)}>Billed outside the portal</button>}
     {open && <ExternalBillingModal key={workOrderId} workOrderId={workOrderId} onClose={() => setOpen(false)} />}
   </section>;
 }

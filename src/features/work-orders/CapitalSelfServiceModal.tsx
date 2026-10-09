@@ -6,12 +6,14 @@ import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { useWorkOrderByIdQuery } from "./queries";
 import { useDirectoryActor } from "../directory/queries";
 import { directoryActorScope } from "../../lib/counts/queryKeys";
+import { closeOutAuditNote } from "../../lib/workOrderCloseOut";
 import { capitalError, createCapitalAttempt, runCapitalAttempt, type CapitalReceipt, type CapitalSelfServiceAction } from "./capitalSelfService";
 
 const titles: Record<CapitalSelfServiceAction, string> = { capital_external_handoff: "Record external capital quote",
   capital_confirmed_completion: "Confirm capital installation", capital_quote_revision: "Create capital quote revision" };
-export function CapitalSelfServiceModal({ workOrderId, action, quote, onClose, onDone }: {
+export function CapitalSelfServiceModal({ workOrderId, action, quote, onClose, onDone, guidedCloseOut = false }: {
   workOrderId: string; action: CapitalSelfServiceAction; quote?: { id: string; invoiceVersion: number };
+  guidedCloseOut?: boolean;
   onClose(): void; onDone?(receipt: CapitalReceipt): void | Promise<void>;
 }) {
   const work = useWorkOrderByIdQuery(workOrderId); const qc = useQueryClient(); const id = useId();
@@ -29,11 +31,17 @@ export function CapitalSelfServiceModal({ workOrderId, action, quote, onClose, o
   async function save(event: FormEvent) {
     event.preventDefault(); if (sending.current || receipt) return;
     if (!work.data) { setError("Wait for the current work order to load."); return; }
+    let auditNote = note;
+    try {
+      if (guidedCloseOut && action !== "capital_quote_revision") auditNote = closeOutAuditNote(
+        { id: workOrderId, workflowCycle: work.data.workflowCycle },
+        action === "capital_external_handoff" ? "external_quote" : "capital_complete", note, reference);
+    } catch { setError("Keep additional details to 350 characters and remove control characters."); return; }
     sending.current = true; setBusy(true); setError("");
     const generation = session.current.generation;
     const current = () => session.current.mounted && session.current.generation === generation && session.current.scope === scope;
     try {
-      attempt.current ??= createCapitalAttempt(work.data, { action, note, confirmed,
+      attempt.current ??= createCapitalAttempt(work.data, { action, note: auditNote, confirmed,
         ...(action === "capital_external_handoff" ? { reference } : {}),
         ...(action === "capital_quote_revision" ? { quoteId: quote?.id, invoiceVersion: quote?.invoiceVersion } : {}) });
       const saved = await runCapitalAttempt(attempt.current);
@@ -56,7 +64,7 @@ export function CapitalSelfServiceModal({ workOrderId, action, quote, onClose, o
         setBusy(true); try { await onDone?.(receipt); onClose(); }
         catch { setError("The action saved, but the next screen could not open. Close this form and open the document from its history."); }
         finally { setBusy(false); }
-      }}>{action === "capital_quote_revision" ? "Edit draft revision" : action === "capital_confirmed_completion" ? "Continue to final billing" : "Done"}</button>
+      }}>{action === "capital_quote_revision" ? "Edit draft revision" : action === "capital_confirmed_completion" && onDone ? "Continue to final billing" : "Done"}</button>
     </div> : <form noValidate className="space-y-4" onSubmit={save}>
       <p className="text-sm">{action === "capital_external_handoff" ? "Use only when a P1 capital quote was sent and approved outside this portal. Record its real reference instead of creating a duplicate. This is not final customer billing."
         : action === "capital_confirmed_completion" ? "Confirm installation is finished. Active visits must be checked out first. The job leaves Active capital work and moves to final billing; existing quotes stay intact. Do not use Capital declined to clear completed work."
@@ -66,8 +74,10 @@ export function CapitalSelfServiceModal({ workOrderId, action, quote, onClose, o
       <fieldset disabled={busy || uncertain} className="space-y-3">
         {action === "capital_external_handoff" && <label htmlFor={`${id}-ref`} className="grid gap-1 text-sm">Approved external quote reference (required)
           <input id={`${id}-ref`} className="input" maxLength={120} value={reference} onChange={e => setReference(e.target.value)} /></label>}
-        <label htmlFor={`${id}-note`} className="grid gap-1 text-sm">Audit note (required)
-          <textarea id={`${id}-note`} className="input" rows={3} minLength={5} maxLength={1000} value={note} onChange={e => setNote(e.target.value)} /></label>
+        <label htmlFor={`${id}-note`} className="grid gap-1 text-sm">{guidedCloseOut && action !== "capital_quote_revision" ? "Additional details (optional)" : "Audit note (required)"}
+          <textarea id={`${id}-note`} className="input" rows={3} minLength={guidedCloseOut && action !== "capital_quote_revision" ? undefined : 5}
+            maxLength={guidedCloseOut && action !== "capital_quote_revision" ? 350 : 1000} value={note} onChange={e => setNote(e.target.value)} /></label>
+        {guidedCloseOut && action !== "capital_quote_revision" && <p className="text-xs">Your confirmed outcome and quote reference, when applicable, supply the audit note automatically.</p>}
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
           <span>{action === "capital_external_handoff" ? "I confirm this quote was submitted and approved; the reference is correct."
             : action === "capital_confirmed_completion" ? "I confirm capital installation is finished and ready for final billing."

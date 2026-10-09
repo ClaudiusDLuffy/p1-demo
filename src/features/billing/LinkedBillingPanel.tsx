@@ -10,8 +10,8 @@ import { loadLinkedBillingHistory } from "./linkedBillingRepository";
 import type { LinkedBillingCursor } from "./linkedBillingContracts";
 import { LinkedBillingModal } from "./LinkedBillingModal";
 
-export function LinkedBillingPanel({ workOrderId, status, onOpenWorkOrder }: {
-  workOrderId: string; status: string; onOpenWorkOrder(id: string): void;
+export function LinkedBillingPanel({ workOrderId, status, onOpenWorkOrder, showActions = true }: {
+  workOrderId: string; status: string; onOpenWorkOrder(id: string): void; showActions?: boolean;
 }) {
   const actor = useDirectoryActor(); const allowed = canRecordExternalBilling(actor);
   const [open, setOpen] = useState(false);
@@ -37,7 +37,7 @@ export function LinkedBillingPanel({ workOrderId, status, onOpenWorkOrder }: {
     })}
     {history.isError && <p role="alert" className="text-sm">Linked billing history could not be loaded. <button type="button" className="btn-soft" onClick={() => void history.refetch()}>Retry history</button></p>}
     {history.hasNextPage && <button type="button" className="btn-soft" disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>Load older billing links</button>}
-    {billingClosureStatusEligible(status) && <button type="button" className="btn-soft" onClick={() => setOpen(true)}>Billed under another work order</button>}
+    {showActions && billingClosureStatusEligible(status) && <button type="button" className="btn-soft" onClick={() => setOpen(true)}>Billed under another work order</button>}
     {open && <LinkedBillingModal workOrderId={workOrderId} onClose={() => setOpen(false)} />}
   </section>;
 }

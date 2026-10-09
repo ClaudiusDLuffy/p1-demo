@@ -11,11 +11,12 @@ import { billingClosureUnavailableReason } from "./billingClosurePolicy";
 import { createLinkedBillingAttempt } from "./linkedBillingCommands";
 import { linkedBillingError, linkedBillingFieldsSchema, type LinkedBillingCandidate, type LinkedBillingReceipt } from "./linkedBillingContracts";
 import { runLinkedBillingAttempt } from "./linkedBillingRepository";
+import { closeOutAuditNote } from "../../lib/workOrderCloseOut";
 
 const changedRoots = new Set(["work-orders", "work-order-pages", "work-order-count", "work-order-by-id",
   "work-order-details", "work-order-child-count", "portal-navigation-summary", "contractor-workload-summary", "linked-billing"]);
 
-export function LinkedBillingModal({ workOrderId, onClose }: { workOrderId: string; onClose(): void }) {
+export function LinkedBillingModal({ workOrderId, onClose, guidedCloseOut = false }: { workOrderId: string; onClose(): void; guidedCloseOut?: boolean }) {
   const work = useWorkOrderByIdQuery(workOrderId);
   const qc = useQueryClient(); const fieldId = useId();
   const [candidate, setCandidate] = useState<LinkedBillingCandidate | null>(null);
@@ -29,7 +30,12 @@ export function LinkedBillingModal({ workOrderId, onClose }: { workOrderId: stri
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending.current || receipt) return;
-    const parsed = linkedBillingFieldsSchema.safeParse({ candidate, note, coverageConfirmed: confirmed });
+    let auditNote = note;
+    try {
+      if (guidedCloseOut) auditNote = closeOutAuditNote({ id: workOrderId, workflowCycle: work.data?.workflowCycle },
+        "linked_billing", note, candidate ? `${candidate.workOrderId}, invoice ID ${candidate.invoiceId}` : "");
+    } catch { setError("Keep additional details to 350 characters and remove control characters."); return; }
+    const parsed = linkedBillingFieldsSchema.safeParse({ candidate, note: auditNote, coverageConfirmed: confirmed });
     if (!parsed.success) { setError(linkedBillingError(parsed.error).message); return; }
     if (!work.data) { setError("Wait for the current work order to load."); return; }
     // Unknown outcomes must be reconciled with the original operation, even if
@@ -61,15 +67,15 @@ export function LinkedBillingModal({ workOrderId, onClose }: { workOrderId: stri
         <LinkedBillingInvoicePicker sourceWorkOrderId={workOrderId} selected={candidate} disabled={busy || uncertain}
           onSelect={value => { setCandidate(value); setConfirmed(false); setError(""); }} />
         <fieldset disabled={busy || uncertain} className="min-w-0 space-y-3 disabled:opacity-70">
-          <label htmlFor={`${fieldId}-note`} className="grid gap-1 text-sm">Audit note (required)
-            <TA id={`${fieldId}-note`} className="w-full min-w-0" rows={3} minLength={5} maxLength={1000}
+          <label htmlFor={`${fieldId}-note`} className="grid gap-1 text-sm">{guidedCloseOut ? "Additional details (optional)" : "Audit note (required)"}
+            <TA id={`${fieldId}-note`} className="w-full min-w-0" rows={3} minLength={guidedCloseOut ? undefined : 5} maxLength={guidedCloseOut ? 350 : 1000}
               value={note} onChange={event => { setNote(event.target.value); setError(""); }} />
           </label>
-          <p className="text-xs">5–1,000 characters. Explain why billing is under the other work order.</p>
+          <p className="text-xs">{guidedCloseOut ? "Your confirmed invoice coverage supplies the audit note automatically. Add any useful details." : "5–1,000 characters. Explain why billing is under the other work order."}</p>
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-1 shrink-0" checked={confirmed} disabled={!candidate || busy || uncertain}
               onChange={event => { setConfirmed(event.target.checked); setError(""); }} />
-            <span>I confirm the selected submitted invoice covers this work order and no separate invoice is needed.</span>
+            <span>{guidedCloseOut ? "I confirm field work is finished, the selected submitted invoice covers this work order's current work, and no separate invoice is needed." : "I confirm the selected submitted invoice covers this work order and no separate invoice is needed."}</span>
           </label>
         </fieldset>
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
