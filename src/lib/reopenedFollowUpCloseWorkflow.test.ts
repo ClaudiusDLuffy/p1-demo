@@ -106,12 +106,14 @@ test("invoice and QuickBooks paths cannot reopen or mutate a newer operational c
   assert.match(migration, /quickbooks_transition = 'confirm' then[\s\S]*return null/);
 });
 
-test("staff UI requires a reason and submits the exact optimistic-concurrency snapshot", () => {
+test("staff UI validates manual or confirmed generated reasons and submits the exact concurrency snapshot", () => {
   assert.match(detail, /canCloseReopenedFollowUpWithoutBilling/);
   assert.match(detail, /hasCompleteEvidence:[\s\S]*contractorInvoiceQuery\.data\?\.hasMore === false[\s\S]*billingInvoiceQuery\.data\?\.hasMore === false[\s\S]*activityPage\?\.hasMore === false/);
   assert.match(detail, /setModal\("closeReopenedFollowUp"\)/);
   assert.match(detail, /Close follow-up — no additional billing/);
-  assert.match(modal, /validateFollowUpCloseReason\(reason\)/);
+  assert.match(modal, /let auditReason = reason/);
+  assert.match(modal, /if \(guidedCloseOut\) auditReason = closeOutAuditNote/);
+  assert.match(modal, /validateFollowUpCloseReason\(auditReason\)/);
   assert.match(modal, /Existing contractor and P1 invoices will remain unchanged/);
   assert.match(shell, /modal === "closeReopenedFollowUp"/);
   assert.match(shell, /woData\.workflowCycle[\s\S]*woData\.contractorAssignmentVersion[\s\S]*woData\.updatedAt[\s\S]*reason/);

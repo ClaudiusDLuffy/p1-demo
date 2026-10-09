@@ -32,3 +32,11 @@ test("capital actions retain stage eligibility and prevent skipping an active vi
 test("loading disables the existing capital command without changing its eligibility", () => {
   assert.match(render({ isLoading: key => key === "capitalFlag_SYNTHETIC-CAPITAL" }), /disabled=""/);
 });
+
+test("Simplified hides duplicated completion controls while full view retains them", () => {
+  const simplified = render({ status: "pending_capital_completion", canFlag: false, hideCloseOutActions: true });
+  assert.doesNotMatch(simplified, /Capital Completed/);
+  assert.match(simplified, /Authorize &amp; resume capital work/);
+  assert.doesNotMatch(render({ status: "capital", hideCloseOutActions: true, onRecordExternal: () => {} }), /Record external capital quote/);
+  assert.match(render({ status: "capital", onRecordExternal: () => {} }), /Record external capital quote/);
+});

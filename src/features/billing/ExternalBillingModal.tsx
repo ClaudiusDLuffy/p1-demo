@@ -10,28 +10,36 @@ import { useWorkOrderByIdQuery } from "../work-orders/queries";
 import { createExternalBillingAttempt } from "./externalBillingCommands";
 import { externalBillingError, externalBillingFieldsSchema, type ExternalBillingReceipt } from "./externalBillingContracts";
 import { runExternalBillingAttempt } from "./externalBillingRepository";
+import { closeOutAuditNote } from "../../lib/workOrderCloseOut";
 
 const changedQueryRoots = new Set(["work-orders", "work-order-pages", "work-order-count", "work-order-by-id",
   "work-order-details", "work-order-child-count", "portal-navigation-summary", "contractor-workload-summary", "external-billing"]);
 
-export function ExternalBillingModal({ workOrderId, onClose }: { workOrderId: string; onClose(): void }) {
+export function ExternalBillingModal({ workOrderId, onClose, guidedCloseOut = false }: { workOrderId: string; onClose(): void; guidedCloseOut?: boolean }) {
   const workOrder = useWorkOrderByIdQuery(workOrderId);
   const qc = useQueryClient();
   const fieldId = useId();
   const [fields, setFields] = useState({ billingSystem: "QuickBooks", invoiceReference: "", billedOn: "", note: "" });
+  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [uncertain, setUncertain] = useState(false);
   const [receipt, setReceipt] = useState<ExternalBillingReceipt | null>(null);
   const attempt = useRef<ReturnType<typeof createExternalBillingAttempt> | null>(null);
   const sending = useRef(false);
-  const dirty = !receipt && (fields.billingSystem !== "QuickBooks" || Boolean(fields.invoiceReference || fields.billedOn || fields.note));
+  const dirty = !receipt && (fields.billingSystem !== "QuickBooks" || Boolean(fields.invoiceReference || fields.billedOn || fields.note || confirmed));
   const dismissal = useUnsavedChangesGuard({ dirty, busy, scopeKey: workOrderId, onClose });
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending.current || receipt) return;
-    const parsed = externalBillingFieldsSchema.safeParse(fields);
+    if (guidedCloseOut && !confirmed) { setError("Confirm that field work is finished and this work was actually billed externally."); return; }
+    let auditNote = fields.note;
+    try {
+      if (guidedCloseOut) auditNote = closeOutAuditNote({ id: workOrderId, workflowCycle: workOrder.data?.workflowCycle },
+        "external_billing", fields.note, `${fields.billingSystem} #${fields.invoiceReference}, billed ${fields.billedOn}`);
+    } catch { setError("Keep additional details to 350 characters and remove control characters."); return; }
+    const parsed = externalBillingFieldsSchema.safeParse({ ...fields, note: auditNote });
     if (!parsed.success) { setError(externalBillingError(parsed.error).message); return; }
     if (!workOrder.data) { setError("Wait for the current work order to load before saving."); return; }
     sending.current = true;
@@ -79,11 +87,14 @@ export function ExternalBillingModal({ workOrderId, onClose }: { workOrderId: st
             <Input id={`${fieldId}-date`} type="date" className="w-full min-w-0" required
               value={fields.billedOn} onChange={event => setField("billedOn", event.target.value)} />
           </label>
-          <label className="grid gap-1 text-sm" htmlFor={`${fieldId}-note`}>Audit note (required)
-            <TA id={`${fieldId}-note`} className="w-full min-w-0" rows={3} required minLength={5} maxLength={1000}
+          <label className="grid gap-1 text-sm" htmlFor={`${fieldId}-note`}>{guidedCloseOut ? "Additional details (optional)" : "Audit note (required)"}
+            <TA id={`${fieldId}-note`} className="w-full min-w-0" rows={3} required={!guidedCloseOut} minLength={guidedCloseOut ? undefined : 5} maxLength={guidedCloseOut ? 350 : 1000}
               aria-describedby={`${fieldId}-help`} value={fields.note} onChange={event => setField("note", event.target.value)} />
           </label>
-          <p id={`${fieldId}-help`} className="text-xs">5–1,000 characters. Include where billing was recorded and any other work orders covered.</p>
+          <p id={`${fieldId}-help`} className="text-xs">{guidedCloseOut ? "The confirmed billing outcome and references supply the audit note automatically. Add details if the invoice covers multiple work orders." : "5–1,000 characters. Include where billing was recorded and any other work orders covered."}</p>
+          {guidedCloseOut && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed}
+            onChange={event => { setConfirmed(event.target.checked); setError(""); }} />
+            <span>I confirm field work is finished and this work was actually billed using the reference and date above; no separate portal invoice is needed.</span></label>}
         </fieldset>
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         <div className="flex flex-wrap justify-end gap-2">

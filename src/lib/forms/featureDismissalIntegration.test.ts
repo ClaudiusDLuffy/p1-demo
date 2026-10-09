@@ -31,6 +31,8 @@ test("follow-up reason Cancel/X share guard, preserve pending input, authoritati
   tree = h.render("default", props); assert.equal(guard.options.dirty, true);
   uiInvoke(button(tree, "Cancel"), "onClick"); assert.deepEqual(guard.requests, ["cancel_button"]); assert.equal(closes, 0);
   uiInvoke(find(tree, node => node.type === "Modal"), "onRequestClose", "escape"); assert.equal(closes, 0);
+  uiInvoke(find(tree, node => node.type === "input" && node.props.type === "checkbox"), "onChange", { target: { checked: true } });
+  tree = h.render("default", props);
   uiInvoke(button(tree, "Close follow-up — no additional billing"), "onClick"); tree = h.render("default", props);
   assert.equal(guard.options.busy, true); assert.equal(find(tree, node => node.type === "Modal").props.dismissDisabled, true);
   finish(true); await flush(); assert.equal(closes, 1);

@@ -5,6 +5,8 @@ import { DirectoryScopeProvider, useDirectoryLabels } from "../features/director
 import { DirectorySelect } from "../features/directory/DirectorySelect";
 import { directoryScopeKey } from "../features/directory/contracts";
 import { loadDirectorySelection } from "../features/directory/api";
+import { loadWorkOrderById } from "../features/work-orders/data/workOrderReadRepository";
+import { noInvoiceCloseSnapshotMatches } from "../lib/workOrderCloseOut";
 import { normalizeUnknownError, safeErrorMessage } from "../lib/errors/normalizeUnknown";
 import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from "react";
 import { createWorkOrderCreationAttempt } from "../lib/workOrderCreationCommand";
@@ -3517,6 +3519,26 @@ export default function PortalShell() {
             onApproveAndGoToBilling={approveInvoiceAndOpenBilling}
             doMarkPaid={doMarkPaid}
             doCloseWithoutInvoice={doCloseWithoutInvoice}
+            onCloseReopenedFollowUp={async (snapshot, reason) => {
+              const expectedUpdatedAt = await awaitCurrentWorkOrderVersion(snapshot.id, snapshot.updatedAt);
+              if (!expectedUpdatedAt) { fire("Refresh the work order before closing its follow-up."); return false; }
+              return doCloseReopenedFollowUp(snapshot.id, snapshot.workflowCycle,
+                snapshot.contractorAssignmentVersion, expectedUpdatedAt, reason);
+            }}
+            onCloseOutWithoutInvoice={async snapshot => {
+              // Do not promote a captured no-invoice snapshot to a later read
+              // acknowledgment. The legacy command can auto-checkout visits;
+              // this guided path must instead fail stale if anything changed.
+              const expectedUpdatedAt = snapshot.updatedAt;
+              if (!expectedUpdatedAt) { fire("Refresh the work order before closing it without billing."); return false; }
+              const current = await loadWorkOrderById(snapshot.id);
+              if (!noInvoiceCloseSnapshotMatches(current, snapshot)) {
+                fire("This work order changed or is no longer eligible. Refresh and review it before closing without billing.");
+                return false;
+              }
+              return doCloseWithoutInvoice(snapshot.id, snapshot.workflowCycle,
+                snapshot.contractorAssignmentVersion, expectedUpdatedAt);
+            }}
             onRequestReopen={requestReopen}
             doReturnCompletedToField={doReturnCompletedToField}
             doDownloadInvoice={doDownloadInvoice}
