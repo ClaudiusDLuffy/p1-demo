@@ -22,26 +22,34 @@ export function isCapitalCloseOutWork(work: CloseOutWorkOrder | null | undefined
 /** Read-only destinations. These never authorize a billing or lifecycle action. */
 export function workOrderCloseOutReviewSteps(input: {
   workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasCurrentInvoice: boolean;
-  hasUnresolvedContractorInvoices: boolean;
+  hasUnresolvedContractorInvoices: boolean; action?: CloseOutAction;
 }): CloseOutReviewStep[] {
   const { workOrder: work } = input;
   if (work.status === "closed" || isCapitalCloseOutWork(work)) return [];
   const steps: CloseOutReviewStep[] = [];
   const openVisit = work.visits?.some(visit => !visit.checkOutAt);
-  if (!input.hasCompleteEvidence) steps.push({ target: "history", label: "Review activity history",
+  if (!input.hasCompleteEvidence) steps.push({ target: "history", label: "History",
     explanation: "Complete invoice, activity, and visit history is needed before choosing a billing outcome." });
-  if (input.hasCurrentInvoice) steps.push({ target: "billing", label: "Review existing P1 invoice",
-    explanation: "A P1 invoice already exists. Review it before recording another billing outcome." });
-  if (openVisit) steps.push({ target: "visits", label: "Review active visit / checkout",
+  if (input.hasCurrentInvoice) steps.push({ target: "billing", label: "Invoice on this WO",
+    explanation: "A P1 invoice already exists on this work order. Review it before recording another billing outcome." });
+  if (openVisit) steps.push({ target: "visits", label: "Checkout",
     explanation: "A visit is still open. Its actual checkout must be recorded before closing." });
-  if (work.hasPendingSevenElevenSync || work.hasPendingContractorAttention) steps.push({ target: "updates", label: "Review pending updates",
+  if (work.hasPendingSevenElevenSync || work.hasPendingContractorAttention) steps.push({ target: "updates", label: "Updates",
     explanation: "Review outstanding 7-Eleven updates or contractor attention items." });
-  if (input.hasUnresolvedContractorInvoices) steps.push({ target: "documents", label: "Review contractor invoices",
+  if (input.hasUnresolvedContractorInvoices) steps.push({ target: "documents", label: "Contractor invoices",
     explanation: "Outstanding contractor invoice reviews must be resolved before closing." });
   if ((!work.billingOnly && work.functionalStatus !== "Completed") || !billingClosureStatusEligible(work.status)) steps.push({
-    target: "progress", label: "Review job progress and completion",
+    target: "progress", label: "Job progress",
     explanation: "Review the field-work and billing-handoff status. This link does not mark the job complete." });
-  return steps;
+  // Review links belong to the action they explain. Reviewing an existing
+  // invoice doesn't require checkout; a proven follow-up resolution doesn't
+  // acquire a new field-completion or current-invoice requirement.
+  if (input.action === "review_billing") return steps.filter(step => step.target === "billing"
+    || (!input.hasCurrentInvoice && (step.target === "history"
+      || (step.target === "progress" && !billingClosureStatusEligible(work.status)))));
+  if (input.action === "follow_up") return steps.filter(step => !["billing", "progress"].includes(step.target));
+  if (input.action === "no_invoice") return steps.filter(step => step.target !== "billing");
+  return !input.action || ["linked_billing", "external_billing"].includes(input.action) ? steps : [];
 }
 
 /** A read preflight improves conflict feedback; the RPC still enforces the exact snapshot. */
@@ -79,13 +87,15 @@ export function workOrderCloseOutOptions(input: {
   ];
   const options: CloseOutOption[] = [
     { action: "review_billing", label: hasCurrentInvoice ? "Review or finish P1 billing" : "Review or prepare final P1 invoice",
-      explanation: "Use the normal invoice process. Only confirm Billed to 7-Eleven after the actual customer handoff. Prior billed invoices must not be billed again.",
+      explanation: hasCurrentInvoice
+        ? "Review the existing P1 invoice on this work order. Do not create another invoice or bill it again if already billed."
+        : "Use the normal invoice process for this work order. Only confirm Billed to 7-Eleven after the actual customer handoff.",
       blocked: hasCurrentInvoice ? undefined : incompleteEvidence || (!billingClosureStatusEligible(work.status) ? "Finish field work and move this WO to billing before preparing the final invoice." : undefined) },
   ];
   if (billingClosureStatusEligible(work.status)) {
     options.push(
-      { action: "linked_billing", label: "Billed under another work order", explanation: "Select an eligible submitted P1 invoice that covers this work. No additional invoice or revenue is created.", blocked: alternateBillingBlocker },
-      { action: "external_billing", label: "Billed outside the portal", explanation: "Enter the actual billing system, invoice reference and date. This records billing, not an unbilled closure.", blocked: alternateBillingBlocker },
+      { action: "linked_billing", label: "Billed under another work order", explanation: "Only when a P1 invoice on a different work order covers this job—not an invoice on this WO. No new invoice or revenue is created.", blocked: alternateBillingBlocker },
+      { action: "external_billing", label: "Billed outside the portal", explanation: "Only when this job was billed outside P1, such as in QuickBooks, and has no P1 billing invoice on this WO. Enter the actual billing system, invoice reference and billing date.", blocked: alternateBillingBlocker },
     );
   }
   if (canCloseFollowUp) options.push({ action: "follow_up", label: "Follow-up resolved, prior billing covers it",

@@ -12,7 +12,12 @@ import { CapitalCloseOutModal, type CapitalCloseOutDocument } from "./CapitalClo
 import type { CapitalCloseOutOutcome } from "./capitalCloseOut";
 import CloseReopenedFollowUpModal from "./CloseReopenedFollowUpModal";
 import { CloseOutNoInvoiceModal } from "./CloseOutNoInvoiceModal";
-import { isCapitalCloseOutWork, workOrderCloseOutOptions, workOrderCloseOutReviewSteps, type CloseOutAction, type CloseOutReviewSection, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
+import { isCapitalCloseOutWork, workOrderCloseOutOptions, workOrderCloseOutReviewSteps, type CloseOutAction, type CloseOutReviewSection, type CloseOutReviewStep, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
+
+const reviewSectionIds: Record<CloseOutReviewStep["target"], string> = {
+  billing: "work-order-documents", documents: "work-order-documents", visits: "work-order-visits",
+  history: "work-order-activity", updates: "work-order-activity", progress: "work-order-progress",
+};
 
 type Props = {
   workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasStaffDocuments: boolean; hasAnyDocuments: boolean;
@@ -38,7 +43,7 @@ export function WorkOrderCloseOutPanel(props: Props) {
   const work = props.workOrder;
   const options = workOrderCloseOutOptions({ ...props, hasCurrentInvoice: Boolean(props.billingDocument) });
   const capital = isCapitalCloseOutWork(work);
-  const reviewSteps = workOrderCloseOutReviewSteps({ ...props, hasCurrentInvoice: Boolean(props.billingDocument?.id) })
+  const reviewStepsFor = (action: CloseOutAction) => workOrderCloseOutReviewSteps({ ...props, action, hasCurrentInvoice: Boolean(props.billingDocument?.id) })
     .filter(step => step.target === "billing" ? Boolean(props.billingDocument?.id) : Boolean(props.onReviewSection));
   const close = () => setSelection(null);
   const choose = (action: CloseOutAction | "choose") => setSelection({ action, scope, snapshot: {
@@ -60,21 +65,7 @@ export function WorkOrderCloseOutPanel(props: Props) {
     {selected?.action === "choose" && !capital && <Modal title="Close out work order" description={work.id} width={600} onRequestClose={close}>
       <div className="space-y-4">
         <p className="text-sm">Choose what actually happened. Routine audit notes are recorded automatically; references and confirmation are still required. These actions do not submit anything to 7-Eleven for you.</p>
-        {reviewSteps.length > 0 && <section aria-label="Still needs review" className="space-y-3 rounded-lg border border-p1-border p-3">
-          <h3 className="font-semibold">Still needs review</h3>
-          <p className="text-sm">Open the relevant record below, then return to Close out. These links do not change billing, record checkout, or close the work order.</p>
-          {reviewSteps.map(step => <div key={step.target} className="space-y-1">
-            <p className="text-sm">{step.explanation}</p>
-            <button type="button" className="btn-soft min-h-11" onClick={() => {
-              if (step.target === "billing") {
-                if (!props.billingDocument?.id) return;
-                close(); props.onOpenBilling(work.id, props.billingDocument.id);
-              } else if (props.onReviewSection) {
-                close(); props.onReviewSection(work.id, step.target);
-              }
-            }}>{step.label}</button>
-          </div>)}
-        </section>}
+        <p className="text-xs text-p1-muted">Review links only open existing records. They do not bill, record checkout, or close this work order.</p>
         {!props.hasCompleteEvidence && props.canLoadMoreHistory && props.onLoadMoreHistory && <div className="space-y-2">
           <p className="text-sm">Earlier history is still paged. Load the next history pages here so close-out eligibility can be checked.</p>
           <button type="button" className="btn-soft" disabled={props.historyLoading} onClick={async () => {
@@ -84,7 +75,7 @@ export function WorkOrderCloseOutPanel(props: Props) {
           {historyError && <p role="alert" className="text-sm text-red-700">{historyError}</p>}
         </div>}
         {options.length === 0 && <p role="status">This work order is already closed.</p>}
-        {options.map(option => <div key={option.action} className="rounded-lg border border-p1-border p-3">
+        {options.map(option => <section key={option.action} aria-label={option.label} className="rounded-lg border border-p1-border p-3">
           <button type="button" className="btn-soft" disabled={Boolean(option.blocked)} onClick={() => {
             if (option.blocked) return;
             if (option.action === "review_billing") { close(); props.onOpenBilling(work.id, props.billingDocument?.id ?? null); }
@@ -92,7 +83,21 @@ export function WorkOrderCloseOutPanel(props: Props) {
           }}>{option.label}</button>
           <p className="mt-2 text-sm">{option.explanation}</p>
           {option.blocked && <p role="status" className="mt-1 text-sm text-amber-800">{option.blocked}</p>}
-        </div>)}
+          {reviewStepsFor(option.action).length > 0 && <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="text-p1-muted">Review:</span>
+            {reviewStepsFor(option.action).map(step => <a key={step.target} href={`#${reviewSectionIds[step.target]}`}
+              className="inline-flex min-h-11 max-w-full items-center rounded-sm text-p1-accent underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-p1-accent"
+              title={step.explanation} onClick={event => {
+                event.preventDefault();
+                if (step.target === "billing") {
+                  if (!props.billingDocument?.id) return;
+                  close(); props.onOpenBilling(work.id, props.billingDocument.id);
+                } else if (props.onReviewSection) {
+                  close(); props.onReviewSection(work.id, step.target);
+                }
+              }}>{step.label}</a>)}
+          </p>}
+        </section>)}
         {!options.some(option => ["external_billing", "linked_billing", "follow_up", "capital_complete", "no_invoice"].includes(option.action))
           && !["capital", "closed"].includes(work.status) && <p className="text-sm">Finish field work and move the WO to billing first. Close out never checks out a technician or force-closes unfinished work.</p>}
         <button type="button" className="btn-soft" onClick={close}>Cancel</button>
