@@ -44,6 +44,7 @@ export default function CapitalProjects(props: CapitalProjectsProps) {
   const [sortColumn, setSortColumn] = useState<WorkOrderTableSortColumn>("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [capitalFilter, setCapitalFilter] = useState<CapitalProjectFilter>("capital_active");
+  const [search, setSearch] = useState("");
   const updateSortColumn = (value: WorkOrderTableSortColumn) => {
     setPosition(firstCursorPosition);
     setSortColumn(value);
@@ -56,6 +57,7 @@ export default function CapitalProjects(props: CapitalProjectsProps) {
   const capitalQuery = useWorkOrdersPageQuery({
     scope: "capital",
     status: capitalFilter,
+    search: search.trim(),
     sort: "newest",
     tableSortColumn: sortColumn,
     tableSortDirection: sortDirection,
@@ -81,10 +83,19 @@ export default function CapitalProjects(props: CapitalProjectsProps) {
                 <div className="mobile-alert-icon" style={{ width: 40, height: 40, borderRadius: 10, background: T.violet, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Ico d="M2 20h20M5 20V8l7-5 7 5v12M9 20v-4h6v4" size={20} color="#fff" /></div>
                 <div className="mobile-alert-body">
                   <div title={COUNT_FRESHNESS_DESCRIPTION} style={{ fontWeight: 700, color: T.violet, fontSize: 13 }}>{exactCapitalCount} capital replacement{exactCapitalCount !== 1 ? "s" : ""}</div>
-                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Installed jobs leave Active capital work and move to final billing. Use Installed to review them; all jobs remain searchable in Work orders.</div>
+                  <div style={{ fontSize: 11, color: "#4A3C73", marginTop: 2 }}>Search capitals here and filter by status; all jobs remain searchable in Work orders. Installed jobs awaiting billing are available under Installed; closed jobs are in History.</div>
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                <label style={{ display: "grid", gap: 5, flex: "1 1 240px", color: T.muted, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7 }}>
+                  Search capitals
+                  <input type="search" aria-label="Search capitals" placeholder="Work order, store, city, or summary"
+                    value={search} maxLength={200}
+                    onChange={event => { setPosition(firstCursorPosition); setSearch(event.target.value); }}
+                    style={{ width: "100%", minHeight: 38, borderRadius: 9, border: `1px solid ${T.border}`,
+                      background: T.surface, color: T.ink, padding: "8px 11px", font: "inherit",
+                      fontSize: 12, fontWeight: 500, textTransform: "none", letterSpacing: 0 }} />
+                </label>
                 <label style={{ display: "grid", gap: 5, minWidth: 280, maxWidth: "100%", color: T.muted, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.7 }}>
                   Capital status
                   <select aria-label="Capital status" value={capitalFilter}

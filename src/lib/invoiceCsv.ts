@@ -81,7 +81,7 @@ const HEADERS = [
   "Rate",
   "*Amount",
   "Tax Rate",
-  "Equipment Tag",
+  "Tag",
   "Class",
 ] as const;
 

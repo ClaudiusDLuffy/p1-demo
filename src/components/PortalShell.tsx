@@ -2248,8 +2248,8 @@ export default function PortalShell() {
   const doDownloadBillingInvoiceCsv = async (invoice: any) => {
     try {
       const exportInvoice = await loadBillingInvoiceForExport(invoice, "csv");
-      if (exportInvoice.documentKind === "capital_quote") {
-        throw new Error("Capital quotes cannot use the SaasAnt customer-invoice format");
+      if (exportInvoice.documentKind === "capital_quote" && (!isManager || invoiceController || currentUser?.active !== true)) {
+        throw new Error("Only operational billing staff can download a capital quote CSV");
       }
       const { downloadStaffInvoiceCsv } = await import("../lib/invoiceCsv");
       loadCompleteInvoice.assertCurrent();
@@ -2261,7 +2261,7 @@ export default function PortalShell() {
             || exportInvoice.workOrderId,
         ),
       });
-      fire(`Invoice ${exportInvoice.num} SaasAnt CSV downloaded`);
+      fire(`${exportInvoice.documentKind === "capital_quote" ? "Capital quote" : "Invoice"} ${exportInvoice.num} SaasAnt CSV downloaded`);
     } catch (e: any) {
       fire(`CSV download failed: ${safeErrorMessage(e)}`);
     }

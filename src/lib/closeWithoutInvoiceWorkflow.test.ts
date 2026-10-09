@@ -37,7 +37,7 @@ test("closed work orders reject unsafe new invoice headers at the database bound
 
 test("staff only get the no-invoice exception on work orders", () => {
   assert.match(detail, /const hasAnyLiveInvoice = woAllInvoices\.length > 0 \|\| woBillingInvoices\.length > 0/);
-  assert.match(detail, /isManager && woData\.status !== "closed" && !hasAnyLiveInvoice/);
+  assert.match(detail, /isManager && !isCapitalCloseOutWork\(woData\) && woData\.status !== "closed" && !hasAnyLiveInvoice/);
   assert.match(detail, /setModal\("closeWithoutInvoice"\)/);
   assert.match(detail, /Close — no invoice/);
   assert.doesNotMatch(detail, /setModal\("closeWO"\)/);

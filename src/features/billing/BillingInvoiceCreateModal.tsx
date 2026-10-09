@@ -1515,7 +1515,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         <fieldset disabled={submitting || pullingLines} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: 18 }}>
           {isCapitalQuote
-            ? "This capital quote is separate from the final invoice. Submitting it will move the work order into Pending Capital Completion."
+            ? "Preparing or updating this quote does not upload it to 7-Eleven or confirm billing. When the job is finished, use Close out to confirm the existing bill or send it to billing."
             : isCapitalFinalInvoice
               ? "This is the final capital invoice linked to the previously submitted quote."
               : isEditing

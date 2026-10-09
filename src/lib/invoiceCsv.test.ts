@@ -7,7 +7,7 @@ import {
   staffInvoiceCsvRows,
 } from "./invoiceCsv";
 
-const HEADER = "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Equipment Tag,Class";
+const HEADER = "Invoice Number,*Customer,Sub Customer,Terms,*Invoice Date,*Service Date,Due Date,Location,Shipping To,Store Number,Memo,Message on Invoice,Work Order #,*Product/Service,Description,Quantity,Rate,*Amount,Tax Rate,Tag,Class";
 
 test("matches the supplied SaasAnt layout with one row per line item", () => {
   const csv = generateStaffInvoiceCsv({
@@ -45,7 +45,7 @@ test("matches the supplied SaasAnt layout with one row per line item", () => {
   );
 });
 
-test("Tag display rename leaves the saved Fountain value and established import column intact", () => {
+test("CSV Tag header retains the saved equipment-tag values and column position", () => {
   const invoice = { num: "SYNTHETIC-TAG", equipmentTag: "7-ELEVEN: Fountain", lines: [
     { type: "Labor", description: "Synthetic import mapping test", qty: 1, rate: 100 },
     { type: "Parts", description: "Synthetic part", qty: 1, rate: 50 },

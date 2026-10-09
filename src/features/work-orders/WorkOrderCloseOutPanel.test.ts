@@ -19,6 +19,7 @@ function harness(initialActor: object | null = { id: "staff-A", role: "manager",
     "../billing/ExternalBillingModal": { ExternalBillingModal: "ExternalForm" },
     "../billing/LinkedBillingModal": { LinkedBillingModal: "LinkedForm" },
     "./CapitalSelfServiceModal": { CapitalSelfServiceModal: "CapitalForm" },
+    "./CapitalCloseOutModal": { CapitalCloseOutModal: "SimpleCapitalForm" },
     "./CloseReopenedFollowUpModal": { default: "FollowUpForm" },
     "./CloseOutNoInvoiceModal": { CloseOutNoInvoiceModal: "NoInvoiceForm" },
   });
@@ -49,16 +50,16 @@ test("billing review opens the existing invoice, never silently creates or final
   assert.deepEqual(calls, [[base.workOrder.id, "existing-invoice"]]);
 });
 
-test("capital completion opens installation confirmation, not a closure or automatic final invoice", () => {
+test("one capital Close out click opens the two-outcome confirmation directly, without a quote-page detour", () => {
   const h = harness(); let opened = 0;
   const props = { ...base, workOrder: { ...base.workOrder, status: "pending_capital_completion" },
     billingDocument: { id: "approved-quote" }, onOpenBilling: () => opened++ };
   let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
-  tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Installation is complete"), "onClick");
   tree = h.render("WorkOrderCloseOutPanel", props);
-  const form = find(tree, node => node.type === "CapitalForm");
-  assert.equal(form.props.action, "capital_confirmed_completion"); assert.equal(form.props.guidedCloseOut, true);
-  assert.equal(form.props.onDone, undefined); assert.equal(opened, 0);
+  const form = find(tree, node => node.type === "SimpleCapitalForm");
+  assert.equal(form.props.workOrderId, props.workOrder.id);
+  assert.equal(form.props.hasCompleteEvidence, true); assert.equal(opened, 0);
+  assert.equal(uiNodes(tree).some(node => node.type === "Modal"), false);
 });
 
 test("disabled outcomes cannot be entered even through their click handler", () => {
@@ -99,8 +100,10 @@ test("actor/WO switches remove selected forms, but a closed refresh keeps an unc
 test("Simplified consolidates duplicate controls but retains legacy/full view and snapshot-aware shell callbacks", () => {
   const detail = readFileSync("src/features/work-orders/WorkOrderDetail.tsx", "utf8");
   const shell = readFileSync("src/components/PortalShell.tsx", "utf8");
-  assert.match(detail, /showActions=\{!focused\}/);
-  assert.match(detail, /hideCloseOutActions=\{focused\}/);
+  assert.match(detail, /showActions=\{!focused && !isCapitalCloseOutWork\(woData\)\}/);
+  assert.match(detail, /!focused && canCloseReopenedFollowUp && !isCapitalCloseOutWork\(woData\)/);
+  assert.match(detail, /!focused && isManager && !isCapitalCloseOutWork\(woData\) && woData.status !== "closed" && !hasAnyLiveInvoice/);
+  assert.match(detail, /hideCloseOutActions=\{focused \|\| isCapitalCloseOutWork\(woData\)\}/);
   assert.match(detail, /!focused && canCloseReopenedFollowUp/);
   assert.match(detail, /visitPage\?\.hasMore === false/);
   assert.match(shell, /onCloseReopenedFollowUp=\{async \(snapshot, reason\)[\s\S]*doCloseReopenedFollowUp\(snapshot.id, snapshot.workflowCycle/);
