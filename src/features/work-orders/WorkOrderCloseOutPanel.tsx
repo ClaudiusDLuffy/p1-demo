@@ -12,7 +12,7 @@ import { CapitalCloseOutModal, type CapitalCloseOutDocument } from "./CapitalClo
 import type { CapitalCloseOutOutcome } from "./capitalCloseOut";
 import CloseReopenedFollowUpModal from "./CloseReopenedFollowUpModal";
 import { CloseOutNoInvoiceModal } from "./CloseOutNoInvoiceModal";
-import { isCapitalCloseOutWork, workOrderCloseOutOptions, type CloseOutAction, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
+import { isCapitalCloseOutWork, workOrderCloseOutOptions, workOrderCloseOutReviewSteps, type CloseOutAction, type CloseOutReviewSection, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
 
 type Props = {
   workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasStaffDocuments: boolean; hasAnyDocuments: boolean;
@@ -20,6 +20,7 @@ type Props = {
   billingDocument?: { id: string } | null;
   capitalDocuments?: readonly CapitalCloseOutDocument[]; onCapitalDone?(outcome: CapitalCloseOutOutcome): void;
   onOpenBilling(workOrderId: string, invoiceId: string | null): void;
+  onReviewSection?(workOrderId: string, section: CloseOutReviewSection): void;
   onCloseFollowUp(snapshot: FollowUpCloseSnapshot, reason: string): Promise<boolean>;
   onCloseWithoutInvoice(snapshot: FollowUpCloseSnapshot): Promise<boolean>;
   canLoadMoreHistory?: boolean; historyLoading?: boolean; onLoadMoreHistory?(): Promise<void>;
@@ -37,6 +38,8 @@ export function WorkOrderCloseOutPanel(props: Props) {
   const work = props.workOrder;
   const options = workOrderCloseOutOptions({ ...props, hasCurrentInvoice: Boolean(props.billingDocument) });
   const capital = isCapitalCloseOutWork(work);
+  const reviewSteps = workOrderCloseOutReviewSteps({ ...props, hasCurrentInvoice: Boolean(props.billingDocument?.id) })
+    .filter(step => step.target === "billing" ? Boolean(props.billingDocument?.id) : Boolean(props.onReviewSection));
   const close = () => setSelection(null);
   const choose = (action: CloseOutAction | "choose") => setSelection({ action, scope, snapshot: {
     id: work.id, workflowCycle: work.workflowCycle ?? 0,
@@ -57,6 +60,21 @@ export function WorkOrderCloseOutPanel(props: Props) {
     {selected?.action === "choose" && !capital && <Modal title="Close out work order" description={work.id} width={600} onRequestClose={close}>
       <div className="space-y-4">
         <p className="text-sm">Choose what actually happened. Routine audit notes are recorded automatically; references and confirmation are still required. These actions do not submit anything to 7-Eleven for you.</p>
+        {reviewSteps.length > 0 && <section aria-label="Still needs review" className="space-y-3 rounded-lg border border-p1-border p-3">
+          <h3 className="font-semibold">Still needs review</h3>
+          <p className="text-sm">Open the relevant record below, then return to Close out. These links do not change billing, record checkout, or close the work order.</p>
+          {reviewSteps.map(step => <div key={step.target} className="space-y-1">
+            <p className="text-sm">{step.explanation}</p>
+            <button type="button" className="btn-soft min-h-11" onClick={() => {
+              if (step.target === "billing") {
+                if (!props.billingDocument?.id) return;
+                close(); props.onOpenBilling(work.id, props.billingDocument.id);
+              } else if (props.onReviewSection) {
+                close(); props.onReviewSection(work.id, step.target);
+              }
+            }}>{step.label}</button>
+          </div>)}
+        </section>}
         {!props.hasCompleteEvidence && props.canLoadMoreHistory && props.onLoadMoreHistory && <div className="space-y-2">
           <p className="text-sm">Earlier history is still paged. Load the next history pages here so close-out eligibility can be checked.</p>
           <button type="button" className="btn-soft" disabled={props.historyLoading} onClick={async () => {

@@ -12,9 +12,36 @@ export type FollowUpCloseSnapshot = {
   id: string; workflowCycle: number; contractorAssignmentVersion: number; updatedAt: string | null;
 };
 export type CloseOutOption = { action: CloseOutAction; label: string; explanation: string; blocked?: string };
+export type CloseOutReviewSection = "visits" | "history" | "updates" | "documents" | "progress";
+export type CloseOutReviewStep = { target: CloseOutReviewSection | "billing"; label: string; explanation: string };
 
 export function isCapitalCloseOutWork(work: CloseOutWorkOrder | null | undefined) {
   return Boolean(work && !work.billingOnly && (work.isCapital === true || ["capital", "pending_capital_completion"].includes(work.status)));
+}
+
+/** Read-only destinations. These never authorize a billing or lifecycle action. */
+export function workOrderCloseOutReviewSteps(input: {
+  workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasCurrentInvoice: boolean;
+  hasUnresolvedContractorInvoices: boolean;
+}): CloseOutReviewStep[] {
+  const { workOrder: work } = input;
+  if (work.status === "closed" || isCapitalCloseOutWork(work)) return [];
+  const steps: CloseOutReviewStep[] = [];
+  const openVisit = work.visits?.some(visit => !visit.checkOutAt);
+  if (!input.hasCompleteEvidence) steps.push({ target: "history", label: "Review activity history",
+    explanation: "Complete invoice, activity, and visit history is needed before choosing a billing outcome." });
+  if (input.hasCurrentInvoice) steps.push({ target: "billing", label: "Review existing P1 invoice",
+    explanation: "A P1 invoice already exists. Review it before recording another billing outcome." });
+  if (openVisit) steps.push({ target: "visits", label: "Review active visit / checkout",
+    explanation: "A visit is still open. Its actual checkout must be recorded before closing." });
+  if (work.hasPendingSevenElevenSync || work.hasPendingContractorAttention) steps.push({ target: "updates", label: "Review pending updates",
+    explanation: "Review outstanding 7-Eleven updates or contractor attention items." });
+  if (input.hasUnresolvedContractorInvoices) steps.push({ target: "documents", label: "Review contractor invoices",
+    explanation: "Outstanding contractor invoice reviews must be resolved before closing." });
+  if ((!work.billingOnly && work.functionalStatus !== "Completed") || !billingClosureStatusEligible(work.status)) steps.push({
+    target: "progress", label: "Review job progress and completion",
+    explanation: "Review the field-work and billing-handoff status. This link does not mark the job complete." });
+  return steps;
 }
 
 /** A read preflight improves conflict feedback; the RPC still enforces the exact snapshot. */
