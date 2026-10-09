@@ -1,11 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { closeOutAuditNote, isCapitalCloseOutWork, noInvoiceCloseSnapshotMatches, workOrderCloseOutOptions, type CloseOutWorkOrder } from "./workOrderCloseOut";
+import { closeOutAuditNote, isCapitalCloseOutWork, noInvoiceCloseSnapshotMatches, workOrderCloseOutOptions, workOrderCloseOutReviewSteps, type CloseOutWorkOrder } from "./workOrderCloseOut";
 
 const workOrder: CloseOutWorkOrder = { id: "SYNTHETIC-WO", status: "pending_invoice", functionalStatus: "Completed", workflowCycle: 1, visits: [] };
 const base = { workOrder, hasCompleteEvidence: true, hasCurrentInvoice: false, hasStaffDocuments: false,
   hasAnyDocuments: false, hasUnresolvedContractorInvoices: false, canCloseFollowUp: false };
 const options = (changes: Partial<typeof base> = {}) => workOrderCloseOutOptions({ ...base, ...changes });
+const reviewSteps = (changes: Partial<typeof base> = {}) => workOrderCloseOutReviewSteps({ ...base, ...changes });
+
+test("ordinary closeout review links appear only for existing documents or unmet prerequisites", () => {
+  assert.deepEqual(reviewSteps(), []);
+  const before = options();
+  const cases: [Partial<typeof base>, string][] = [
+    [{ hasCompleteEvidence: false }, "history"],
+    [{ hasCurrentInvoice: true }, "billing"],
+    [{ workOrder: { ...workOrder, visits: [{ checkOutAt: null }] } }, "visits"],
+    [{ workOrder: { ...workOrder, hasPendingSevenElevenSync: true } }, "updates"],
+    [{ workOrder: { ...workOrder, hasPendingContractorAttention: true } }, "updates"],
+    [{ hasUnresolvedContractorInvoices: true }, "documents"],
+    [{ workOrder: { ...workOrder, functionalStatus: "Work in Progress" } }, "progress"],
+  ];
+  for (const [change, target] of cases) {
+    assert.deepEqual(reviewSteps(change).map(step => step.target), [target]);
+  }
+  assert.deepEqual(options(), before, "Read-only guidance cannot change closure eligibility");
+});
+
+test("review links report all relevant prerequisites once, including pending updates with two flags", () => {
+  const steps = reviewSteps({ hasCompleteEvidence: false, hasCurrentInvoice: true, hasUnresolvedContractorInvoices: true,
+    workOrder: { ...workOrder, visits: [{ checkOutAt: null }], hasPendingSevenElevenSync: true, hasPendingContractorAttention: true } });
+  assert.deepEqual(steps.map(step => step.target), ["history", "billing", "visits", "updates", "documents"]);
+  assert.equal(steps.filter(step => step.target === "updates").length, 1);
+});
+
+test("capital and closed work have no ordinary review checklist, and billing-only work needs no field-completion link", () => {
+  for (const work of [{ ...workOrder, status: "closed" }, { ...workOrder, status: "capital" },
+    { ...workOrder, isCapital: true }, { ...workOrder, status: "pending_capital_completion" }]) {
+    assert.deepEqual(reviewSteps({ workOrder: work, hasCompleteEvidence: false, hasCurrentInvoice: true, hasUnresolvedContractorInvoices: true }), []);
+  }
+  assert.deepEqual(reviewSteps({ workOrder: { ...workOrder, billingOnly: true, functionalStatus: "Work in Progress" } }), []);
+  assert.deepEqual(reviewSteps({ workOrder: { ...workOrder, status: "assigned" } }).map(step => step.target), ["progress"]);
+});
 
 test("capital detection safely handles the initial empty work-order selection", () => {
   assert.equal(isCapitalCloseOutWork(null), false);

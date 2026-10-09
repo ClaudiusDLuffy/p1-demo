@@ -50,6 +50,74 @@ test("billing review opens the existing invoice, never silently creates or final
   assert.deepEqual(calls, [[base.workOrder.id, "existing-invoice"]]);
 });
 
+test("contextual invoice link opens only the exact existing invoice while blocked billing outcomes stay blocked", () => {
+  const h = harness(); const calls: unknown[][] = [];
+  const props = { ...base, billingDocument: { id: "existing-invoice" }, onOpenBilling: (...args: unknown[]) => calls.push(args),
+    workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  assert.equal(button(tree, "Billed outside the portal").props.disabled, true);
+  uiInvoke(button(tree, "Review existing P1 invoice"), "onClick");
+  assert.deepEqual(calls, [[base.workOrder.id, "existing-invoice"]]);
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  assert.equal(uiNodes(tree).some(node => node.type === "Modal" || node.type === "ExternalForm"), false);
+  uiInvoke(button(tree, "Close out"), "onClick"); tree = h.render("WorkOrderCloseOutPanel", props);
+  assert.equal(button(tree, "Billed outside the portal").props.disabled, true);
+});
+
+for (const [label, section, patch] of [
+  ["Review active visit / checkout", "visits", { workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } }],
+  ["Review activity history", "history", { hasCompleteEvidence: false }],
+  ["Review pending updates", "updates", { workOrder: { ...base.workOrder, hasPendingSevenElevenSync: true } }],
+  ["Review contractor invoices", "documents", { hasUnresolvedContractorInvoices: true }],
+  ["Review job progress and completion", "progress", { workOrder: { ...base.workOrder, functionalStatus: "Work in Progress" } }],
+] as const) test(`${label} navigates within the same WO without invoking any closeout command`, () => {
+  const h = harness(); const calls: unknown[][] = []; let writes = 0;
+  const props = { ...base, ...patch, onReviewSection: (...args: unknown[]) => calls.push(args),
+    onCloseFollowUp: async () => { writes++; return true; }, onCloseWithoutInvoice: async () => { writes++; return true; } };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  uiInvoke(button(tree, label), "onClick");
+  assert.deepEqual(calls, [[base.workOrder.id, section]]); assert.equal(writes, 0);
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  assert.equal(uiNodes(tree).some(node => ["Modal", "ExternalForm", "LinkedForm", "NoInvoiceForm"].includes(String(node.type))), false);
+});
+
+test("no prerequisite links are shown when there is no destination callback or nothing needs review", () => {
+  const h = harness();
+  const props = { ...base, hasCompleteEvidence: false, workOrder: { ...base.workOrder, visits: [{ checkOutAt: null }] } };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  assert.equal(uiNodes(tree).some(node => node.props["aria-label"] === "Still needs review"), false);
+  tree = h.render("WorkOrderCloseOutPanel", { ...base, onReviewSection() {} });
+  assert.equal(uiNodes(tree).some(node => node.props["aria-label"] === "Still needs review"), false);
+});
+
+test("paged-history loading remains in the chooser, reports failures, and never clears a guard by itself", async () => {
+  const h = harness(); let loads = 0;
+  const props = { ...base, hasCompleteEvidence: false, canLoadMoreHistory: true, onReviewSection() {},
+    onLoadMoreHistory: async () => { loads++; throw new Error("Synthetic read failed"); } };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  await uiInvoke(button(tree, "Load more close-out history"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props);
+  assert.equal(loads, 1); assert.match(uiText(tree), /History could not load/);
+  assert.equal(button(tree, "Billed outside the portal").props.disabled, true);
+  const busy = h.render("WorkOrderCloseOutPanel", { ...props, historyLoading: true });
+  assert.equal(button(busy, "Loading history...").props.disabled, true);
+});
+
+test("review destinations are mounted in both layouts and focus waits until the chooser closes", () => {
+  const detail = readFileSync("src/features/work-orders/WorkOrderDetail.tsx", "utf8");
+  for (const id of ["work-order-visits", "work-order-activity", "work-order-documents", "work-order-progress"]) {
+    assert.ok(detail.includes(`id="${id}"`), `${id} must have a real destination`);
+  }
+  assert.match(detail, /closeOutReview\.workOrderId === selectedWO && closeOutReview\.workOrderId === woData\?\.id/);
+  assert.match(detail, /closeOutReview\.actorId === currentUser\?\.id/);
+  assert.match(detail, /currentUser\?\.active === true && isManager && !invoiceController/);
+  assert.match(detail, /focusWorkOrderSection\(sections\[closeOutReview\.section\]\)/);
+});
+
 test("one capital Close out click opens the two-outcome confirmation directly, without a quote-page detour", () => {
   const h = harness(); let opened = 0;
   const props = { ...base, workOrder: { ...base.workOrder, status: "pending_capital_completion" },
@@ -60,6 +128,7 @@ test("one capital Close out click opens the two-outcome confirmation directly, w
   assert.equal(form.props.workOrderId, props.workOrder.id);
   assert.equal(form.props.hasCompleteEvidence, true); assert.equal(opened, 0);
   assert.equal(uiNodes(tree).some(node => node.type === "Modal"), false);
+  assert.equal(uiNodes(tree).some(node => node.props["aria-label"] === "Still needs review"), false);
 });
 
 test("disabled outcomes cannot be entered even through their click handler", () => {

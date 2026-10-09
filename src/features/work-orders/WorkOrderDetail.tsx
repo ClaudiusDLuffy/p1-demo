@@ -76,11 +76,11 @@ import { CapitalSelfServiceModal } from "./CapitalSelfServiceModal";
 import type { CapitalSelfServiceAction } from "./capitalSelfService";
 import { belongsToCurrentBillingWork } from "./currentBillingDocument";
 import { FocusedWorkOrderHeader } from "../simplified-work/FocusedWorkOrderHeader";
-import { AttachmentsButton, WorkOrderAttachments } from "./WorkOrderAttachments";
+import { AttachmentsButton, WorkOrderAttachments, focusWorkOrderSection } from "./WorkOrderAttachments";
 import { ExternalBillingPanel } from "../billing/ExternalBillingPanel";
 import { LinkedBillingPanel } from "../billing/LinkedBillingPanel";
 import { WorkOrderCloseOutPanel } from "./WorkOrderCloseOutPanel";
-import { isCapitalCloseOutWork } from "../../lib/workOrderCloseOut";
+import { isCapitalCloseOutWork, type CloseOutReviewSection } from "../../lib/workOrderCloseOut";
 
 const WorkReportForm = dynamic(
   () => import("./WorkReportForm"),
@@ -122,6 +122,7 @@ const formatEta = (v: any, workOrder?: any): string => {
 
 export default function WorkOrderDetail(props: any) {
   const [layoutOverride, setLayoutOverride] = useState<{ id: string; focused: boolean } | null>(null);
+  const [closeOutReview, setCloseOutReview] = useState<{ workOrderId: string; actorId: string; section: CloseOutReviewSection } | null>(null);
   const focused = layoutOverride?.id === props.selectedWO ? layoutOverride.focused : props.focused === true;
   const { photoUploadItems = [], retryPhotoUploads, cancelPhotoUploads, photoDeleteError = "", retryPhotoDeletion } = props;
   const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doReturnCompletedToField, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
@@ -341,6 +342,20 @@ export default function WorkOrderDetail(props: any) {
     canonicalSevenElevenWorkOrderId(workOrderId) !== sevenElevenWorkOrderId
   );
   const invoiceController = isInvoiceController(currentUser);
+  useEffect(() => {
+    if (!closeOutReview) return;
+    // Run after the chooser unmounts so its focus trap/restore cannot steal
+    // focus back. A WO or actor switch must not redirect a different record.
+    if (detailEnabled && closeOutReview.workOrderId === selectedWO && closeOutReview.workOrderId === woData?.id
+      && closeOutReview.actorId === currentUser?.id && currentUser?.active === true && isManager && !invoiceController) {
+      const sections: Record<CloseOutReviewSection, string> = {
+        visits: "work-order-visits", history: "work-order-activity", updates: "work-order-activity",
+        documents: "work-order-documents", progress: "work-order-progress",
+      };
+      focusWorkOrderSection(sections[closeOutReview.section]);
+    }
+    setCloseOutReview(null);
+  }, [closeOutReview, detailEnabled, selectedWO, woData?.id, currentUser?.id, currentUser?.active, isManager, invoiceController]);
   const hasCompleteCloseOutEvidence = !contractorInvoiceQuery.isError && !billingInvoiceQuery.isError
     && contractorInvoiceQuery.data?.hasMore === false && billingInvoiceQuery.data?.hasMore === false
     && woData?.activityPage?.hasMore === false && woData?.visitPage?.hasMore === false;
@@ -1072,6 +1087,7 @@ export default function WorkOrderDetail(props: any) {
                   }))}
                   onCapitalDone={outcome => { setSelectedWO(null); setPage(outcome === "billed" ? "history" : "billing"); }}
                   onOpenBilling={onOpenBillingForWorkOrder}
+                  onReviewSection={(workOrderId, section) => setCloseOutReview({ workOrderId, section, actorId: currentUser.id })}
                   onCloseFollowUp={props.onCloseReopenedFollowUp}
                   onCloseWithoutInvoice={props.onCloseOutWithoutInvoice}
                   canLoadMoreHistory={Boolean(woData.activityPage?.hasMore || woData.visitPage?.hasMore)}
@@ -1444,7 +1460,7 @@ export default function WorkOrderDetail(props: any) {
                       workOrder={woData} actor={currentUser} isManager={isManager}
                       doAssignPortalTechnician={doAssignPortalTechnician} doSetTechnician={doSetTechnician} />}
 
-                    <DetailDisclosure focused={focused} title="Completion record and visit corrections">
+                    <DetailDisclosure focused={focused} title="Completion record and visit corrections" id="work-order-visits">
                     {/* Completion Record — the self-contained closure file. Shown
                         on completed/closed jobs; identical from the board and History
                         (same detail component). */}
@@ -1524,6 +1540,7 @@ export default function WorkOrderDetail(props: any) {
                     />
 
                     </WorkOrderAttachments>
+                    <section id="work-order-activity" tabIndex={-1} aria-label="Work order activity history" className="min-w-0 scroll-mt-4">
                     <WorkOrderActivityPanels
                       key={woData.id}
                       activities={allVisibleActivities}
@@ -1554,6 +1571,7 @@ export default function WorkOrderDetail(props: any) {
                       doAcknowledgeContractorAttention={doAcknowledgeContractorAttention}
                       readOnly={contractorHistoryReadOnly}
                     />
+                    </section>
                     {focused && <>
                       {billingDocuments}
                       <DetailDisclosure focused title="More job information">
@@ -1563,7 +1581,7 @@ export default function WorkOrderDetail(props: any) {
                   </div>
 
                   {/* Secondary information remains available in both layouts. */}
-                  <DetailDisclosure focused={focused} title="SLA, contacts, progress and parts">
+                  <DetailDisclosure focused={focused} title="SLA, contacts, progress and parts" id="work-order-progress">
                   <div className="min-w-0">
                     {sla2 ? (
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
