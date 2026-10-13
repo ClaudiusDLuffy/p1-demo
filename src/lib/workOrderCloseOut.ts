@@ -1,6 +1,6 @@
 import { billingClosureStatusEligible } from "../features/billing/billingClosurePolicy";
 
-export type CloseOutAction = "review_billing" | "external_quote" | "capital_complete" | "capital_billed" | "capital_to_billing" | "external_billing" | "linked_billing" | "follow_up" | "no_invoice";
+export type CloseOutAction = "review_billing" | "reconcile_billing" | "external_quote" | "capital_complete" | "capital_billed" | "capital_to_billing" | "external_billing" | "linked_billing" | "follow_up" | "no_invoice";
 export type CloseOutWorkOrder = {
   id: string; status: string; functionalStatus?: string | null; billingOnly?: boolean; isCapital?: boolean | null;
   workflowCycle?: number; contractorAssignmentVersion?: number; updatedAt?: string | null;
@@ -49,7 +49,7 @@ export function workOrderCloseOutReviewSteps(input: {
       || (step.target === "progress" && !billingClosureStatusEligible(work.status)))));
   if (input.action === "follow_up") return steps.filter(step => !["billing", "progress"].includes(step.target));
   if (input.action === "no_invoice") return steps.filter(step => step.target !== "billing");
-  return !input.action || ["linked_billing", "external_billing"].includes(input.action) ? steps : [];
+  return !input.action || ["linked_billing", "external_billing", "reconcile_billing"].includes(input.action) ? steps : [];
 }
 
 /** A read preflight improves conflict feedback; the RPC still enforces the exact snapshot. */
@@ -66,6 +66,7 @@ export function noInvoiceCloseSnapshotMatches(current: CloseOutWorkOrder | null,
 export function workOrderCloseOutOptions(input: {
   workOrder: CloseOutWorkOrder; hasCompleteEvidence: boolean; hasCurrentInvoice: boolean;
   hasStaffDocuments: boolean; hasAnyDocuments: boolean; hasUnresolvedContractorInvoices: boolean; canCloseFollowUp: boolean;
+  hasRecordedBillingEvidence?: boolean;
 }): CloseOutOption[] {
   const { workOrder: work, hasCompleteEvidence, hasCurrentInvoice, hasAnyDocuments,
     hasUnresolvedContractorInvoices, canCloseFollowUp } = input;
@@ -92,6 +93,8 @@ export function workOrderCloseOutOptions(input: {
         : "Use the normal invoice process for this work order. Only confirm Billed to 7-Eleven after the actual customer handoff.",
       blocked: hasCurrentInvoice ? undefined : incompleteEvidence || (!billingClosureStatusEligible(work.status) ? "Finish field work and move this WO to billing before preparing the final invoice." : undefined) },
   ];
+  if (input.hasRecordedBillingEvidence) options.unshift({ action: "reconcile_billing", label: "Already billed, close work order",
+    explanation: "Use the verified existing 7-Eleven billing record to repair this finished work order's open status. No new invoice, billing submission or export.", blocked: closingBlocker });
   if (billingClosureStatusEligible(work.status)) {
     options.push(
       { action: "linked_billing", label: "Billed under another work order", explanation: "Only when a P1 invoice on a different work order covers this job—not an invoice on this WO. No new invoice or revenue is created.", blocked: alternateBillingBlocker },
@@ -104,7 +107,7 @@ export function workOrderCloseOutOptions(input: {
     explanation: "Confirm that the follow-up is resolved and no additional billing is needed. Original billed invoices remain unchanged.", blocked: financialBlocker });
   // This is never a shortcut for missing billing references. Unlike the old
   // general-close button, the guided path requires finished, invoice-free work.
-  if (!hasAnyDocuments && hasCompleteEvidence && billingClosureStatusEligible(work.status)) options.push({ action: "no_invoice",
+  if (!hasAnyDocuments && !input.hasRecordedBillingEvidence && hasCompleteEvidence && billingClosureStatusEligible(work.status)) options.push({ action: "no_invoice",
     label: "No billing is required", explanation: "Only for finished work with no invoices and no billing anywhere. Do not use for work billed externally or under another WO.", blocked: closingBlocker });
   return options;
 }

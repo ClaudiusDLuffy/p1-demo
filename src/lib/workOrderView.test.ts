@@ -236,3 +236,12 @@ test("external billing has distinct internal closure attribution", () => {
   assert.equal(resolveWorkOrderClosedBy([activity]), "Synthetic Billing Staff");
   assert.equal(isInternalWorkOrderActivity(activity), true);
 });
+
+test("recorded-billing reconciliation attributes the repair to staff and stays internal", () => {
+  const reconciliation = { author: "Synthetic Reconciliation Staff", eventKey: "work_order_billing_closeout_reconciled",
+    text: "Closed against existing recorded billing, without billing again." };
+  const originalBill = { author: "Synthetic Original Billing Staff", eventKey: "staff_billing",
+    eventData: { action: "billed_to_7_eleven" } };
+  assert.equal(resolveWorkOrderClosedBy([reconciliation, originalBill]), "Synthetic Reconciliation Staff");
+  assert.equal(isInternalWorkOrderActivity(reconciliation), true);
+});

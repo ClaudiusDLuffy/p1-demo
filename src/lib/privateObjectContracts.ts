@@ -6,6 +6,7 @@ import type { ExternalBillingFunctions } from "../features/billing/externalBilli
 import type { LinkedBillingFunctions } from "../features/billing/linkedBillingContracts";
 import type { CapitalSelfServiceFunctions } from "../features/work-orders/capitalSelfService";
 import type { CapitalCloseOutFunctions } from "../features/work-orders/capitalCloseOut";
+import type { RecordedBillingCloseOutFunctions } from "../features/work-orders/recordedBillingCloseOut";
 
 export const objectPurposeSchema = z.enum(["photo", "invoice_original", "invoice_generated", "estimate_attachment"]);
 export type ObjectPurpose = z.infer<typeof objectPurposeSchema>;
@@ -77,7 +78,7 @@ export type PrivateObjectServiceFunctions = {
   complete_private_object_deletion_v1: Routine<{ p_deletion_id: string; p_claim_id: string; p_outcome: string }>;
   list_private_object_reconciliation_v1: Routine<{ p_limit: number; p_dry_run: boolean }>;
 };
-export type PrivateObjectDatabase = AssignmentDatabase & { public: { Functions: PrivateObjectFunctions & ExternalBillingFunctions & LinkedBillingFunctions & CapitalSelfServiceFunctions & CapitalCloseOutFunctions } };
+export type PrivateObjectDatabase = AssignmentDatabase & { public: { Functions: PrivateObjectFunctions & ExternalBillingFunctions & LinkedBillingFunctions & CapitalSelfServiceFunctions & CapitalCloseOutFunctions & RecordedBillingCloseOutFunctions } };
 export type PrivateObjectServerDatabase = EmailIntakeServerDatabase & { public: { Functions: PrivateObjectFunctions & PrivateObjectServiceFunctions } };
 
 export class PrivateObjectError extends Error {
