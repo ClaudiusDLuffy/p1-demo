@@ -21,7 +21,9 @@ const base = {
 };
 function harness(initialActor: object | null = { id: "staff-A", role: "manager", active: true }) {
   let actor = initialActor;
+  let recordedEvidence: object | null = null;
   const h = primitiveHarness("src/features/work-orders/WorkOrderCloseOutPanel.tsx", {
+    "@tanstack/react-query": { useQuery: () => ({ data: recordedEvidence, isFetching: false, isError: false }) },
     "../directory/queries": { useDirectoryActor: () => actor },
     "../billing/ExternalBillingModal": { ExternalBillingModal: "ExternalForm" },
     "../billing/LinkedBillingModal": { LinkedBillingModal: "LinkedForm" },
@@ -29,8 +31,9 @@ function harness(initialActor: object | null = { id: "staff-A", role: "manager",
     "./CapitalCloseOutModal": { CapitalCloseOutModal: "SimpleCapitalForm" },
     "./CloseReopenedFollowUpModal": { default: "FollowUpForm" },
     "./CloseOutNoInvoiceModal": { CloseOutNoInvoiceModal: "NoInvoiceForm" },
+    "./RecordedBillingCloseOutModal": { RecordedBillingCloseOutModal: "RecordedBillingForm" },
   });
-  return { ...h, setActor: (next: object | null) => { actor = next; } };
+  return { ...h, setActor: (next: object | null) => { actor = next; }, setRecordedEvidence: (next: object | null) => { recordedEvidence = next; } };
 }
 
 for (const actor of [null, { role: "contractor", active: true }, { role: "manager", active: false },
@@ -55,6 +58,30 @@ test("billing review opens the existing invoice, never silently creates or final
   let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
   tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Review or finish P1 billing"), "onClick");
   assert.deepEqual(calls, [[base.workOrder.id, "existing-invoice"]]);
+});
+
+test("database-verified billing is captured once for reconciliation and cannot become a no-invoice shortcut", () => {
+  const h = harness();
+  const original = { workOrderId: base.workOrder.id, invoiceId: "verified-invoice", invoiceVersion: 2,
+    billingActivityId: "verified-billing-event", billedAt: "2026-08-06T12:00:00Z", lifecycleVersion: 3 };
+  h.setRecordedEvidence(original);
+  let tree = h.render("WorkOrderCloseOutPanel", base); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", base);
+  assert.equal(uiNodes(tree).some(node => node.type === "button" && uiText(node.props.children) === "No billing is required"), false);
+  assert.equal(button(tree, "Billed outside the portal").props.disabled, true);
+  uiInvoke(button(tree, "Already billed, close work order"), "onClick");
+  h.setRecordedEvidence({ ...original, invoiceVersion: 99 });
+  tree = h.render("WorkOrderCloseOutPanel", base);
+  assert.equal(JSON.stringify(find(tree, node => node.type === "RecordedBillingForm").props.evidence), JSON.stringify(original));
+});
+
+test("verified invoice fallback opens that existing record, never a new-invoice form", () => {
+  const h = harness(); const calls: unknown[][] = [];
+  h.setRecordedEvidence({ invoiceId: "verified-existing" });
+  const props = { ...base, onOpenBilling: (...args: unknown[]) => calls.push(args) };
+  let tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Close out"), "onClick");
+  tree = h.render("WorkOrderCloseOutPanel", props); uiInvoke(button(tree, "Review or finish P1 billing"), "onClick");
+  assert.deepEqual(calls, [[base.workOrder.id, "verified-existing"]]);
 });
 
 test("contextual invoice link opens only the exact existing invoice while blocked billing outcomes stay blocked", () => {

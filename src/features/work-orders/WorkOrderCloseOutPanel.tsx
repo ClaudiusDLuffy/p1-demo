@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Modal } from "../../components/ui/Modal";
 import { useDirectoryActor } from "../directory/queries";
 import { directoryActorScope } from "../../lib/counts/queryKeys";
@@ -12,6 +13,8 @@ import { CapitalCloseOutModal, type CapitalCloseOutDocument } from "./CapitalClo
 import type { CapitalCloseOutOutcome } from "./capitalCloseOut";
 import CloseReopenedFollowUpModal from "./CloseReopenedFollowUpModal";
 import { CloseOutNoInvoiceModal } from "./CloseOutNoInvoiceModal";
+import { RecordedBillingCloseOutModal } from "./RecordedBillingCloseOutModal";
+import { loadRecordedBillingEvidence, recordedBillingCloseOutError, type RecordedBillingEvidence } from "./recordedBillingCloseOut";
 import { isCapitalCloseOutWork, workOrderCloseOutOptions, workOrderCloseOutReviewSteps, type CloseOutAction, type CloseOutReviewSection, type CloseOutReviewStep, type CloseOutWorkOrder, type FollowUpCloseSnapshot } from "../../lib/workOrderCloseOut";
 
 const reviewSectionIds: Record<CloseOutReviewStep["target"], string> = {
@@ -35,18 +38,26 @@ type Props = {
 export function WorkOrderCloseOutPanel(props: Props) {
   const actor = useDirectoryActor();
   const scope = directoryActorScope(actor);
-  const [selection, setSelection] = useState<{ action: CloseOutAction | "choose"; scope: string; snapshot: FollowUpCloseSnapshot } | null>(null);
+  const [selection, setSelection] = useState<{ action: CloseOutAction | "choose"; scope: string; snapshot: FollowUpCloseSnapshot; recordedBilling?: RecordedBillingEvidence } | null>(null);
   const [historyError, setHistoryError] = useState("");
+  const evidence = useQuery({ queryKey: ["recorded-billing-closeout", scope, props.workOrder.id],
+    queryFn: ({ signal }) => loadRecordedBillingEvidence(props.workOrder.id, signal), staleTime: 0,
+    enabled: canRecordExternalBilling(actor) && selection?.scope === scope && selection.snapshot.id === props.workOrder.id
+      && selection.action === "choose" && !isCapitalCloseOutWork(props.workOrder) && props.workOrder.status !== "closed",
+  });
   // Permission checks remain in every server command. Hiding the panel also
   // unmounts an old actor's form if their operational access changes.
   if (!canRecordExternalBilling(actor)) return null;
   const work = props.workOrder;
-  const options = workOrderCloseOutOptions({ ...props, hasCurrentInvoice: Boolean(props.billingDocument) });
+  const billingDocument = props.billingDocument || (evidence.data ? { id: evidence.data.invoiceId } : null);
+  const options = workOrderCloseOutOptions({ ...props, hasCurrentInvoice: Boolean(billingDocument), hasRecordedBillingEvidence: Boolean(evidence.data) })
+    .map(option => option.action === "reconcile_billing" && evidence.isFetching
+      ? { ...option, blocked: option.blocked || "Checking current recorded billing…" } : option);
   const capital = isCapitalCloseOutWork(work);
-  const reviewStepsFor = (action: CloseOutAction) => workOrderCloseOutReviewSteps({ ...props, action, hasCurrentInvoice: Boolean(props.billingDocument?.id) })
-    .filter(step => step.target === "billing" ? Boolean(props.billingDocument?.id) : Boolean(props.onReviewSection));
+  const reviewStepsFor = (action: CloseOutAction) => workOrderCloseOutReviewSteps({ ...props, action, hasCurrentInvoice: Boolean(billingDocument?.id) })
+    .filter(step => step.target === "billing" ? Boolean(billingDocument?.id) : Boolean(props.onReviewSection));
   const close = () => setSelection(null);
-  const choose = (action: CloseOutAction | "choose") => setSelection({ action, scope, snapshot: {
+  const choose = (action: CloseOutAction | "choose") => setSelection({ action, scope, recordedBilling: action === "reconcile_billing" && evidence.data ? { ...evidence.data } : undefined, snapshot: {
     id: work.id, workflowCycle: work.workflowCycle ?? 0,
     contractorAssignmentVersion: work.contractorAssignmentVersion ?? 0, updatedAt: work.updatedAt ?? null,
   } });
@@ -66,6 +77,9 @@ export function WorkOrderCloseOutPanel(props: Props) {
       <div className="space-y-4">
         <p className="text-sm">Choose what actually happened. Routine audit notes are recorded automatically; references and confirmation are still required. These actions do not submit anything to 7-Eleven for you.</p>
         <p className="text-xs text-p1-muted">Review links only open existing records. They do not bill, record checkout, or close this work order.</p>
+        {evidence.isFetching && <p role="status" className="text-xs">Checking existing recorded billing…</p>}
+        {evidence.isError && <p role="alert" className="text-xs">{recordedBillingCloseOutError(evidence.error).message}
+          <button type="button" className="ml-2 underline" onClick={() => void evidence.refetch()}>Retry billing check</button></p>}
         {!props.hasCompleteEvidence && props.canLoadMoreHistory && props.onLoadMoreHistory && <div className="space-y-2">
           <p className="text-sm">Earlier history is still paged. Load the next history pages here so close-out eligibility can be checked.</p>
           <button type="button" className="btn-soft" disabled={props.historyLoading} onClick={async () => {
@@ -78,7 +92,7 @@ export function WorkOrderCloseOutPanel(props: Props) {
         {options.map(option => <section key={option.action} aria-label={option.label} className="rounded-lg border border-p1-border p-3">
           <button type="button" className="btn-soft" disabled={Boolean(option.blocked)} onClick={() => {
             if (option.blocked) return;
-            if (option.action === "review_billing") { close(); props.onOpenBilling(work.id, props.billingDocument?.id ?? null); }
+            if (option.action === "review_billing") { close(); props.onOpenBilling(work.id, billingDocument?.id ?? null); }
             else choose(option.action);
           }}>{option.label}</button>
           <p className="mt-2 text-sm">{option.explanation}</p>
@@ -90,15 +104,15 @@ export function WorkOrderCloseOutPanel(props: Props) {
               title={step.explanation} onClick={event => {
                 event.preventDefault();
                 if (step.target === "billing") {
-                  if (!props.billingDocument?.id) return;
-                  close(); props.onOpenBilling(work.id, props.billingDocument.id);
+                  if (!billingDocument?.id) return;
+                  close(); props.onOpenBilling(work.id, billingDocument.id);
                 } else if (props.onReviewSection) {
                   close(); props.onReviewSection(work.id, step.target);
                 }
               }}>{step.label}</a>)}
           </p>}
         </section>)}
-        {!options.some(option => ["external_billing", "linked_billing", "follow_up", "capital_complete", "no_invoice"].includes(option.action))
+        {!options.some(option => ["external_billing", "linked_billing", "reconcile_billing", "follow_up", "capital_complete", "no_invoice"].includes(option.action))
           && !["capital", "closed"].includes(work.status) && <p className="text-sm">Finish field work and move the WO to billing first. Close out never checks out a technician or force-closes unfinished work.</p>}
         <button type="button" className="btn-soft" onClick={close}>Cancel</button>
       </div>
@@ -107,6 +121,8 @@ export function WorkOrderCloseOutPanel(props: Props) {
     {selected?.action === "capital_complete" && <CapitalSelfServiceModal workOrderId={work.id} action="capital_confirmed_completion" guidedCloseOut onClose={close} />}
     {selected?.action === "external_billing" && <ExternalBillingModal workOrderId={work.id} guidedCloseOut onClose={close} />}
     {selected?.action === "linked_billing" && <LinkedBillingModal workOrderId={work.id} guidedCloseOut onClose={close} />}
+    {selected?.action === "reconcile_billing" && selected.recordedBilling && <RecordedBillingCloseOutModal key={selected.scope}
+      evidence={selected.recordedBilling} onClose={close} />}
     {selected?.action === "follow_up" && <CloseReopenedFollowUpModal workOrderId={work.id} workflowCycle={selected.snapshot.workflowCycle} guidedCloseOut
       onClose={close} onConfirm={reason => props.onCloseFollowUp(selected.snapshot, reason)} />}
     {selected?.action === "no_invoice" && <CloseOutNoInvoiceModal workOrderId={work.id} onClose={close}
