@@ -71,6 +71,12 @@ export function createPhotoMetadataReadHarness(plans: readonly PhotoReadPlan[]) 
       const result: unknown = await Reflect.apply(method, undefined, [workOrderId, cursor, limit, signal]);
       return structuredClone(result);
     },
+    async collectPaths(workOrderId: string): Promise<string[]> {
+      const method = facade.loadAllWorkOrderPhotoPaths;
+      assert.equal(typeof method, "function");
+      if (typeof method !== "function") throw new Error("Invalid photo collector facade export");
+      return structuredClone(await Reflect.apply(method, undefined, [workOrderId]));
+    },
     remainingPlans: () => pending.length,
   };
 }

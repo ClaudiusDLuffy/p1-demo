@@ -40,7 +40,15 @@ export function normalizeUnknownError(cause: unknown): AppError {
       const status = errorData(cause, "status");
       if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599) return normalizeHttpError(status, cause);
       const message = errorData(cause, "message");
-      if (cause instanceof TypeError && typeof message === "string" && ["Failed to fetch", "fetch failed", "NetworkError when attempting to fetch resource."].includes(message)) {
+      // PostgREST wraps fetch failures in a plain {code:'', hint:'', details,
+      // message} result. Recognize only the exact installed-SDK transport
+      // signatures, never arbitrary SQL/provider text or missing-code errors.
+      if (code === "" && errorData(cause, "hint") === "" && typeof errorData(cause, "details") === "string"
+        && typeof message === "string" && ["TypeError: Failed to fetch", "TypeError: fetch failed", "TypeError: Load failed",
+          "TypeError: NetworkError when attempting to fetch resource."].includes(message)) {
+        return new AppError("NETWORK_UNAVAILABLE", { cause });
+      }
+      if (cause instanceof TypeError && typeof message === "string" && ["Failed to fetch", "fetch failed", "Load failed", "NetworkError when attempting to fetch resource."].includes(message)) {
         return new AppError("NETWORK_UNAVAILABLE", { cause });
       }
     }

@@ -1,6 +1,7 @@
 "use client";
 
 import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
+import { AppError } from "../../lib/errors/AppError";
 import {
   useEffect,
   useRef,
@@ -119,7 +120,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
       const paths = mode === "all"
         ? await loadAllWorkOrderPhotoPaths(woId)
         : selected;
-      if (paths.length === 0) throw new Error("There are no photos to download");
+      if (paths.length === 0) throw new AppError("PHOTO_SELECTION_REQUIRED");
 
       setArchiveProgress({ mode, completed: 0, total: paths.length });
       const { buildPhotoArchive, photoArchiveFilename } = await import("../../lib/photoArchive");
@@ -284,6 +285,18 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                         {!readOnly && retryDeletion && <button type="button" className="btn-soft" disabled={removing}
                           onClick={() => void retryDeletion()} style={{ padding: "8px 10px" }}>Retry photo removal</button>}
                       </div>}
+                      {archiveProgress && (
+                        <div role="status" style={{ textAlign: "center", padding: "9px 0", fontSize: 11, color: T.muted }}>
+                          {archiveProgress.total > 0
+                            ? `Preparing photo ${archiveProgress.completed} of ${archiveProgress.total}...`
+                            : "Loading the complete photo list..."}
+                        </div>
+                      )}
+                      {archiveError && (
+                        <div role="alert" style={{ marginBottom: 12, padding: "9px 11px", borderRadius: 9, background: T.dangerSoft, color: T.danger, fontSize: 11 }}>
+                          {archiveError}
+                        </div>
+                      )}
                       {(photos || []).length === 0
                         ? <div style={{ textAlign: "center", padding: "28px 0", fontSize: 12, color: T.subtle, background: T.surfaceSoft, borderRadius: 10, border: `1px dashed ${T.border}` }}>No photos yet. Add site pics, asset tags, part numbers, completed work.</div>
                         : !expanded
@@ -318,18 +331,6 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                                   </div>
                                 </div>
                               )}
-                              {archiveProgress && (
-                                <div role="status" style={{ textAlign: "center", padding: "9px 0", fontSize: 11, color: T.muted }}>
-                                  {archiveProgress.total > 0
-                                    ? `Preparing photo ${archiveProgress.completed} of ${archiveProgress.total}...`
-                                    : "Loading the complete photo list..."}
-                                </div>
-                              )}
-                              {archiveError && (
-                                <div role="alert" style={{ marginBottom: 12, padding: "9px 11px", borderRadius: 9, background: T.dangerSoft, color: T.danger, fontSize: 11 }}>
-                                  {archiveError}
-                                </div>
-                              )}
                               {resolving && <div style={{ textAlign: "center", padding: "12px 0", fontSize: 12, color: T.subtle }}>Loading photos...</div>}
                               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
                                 {photos.map((path: string, i: number) => {
@@ -339,6 +340,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
                                     <div
                                       key={path || i}
                                       role={url ? "button" : undefined}
+                                      aria-label={url ? `${selecting ? "Select" : "View"} photo ${i + 1}` : undefined}
                                       tabIndex={url ? 0 : undefined}
                                       aria-pressed={selecting ? selected : undefined}
                                       style={{ position: "relative", aspectRatio: "1", borderRadius: 10, overflow: "hidden", border: `2px solid ${selected ? T.accent : T.border}`, cursor: url ? "pointer" : "default" }}

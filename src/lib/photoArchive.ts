@@ -1,4 +1,5 @@
 import { createZipArchive, type ZipArchiveEntry } from "./zipArchive";
+import { AppError } from "./errors/AppError";
 
 export const PHOTO_ARCHIVE_MAX_BYTES = 95 * 1024 * 1024;
 
@@ -73,7 +74,7 @@ export async function buildPhotoArchive(
   onProgress?: (progress: PhotoArchiveProgress) => void,
 ): Promise<PhotoArchiveResult> {
   const paths = [...new Set(rawPaths.filter(Boolean))];
-  if (paths.length === 0) throw new Error("Select at least one photo to download");
+  if (paths.length === 0) throw new AppError("PHOTO_SELECTION_REQUIRED");
 
   const entries: ZipArchiveEntry[] = [];
   let skippedCount = 0;
@@ -85,9 +86,7 @@ export async function buildPhotoArchive(
     try {
       const blob = await loadBlob(path);
       if (sourceBytes + blob.size > PHOTO_ARCHIVE_MAX_BYTES) {
-        throw new Error(
-          "The selected photos exceed the 95 MB safe archive limit. Select fewer photos and try again.",
-        );
+        throw new AppError("PHOTO_ARCHIVE_TOO_LARGE");
       }
       const bytes = new Uint8Array(await blob.arrayBuffer());
       sourceBytes += bytes.byteLength;
@@ -96,7 +95,7 @@ export async function buildPhotoArchive(
         data: bytes,
       });
     } catch (error) {
-      if (error instanceof Error && error.message.includes("safe archive limit")) {
+      if (error instanceof AppError && error.code === "PHOTO_ARCHIVE_TOO_LARGE") {
         throw error;
       }
       skippedCount += 1;
@@ -105,14 +104,12 @@ export async function buildPhotoArchive(
   }
 
   if (entries.length === 0) {
-    throw new Error("None of the selected photos could be downloaded");
+    throw new AppError("PHOTO_DOWNLOAD_UNAVAILABLE");
   }
 
   const archive = createZipArchive(entries);
   if (archive.byteLength > PHOTO_ARCHIVE_MAX_BYTES) {
-    throw new Error(
-      "The selected photos exceed the 95 MB safe archive limit. Select fewer photos and try again.",
-    );
+    throw new AppError("PHOTO_ARCHIVE_TOO_LARGE");
   }
 
   return {

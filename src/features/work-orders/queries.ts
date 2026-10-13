@@ -172,7 +172,7 @@ export function useWorkOrderFamilyQuery(workOrderId: string | null | undefined, 
   const id = String(workOrderId || "");
   return useQuery({
     queryKey: workOrderFamilyKey(id, directoryActorScope(actor)),
-    queryFn: () => loadWorkOrderFamily(id),
+    queryFn: ({ signal }) => loadWorkOrderFamily(id, signal),
     staleTime: 30_000,
     enabled: enabled && id.length > 0 && !!actor?.id && actor.active === true,
   });

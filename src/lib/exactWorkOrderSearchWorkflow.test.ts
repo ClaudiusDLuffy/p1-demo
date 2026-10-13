@@ -58,7 +58,7 @@ test("the exact family lookup preserves RLS and never returns soft-deleted work 
   assert.match(familyLoader, /normalizeExactPortalWorkOrderId\(workOrderId\)/);
   assert.match(familyLoader, /\.is\("deleted_at", null\)/);
   assert.match(familyLoader, /Promise\.all\(/);
-  assert.match(familyLoader, /loadWorkOrderById\(candidate\.id\)/);
+  assert.match(familyLoader, /loadWorkOrderById\(candidate\.id, signal\)/);
 });
 
 test("suffixed exact references do not expand into another assignment family", () => {
@@ -72,4 +72,6 @@ test("suffixed exact references do not expand into another assignment family", (
 test("exact results refresh with the existing work-order invalidation boundary", () => {
   assert.deepEqual(workOrderFamilyKey("synthetic", "actor-scope"), ["work-order-by-id", "family", "synthetic", "actor-scope"]);
   assert.ok(/queryKey: workOrderFamilyKey\(id, directoryActorScope\(actor\)\)/.test(queries));
+  assert.match(queries, /queryFn: \(\{ signal \}\) => loadWorkOrderFamily\(id, signal\)/);
+  assert.match(dataLayer, /candidatesQuery = candidatesQuery\.abortSignal\(signal\)/);
 });
