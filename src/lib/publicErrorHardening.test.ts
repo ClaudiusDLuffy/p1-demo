@@ -104,6 +104,24 @@ test("safe own-data normalization preserves real Zod and native abort results", 
   assert.equal(normalizeUnknownError(new TypeError("Failed to fetch")).code, "NETWORK_UNAVAILABLE");
 });
 
+for (const message of ["TypeError: Failed to fetch", "TypeError: fetch failed", "TypeError: Load failed",
+  "TypeError: NetworkError when attempting to fetch resource."]) {
+  test(`installed-SDK wrapped network failure is actionable: ${message}`, () => {
+    const error = normalizeUnknownError({ code: "", hint: "", details: "SYNTHETIC_PRIVATE_STACK", message });
+    assert.equal(error.code, "NETWORK_UNAVAILABLE");
+    assert.match(safeErrorMessage(error), /connection is unavailable/);
+    assert.doesNotMatch(JSON.stringify(publicError(error, crypto.randomUUID())), /PRIVATE_STACK|TypeError/);
+  });
+}
+test("network signature recognition does not override SQL errors or expose arbitrary messages", () => {
+  assert.equal(normalizeUnknownError({ code: "42501", hint: "", details: "private", message: "TypeError: Failed to fetch" }).code, "FORBIDDEN");
+  for (const cause of [{ message: "TypeError: Failed to fetch" },
+    { code: "", hint: "", details: "private", message: "TypeError: Failed to fetch PRIVATE_VALUE" }]) {
+    assert.equal(normalizeUnknownError(cause).code, "INTERNAL_ERROR");
+    assert.doesNotMatch(safeErrorMessage(cause), /PRIVATE_VALUE/);
+  }
+});
+
 test("client display includes a validated support reference only where the catalog requests it", () => {
   const correlationId = crypto.randomUUID();
   for (const code of [...Object.keys(coreErrorCodes), ...Object.keys(domainErrorCodes)]) {

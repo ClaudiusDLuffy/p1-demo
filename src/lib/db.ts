@@ -255,9 +255,10 @@ export async function loadWorkOrderById(workOrderId: string, signal?: AbortSigna
   return await readWorkOrderById(workOrderId, signal) as unknown as WorkOrder | null;
 }
 
-export async function loadWorkOrderFamily(workOrderId: string): Promise<WorkOrder[]> {
+export async function loadWorkOrderFamily(workOrderId: string, signal?: AbortSignal): Promise<WorkOrder[]> {
   const reference = normalizeExactPortalWorkOrderId(workOrderId);
   if (!reference) return [];
+  signal?.throwIfAborted();
 
   const sb = supabase();
   let candidatesQuery = sb
@@ -275,14 +276,18 @@ export async function loadWorkOrderFamily(workOrderId: string): Promise<WorkOrde
       )
     : candidatesQuery.eq("id", reference);
 
+  if (signal) candidatesQuery = candidatesQuery.abortSignal(signal);
+
   const { data, error } = await candidatesQuery
     .order("duplicate_sequence", { ascending: false, nullsFirst: false })
     .order("id", { ascending: false });
+  signal?.throwIfAborted();
   if (error) throw normalizeUnknownError(error);
 
   const hydrated = await Promise.all(
-    (data || []).map(candidate => loadWorkOrderById(candidate.id)),
+    (data || []).map(candidate => loadWorkOrderById(candidate.id, signal)),
   );
+  signal?.throwIfAborted();
   return hydrated.filter((workOrder): workOrder is WorkOrder => Boolean(workOrder));
 }
 

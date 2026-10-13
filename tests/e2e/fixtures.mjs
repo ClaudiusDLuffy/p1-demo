@@ -35,6 +35,7 @@ export const test = base.extend({
       if (response.status() >= 500) events.push({ kind: "http", status: response.status(), url: response.url().replace(/\?.*$/, "") });
     });
     await use(events);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(events, null, 2)),
       contentType: "application/json",
@@ -121,7 +122,11 @@ export async function login(page, account) {
         // A query invalidation can cancel a stale read while the local retry
         // handler is materializing it. Do not replay that request: writes may
         // be non-repeatable, and the browser has already abandoned this one.
-        if (!/response has been disposed|fetch response has been disposed/i.test(String(error))) throw error;
+        if (!/response has been disposed|fetch response has been disposed|test ended|target page, context or browser has been closed/i.test(String(error))) {
+          // APIRequest error strings may embed credentials from request
+          // headers. Keep an unexpected harness failure safe to report.
+          throw new Error("The local test request could not be inspected.");
+        }
         await route.abort("aborted").catch(() => undefined);
         return;
       }

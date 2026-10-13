@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { safeErrorMessage } from "./errors/normalizeUnknown";
+import { AppError } from "./errors/AppError";
 
 import {
   PHOTO_ARCHIVE_MAX_BYTES,
@@ -57,8 +59,39 @@ test("photo archives enforce the shared safe size boundary", async () => {
         arrayBuffer: async () => new ArrayBuffer(0),
       }),
     ),
-    /95 MB safe archive limit/,
+    error => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "PHOTO_ARCHIVE_TOO_LARGE");
+      assert.match(safeErrorMessage(error), /95 MB safe archive limit.*Select fewer photos/);
+      return true;
+    },
   );
+});
+
+test("all-unavailable and empty photo selections retain safe actionable messages", async () => {
+  await assert.rejects(buildPhotoArchive([], async () => blob([1])), error => {
+    assert.equal(safeErrorMessage(error), "Select at least one photo to download.");
+    return true;
+  });
+  await assert.rejects(buildPhotoArchive(["synthetic.png"], async () => {
+    throw new Error("PRIVATE STORAGE ERROR MUST NOT LEAK");
+  }), error => {
+    assert.match(safeErrorMessage(error), /None of the selected photos.*Check your connection/);
+    assert.doesNotMatch(safeErrorMessage(error), /PRIVATE STORAGE/);
+    return true;
+  });
+});
+
+test("photo download all includes more than twenty-four photos and verifies ZIP entry count", async () => {
+  for (const count of [24, 25, 42, 101]) {
+    const paths = Array.from({ length: count }, (_, index) => `wo/SYNTHETIC/photo-${index}.png`);
+    const result = await buildPhotoArchive(paths, async () => blob([1, 2, 3], "image/png"));
+    const end = new DataView(result.archive.buffer, result.archive.byteOffset + result.archive.length - 22, 22);
+    assert.equal(end.getUint32(0, true), 0x06054b50);
+    assert.equal(end.getUint16(10, true), count);
+    assert.equal(result.downloadedCount, count);
+    assert.equal(result.skippedCount, 0);
+  }
 });
 
 test("photo archive filenames are filesystem safe", () => {

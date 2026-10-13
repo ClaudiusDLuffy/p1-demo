@@ -12,6 +12,8 @@ export type ReadCall = {
 };
 export type RawReadResult = { data: unknown; error: unknown };
 export type ReadPlan = (call: ReadCall) => RawReadResult | Promise<RawReadResult>;
+export type FamilyReadCall = { filters: [string, unknown][]; signal?: AbortSignal };
+export type FamilyReadPlan = (call: FamilyReadCall) => RawReadResult | Promise<RawReadResult>;
 const root = process.cwd();
 const requireHere = createRequire(join(root, "package.json"));
 const allowedRpcs = new Set([
@@ -23,13 +25,33 @@ const allowedRpcs = new Set([
  * Only the Supabase request adapter is fake. No copied production function body,
  * mutable global stub, provider fallback, environment access or table query.
  */
-export function createWorkOrderReadHarness(plans: readonly ReadPlan[], now = Date.parse("2026-09-12T08:00:00.000Z")) {
+export function createWorkOrderReadHarness(plans: readonly ReadPlan[], now = Date.parse("2026-09-12T08:00:00.000Z"), familyPlan?: FamilyReadPlan) {
   const pending = [...plans];
   const calls: ReadCall[] = [];
+  const familyCalls: FamilyReadCall[] = [];
   const loaded = new Map<string, { exports: Record<string, unknown> }>();
   class FrozenDate extends Date { static now() { return now; } }
   const client = {
-    from() { throw new Error("Read-only page/header test must not issue table queries"); },
+    from(table: string) {
+      assert.ok(familyPlan, "Read-only page/header test must not issue table queries");
+      assert.equal(table, "work_orders");
+      const call: FamilyReadCall = { filters: [] };
+      familyCalls.push(call);
+      const query: PromiseLike<RawReadResult> & {
+        select(columns: string): typeof query; is(column: string, value: unknown): typeof query;
+        eq(column: string, value: unknown): typeof query; or(expression: string): typeof query;
+        order(column: string, options: unknown): typeof query; abortSignal(signal: AbortSignal): typeof query;
+      } = {
+        select(columns) { assert.equal(columns, "id, duplicate_sequence"); return query; },
+        is(column, value) { assert.equal(column, "deleted_at"); assert.equal(value, null); call.filters.push([column, value]); return query; },
+        eq(column, value) { assert.equal(column, "id"); call.filters.push([column, value]); return query; },
+        or(expression) { call.filters.push(["or", expression]); return query; },
+        order(column) { assert.ok(["duplicate_sequence", "id"].includes(column)); return query; },
+        abortSignal(signal) { call.signal = signal; return query; },
+        then(onfulfilled, onrejected) { return Promise.resolve().then(() => familyPlan(call)).then(onfulfilled, onrejected); },
+      };
+      return query;
+    },
     rpc(name: string, args: Record<string, unknown>) {
       assert.ok(allowedRpcs.has(name), `Unexpected query or mutation RPC: ${name}`);
       const call: ReadCall = { name, args: structuredClone(args), signal: undefined };
@@ -85,8 +107,10 @@ export function createWorkOrderReadHarness(plans: readonly ReadPlan[], now = Dat
   };
   return {
     calls,
+    familyCalls,
     loadPage: (params?: Record<string, unknown>, signal?: AbortSignal) => invoke("loadWorkOrdersPage", [params, signal]),
     loadExact: (id: string, signal?: AbortSignal) => invoke("loadWorkOrderById", [id, signal]),
+    loadFamily: (id: string, signal?: AbortSignal) => invoke("loadWorkOrderFamily", [id, signal]),
     remainingPlans: () => pending.length,
   };
 }
