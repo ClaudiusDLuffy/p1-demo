@@ -15,6 +15,7 @@ const headerStrings = {
   rejectedBy: "rejected_by", resubmittedAt: "resubmitted_at", resubmittedBy: "resubmitted_by",
   paymentHoldBy: "payment_hold_by", paymentHoldReason: "payment_hold_reason", contractorName: "contractor_name",
   originalPdfName: "original_pdf_name",
+  priorAssignmentId: "prior_assignment_id", priorAssignmentNote: "prior_assignment_note",
 } as const;
 type HeaderStrings = { -readonly [Key in keyof typeof headerStrings]?: string | null };
 export type InvoiceSourceSummary = {

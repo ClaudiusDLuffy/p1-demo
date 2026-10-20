@@ -1247,6 +1247,8 @@ export type Database = {
           num: string
           paid_at: string | null
           pdf_storage_path: string | null
+          prior_assignment_id: string | null
+          prior_assignment_note: string | null
           qbo_invoice_id: string | null
           qbo_synced_at: string | null
           rejection_reason: string | null
@@ -1291,6 +1293,8 @@ export type Database = {
           num: string
           paid_at?: string | null
           pdf_storage_path?: string | null
+          prior_assignment_id?: string | null
+          prior_assignment_note?: string | null
           qbo_invoice_id?: string | null
           qbo_synced_at?: string | null
           rejection_reason?: string | null
@@ -1335,6 +1339,8 @@ export type Database = {
           num?: string
           paid_at?: string | null
           pdf_storage_path?: string | null
+          prior_assignment_id?: string | null
+          prior_assignment_note?: string | null
           qbo_invoice_id?: string | null
           qbo_synced_at?: string | null
           rejection_reason?: string | null
@@ -3171,6 +3177,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_prior_contractor_invoice_context_v1: { Args: { p_work_order_id: string }; Returns: Json };
+      save_prior_contractor_invoice_v1: { Args: { p_work_order_id: string; p_expected_assignment_version: number;
+        p_expected_workflow_cycle: number; p_assignment_id: string; p_invoice_id: string | null;
+        p_expected_invoice_version: number | null; p_operation_id: string; p_payload: Json }; Returns: Json };
+      submit_prior_contractor_invoice_v1: { Args: { p_invoice_id: string; p_expected_invoice_version: number;
+        p_expected_assignment_version: number; p_expected_workflow_cycle: number; p_operation_id: string }; Returns: Json };
       get_financial_notification_review_compatibility_v1: {
         Args: { p_invoice_id: string; p_event: string };
         Returns: Json;
