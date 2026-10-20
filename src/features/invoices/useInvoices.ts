@@ -89,6 +89,7 @@ export default function useInvoices({ currentUser, fire }: any) {
   ]);
   const invalidateInvoiceData = () => Promise.all([
     qc.invalidateQueries({ queryKey: INVOICES_KEY }),
+    qc.invalidateQueries({ queryKey: ["prior-contractor-invoices"] }),
     qc.invalidateQueries({ queryKey: INVOICE_PAGES_KEY }),
     qc.invalidateQueries({ queryKey: invoiceCountKey(readScope) }),
     qc.invalidateQueries({ queryKey: INVOICE_BY_ID_KEY }),

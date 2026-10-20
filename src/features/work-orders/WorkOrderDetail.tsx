@@ -94,6 +94,7 @@ const ContractorEstimatePanel = dynamic(
   () => import("../estimates/ContractorEstimatePanel"),
   { ssr: false }
 );
+const PriorContractorInvoicePanel = dynamic(() => import("../invoices/PriorContractorInvoicePanel"), { ssr: false });
 
 const PART_STATUS_ORDER: Record<string, number> = {
   backordered: 0,
@@ -307,7 +308,7 @@ export default function WorkOrderDetail(props: any) {
       && woData.contractorInvoicingAssignmentVersion === woData.contractorAssignmentVersion
       && woData.contractorInvoicingWorkflowCycle === woData.workflowCycle,
   );
-  const contractorInvoiceStates = woAllInvoices.map((invoice: any) => invoice.state);
+  const contractorInvoiceStates = woAllInvoices.filter(invoice => !invoice.priorAssignmentId).map((invoice: any) => invoice.state);
   const contractorInvoiceSetReady = contractorInvoiceStates.some(state =>
     ["submitted", "revised", "approved", "paid"].includes(state),
   ) && !contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state));
@@ -727,6 +728,7 @@ export default function WorkOrderDetail(props: any) {
             </>);
             const billingDocuments = (<>
                     <DetailDisclosure focused={focused} title="Invoices, estimates and documents" id="work-order-documents">
+                    {isManager && !invoiceController && <PriorContractorInvoicePanel key={`${currentUser?.id}:${woData.id}`} workOrderId={woData.id} />}
                     {!contractorHistoryReadOnly && woData.status !== "closed" && !isManager && canInvoice && (
                       <div className="card contractor-invoice-cta" style={{ padding: "16px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
                         <div>
@@ -752,7 +754,7 @@ export default function WorkOrderDetail(props: any) {
                       />
                     )}
 
-                    {woAllInvoices.length > 0 && (isManager || canInvoice) && (
+                    {contractorInvoiceStates.length > 0 && (isManager || canInvoice) && (
                       <div
                         role="status"
                         className="card"
@@ -862,6 +864,7 @@ export default function WorkOrderDetail(props: any) {
                                 <div className="wo-invoice-row-main" style={{ minWidth: 0, flex: 1 }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                                     <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>#{inv.num}</span>
+                                    {inv.priorAssignmentId && <span className="text-xs">Previous contractor bill · current assignment unchanged</span>}
                                     <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: stateColor, background: stateBg, border: `1px solid ${stateColor}33`, padding: "2px 8px", borderRadius: 999 }}>{stateLabel}</span>
                                     <span className="mono" style={{ fontSize: 12, color: T.muted }}>{fmt(inv.total || 0)}</span>
                                     {inv.invoiceDate && <span style={{ fontSize: 11, color: T.subtle }}>{inv.invoiceDate}</span>}

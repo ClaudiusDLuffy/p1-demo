@@ -313,7 +313,8 @@ export default function InvoiceDetail(props: any) {
                 {confirmApprove && (
                   <Modal onClose={() => { if (!approving) setConfirmApprove(false); }} dismissDisabled={approving} title={`Approve invoice #${inv.num}`} width={440}>
                     <div style={{ fontSize: 13, color: T.muted, marginBottom: 20, lineHeight: 1.55 }}>
-                      Approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>? This updates only this invoice. The work order advances only when all live invoices are approved or entered in QuickBooks.
+                      Approve invoice <span className="mono" style={{ color: T.ink, fontWeight: 600 }}>#{inv.num}</span>?
+                      {inv.priorAssignmentId ? " This is a previous contractor bill. Approval does not change the current contractor or work-order status." : " This updates only this invoice. The work order advances only when all live invoices are approved or entered in QuickBooks."}
                     </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                       <button onClick={() => setConfirmApprove(false)} disabled={approving} className="btn-soft">Cancel</button>
