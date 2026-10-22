@@ -49,6 +49,14 @@ export default function VaCoordinatorTeamManagement({ page, allowed, actorId }: 
     save.reset();
   };
 
+  const cancelEditing = () => {
+    setEditing(false);
+    setSelection(blankSelection);
+    setFilter("");
+    setNotice("");
+    save.reset();
+  };
+
   const toggle = (field: "coordinatorIds" | "technicianIds", id: string) => {
     setSelection(current => ({
       ...current,
@@ -137,7 +145,7 @@ export default function VaCoordinatorTeamManagement({ page, allowed, actorId }: 
           {save.isError && <p role="alert" style={errorStyle}>{safeErrorMessage(save.error)}</p>}
           {notice && <p role="status" style={{ color: notice === "Team access saved." ? T.success : T.danger }}>{notice}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button type="button" className="btn-soft" onClick={startNewTeam} disabled={save.isPending}>Cancel</button>
+            <button type="button" className="btn-soft" onClick={cancelEditing} disabled={save.isPending}>Cancel</button>
             <button type="submit" className="btn-primary" disabled={save.isPending || !selection.name.trim()}>
               {save.isPending ? "Saving…" : "Save team access"}
             </button>
