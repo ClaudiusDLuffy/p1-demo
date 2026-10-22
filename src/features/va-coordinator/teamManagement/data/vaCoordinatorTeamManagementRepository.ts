@@ -12,7 +12,7 @@ export function createVaCoordinatorTeamManagementRepository(client?: RpcClient) 
   return {
     async load(signal?: AbortSignal): Promise<VaCoordinatorTeamManagement> {
       signal?.throwIfAborted();
-      const request = rpcClient().rpc("list_va_coordinator_team_management_v1");
+      const request = rpcClient().rpc("list_va_coordinator_team_management_v2");
       const { data, error } = await (signal && request.abortSignal ? request.abortSignal(signal) : request);
       signal?.throwIfAborted();
       if (error) throw normalizeUnknownError(error);
@@ -21,7 +21,7 @@ export function createVaCoordinatorTeamManagementRepository(client?: RpcClient) 
     },
     async save(command: SaveVaCoordinatorTeamCommand, directory: VaCoordinatorTeamManagement) {
       const args = prepareSaveVaCoordinatorTeam(command, directory);
-      const { data, error } = await rpcClient().rpc("configure_va_coordinator_team_v1", args);
+      const { data, error } = await rpcClient().rpc("configure_va_coordinator_team_v2", args);
       if (error) throw normalizeUnknownError(error);
       if (!data || typeof data !== "object" || Array.isArray(data)
         || typeof (data as Record<string, unknown>).teamId !== "string") {

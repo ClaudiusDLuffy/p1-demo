@@ -5,6 +5,7 @@ import test from "node:test";
 
 const migration = readFileSync(resolve(process.cwd(), "supabase/migrations/0175_va_coordinator_scoped_access.sql"), "utf8");
 const managerBackOfficeTeamManagementMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0178_manager_backoffice_va_team_management.sql"), "utf8");
+const testAccountExclusionMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0179_va_team_test_account_exclusion.sql"), "utf8");
 const staffAuthorization = readFileSync(resolve(process.cwd(), "supabase/migrations/0101_enforce_active_staff_authorization.sql"), "utf8");
 const portalShell = readFileSync(resolve(process.cwd(), "src/components/PortalShell.tsx"), "utf8");
 
@@ -40,6 +41,16 @@ test("team-management reads and writes are restricted to active managers and bac
   assert.match(managerBackOfficeTeamManagementMigration, /technician\.profile_id = profile\.id and technician\.is_active/);
   assert.match(managerBackOfficeTeamManagementMigration, /grant execute on function public\.list_va_coordinator_team_management_v1\(\) to authenticated, service_role/);
   assert.doesNotMatch(managerBackOfficeTeamManagementMigration, /jsonb_build_object\([\s\S]*?'(?:email|phone|billing|pricing)'/i);
+});
+
+test("VA team roster excludes explicitly marked test technicians at read and save boundaries", () => {
+  assert.match(testAccountExclusionMigration, /add column if not exists is_test_account boolean not null default false/);
+  assert.match(testAccountExclusionMigration, /create function public\.list_va_coordinator_team_management_v2\(\)/);
+  assert.match(testAccountExclusionMigration, /profile\.is_test_account = true/);
+  assert.match(testAccountExclusionMigration, /create function public\.configure_va_coordinator_team_v2/);
+  assert.match(testAccountExclusionMigration, /profile\.is_test_account is true/);
+  assert.match(testAccountExclusionMigration, /revoke all on function public\.list_va_coordinator_team_management_v1\(\) from authenticated/);
+  assert.match(testAccountExclusionMigration, /revoke all on function public\.configure_va_coordinator_team_v1\(uuid,text,uuid\[\],uuid\[\]\) from authenticated/);
 });
 
 test("VA read RPCs return a bounded allowlist and use a keyset cursor", () => {

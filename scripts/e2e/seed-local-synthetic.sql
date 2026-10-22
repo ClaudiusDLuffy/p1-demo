@@ -80,6 +80,14 @@ on conflict (id) do update set
   contractor_access_level = excluded.contractor_access_level,
   updated_at = now();
 
+update public.profiles
+set is_test_account = (id = :'invoice_tech_id'::uuid), updated_at = now()
+where id in (:'manager_id'::uuid, :'dispatcher_id'::uuid, :'backoffice_id'::uuid,
+  :'controller_id'::uuid, :'accounting_id'::uuid, :'direct_id'::uuid,
+  :'company_admin_id'::uuid, :'company_admin_2_id'::uuid, :'invoice_tech_id'::uuid,
+  :'legacy_invoice_tech_id'::uuid, :'revocation_tech_id'::uuid, :'report_tech_id'::uuid,
+  :'team_lead_id'::uuid, :'team_member_id'::uuid, :'va_coordinator_id'::uuid);
+
 update public.organizations
 set canonical_contractor_id = :'company_admin_id'::uuid, updated_at = now()
 where id = '00000000-0000-4000-8000-00000000e201';

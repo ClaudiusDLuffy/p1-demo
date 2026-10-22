@@ -9,6 +9,7 @@ for (const account of [accounts.manager, accounts.backoffice, accounts.controlle
     await expect(page.getByLabel("Team name")).toHaveValue("Synthetic VA Team");
     await expect(page.getByRole("checkbox", { name: /Synthetic VA Coordinator/ })).toBeChecked();
     await expect(page.getByRole("checkbox", { name: /Synthetic Team Member/ })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: /Synthetic Invoice Technician/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Save team access", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Team access saved." })).toBeVisible();
   });
