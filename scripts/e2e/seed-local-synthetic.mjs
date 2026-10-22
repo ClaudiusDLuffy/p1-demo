@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createClient } from "@supabase/supabase-js";
 import { localSupabaseRuntime, syntheticPassword } from "./local-supabase-runtime.mjs";
 
 const accounts = [
@@ -18,6 +19,7 @@ const accounts = [
   ["report_tech_id", "e2e.report.tech@p1.invalid", "Synthetic Report Technician", "contractor"],
   ["team_lead_id", "e2e.team.lead@p1.invalid", "Synthetic Team Lead", "contractor"],
   ["team_member_id", "e2e.team.member@p1.invalid", "Synthetic Team Member", "contractor"],
+  ["va_coordinator_id", "e2e.va.coordinator@p1.invalid", "Synthetic VA Coordinator", "va_coordinator"],
 ];
 
 function headers(secret) {
@@ -60,6 +62,14 @@ async function ensureUsers(runtime) {
 
 async function main() {
   const runtime = localSupabaseRuntime();
+  const storage = createClient(runtime.NEXT_PUBLIC_SUPABASE_URL, runtime.SUPABASE_SECRET_KEY,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error: photoCleanupError } = await storage.storage.from("photos")
+    .remove([
+      "wo/E2E-SUB-TEAM/va-coordinator-synthetic.png",
+      "wo/E2E-REPORT-START/va-coordinator-out-of-scope.png",
+    ]);
+  if (photoCleanupError) throw new Error("Local synthetic VA photo cleanup failed");
   const preflight = readFileSync(resolve(process.cwd(), "scripts/e2e/assert-local-private-object-baseline.sql"), "utf8");
   execFileSync(
     "docker",

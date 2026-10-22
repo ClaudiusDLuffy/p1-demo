@@ -32,10 +32,10 @@ test("the shared menu never introduces staff or billing pages for restricted acc
     { isManager: false, invoiceController: true },
   ]) {
     const items = buildPortalNavigationItems({ ...permissions, counts });
-    for (const selectedPage of ["my_jobs", "my_schedule", "simplified", "billing", "wo_detail"]) {
+    for (const selectedPage of ["my_jobs", "my_schedule", "simplified", "billing", "va_teams", "wo_detail"]) {
       const html = render(items, selectedPage);
       assert.deepEqual(labels(html), items.map(item => item.label));
-      assert.doesNotMatch(html, /aria-label="(?:Simplified|7-Eleven billing|Contractors|Capital)"/);
+      assert.doesNotMatch(html, /aria-label="(?:Simplified|7-Eleven billing|Contractors|Capital|VA Teams)"/);
     }
   }
 });

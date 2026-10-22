@@ -15,6 +15,7 @@ type PortalNavigationOptions = {
   canInvoice?: boolean;
   canLeadTeam?: boolean;
   canManageTeam?: boolean;
+  canManageVaCoordinatorTeams?: boolean;
   counts: {
     capital: number | null;
     contractorActive: number | null;
@@ -62,15 +63,18 @@ export function initialFocusedPortalPage(role: PortalNavigationRole, search: str
   return role === "contractor" ? "my_jobs" : "dashboard";
 }
 
-function controllerItems(): PortalNavigationItem[] {
-  return [
+function controllerItems(options: PortalNavigationOptions): PortalNavigationItem[] {
+  const items: PortalNavigationItem[] = [
     { id: "dashboard", label: "Controller", icon: ICONS.dashboard },
     { id: "invoices", label: "Contractor bills", icon: ICONS.invoices },
   ];
+  if (options.canManageVaCoordinatorTeams) items.push({ id: "va_teams", label: "VA Teams", icon: ICONS.team });
+  return items;
 }
 
-function managerItems(counts: PortalNavigationOptions["counts"]): PortalNavigationItem[] {
-  return [
+function managerItems(options: PortalNavigationOptions): PortalNavigationItem[] {
+  const counts = options.counts;
+  const items: PortalNavigationItem[] = [
     { id: "dashboard", label: "Dashboard", icon: ICONS.dashboard },
     { id: "simplified", label: "Simplified", icon: ICONS.simplified },
     { id: "staff_work", label: "My Work", icon: ICONS.staffWork, badge: counts.staffWork },
@@ -83,6 +87,8 @@ function managerItems(counts: PortalNavigationOptions["counts"]): PortalNavigati
     { id: "contractor_preview", label: "Contractor view", icon: ICONS.preview },
     { id: "history", label: "History", icon: ICONS.history, badge: counts.history },
   ];
+  if (options.canManageVaCoordinatorTeams) items.splice(9, 0, { id: "va_teams", label: "VA Teams", icon: ICONS.team });
+  return items;
 }
 
 function contractorItems(options: PortalNavigationOptions): PortalNavigationItem[] {
@@ -107,8 +113,8 @@ function contractorItems(options: PortalNavigationOptions): PortalNavigationItem
 }
 
 const ITEM_BUILDERS: Record<PortalNavigationRole, (options: PortalNavigationOptions) => PortalNavigationItem[]> = {
-  controller: () => controllerItems(),
-  manager: options => managerItems(options.counts),
+  controller: controllerItems,
+  manager: managerItems,
   contractor: contractorItems,
 };
 
@@ -140,6 +146,7 @@ export function portalPageTitle(
     invoices: options.isManager ? "Contractor bills" : "Invoices",
     billing: "7-Eleven billing",
     contractors: "Contractors",
+    va_teams: "VA Teams",
     contractor_preview: "Contractor view",
     my_jobs: "My jobs",
     team_dispatch: "My Team",
