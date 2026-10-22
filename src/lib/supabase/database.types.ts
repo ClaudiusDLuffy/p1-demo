@@ -3927,6 +3927,39 @@ export type Database = {
         Args: { p_new_owner_id: string; p_work_order_id: string }
         Returns: Database["public"]["Tables"]["staff_work_order_todos"]["Row"]
       }
+      list_va_coordinator_work_orders_v1: {
+        Args: { p_search?: string | null; p_limit?: number; p_cursor?: Json | null }
+        Returns: Json
+      }
+      get_va_coordinator_work_order_v1: {
+        Args: { p_work_order_id: string }
+        Returns: Json
+      }
+      list_va_coordinator_technician_notes_v1: {
+        Args: { p_work_order_id: string; p_limit?: number }
+        Returns: Json
+      }
+      list_va_coordinator_photos_v1: {
+        Args: { p_work_order_id: string; p_limit?: number }
+        Returns: Json
+      }
+      mark_work_order_activity_synced_v1: {
+        Args: { p_activity_id: string; p_synced: boolean }
+        Returns: undefined
+      }
+      configure_va_coordinator_team_v1: {
+        Args: {
+          p_team_id?: string | null
+          p_name?: string | null
+          p_coordinator_profile_ids?: string[]
+          p_technician_profile_ids?: string[]
+        }
+        Returns: Json
+      }
+      list_va_coordinator_team_management_v1: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
     }
     Enums: {
       capital_status:
@@ -3952,7 +3985,7 @@ export type Database = {
         | "rejected"
         | "revised"
         | "paid"
-      user_role: "manager" | "dispatcher" | "back_office" | "contractor"
+      user_role: "manager" | "dispatcher" | "back_office" | "contractor" | "va_coordinator"
       wo_priority: "p1" | "p2" | "p3" | "p4" | "p5"
       wo_status:
         | "unassigned"
@@ -4119,7 +4152,7 @@ export const Constants = {
         "revised",
         "paid",
       ],
-      user_role: ["manager", "dispatcher", "back_office", "contractor"],
+      user_role: ["manager", "dispatcher", "back_office", "contractor", "va_coordinator"],
       wo_priority: ["p1", "p2", "p3", "p4", "p5"],
       wo_status: [
         "unassigned",

@@ -16,6 +16,7 @@ export const accounts = {
   reportTech: { email: "e2e.report.tech@p1.invalid", name: "Synthetic Report Technician" },
   teamLead: { email: "e2e.team.lead@p1.invalid", name: "Synthetic Team Lead" },
   teamMember: { email: "e2e.team.member@p1.invalid", name: "Synthetic Team Member" },
+  vaCoordinator: { email: "e2e.va.coordinator@p1.invalid", name: "Synthetic VA Coordinator", workspaceLabel: "VA Coordinator" },
 };
 
 export const test = base.extend({
@@ -153,6 +154,8 @@ export async function login(page, account) {
   if ((page.viewportSize()?.width || 0) <= 720) {
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeHidden();
     await expect(page.locator(".app-root")).toBeVisible();
+  } else if (account.workspaceLabel) {
+    await expect(page.getByText(`${account.workspaceLabel} · ${account.name}`, { exact: true })).toBeVisible();
   } else {
     await expect(page.locator(".desktop-sidebar").getByText(account.name, { exact: true })).toBeVisible();
   }

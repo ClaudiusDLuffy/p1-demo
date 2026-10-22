@@ -110,3 +110,9 @@ body {
     position: static;
   }
 }
+
+@media (max-width: 900px) {
+  .va-coordinator-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

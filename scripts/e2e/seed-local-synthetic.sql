@@ -60,7 +60,8 @@ values
   (:'revocation_tech_id'::uuid, 'Synthetic Revocation Technician', 'RV', 'e2e.revocation.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#047857', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'invoice'),
   (:'report_tech_id'::uuid, 'Synthetic Report Technician', 'RT', 'e2e.report.tech@p1.invalid', 'contractor', null, 'Synthetic Service Company', 'Test Territory', array['refrigeration'], '#EC4899', true, 'contracted', null, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
   (:'team_lead_id'::uuid, 'Synthetic Team Lead', 'TL', 'e2e.team.lead@p1.invalid', 'contractor', null, 'Synthetic Service Company · Field Team', 'Test Territory', array['general'], '#0F766E', true, 'mr_freeze', null, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
-  (:'team_member_id'::uuid, 'Synthetic Team Member', 'TM', 'e2e.team.member@p1.invalid', 'contractor', null, 'Synthetic Service Company · Field Team', 'Test Territory', array['general'], '#2563EB', true, 'contracted', :'team_lead_id'::uuid, true, '00000000-0000-4000-8000-00000000e201', 'report_only')
+  (:'team_member_id'::uuid, 'Synthetic Team Member', 'TM', 'e2e.team.member@p1.invalid', 'contractor', null, 'Synthetic Service Company · Field Team', 'Test Territory', array['general'], '#2563EB', true, 'contracted', :'team_lead_id'::uuid, true, '00000000-0000-4000-8000-00000000e201', 'report_only'),
+  (:'va_coordinator_id'::uuid, 'Synthetic VA Coordinator', 'VA', 'e2e.va.coordinator@p1.invalid', 'va_coordinator', null, null, null, '{}', '#7C3AED', true, null, null, false, null, null)
 on conflict (id) do update set
   name = excluded.name,
   initials = excluded.initials,
@@ -105,6 +106,23 @@ values
   (:'company_admin_id'::uuid, :'report_tech_id'::uuid, 'Synthetic Report Technician', 'contracted', true),
   (:'company_admin_id'::uuid, :'team_lead_id'::uuid, 'Synthetic Team Lead', 'mr_freeze', true),
   (:'company_admin_id'::uuid, :'team_member_id'::uuid, 'Synthetic Team Member', 'contracted', true);
+
+insert into va_coordinator_private.teams (id, name, active)
+values ('00000000-0000-4000-8000-00000000e401', 'Synthetic VA Team', true)
+on conflict (id) do update set name = excluded.name, active = excluded.active;
+delete from va_coordinator_private.team_members where team_id = '00000000-0000-4000-8000-00000000e401';
+delete from va_coordinator_private.team_technicians where team_id = '00000000-0000-4000-8000-00000000e401';
+delete from va_coordinator_private.assignment_events where team_id = '00000000-0000-4000-8000-00000000e401';
+insert into va_coordinator_private.team_members (team_id, profile_id)
+values ('00000000-0000-4000-8000-00000000e401', :'va_coordinator_id'::uuid);
+insert into va_coordinator_private.team_technicians (team_id, technician_profile_id)
+values ('00000000-0000-4000-8000-00000000e401', :'team_member_id'::uuid);
+insert into va_coordinator_private.assignment_events (
+  team_id, actor_id, coordinator_profile_ids, technician_profile_ids
+) values (
+  '00000000-0000-4000-8000-00000000e401', :'manager_id'::uuid,
+  array[:'va_coordinator_id'::uuid], array[:'team_member_id'::uuid]
+);
 
 insert into public.afms (id, name, email, region)
 values ('00000000-0000-4000-8000-00000000e301', 'Synthetic AFM', 'afm@synthetic.invalid', 'Synthetic Region')
@@ -480,7 +498,34 @@ values
    'manager', 'note', '{}'::jsonb, true, false, 1, 0, 'field_note'),
   ('00000000-0000-4000-8000-00000000f303', 'E2E-ACTIVITY', :'manager_id'::uuid,
    'Synthetic Manager', 'Synthetic internal note for deletion.', 'note',
+   'manager', 'note', '{}'::jsonb, false, true, 1, 0, 'internal_note'),
+  ('00000000-0000-4000-8000-00000000f304', 'E2E-SUB-TEAM', :'team_member_id'::uuid,
+   'Synthetic Team Member', 'Synthetic VA coordinator note to transfer.', 'note',
+   'contractor', 'note', '{}'::jsonb, true, false, 1, 0, 'field_note'),
+  ('00000000-0000-4000-8000-00000000f305', 'E2E-SUB-TEAM', :'manager_id'::uuid,
+   'Synthetic Manager', 'Synthetic VA hidden internal note.', 'note',
    'manager', 'note', '{}'::jsonb, false, true, 1, 0, 'internal_note');
+
+insert into public.photos (work_order_id, storage_path, uploader_id, uploader_name, caption)
+values
+  ('E2E-SUB-TEAM', 'wo/E2E-SUB-TEAM/va-coordinator-synthetic.png', :'team_member_id'::uuid,
+    'Synthetic Team Member', 'Synthetic VA team attachment'),
+  ('E2E-REPORT-START', 'wo/E2E-REPORT-START/va-coordinator-out-of-scope.png', :'report_tech_id'::uuid,
+    'Synthetic Report Technician', 'Synthetic out-of-team attachment');
+insert into storage.objects (bucket_id, name, owner, metadata)
+values
+  ('photos', 'wo/E2E-SUB-TEAM/va-coordinator-synthetic.png', :'team_member_id'::uuid, '{}'::jsonb),
+  ('photos', 'wo/E2E-REPORT-START/va-coordinator-out-of-scope.png', :'report_tech_id'::uuid, '{}'::jsonb);
+insert into public.private_object_bindings (
+  bucket, object_path, storage_object_id, purpose, work_order_id, photo_id, actor_id,
+  assignment_version, workflow_cycle, validation, review_reference, state
+)
+select 'photos', p.storage_path, o.id, 'photo', p.work_order_id, p.id, :'team_member_id'::uuid,
+  1, 0, 'legacy_reviewed', 'SYNTHETIC-VA-COORDINATOR-PHOTO', 'finalized'
+from public.photos p join storage.objects o on o.bucket_id = 'photos' and o.name = p.storage_path
+where p.work_order_id in ('E2E-SUB-TEAM', 'E2E-REPORT-START')
+  and p.storage_path in ('wo/E2E-SUB-TEAM/va-coordinator-synthetic.png',
+    'wo/E2E-REPORT-START/va-coordinator-out-of-scope.png');
 
 insert into public.invoices (
   id, num, work_order_id, store_number, store_address, contractor_id, cme,

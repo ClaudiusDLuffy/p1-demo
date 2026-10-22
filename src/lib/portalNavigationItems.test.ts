@@ -30,11 +30,16 @@ test("builds role-specific portal navigation without leaking manager pages", () 
 
   const manager = buildPortalNavigationItems({ invoiceController: false, isManager: true, counts: emptyCounts });
   assert.ok(manager.some(item => item.id === "simplified"));
+  assert.ok(!manager.some(item => item.id === "va_teams"));
+  const vaTeamManager = buildPortalNavigationItems({ invoiceController: false, isManager: true,
+    canManageVaCoordinatorTeams: true, counts: emptyCounts });
+  assert.ok(vaTeamManager.some(item => item.id === "va_teams"));
   assert.ok(manager.some(item => item.id === "my_schedule"));
   assert.equal(manager.find(item => item.id === "my_schedule")?.beta, true);
   assert.equal(contractor.find(item => item.id === "my_schedule")?.beta, true);
   assert.equal(manager.filter(item => item.beta).length, 1);
   assert.ok(!contractor.some(item => item.id === "simplified"));
+  assert.ok(!contractor.some(item => item.id === "va_teams"));
 });
 
 test("restores focused tabs only for their allowed navigation roles", () => {
@@ -61,5 +66,6 @@ test("selects stable bottom navigation for each role", () => {
 test("resolves contextual page titles", () => {
   assert.equal(portalPageTitle("work_orders", { isManager: true, selectedWorkOrderTitle: "WOT123" }), "WOT123");
   assert.equal(portalPageTitle("invoices", { isManager: false }), "Invoices");
+  assert.equal(portalPageTitle("va_teams", { isManager: true }), "VA Teams");
   assert.equal(portalPageTitle("unknown", { isManager: true }), "P1 Service Portal");
 });

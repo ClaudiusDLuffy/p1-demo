@@ -50,6 +50,11 @@ import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import SimplifiedWorkspace from "../features/simplified-work/SimplifiedWorkspace";
+import VaCoordinatorTeamManagement from "../features/va-coordinator/teamManagement/VaCoordinatorTeamManagement";
+import { canManageVaCoordinatorTeams } from "../features/va-coordinator/teamManagement/teamManagementBusiness";
+import VaCoordinatorWorkspace from "../features/va-coordinator/VaCoordinatorWorkspace";
+import { VA_COORDINATOR_ROLE } from "../features/va-coordinator/contracts";
+import type { PortalAuthProfile } from "../features/auth/authProfile";
 import MySchedule from "../features/schedule/MySchedule";
 import {
   WORK_ORDER_BY_ID_KEY,
@@ -1170,8 +1175,13 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
 // ===============================================================
 const EMPTY_EDIT_WO = { priority: "", store: "", city: "", addr: "", lineOfService: "", businessService: "", category: "", subCategory: "", afm: "", afmEmail: "", summary: "", description: "" };
 
-export default function PortalShell() {
-  const [page, setPage] = useState("dashboard");
+function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, authLogout }: {
+  currentUser: PortalAuthProfile;
+  initialPage: string;
+  refreshCurrentProfile: () => Promise<boolean>;
+  authLogout: () => Promise<void>;
+}) {
+  const [page, setPage] = useState(initialPage);
   const [selectedWO, setSelectedWO] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterC, setFilterC] = useState("all");
@@ -1375,17 +1385,9 @@ export default function PortalShell() {
   const [resolutionInput, setResolutionInput] = useState("");
   const [resolutionNotesInput, setResolutionNotesInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
-  const { currentUser: hydratedUser, hasSession, refreshCurrentProfile, loginEmail, setLoginEmail,
-    loginPassword, setLoginPassword, rememberMe, setRememberMe, loginLoading, loginError,
-    fadeIn, doLogin, logout: authLogout } = useAuth({ fire, setPage, setSelectedWO, setAiNote, setInvoices });
-  // A hydrated profile is only an authorization projection; it must never
-  // keep data hooks alive after the underlying Supabase session disappears.
-  const currentUser = hasSession ? hydratedUser : null;
-  // Wait for the profile before enabling portal data. Starting on the raw
-  // session and then resetting again when the profile arrives caused every
-  // initial query to run twice.
-  const isAuthenticated = !!currentUser?.id && currentUser.active === true;
+  const isAuthenticated = currentUser.active === true;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
+  const canManageVaTeams = canManageVaCoordinatorTeams(currentUser?.role);
   const invoiceController = isInvoiceController(currentUser);
   const notesSeenInFlight = useRef(new Map<string, Promise<string | null>>());
   const notesSeenVersions = useRef(new Map<string, string>());
@@ -2673,6 +2675,7 @@ export default function PortalShell() {
     canInvoice: currentUser?.canInvoice,
     canLeadTeam: currentUser?.canLeadTeam,
     canManageTeam: currentUser?.canManageTeam,
+    canManageVaCoordinatorTeams: canManageVaTeams,
     counts: {
       capital: capitalCount || null,
       contractorActive: contractorActiveBadge,
@@ -2683,20 +2686,20 @@ export default function PortalShell() {
       pendingApproval: pendAppr || null,
       staffWork: navigationSummary?.staffWorkCount || null,
     },
-  }), [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
+  }), [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, canManageVaTeams, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
   const bottomNavItems = useMemo(
     () => buildBottomNavigationItems(sideItems, navigationRole),
     [navigationRole, sideItems],
   );
 
   useEffect(() => {
-    if (!invoiceController || page === "dashboard" || page === "invoices") return;
+    if (!invoiceController || page === "dashboard" || page === "invoices" || (page === "va_teams" && canManageVaTeams)) return;
     setSelectedWO(null);
     setSelectedInvoice(null);
     setSelectedBillingInvoice(null);
     setModal(null);
     setPage("dashboard");
-  }, [invoiceController, page, setSelectedInvoice]);
+  }, [canManageVaTeams, invoiceController, page, setSelectedInvoice]);
 
   const sensitiveShellIdentity = useRef<string | null>(null);
   useEffect(() => {
@@ -2717,8 +2720,6 @@ export default function PortalShell() {
   // ===============================================================
   //  LOGIN
   // ===============================================================
-  if (!currentUser || currentUser.active !== true) return <LoginForm loginEmail={loginEmail} setLoginEmail={setLoginEmail} loginPassword={loginPassword} setLoginPassword={setLoginPassword} rememberMe={rememberMe} setRememberMe={setRememberMe} loginLoading={loginLoading} logoutLoading={logoutLoading} loginError={currentUser?.active === false ? "Your account is inactive. Contact an administrator." : loginError} fadeIn={fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={doLogin} CSS={CSS} />;
-
   // ===============================================================
   //  APP SHELL
   // ===============================================================
@@ -3417,6 +3418,8 @@ export default function PortalShell() {
             setFilterC={setFilterC}
             fire={fire}
           />
+
+          <VaCoordinatorTeamManagement page={page} allowed={canManageVaTeams} actorId={currentUser.id} />
 
           {isManager && !invoiceController && (
             <StaffContractorPreview
@@ -4559,4 +4562,39 @@ export default function PortalShell() {
     </div>
     </DirectoryScopeProvider>
   );
+}
+
+export default function PortalShell() {
+  const [authPage, setAuthPage] = useState("dashboard");
+  const [, setAuthSelectedWorkOrder] = useState<string | null>(null);
+  const [, setAuthAiNote] = useState<null>(null);
+  const [, setAuthInvoices] = useState<never[]>([]);
+  const [authToast, setAuthToast] = useState<string | null>(null);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const fire = useCallback((message: string) => {
+    setAuthToast(message);
+    window.setTimeout(() => setAuthToast(null), 2800);
+  }, []);
+  const auth = useAuth({ fire, setPage: setAuthPage, setSelectedWO: setAuthSelectedWorkOrder,
+    setAiNote: setAuthAiNote, setInvoices: setAuthInvoices });
+  const currentUser = auth.hasSession ? auth.currentUser : null;
+
+  if (!currentUser || currentUser.active !== true) return <LoginForm
+    loginEmail={auth.loginEmail} setLoginEmail={auth.setLoginEmail}
+    loginPassword={auth.loginPassword} setLoginPassword={auth.setLoginPassword}
+    rememberMe={auth.rememberMe} setRememberMe={auth.setRememberMe}
+    loginLoading={auth.loginLoading} logoutLoading={false}
+    loginError={currentUser?.active === false ? "Your account is inactive. Contact an administrator." : auth.loginError}
+    fadeIn={auth.fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={auth.doLogin} CSS={CSS}
+  />;
+
+  if (currentUser.role === VA_COORDINATOR_ROLE) return <>
+    <style>{CSS}</style>
+    <VaCoordinatorWorkspace actor={{ id: currentUser.id, name: currentUser.name,
+      email: currentUser.email, initials: currentUser.initials, active: currentUser.active }} onSignOut={auth.logout} />
+    {authToast && <div role="status" className="app-toast">{authToast}</div>}
+  </>;
+
+  return <PortalApplication key={JSON.stringify(directoryScopeKey(currentUser))} currentUser={currentUser} initialPage={authPage}
+    refreshCurrentProfile={auth.refreshCurrentProfile} authLogout={auth.logout} />;
 }
