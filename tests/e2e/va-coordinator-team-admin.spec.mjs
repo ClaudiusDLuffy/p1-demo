@@ -68,3 +68,23 @@ test("VA team screen fits desktop and phone viewports without horizontal overflo
     }
   }
 });
+
+test("Cancel discards new and edited team changes and exits the editor", async ({ page }) => {
+  await login(page, accounts.manager);
+  await sidebar(page).getByRole("button", { name: "VA Teams", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "VA team access" })).toBeVisible();
+
+  await page.getByRole("button", { name: "New team", exact: true }).click();
+  await page.getByLabel("Team name").fill("Unsaved synthetic team");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByLabel("Team name")).toHaveCount(0);
+  await expect(page.getByText("Select a team to edit or choose New team.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Unsaved synthetic team/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Synthetic VA Team/ }).click();
+  await page.getByLabel("Team name").fill("Unsaved renamed team");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByLabel("Team name")).toHaveCount(0);
+  await page.getByRole("button", { name: /Synthetic VA Team/ }).click();
+  await expect(page.getByLabel("Team name")).toHaveValue("Synthetic VA Team");
+});

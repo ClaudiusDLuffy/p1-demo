@@ -5,7 +5,7 @@ const TEAM_WORK_ORDER_ID = "E2E-SUB-TEAM";
 const OUT_OF_TEAM_WORK_ORDER_ID = "E2E-REPORT-START";
 const syntheticPhoto = readFileSync("public/p1-icon-192.png");
 
-test("VA coordinator searches only team work orders and attributes confirmed note transfer", async ({ page }) => {
+test("VA coordinator searches only team work orders and attributes confirmed note transfer", async ({ page }, testInfo) => {
   await login(page, accounts.vaCoordinator);
   await expect(page.getByRole("heading", { name: "Team work orders" })).toBeVisible();
   await expect(page.locator(".desktop-sidebar")).toHaveCount(0);
@@ -28,6 +28,8 @@ test("VA coordinator searches only team work orders and attributes confirmed not
   await expect(page.getByText("Synthetic VA hidden internal note.", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Synthetic VA team attachment", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Invoice|Close work order|Reassign/ })).toHaveCount(0);
+
+  await testInfo.attach("va-coordinator-work-order-view.png", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 
   await page.route("**/storage/v1/object/**/photos/wo/E2E-SUB-TEAM/va-coordinator-synthetic.png", route =>
     route.fulfill({ status: 200, contentType: "image/png", body: syntheticPhoto }));
