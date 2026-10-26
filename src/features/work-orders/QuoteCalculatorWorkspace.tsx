@@ -28,6 +28,7 @@ import {
   quoteLineToBillingLine,
   quoteTotals,
   roundMoney,
+  updateQuoteCalculatorLine,
   type QuoteCalculatorLine,
 } from "../../lib/quoteCalculator";
 import { STAFF_BILLING_LINE_TYPES } from "../../lib/staffBilling";
@@ -441,9 +442,7 @@ export default function QuoteCalculatorWorkspace({
     id: string,
     patch: Partial<QuoteCalculatorLine>,
   ) => {
-    setLines((current) =>
-      current.map((line) => line.id === id ? { ...line, ...patch } : line),
-    );
+    setLines((current) => updateQuoteCalculatorLine(current, id, patch, pricing));
     setHasDraft(true);
   };
 
