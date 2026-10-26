@@ -63,6 +63,21 @@ export function priceQuoteLines(
   });
 }
 
+export function updateQuoteCalculatorLine(
+  lines: QuoteCalculatorLine[],
+  lineId: string,
+  patch: Partial<QuoteCalculatorLine>,
+  pricing: QuotePricing,
+): QuoteCalculatorLine[] {
+  return lines.map((line) => {
+    if (line.id !== lineId) return line;
+    const updated = { ...line, ...patch };
+    return "type" in patch || "sourceRate" in patch
+      ? priceQuoteLines([updated], pricing)[0]
+      : updated;
+  });
+}
+
 export function quoteTotals(
   lines: QuoteCalculatorLine[],
   pricing: QuotePricing,

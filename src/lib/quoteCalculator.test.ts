@@ -4,6 +4,7 @@ import {
   priceQuoteLines,
   quoteLineToBillingLine,
   quoteTotals,
+  updateQuoteCalculatorLine,
   type QuoteCalculatorLine,
 } from "./quoteCalculator";
 
@@ -36,6 +37,26 @@ test("sets the P1 labor rate and applies visible parts markup", () => {
   assert.equal(priced[0].rate, 110);
   assert.equal(priced[1].type, "Parts/Hardware");
   assert.equal(priced[1].rate, 250);
+});
+
+test("reprices a part immediately when its category or contractor cost changes", () => {
+  const pricing = { laborRate: 110, partsMarkupPercent: 25, overallMarginPercent: 0 };
+  const existing = [{ ...lines[1], id: "editable-part", type: "Labor", sourceRate: 100, rate: 110 }];
+  const categorized = updateQuoteCalculatorLine(existing, "editable-part", { type: "Parts/Hardware" }, pricing);
+  assert.equal(categorized[0].rate, 125);
+
+  const repriced = updateQuoteCalculatorLine(categorized, "editable-part", { sourceRate: 200 }, pricing);
+  assert.equal(repriced[0].rate, 250);
+  assert.equal(quoteTotals(repriced, pricing).subtotal, 250);
+});
+
+test("keeps direct P1 rate edits and non-pricing edits intact", () => {
+  const pricing = { laborRate: 110, partsMarkupPercent: 25, overallMarginPercent: 0 };
+  const part = [{ ...lines[1], id: "editable-part", type: "Parts/Hardware", sourceRate: 200, rate: 250 }];
+  const manuallyPriced = updateQuoteCalculatorLine(part, "editable-part", { rate: 300 }, pricing);
+  assert.equal(manuallyPriced[0].rate, 300);
+  const renamed = updateQuoteCalculatorLine(manuallyPriced, "editable-part", { desc: "Updated description" }, pricing);
+  assert.equal(renamed[0].rate, 300);
 });
 
 test("applies overall margin after labor and parts pricing", () => {
