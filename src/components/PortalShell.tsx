@@ -50,8 +50,6 @@ import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import SimplifiedWorkspace from "../features/simplified-work/SimplifiedWorkspace";
-import VaCoordinatorTeamManagement from "../features/va-coordinator/teamManagement/VaCoordinatorTeamManagement";
-import { canManageVaCoordinatorTeams } from "../features/va-coordinator/teamManagement/teamManagementBusiness";
 import VaCoordinatorWorkspace from "../features/va-coordinator/VaCoordinatorWorkspace";
 import { VA_COORDINATOR_ROLE } from "../features/va-coordinator/contracts";
 import type { PortalAuthProfile } from "../features/auth/authProfile";
@@ -1387,7 +1385,6 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   const [invoices, setInvoices] = useState<any[]>([]);
   const isAuthenticated = currentUser.active === true;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
-  const canManageVaTeams = canManageVaCoordinatorTeams(currentUser?.role);
   const invoiceController = isInvoiceController(currentUser);
   const notesSeenInFlight = useRef(new Map<string, Promise<string | null>>());
   const notesSeenVersions = useRef(new Map<string, string>());
@@ -2675,7 +2672,6 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     canInvoice: currentUser?.canInvoice,
     canLeadTeam: currentUser?.canLeadTeam,
     canManageTeam: currentUser?.canManageTeam,
-    canManageVaCoordinatorTeams: canManageVaTeams,
     counts: {
       capital: capitalCount || null,
       contractorActive: contractorActiveBadge,
@@ -2686,20 +2682,20 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
       pendingApproval: pendAppr || null,
       staffWork: navigationSummary?.staffWorkCount || null,
     },
-  }), [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, canManageVaTeams, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
+  }), [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
   const bottomNavItems = useMemo(
     () => buildBottomNavigationItems(sideItems, navigationRole),
     [navigationRole, sideItems],
   );
 
   useEffect(() => {
-    if (!invoiceController || page === "dashboard" || page === "invoices" || (page === "va_teams" && canManageVaTeams)) return;
+    if (page !== "va_teams") return;
     setSelectedWO(null);
     setSelectedInvoice(null);
     setSelectedBillingInvoice(null);
     setModal(null);
     setPage("dashboard");
-  }, [canManageVaTeams, invoiceController, page, setSelectedInvoice]);
+  }, [page, setSelectedInvoice]);
 
   const sensitiveShellIdentity = useRef<string | null>(null);
   useEffect(() => {
@@ -3419,7 +3415,6 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             fire={fire}
           />
 
-          <VaCoordinatorTeamManagement page={page} allowed={canManageVaTeams} actorId={currentUser.id} />
 
           {isManager && !invoiceController && (
             <StaffContractorPreview

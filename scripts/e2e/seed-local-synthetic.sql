@@ -116,7 +116,7 @@ values
   (:'company_admin_id'::uuid, :'team_member_id'::uuid, 'Synthetic Team Member', 'contracted', true);
 
 insert into va_coordinator_private.teams (id, name, active)
-values ('00000000-0000-4000-8000-00000000e401', 'Synthetic VA Team', true)
+values ('00000000-0000-4000-8000-00000000e401', 'Archived Synthetic VA Team', false)
 on conflict (id) do update set name = excluded.name, active = excluded.active;
 delete from va_coordinator_private.team_members where team_id = '00000000-0000-4000-8000-00000000e401';
 delete from va_coordinator_private.team_technicians where team_id = '00000000-0000-4000-8000-00000000e401';
@@ -512,7 +512,13 @@ values
    'contractor', 'note', '{}'::jsonb, true, false, 1, 0, 'field_note'),
   ('00000000-0000-4000-8000-00000000f305', 'E2E-SUB-TEAM', :'manager_id'::uuid,
    'Synthetic Manager', 'Synthetic VA hidden internal note.', 'note',
-   'manager', 'note', '{}'::jsonb, false, true, 1, 0, 'internal_note');
+   'manager', 'note', '{}'::jsonb, false, true, 1, 0, 'internal_note'),
+  ('00000000-0000-4000-8000-00000000f306', 'E2E-REPORT-START', :'report_tech_id'::uuid,
+   'Synthetic Report Technician', 'Synthetic VA Chrome note to transfer.', 'note',
+   'contractor', 'note', '{}'::jsonb, true, false, 1, 0, 'field_note'),
+  ('00000000-0000-4000-8000-00000000f307', 'E2E-REPORT-START', :'report_tech_id'::uuid,
+   'Synthetic Report Technician', 'Synthetic VA WebKit note to transfer.', 'note',
+   'contractor', 'note', '{}'::jsonb, true, false, 1, 0, 'field_note');
 
 insert into public.photos (work_order_id, storage_path, uploader_id, uploader_name, caption)
 values

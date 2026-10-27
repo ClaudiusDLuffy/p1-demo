@@ -6,6 +6,7 @@ import test from "node:test";
 const migration = readFileSync(resolve(process.cwd(), "supabase/migrations/0175_va_coordinator_scoped_access.sql"), "utf8");
 const managerBackOfficeTeamManagementMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0178_manager_backoffice_va_team_management.sql"), "utf8");
 const testAccountExclusionMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0179_va_team_test_account_exclusion.sql"), "utf8");
+const allWorkOrdersMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0180_va_coordinator_all_work_orders_archive_teams.sql"), "utf8");
 const staffAuthorization = readFileSync(resolve(process.cwd(), "supabase/migrations/0101_enforce_active_staff_authorization.sql"), "utf8");
 const portalShell = readFileSync(resolve(process.cwd(), "src/components/PortalShell.tsx"), "utf8");
 
@@ -17,7 +18,7 @@ test("VA accounts mount the isolated coordinator workspace, not the standard por
   assert.match(portalShell, /function PortalApplication\(/);
 });
 
-test("VA visibility is an explicit private team-to-technician mapping over current assignments", () => {
+test("initial VA visibility was a private team-to-technician mapping over current assignments", () => {
   assert.match(migration, /create schema if not exists va_coordinator_private/);
   assert.match(migration, /revoke all on schema va_coordinator_private from public, anon, authenticated, service_role/);
   assert.match(migration, /team_members[\s\S]*team_technicians/);
@@ -63,7 +64,7 @@ test("VA read RPCs return a bounded allowlist and use a keyset cursor", () => {
   assert.match(migration, /a\.entered_by_role = 'contractor'[\s\S]*a\.is_staff_only = false/);
 });
 
-test("photo metadata and bytes require a finalized canonical binding and the active team scope", () => {
+test("photo metadata and bytes require a finalized canonical binding and shared VA work-order access", () => {
   assert.match(migration, /binding\.state = 'finalized'/);
   assert.match(migration, /create function public\.can_read_va_coordinator_photo\(uuid, text\)[\s\S]*?binding\.storage_object_id = \$1[\s\S]*?public\.can_access_va_coordinator_work_order\(work_order\.id\)/);
   assert.match(migration, /public\.can_read_va_coordinator_photo\(objects\.id, name\)/);
@@ -77,4 +78,28 @@ test("note transfer reuses the existing sync command and prevents VAs from undoi
   assert.match(migration, /synced_to_7eleven_by = case when p_synced then auth\.uid\(\) else null end/);
   assert.match(migration, /create or replace function public\.protect_activity_7eleven_sync\(\)[\s\S]*?g\.command_kind = 'sync'[\s\S]*?public\.can_access_va_coordinator_work_order\(old\.work_order_id\)/);
   assert.match(migration, /old\.synced_to_7eleven_at is not null[\s\S]*?new\.synced_to_7eleven_at is null/);
+});
+
+test("current VA access covers every non-deleted work order without changing the scoped DTO", () => {
+  assert.match(allWorkOrdersMigration, /public\.is_va_coordinator\(\) and exists \([\s\S]*?work_order\.id = p_work_order_id[\s\S]*?work_order\.deleted_at is null/);
+  const list = allWorkOrdersMigration.match(/create or replace function public\.list_va_coordinator_work_orders_v1\([\s\S]*?\n\$\$;/)?.[0] || "";
+  assert.match(list, /if not public\.is_va_coordinator\(\)/);
+  assert.match(list, /work_order\.deleted_at is null/);
+  assert.doesNotMatch(list, /team_members|team_technicians|contractor_technicians|assigned_technician_profile_id\s*=/);
+  assert.match(list, /v_cursor_time := 'infinity'::timestamptz/);
+  assert.doesNotMatch(list, /p_cursor is null or/);
+  assert.match(list, /limit p_limit \+ 1/);
+  assert.match(list, /'nextCursor'/);
+  assert.match(list, /'assetMake'[\s\S]*'assetModel'[\s\S]*'assetSerial'/);
+  assert.doesNotMatch(list, /'(?:invoice[^']*|billing[^']*|nte[^']*|contractor_id|pricing[^']*)'/i);
+  assert.match(list, /coalesce\(work_order\.incident_id/);
+  assert.match(allWorkOrdersMigration, /work_orders_va_coordinator_updated_cursor_idx/);
+});
+
+test("VA team management is hidden and existing team configuration is archived, not deleted", () => {
+  assert.match(allWorkOrdersMigration, /update va_coordinator_private\.teams\s+set active = false\s+where active = true/);
+  assert.doesNotMatch(allWorkOrdersMigration, /delete\s+from\s+va_coordinator_private\.(?:teams|team_members|team_technicians|assignment_events)/i);
+  assert.match(allWorkOrdersMigration, /revoke all on function public\.list_va_coordinator_team_management_v2\(\) from public, anon, authenticated/);
+  assert.match(allWorkOrdersMigration, /revoke all on function public\.configure_va_coordinator_team_v2\(uuid, text, uuid\[\], uuid\[\]\) from public, anon, authenticated/);
+  assert.doesNotMatch(portalShell, /VaCoordinatorTeamManagement|canManageVaCoordinatorTeams/);
 });

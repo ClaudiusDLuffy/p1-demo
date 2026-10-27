@@ -27,5 +27,5 @@ test("transfer command delegates actor attribution to the authenticated existing
 test("transfer command maps authorization failures to safe scope guidance", async () => {
   const command = createTechnicianNoteTransferAttempt(note, true);
   await assert.rejects(command(async () => ({ data: null, error: { code: "42501", message: "synthetic-private-detail" } })),
-    error => error instanceof Error && error.message === "This work order is no longer assigned to your VA team.");
+    error => error instanceof Error && error.message === "This work order is no longer available for VA review.");
 });

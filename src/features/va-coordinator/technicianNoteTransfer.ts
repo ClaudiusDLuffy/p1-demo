@@ -29,7 +29,7 @@ export function createTechnicianNoteTransferAttempt(note: VaCoordinatorNote, con
     } catch (cause) {
       if (cause instanceof TechnicianNoteTransferError) throw cause;
       const normalized = normalizeUnknownError(cause);
-      if (normalized.code === "FORBIDDEN") throw new TechnicianNoteTransferError("This work order is no longer assigned to your VA team.");
+      if (normalized.code === "FORBIDDEN") throw new TechnicianNoteTransferError("This work order is no longer available for VA review.");
       if (normalized.code === "VALIDATION_FAILED") throw new TechnicianNoteTransferError("This note is no longer eligible for transfer.");
       throw new TechnicianNoteTransferError("The transfer update could not be confirmed. Refresh the note before retrying.", true);
     }
