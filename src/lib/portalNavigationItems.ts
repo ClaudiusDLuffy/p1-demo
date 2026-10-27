@@ -1,4 +1,4 @@
-export type PortalNavigationRole = "controller" | "manager" | "contractor";
+export type PortalNavigationRole = "controller" | "manager" | "contractor" | "va_coordinator";
 
 export type PortalNavigationItem = {
   id: string;
@@ -12,6 +12,7 @@ export type PortalNavigationItem = {
 type PortalNavigationOptions = {
   invoiceController: boolean;
   isManager: boolean;
+  isVaCoordinator?: boolean;
   canInvoice?: boolean;
   canLeadTeam?: boolean;
   canManageTeam?: boolean;
@@ -46,17 +47,20 @@ const BOTTOM_PAGE_IDS: Record<PortalNavigationRole, readonly string[]> = {
   controller: ["dashboard", "invoices"],
   manager: ["dashboard", "simplified", "work_orders", "invoices"],
   contractor: ["my_jobs", "my_schedule", "history", "invoices"],
+  va_coordinator: ["work_orders"],
 };
 
-export function portalNavigationRole(options: Pick<PortalNavigationOptions, "invoiceController" | "isManager">): PortalNavigationRole {
+export function portalNavigationRole(options: Pick<PortalNavigationOptions, "invoiceController" | "isManager" | "isVaCoordinator">): PortalNavigationRole {
   if (options.invoiceController) return "controller";
   if (options.isManager) return "manager";
+  if (options.isVaCoordinator) return "va_coordinator";
   return "contractor";
 }
 
 /** Restore only the two focused views; never trust a URL to grant a staff page. */
 export function initialFocusedPortalPage(role: PortalNavigationRole, search: string): string {
   const requested = new URLSearchParams(search).get("portal");
+  if (role === "va_coordinator") return "work_orders";
   if (role !== "controller" && requested === "my_schedule") return requested;
   if (role === "manager" && requested === "simplified") return requested;
   return role === "contractor" ? "my_jobs" : "dashboard";
@@ -108,10 +112,15 @@ function contractorItems(options: PortalNavigationOptions): PortalNavigationItem
   return items;
 }
 
+function vaCoordinatorItems(): PortalNavigationItem[] {
+  return [{ id: "work_orders", label: "Work orders", icon: ICONS.workOrders }];
+}
+
 const ITEM_BUILDERS: Record<PortalNavigationRole, (options: PortalNavigationOptions) => PortalNavigationItem[]> = {
   controller: controllerItems,
   manager: managerItems,
   contractor: contractorItems,
+  va_coordinator: vaCoordinatorItems,
 };
 
 export function buildPortalNavigationItems(options: PortalNavigationOptions): PortalNavigationItem[] {

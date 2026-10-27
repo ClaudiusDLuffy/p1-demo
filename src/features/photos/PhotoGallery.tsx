@@ -31,6 +31,7 @@ type PhotoGalleryProps = {
   setLightbox: (url: string) => void;
   doAddPhotos?: (workOrderId: string, files: FileList | null) => void | Promise<unknown>;
   doRemovePhoto?: (workOrderId: string, path: string) => void | Promise<unknown>;
+  loadAllPhotoPaths?: () => Promise<string[]>;
   fire?: (message: string) => void;
   loadingStates?: Record<string, boolean>;
   readOnly?: boolean;
@@ -41,7 +42,7 @@ type PhotoGalleryProps = {
   retryDeletion?: () => void | Promise<unknown>;
 };
 
-export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, fire, loadingStates = {}, readOnly = false, uploadItems = [], cancelUploads, retryUploads, deleteError = "", retryDeletion }: PhotoGalleryProps) {
+export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = false, onLoadMore, loadingMore = false, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, loadAllPhotoPaths, fire, loadingStates = {}, readOnly = false, uploadItems = [], cancelUploads, retryUploads, deleteError = "", retryDeletion }: PhotoGalleryProps) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -118,7 +119,7 @@ export default function PhotoGallery({ woId, photos = [], totalCount, hasMore = 
     let objectUrl: string | null = null;
     try {
       const paths = mode === "all"
-        ? await loadAllWorkOrderPhotoPaths(woId)
+        ? loadAllPhotoPaths ? await loadAllPhotoPaths() : await loadAllWorkOrderPhotoPaths(woId)
         : selected;
       if (paths.length === 0) throw new AppError("PHOTO_SELECTION_REQUIRED");
 

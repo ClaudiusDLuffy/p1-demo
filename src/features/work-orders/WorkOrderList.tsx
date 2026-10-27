@@ -36,6 +36,9 @@ import { normalizeExactPortalWorkOrderId } from "../../lib/workOrderIdentity";
 import { normalizeExactStoreNumberSearch } from "../../lib/storeWorkOrderHistory";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery } from "./queries";
+import { useVaCoordinatorWorkOrders } from "../va-coordinator/queries";
+import { VA_COORDINATOR_PAGE_SIZE, VA_COORDINATOR_SEARCH_LIMIT } from "../va-coordinator/contracts";
+import { mapVaCoordinatorWorkOrderToPortalModel } from "../va-coordinator/vaCoordinatorPortalModel";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
@@ -46,6 +49,7 @@ export default function WorkOrderList(props: any) {
     search,
     setSearch,
     isManager,
+    currentUser,
     filterC,
     setFilterC,
     filterP,
@@ -62,6 +66,7 @@ export default function WorkOrderList(props: any) {
     storeView,
     onClearStoreView,
   } = props;
+  const isVaCoordinator = currentUser?.role === "va_coordinator";
 
   const [sortBy, setSortBy] = useState<WorkOrderSortKey>(storeView ? "newest" : isManager ? "sla_due" : "newest");
   const [tableSort, setTableSort] = useState<WorkOrderTableSort>(() => (
@@ -74,11 +79,11 @@ export default function WorkOrderList(props: any) {
   const [filterState, setFilterState] = useState("all");
   const [hideClosed, setHideClosed] = useState(!storeView);
   const [pagingDirection, setPagingDirection] = useState<"prev" | "next" | null>(null);
-  const pageSize = 10;
+  const pageSize = isVaCoordinator ? VA_COORDINATOR_PAGE_SIZE : 10;
   const deferredSearch = useDeferredValue(search);
   const deferredColumnFilters = useDeferredValue(columnFilters);
-  const exactWorkOrderId = normalizeExactPortalWorkOrderId(deferredSearch);
-  const exactStoreNumber = exactWorkOrderId
+  const exactWorkOrderId = isVaCoordinator ? null : normalizeExactPortalWorkOrderId(deferredSearch);
+  const exactStoreNumber = isVaCoordinator ? null : exactWorkOrderId
     ? null
     : normalizeExactStoreNumberSearch(deferredSearch);
   const scopedStoreNumber = exactStoreNumber || storeView?.storeNumber || null;
@@ -136,6 +141,7 @@ export default function WorkOrderList(props: any) {
         hideClosed,
         viewMode,
         isManager,
+        isVaCoordinator,
         storeNumber: storeView?.storeNumber || null,
         storeRequestId: storeView?.requestId || null,
       });
@@ -147,9 +153,13 @@ export default function WorkOrderList(props: any) {
   const listQueryEnabled = page === "work_orders"
     && !selectedWO
     && !exactWorkOrderId;
+  const vaWorkOrdersQuery = useVaCoordinatorWorkOrders({
+    id: currentUser?.id || "",
+    active: isVaCoordinator && currentUser?.active === true && listQueryEnabled,
+  }, deferredSearch, effectiveCursor.cursor);
   const exactWorkOrderQuery = useWorkOrderFamilyQuery(
     exactWorkOrderId,
-    page === "work_orders" && !selectedWO && Boolean(exactWorkOrderId),
+    !isVaCoordinator && page === "work_orders" && !selectedWO && Boolean(exactWorkOrderId),
   );
   const workOrderPageQuery = useWorkOrdersPageQuery({
     scope: exactStoreNumber ? "all" : hideClosed ? "active" : "all",
@@ -178,12 +188,14 @@ export default function WorkOrderList(props: any) {
     createdDateFilter: exactStoreNumber ? undefined : deferredColumnFilters.createdDate,
     updatedDateFilter: exactStoreNumber ? undefined : deferredColumnFilters.updatedDate,
     slaFilter: exactStoreNumber ? "all" : deferredColumnFilters.sla === "overdue" ? "overdue" : "all",
-  }, listQueryEnabled);
+  }, listQueryEnabled && !isVaCoordinator);
 
-  const serverPage = workOrderPageQuery.data;
+  const serverPage = isVaCoordinator && vaWorkOrdersQuery.data
+    ? { ...vaWorkOrdersQuery.data, items: vaWorkOrdersQuery.data.items.map(mapVaCoordinatorWorkOrderToPortalModel) }
+    : workOrderPageQuery.data;
   const paginatedWOs = exactWorkOrderId
     ? exactWorkOrderQuery.data || []
-    : serverPage?.items || fallbackTableWOs.slice(0, pageSize);
+    : serverPage?.items || (isVaCoordinator ? [] : fallbackTableWOs.slice(0, pageSize));
   const { getUser } = useDirectoryLabels(exactWorkOrderId ? [] : paginatedWOs.map(workOrder => (workOrder as unknown as { contractor?: string }).contractor), listQueryEnabled);
   const totalRows = exactWorkOrderId
     ? exactWorkOrderQuery.data?.length || 0
@@ -194,11 +206,11 @@ export default function WorkOrderList(props: any) {
   const showingStart = paginatedWOs.length === 0 ? 0 : startIndex + 1;
   const showingEnd = startIndex + paginatedWOs.length;
 
-  const pagingBusy = !exactWorkOrderId && workOrderPageQuery.isFetching
+  const pagingBusy = !exactWorkOrderId && (isVaCoordinator ? vaWorkOrdersQuery.isFetching : workOrderPageQuery.isFetching)
     ? pagingDirection
     : null;
 
-  const activeWorkOrderQuery = exactWorkOrderId ? exactWorkOrderQuery : workOrderPageQuery;
+  const activeWorkOrderQuery = isVaCoordinator ? vaWorkOrdersQuery : exactWorkOrderId ? exactWorkOrderQuery : workOrderPageQuery;
   const collectionState = resolveWorkOrderCollectionState({
     itemCount: paginatedWOs.length,
     isPending: activeWorkOrderQuery.isPending,
@@ -255,7 +267,14 @@ export default function WorkOrderList(props: any) {
           ? "sla_due"
           : "custom";
 
-  const tableColumns: Array<{ column: WorkOrderTableColumn; label: string }> = [
+  const tableColumns: Array<{ column: WorkOrderTableColumn; label: string }> = isVaCoordinator ? [
+    { column: "work_order", label: "Work order" },
+    { column: "status", label: "Status" },
+    { column: "priority", label: "Priority" },
+    { column: "store", label: "Store" },
+    { column: "summary", label: "Summary" },
+    { column: "updated", label: "Updated" },
+  ] : [
     { column: "work_order", label: "WO#" },
     { column: "status", label: "Status" },
     { column: "priority", label: "Priority" },
@@ -378,7 +397,7 @@ export default function WorkOrderList(props: any) {
       {page === "work_orders" && !selectedWO && (
         <div style={{ animation: "fadeUp 0.3s" }}>
           <div className="filter-bar" style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
-            <div
+            {!isVaCoordinator && <div
               role="group"
               aria-label="Work order view"
               style={{ display: "inline-flex", padding: 3, border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceSoft }}
@@ -412,9 +431,11 @@ export default function WorkOrderList(props: any) {
                   </button>
                 );
               })}
-            </div>
+            </div>}
             <input
+              aria-label="Search work orders"
               value={search}
+              maxLength={isVaCoordinator ? VA_COORDINATOR_SEARCH_LIMIT : undefined}
               onChange={(e: any) => {
                 const nextSearch = e.target.value;
                 setSearch(nextSearch);
@@ -422,13 +443,13 @@ export default function WorkOrderList(props: any) {
                   onClearStoreView?.();
                 }
               }}
-              placeholder="Search WO#, INC#, store, keyword..."
+              placeholder={isVaCoordinator ? "Search work order, store, city, or summary..." : "Search WO#, INC#, store, keyword..."}
               style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, width: 300, fontFamily: "inherit", background: T.surface }}
             />
             {isManager && (
               <DirectorySelect aria-label="Filter work orders by contractor" domain="contractor_filter" emptyValue="all" emptyLabel="All contractors" value={filterC} onChange={e => setFilterC(e.target.value)} style={{ width: 220 }} />
             )}
-            <Sel
+            {!isVaCoordinator && <Sel
               value={filterStatus}
               onChange={(e: { target: { value: string } }) => setFilterStatus(e.target.value)}
               aria-label="Filter unassigned work orders"
@@ -436,8 +457,8 @@ export default function WorkOrderList(props: any) {
             >
               <option value="all">All work orders</option>
               <option value="unassigned">Unassigned only</option>
-            </Sel>
-            <Sel
+            </Sel>}
+            {!isVaCoordinator && <Sel
               value={filterState}
               onChange={(e: { target: { value: string } }) => setFilterState(e.target.value)}
               aria-label="Filter work orders by state"
@@ -447,18 +468,18 @@ export default function WorkOrderList(props: any) {
               <option value="VA">Virginia</option>
               <option value="TX">Texas</option>
               <option value="FL">Florida</option>
-            </Sel>
-            <Sel aria-label="Filter work orders by priority" value={filterP} onChange={e => setFilterP(e.target.value)} style={{ width: 180, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+            </Sel>}
+            {!isVaCoordinator && <Sel aria-label="Filter work orders by priority" value={filterP} onChange={e => setFilterP(e.target.value)} style={{ width: 180, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
               <option value="all">All priorities</option>
               {Object.entries(PRIORITY).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
-            </Sel>
-            <Sel aria-label="Sort work orders" value={sortPresetValue} onChange={e => { if (e.target.value !== "custom") applySortPreset(e.target.value as WorkOrderSortKey); }} style={{ width: 190, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
+            </Sel>}
+            {!isVaCoordinator && <Sel aria-label="Sort work orders" value={sortPresetValue} onChange={e => { if (e.target.value !== "custom") applySortPreset(e.target.value as WorkOrderSortKey); }} style={{ width: 190, padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}>
               {sortPresetValue === "custom" && <option value="custom">Custom column sort</option>}
               <option value="sla_due">SLA due soonest</option>
               <option value="newest">Newest to oldest</option>
               <option value="oldest">Oldest to newest</option>
               <option value="priority">Priority</option>
-            </Sel>
+            </Sel>}
             {isManager && (
               <label style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 40, padding: "8px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
                 <input
@@ -470,14 +491,14 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls
               </label>
             )}
-            {(filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent" || storeView || hasWorkOrderColumnFilters(columnFilters)) && (
+            {(isVaCoordinator ? Boolean(search) : (filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent" || storeView || hasWorkOrderColumnFilters(columnFilters))) && (
               <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); setHideClosed(true); setColumnFilters({}); onClearStoreView?.(); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}
           </div>
 
-          {exactWorkOrderId && (
+          {!isVaCoordinator && exactWorkOrderId && (
             <div
               role="status"
               aria-live="polite"
@@ -496,7 +517,7 @@ export default function WorkOrderList(props: any) {
             </div>
           )}
 
-          {exactStoreNumber && (
+          {!isVaCoordinator && exactStoreNumber && (
             <div
               role="status"
               aria-live="polite"
@@ -528,28 +549,28 @@ export default function WorkOrderList(props: any) {
 
           <div className="desktop-only-table">
             <div className="card table-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>
-              <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse", fontSize: 12 }}>
+              <table style={{ width: "100%", minWidth: isVaCoordinator ? 760 : 1180, borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: T.surfaceSoft }}>
                     {tableColumns.map(({ column, label }) => (
                       <th key={column} aria-sort={tableSort.column === column ? (tableSort.direction === "asc" ? "ascending" : "descending") : "none"} style={{ textAlign: "left", padding: "10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, borderBottom: `1px solid ${T.borderSoft}`, whiteSpace: "nowrap" }}>
-                        <button
+                        {isVaCoordinator ? label : <button
                           type="button"
                           onClick={() => selectTableSort(column)}
                           style={{ padding: 0, border: 0, background: "none", color: "inherit", font: "inherit", textTransform: "inherit", letterSpacing: "inherit", cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           {label}{sortIndicator(column)}
-                        </button>
+                        </button>}
                       </th>
                     ))}
                   </tr>
-                  <tr style={{ background: T.surfaceSoft }}>
+                  {!isVaCoordinator && <tr style={{ background: T.surfaceSoft }}>
                     {tableColumns.map(({ column }) => (
                       <th key={column} style={{ padding: "0 7px 8px", borderBottom: `1px solid ${T.borderSoft}` }}>
                         {renderColumnFilter(column)}
                       </th>
                     ))}
-                  </tr>
+                  </tr>}
                 </thead>
                 <tbody>
                   {paginatedWOs.map((wo: any, i: number) => {
@@ -569,6 +590,13 @@ export default function WorkOrderList(props: any) {
                             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
                         </td>
+                        {isVaCoordinator ? <>
+                          <td style={{ padding: "10px" }}><Badge conf={STATUS[wo.status]} small /></td>
+                          <td style={{ padding: "10px" }}><Badge conf={PRIORITY[wo.priority]} small /></td>
+                          <td style={{ padding: "10px", fontWeight: 600 }}>{wo.store ? `#${wo.store}` : "—"}</td>
+                          <td style={{ padding: "10px", maxWidth: 420, color: T.inkSoft }}>{wo.summary || "—"}</td>
+                          <td style={{ padding: "10px", color: T.muted, fontSize: 11, minWidth: 130 }}>{wo.updatedAt ? new Date(wo.updatedAt).toLocaleString() : "—"}</td>
+                        </> : <>
                         <td style={{ padding: "10px" }}>
                           <span style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                             <Badge conf={STATUS[wo.status]} small />
@@ -603,6 +631,7 @@ export default function WorkOrderList(props: any) {
                               : (sla ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10, width: "fit-content" }}>{sla.text}</span> : null)}
                           </div>
                         </td>
+                        </>}
                       </tr>
                     );
                   })}
@@ -683,14 +712,14 @@ export default function WorkOrderList(props: any) {
                   <div className="mobile-card-summary" style={{ fontSize: 12, color: T.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {wo.summary || "No summary"}
                   </div>
-                  <div style={{ display: "grid", gap: 3, marginBottom: 8, fontSize: 10, color: T.subtle }}>
+                  {!isVaCoordinator && <div style={{ display: "grid", gap: 3, marginBottom: 8, fontSize: 10, color: T.subtle }}>
                     <div>Created <span style={{ color: T.muted, fontWeight: 600 }}>{dates.created}</span></div>
                     <div>Updated <span style={{ color: T.muted, fontWeight: 600 }}>{dates.updated}</span></div>
                     <div style={{ color: aging.color, background: aging.bg, border: `1px solid ${aging.ring}66`, borderRadius: 8, padding: "3px 6px", fontWeight: 700 }}>
                       SLA due {dates.slaDue}
                     </div>
-                  </div>
-                  <div className="mobile-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11 }}>
+                  </div>}
+                  {!isVaCoordinator && <div className="mobile-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: `1px solid ${T.borderSoft}`, fontSize: 11 }}>
                     <span style={{ color: T.muted }}>
                       {wo.contractor ? exactWorkOrderId ? <DirectoryProfileName id={wo.contractor} /> : getUser(wo.contractor)?.name || "Assigned" : "Unassigned"}
                     </span>
@@ -701,7 +730,7 @@ export default function WorkOrderList(props: any) {
                           ? <span style={{ fontSize: 10, fontWeight: 700, color: sla.color, background: sla.bg, padding: "2px 8px", borderRadius: 10 }}>{sla.text}</span>
                           : null}
                     </div>
-                  </div>
+                  </div>}
                 </div>
               );
             })}

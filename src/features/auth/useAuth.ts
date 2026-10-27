@@ -135,6 +135,7 @@ export default function useAuth({
         const role = portalNavigationRole({
           invoiceController: isInvoiceController(next),
           isManager: ["manager", "dispatcher", "back_office"].includes(next.role),
+          isVaCoordinator: next.role === "va_coordinator",
         });
         setPage(initialFocusedPortalPage(role, initial && !changed ? window.location.search : ""));
       }

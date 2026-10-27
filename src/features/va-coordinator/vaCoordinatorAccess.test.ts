@@ -9,13 +9,33 @@ const testAccountExclusionMigration = readFileSync(resolve(process.cwd(), "supab
 const allWorkOrdersMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0180_va_coordinator_all_work_orders_archive_teams.sql"), "utf8");
 const staffAuthorization = readFileSync(resolve(process.cwd(), "supabase/migrations/0101_enforce_active_staff_authorization.sql"), "utf8");
 const portalShell = readFileSync(resolve(process.cwd(), "src/components/PortalShell.tsx"), "utf8");
+const workOrderList = readFileSync(resolve(process.cwd(), "src/features/work-orders/WorkOrderList.tsx"), "utf8");
+const workOrderDetail = readFileSync(resolve(process.cwd(), "src/features/work-orders/WorkOrderDetail.tsx"), "utf8");
 
-test("VA accounts mount the isolated coordinator workspace, not the standard portal application", () => {
-  const vaBranch = portalShell.indexOf("if (currentUser.role === VA_COORDINATOR_ROLE)");
-  const standardApp = portalShell.indexOf("return <PortalApplication key=");
-  assert.ok(vaBranch >= 0 && standardApp > vaBranch);
-  assert.match(portalShell.slice(vaBranch, standardApp), /<VaCoordinatorWorkspace/);
+test("VA accounts use the standard portal shell with the scoped VA work-order read path", () => {
+  assert.match(portalShell, /return <>\s*<PortalApplication key=/);
+  assert.doesNotMatch(portalShell, /VaCoordinatorWorkspace/);
+  assert.match(portalShell, /useVaCoordinatorWorkOrder\(/);
+  assert.match(portalShell, /useVaCoordinatorTechnicianNotes\(/);
+  assert.match(portalShell, /useVaCoordinatorAttachments\(/);
+  assert.match(portalShell, /invoices=\{isVaCoordinator \? \[\] : invoices\}/);
   assert.match(portalShell, /function PortalApplication\(/);
+});
+
+test("VA list uses the role-scoped page and never falls back to a generic cached work-order list", () => {
+  assert.match(workOrderList, /useVaCoordinatorWorkOrders\(/);
+  assert.match(workOrderList, /serverPage\?\.items \|\| \(isVaCoordinator \? \[\]/);
+  assert.match(workOrderList, /isVaCoordinator \? "Search work order, store, city, or summary/);
+  assert.match(workOrderList, /listQueryEnabled && !isVaCoordinator/);
+});
+
+test("VA detail is read-only apart from its confirmed note-transfer callback", () => {
+  assert.match(workOrderDetail, /currentUser\?\.role === "va_coordinator"/);
+  assert.match(workOrderDetail, /contractorHistoryReadOnly = isVaCoordinator \|\|/);
+  assert.match(workOrderDetail, /loadAllPhotoPaths=\{isVaCoordinator \?/);
+  assert.match(workOrderDetail, /onMarkVaNoteCopiedToSevenEleven=\{onMarkVaNoteCopiedToSevenEleven\}/);
+  assert.match(workOrderDetail, /!isVaCoordinator && !focused && billingDocuments/);
+  assert.match(workOrderDetail, /!isVaCoordinator && !woData\.billingOnly && <ReceivingDispatchStatus/);
 });
 
 test("initial VA visibility was a private team-to-technician mapping over current assignments", () => {

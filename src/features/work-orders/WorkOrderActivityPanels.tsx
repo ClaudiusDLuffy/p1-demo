@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
+import { Modal } from "../../components/ui/Modal";
 import { T } from "../../lib/constants";
 import { isReservedLifecycleEvent } from "../../lib/workOrderLifecycleContracts";
 
@@ -16,6 +17,7 @@ export type WorkOrderActivity = {
   activityChannel?: WorkOrderActivityChannel | null;
   requiresSevenElevenSync?: boolean;
   syncedToSevenElevenAt?: string | null;
+  syncedToSevenElevenByName?: string | null;
   isStaffOnly?: boolean;
   type?: string | null;
   authorId?: string | null;
@@ -74,6 +76,8 @@ type ActivityEntryListProps = {
   doMarkSevenElevenSynced: (workOrderId: string, activityId: string, synced: boolean) => void;
   doMarkContractorAttention: (workOrderId: string, activityId: string, required: boolean) => void;
   doAcknowledgeContractorAttention: (workOrderId: string, activityId: string, acknowledged: boolean) => void;
+  isVaCoordinator?: boolean;
+  onRequestVaNoteTransfer?: (activity: WorkOrderActivity) => void;
   readOnly?: boolean;
 };
 
@@ -91,6 +95,8 @@ function ActivityEntryList({
   doMarkSevenElevenSynced,
   doMarkContractorAttention,
   doAcknowledgeContractorAttention,
+  isVaCoordinator = false,
+  onRequestVaNoteTransfer,
   readOnly = false,
 }: ActivityEntryListProps) {
   if (activities.length === 0) {
@@ -191,6 +197,20 @@ function ActivityEntryList({
               {activity.syncedToSevenElevenAt ? "Updated in 7-Eleven" : "Needs 7-Eleven update"}
             </label>
           )}
+          {isVaCoordinator && activity.id && activityChannel === "field_note"
+            && activity.requiresSevenElevenSync && !activity.syncedToSevenElevenAt && onRequestVaNoteTransfer && (
+            <button
+              type="button"
+              className="btn-soft"
+              onClick={() => onRequestVaNoteTransfer(activity)}
+              style={{ minHeight: 36, marginTop: 8, padding: "7px 10px", color: T.accent, fontSize: 11, fontWeight: 700 }}
+            >Mark copied to 7-Eleven</button>
+          )}
+          {isVaCoordinator && activity.requiresSevenElevenSync && activity.syncedToSevenElevenAt && (
+            <span role="status" style={{ display: "inline-flex", marginTop: 8, padding: "5px 8px", borderRadius: 8, background: T.successSoft, border: `1px solid ${T.success}44`, color: T.success, fontSize: 10, fontWeight: 700 }}>
+              Updated in 7-Eleven{activity.syncedToSevenElevenByName ? ` by ${activity.syncedToSevenElevenByName}` : ""}
+            </span>
+          )}
           {isManager
             && activity.id
             && ["field_note", "contractor_message", "legacy"].includes(activityChannel)
@@ -275,6 +295,8 @@ type WorkOrderActivityPanelsProps = Omit<ActivityEntryListProps, "activities" | 
   setAiNote: (note: ReactNode | null) => void;
   aiEnhancing: boolean;
   doAiEnhance: () => void;
+  isVaCoordinator?: boolean;
+  onMarkVaNoteCopiedToSevenEleven?: (workOrderId: string, activityId: string) => Promise<boolean>;
 };
 
 export default function WorkOrderActivityPanels({
@@ -293,6 +315,8 @@ export default function WorkOrderActivityPanels({
   setAiNote,
   aiEnhancing,
   doAiEnhance,
+  isVaCoordinator = false,
+  onMarkVaNoteCopiedToSevenEleven,
   workOrderId,
   isManager,
   currentUser,
@@ -307,6 +331,9 @@ export default function WorkOrderActivityPanels({
   readOnly = false,
 }: WorkOrderActivityPanelsProps) {
   const [generalText, setGeneralText] = useState("");
+  const [transferCandidate, setTransferCandidate] = useState<WorkOrderActivity | null>(null);
+  const [transferConfirmed, setTransferConfirmed] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
   const [generalChannel, setGeneralChannel] = useState<"internal_note" | "contractor_message">(
     isManager ? "internal_note" : "contractor_message",
   );
@@ -343,6 +370,12 @@ export default function WorkOrderActivityPanels({
     doMarkSevenElevenSynced,
     doMarkContractorAttention,
     doAcknowledgeContractorAttention,
+    isVaCoordinator,
+    onRequestVaNoteTransfer: (activity: WorkOrderActivity) => {
+      if (!isVaCoordinator || transferBusy || !activity.id || !activity.requiresSevenElevenSync || activity.syncedToSevenElevenAt) return;
+      setTransferCandidate(activity);
+      setTransferConfirmed(false);
+    },
     readOnly,
   };
 
@@ -350,7 +383,9 @@ export default function WorkOrderActivityPanels({
     <section aria-label="Work order updates and conversation" style={{ display: "grid", gap: 16 }}>
       {readOnly && (
         <div role="status" className="card" style={{ padding: "11px 14px", color: T.muted, background: T.surfaceSoft, borderColor: T.borderSoft, fontSize: 11 }}>
-          Closed-job activity is read only. New notes, acknowledgements, and deletions are disabled.
+          {isVaCoordinator
+            ? "VA access is read only. Original notes cannot be edited; only a confirmed 7-Eleven transfer can be recorded."
+            : "Closed-job activity is read only. New notes, acknowledgements, and deletions are disabled."}
         </div>
       )}
       <div className="card" style={{ overflow: "visible", borderColor: `${T.accent}55` }}>
@@ -359,7 +394,9 @@ export default function WorkOrderActivityPanels({
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 750, color: T.ink }}>7-Eleven updates / job notes</div>
               <div style={{ marginTop: 4, maxWidth: 650, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
-                {readOnly
+                {isVaCoordinator
+                  ? "Technician notes are shown as recorded. Mark a note transferred only after successfully copying it into 7-Eleven."
+                  : readOnly
                   ? "Recorded service notes and automated field updates for this closed job."
                   : "Post service notes here. Check in, Pause (parts) / checkout, and Job Completed are also added here automatically and alert P1 for a portal update."}
               </div>
@@ -451,7 +488,9 @@ export default function WorkOrderActivityPanels({
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 750, color: T.ink }}>General chat &amp; activity</div>
               <div style={{ marginTop: 4, maxWidth: 650, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
-                {readOnly
+                {isVaCoordinator
+                  ? "This account can review technician updates but cannot post, edit, or delete activity."
+                  : readOnly
                   ? "Recorded contractor-visible conversation and system activity for this closed job."
                   : "Quotes, invoices, regular conversation, and internal or system activity stay here. Nothing posted here creates a 7-Eleven portal alert."}
               </div>
@@ -541,6 +580,61 @@ export default function WorkOrderActivityPanels({
             ? <><BtnSpinnerDark />Loading activity...</>
             : `Load older activity (${activities.length} loaded${totalCount == null ? "" : ` of ${totalCount} at last refresh`})`}
         </button>
+      )}
+      {transferCandidate?.id && isVaCoordinator && onMarkVaNoteCopiedToSevenEleven && (
+        <Modal
+          title="Confirm 7-Eleven update"
+          width={500}
+          onRequestClose={() => {
+            if (!transferBusy) {
+              setTransferCandidate(null);
+              setTransferConfirmed(false);
+            }
+          }}
+          dismissDisabled={transferBusy}
+          closeOnBackdrop={!transferBusy}
+          description="This only records that the technician note was copied. It does not send anything to 7-Eleven."
+        >
+          <div className="card" style={{ marginTop: 16, padding: 14, color: T.inkSoft, fontSize: 12, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+            {transferCandidate.text}
+          </div>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginTop: 16, color: T.ink, fontSize: 12, lineHeight: 1.5 }}>
+            <input
+              type="checkbox"
+              checked={transferConfirmed}
+              disabled={transferBusy}
+              onChange={event => setTransferConfirmed(event.target.checked)}
+              style={{ width: 16, height: 16, marginTop: 1, accentColor: T.accent, flexShrink: 0 }}
+            />
+            I confirm I successfully copied this note into 7-Eleven.
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button
+              type="button"
+              className="btn-soft"
+              disabled={transferBusy}
+              onClick={() => { setTransferCandidate(null); setTransferConfirmed(false); }}
+            >Cancel</button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!transferConfirmed || transferBusy}
+              onClick={async () => {
+                if (!transferCandidate.id || !transferConfirmed || transferBusy) return;
+                setTransferBusy(true);
+                try {
+                  const saved = await onMarkVaNoteCopiedToSevenEleven(workOrderId, transferCandidate.id);
+                  if (saved) {
+                    setTransferCandidate(null);
+                    setTransferConfirmed(false);
+                  }
+                } finally {
+                  setTransferBusy(false);
+                }
+              }}
+            >{transferBusy ? "Recording…" : "Confirm copied"}</button>
+          </div>
+        </Modal>
       )}
     </section>
   );
