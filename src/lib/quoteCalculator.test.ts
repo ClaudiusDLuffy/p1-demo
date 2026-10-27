@@ -50,6 +50,20 @@ test("reprices a part immediately when its category or contractor cost changes",
   assert.equal(quoteTotals(repriced, pricing).subtotal, 250);
 });
 
+test("distinguishes contractor cost from the P1 sell total and preserves Other lines", () => {
+  const pricing = { laborRate: 110, partsMarkupPercent: 25, overallMarginPercent: 0 };
+  const quote = priceQuoteLines([
+    { id: "other", type: "Other", desc: "Miscellaneous service", qty: 1, sourceRate: 858.2, rate: 858.2 },
+    { id: "parts", type: "Parts/Hardware", desc: "Replacement component", qty: 1, sourceRate: 55.24, rate: 55.24 },
+  ], pricing);
+
+  assert.equal(quoteTotals(quote, pricing).sourceCost, 913.44);
+  assert.equal(quoteTotals(quote, pricing).partsMarkupUplift, 13.81);
+  assert.equal(quoteTotals(quote, pricing).subtotal, 927.25);
+  assert.equal(quoteLineToBillingLine(quote[0]).type, "Other");
+  assert.equal(quoteLineToBillingLine(quote[1]).rate, 69.05);
+});
+
 test("keeps direct P1 rate edits and non-pricing edits intact", () => {
   const pricing = { laborRate: 110, partsMarkupPercent: 25, overallMarginPercent: 0 };
   const part = [{ ...lines[1], id: "editable-part", type: "Parts/Hardware", sourceRate: 200, rate: 250 }];

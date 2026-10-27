@@ -10,7 +10,7 @@ const parent = {
   assetSerial: "SERIAL-1", updatedAt: time, technicianName: "Synthetic Technician",
 };
 
-test("read repository binds cursor and search inputs to bounded team-only RPC contracts", async () => {
+test("read repository binds cursor and search inputs to the bounded global VA RPC contracts", async () => {
   const calls: unknown[][] = [];
   const repository = createVaCoordinatorReadRepository({ read: async (...args) => {
     calls.push(args);

@@ -96,9 +96,9 @@ export default function VaCoordinatorWorkspace({ actor, onSignOut }: {
     setTransferConfirmed(false);
   };
 
-  const pageStatus = workOrdersQuery.isPending ? "Loading team work orders…"
+  const pageStatus = workOrdersQuery.isPending ? "Loading work orders…"
     : workOrdersQuery.isError ? safeErrorMessage(workOrdersQuery.error)
-      : search ? "Search results" : "Team work orders";
+      : search ? "Search results" : "All work orders";
 
   return <div className="app-root" style={{ minHeight: "100vh", background: T.bg, color: T.ink }}>
     <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16,
@@ -109,15 +109,15 @@ export default function VaCoordinatorWorkspace({ actor, onSignOut }: {
     </header>
     <main style={{ maxWidth: 1280, margin: "0 auto", padding: "24px clamp(16px, 4vw, 40px)" }}>
       <div className="va-coordinator-grid" style={{ display: "grid", gridTemplateColumns: "minmax(300px, .9fr) minmax(320px, 1.4fr)", gap: 20 }}>
-        <section aria-label="Team work orders" style={panelStyle}>
-          <h1 style={headingStyle}>Team work orders</h1>
+        <section aria-label="All work orders" style={panelStyle}>
+          <h1 style={headingStyle}>All work orders</h1>
           <form onSubmit={submitSearch} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <Input aria-label="Search team work orders" value={searchInput} maxLength={VA_COORDINATOR_SEARCH_LIMIT}
+            <Input aria-label="Search work orders" value={searchInput} maxLength={VA_COORDINATOR_SEARCH_LIMIT}
               onChange={event => setSearchInput(event.target.value)} placeholder="Work order, store, city, or summary" />
             <button type="submit" className="btn-primary">Search</button>
           </form>
           <p role={workOrdersQuery.isError ? "alert" : "status"} style={mutedStyle}>{pageStatus}</p>
-          {workOrders?.items.length === 0 && <p style={mutedStyle}>No work orders are assigned to your team.</p>}
+          {workOrders?.items.length === 0 && <p style={mutedStyle}>No work orders found.</p>}
           <div style={{ display: "grid", gap: 8 }}>
             {workOrders?.items.map(item => <button key={item.id} type="button"
               onClick={() => { setSelectedWorkOrderId(item.id); setPhotoError(""); setNotice(""); }}
@@ -141,7 +141,7 @@ export default function VaCoordinatorWorkspace({ actor, onSignOut }: {
         </section>
 
         <section aria-label="Selected work order details" style={panelStyle}>
-          {!selectedWorkOrderId && <p style={{ ...mutedStyle, textAlign: "center", padding: 40 }}>Select a team work order to review its equipment, technician notes, and photos.</p>}
+          {!selectedWorkOrderId && <p style={{ ...mutedStyle, textAlign: "center", padding: 40 }}>Select a work order to review its equipment, technician notes, and photos.</p>}
           {workOrderQuery.isPending && selectedWorkOrderId && <p role="status">Loading work-order details…</p>}
           {workOrderQuery.isError && <p role="alert" style={errorStyle}>{safeErrorMessage(workOrderQuery.error)}</p>}
           {workOrder && <>

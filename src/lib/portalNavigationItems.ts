@@ -15,7 +15,6 @@ type PortalNavigationOptions = {
   canInvoice?: boolean;
   canLeadTeam?: boolean;
   canManageTeam?: boolean;
-  canManageVaCoordinatorTeams?: boolean;
   counts: {
     capital: number | null;
     contractorActive: number | null;
@@ -63,13 +62,11 @@ export function initialFocusedPortalPage(role: PortalNavigationRole, search: str
   return role === "contractor" ? "my_jobs" : "dashboard";
 }
 
-function controllerItems(options: PortalNavigationOptions): PortalNavigationItem[] {
-  const items: PortalNavigationItem[] = [
+function controllerItems(): PortalNavigationItem[] {
+  return [
     { id: "dashboard", label: "Controller", icon: ICONS.dashboard },
     { id: "invoices", label: "Contractor bills", icon: ICONS.invoices },
   ];
-  if (options.canManageVaCoordinatorTeams) items.push({ id: "va_teams", label: "VA Teams", icon: ICONS.team });
-  return items;
 }
 
 function managerItems(options: PortalNavigationOptions): PortalNavigationItem[] {
@@ -87,7 +84,6 @@ function managerItems(options: PortalNavigationOptions): PortalNavigationItem[] 
     { id: "contractor_preview", label: "Contractor view", icon: ICONS.preview },
     { id: "history", label: "History", icon: ICONS.history, badge: counts.history },
   ];
-  if (options.canManageVaCoordinatorTeams) items.splice(9, 0, { id: "va_teams", label: "VA Teams", icon: ICONS.team });
   return items;
 }
 
@@ -146,7 +142,6 @@ export function portalPageTitle(
     invoices: options.isManager ? "Contractor bills" : "Invoices",
     billing: "7-Eleven billing",
     contractors: "Contractors",
-    va_teams: "VA Teams",
     contractor_preview: "Contractor view",
     my_jobs: "My jobs",
     team_dispatch: "My Team",
