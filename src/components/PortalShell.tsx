@@ -50,8 +50,17 @@ import HistoryView from "../features/work-orders/HistoryView";
 import MyJobs from "../features/work-orders/MyJobs";
 import CapitalProjects from "../features/work-orders/CapitalProjects";
 import SimplifiedWorkspace from "../features/simplified-work/SimplifiedWorkspace";
-import VaCoordinatorWorkspace from "../features/va-coordinator/VaCoordinatorWorkspace";
-import { VA_COORDINATOR_ROLE } from "../features/va-coordinator/contracts";
+import { VA_COORDINATOR_LABEL, VA_COORDINATOR_ROLE } from "../features/va-coordinator/contracts";
+import {
+  useVaCoordinatorAttachments,
+  useVaCoordinatorTechnicianNotes,
+  useVaCoordinatorWorkOrder,
+} from "../features/va-coordinator/queries";
+import { useVaCoordinatorNoteTransfer } from "../features/va-coordinator/hooks/useVaCoordinatorNoteTransfer";
+import {
+  mapVaCoordinatorDetailsToPortalModel,
+  mapVaCoordinatorWorkOrderToPortalModel,
+} from "../features/va-coordinator/vaCoordinatorPortalModel";
 import type { PortalAuthProfile } from "../features/auth/authProfile";
 import MySchedule from "../features/schedule/MySchedule";
 import {
@@ -1384,6 +1393,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   const [resolutionNotesInput, setResolutionNotesInput] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const isAuthenticated = currentUser.active === true;
+  const isVaCoordinator = currentUser?.role === VA_COORDINATOR_ROLE;
   const isManager = currentUser?.role === "manager" || currentUser?.role === "dispatcher" || currentUser?.role === "back_office";
   const invoiceController = isInvoiceController(currentUser);
   const notesSeenInFlight = useRef(new Map<string, Promise<string | null>>());
@@ -1441,21 +1451,50 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     if (shouldRefresh) void refreshPortal();
   }, [refreshPortal, updatePullDistance]);
 
-  const { data: navigationSummary } = usePortalNavigationSummaryQuery(isAuthenticated && !invoiceController, currentUser);
+  const { data: navigationSummary } = usePortalNavigationSummaryQuery(isAuthenticated && !invoiceController && !isVaCoordinator, currentUser);
   const selectedWorkOrderVisible = selectedWorkOrderReadVisible(page, modal);
   const selectedWorkOrderDetailShown = selectedWorkOrderDetailVisible(page);
   const selectedWorkOrderBeingRead = usePortalVisibility() && selectedWorkOrderDetailShown;
+  const vaCoordinatorActor = {
+    id: currentUser.id,
+    active: isVaCoordinator && currentUser.active === true,
+  };
+  const vaWorkOrderQuery = useVaCoordinatorWorkOrder(
+    vaCoordinatorActor,
+    isVaCoordinator && selectedWorkOrderVisible && selectedWO ? selectedWO : null,
+  );
+  const vaTechnicianNotesQuery = useVaCoordinatorTechnicianNotes(
+    vaCoordinatorActor,
+    isVaCoordinator && selectedWorkOrderDetailShown && selectedWO ? selectedWO : null,
+  );
+  const vaAttachmentsQuery = useVaCoordinatorAttachments(
+    vaCoordinatorActor,
+    isVaCoordinator && selectedWorkOrderDetailShown && selectedWO ? selectedWO : null,
+  );
+  const markVaNoteCopiedToSevenEleven = useVaCoordinatorNoteTransfer({
+    actor: vaCoordinatorActor,
+    workOrderId: selectedWO,
+    notes: vaTechnicianNotesQuery.data,
+    notify: fire,
+  });
   const selectedWorkOrderQuery = useWorkOrderByIdQuery(
     selectedWO,
-    isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO),
+    !isVaCoordinator && isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO),
     currentUser,
   );
-  const selectedWorkOrderLookup = selectedWorkOrderQuery.data;
-  const selectedWorkOrderFailure = selectedWorkOrderQuery.error
-    ? normalizeUnknownError(selectedWorkOrderQuery.error)
+  const selectedWorkOrderLookup = useMemo(() => isVaCoordinator && vaWorkOrderQuery.data
+    ? mapVaCoordinatorWorkOrderToPortalModel(vaWorkOrderQuery.data)
+    : selectedWorkOrderQuery.data,
+  [isVaCoordinator, vaWorkOrderQuery.data, selectedWorkOrderQuery.data]);
+  const selectedWorkOrderFailure = (isVaCoordinator ? vaWorkOrderQuery.error : selectedWorkOrderQuery.error)
+    ? normalizeUnknownError(isVaCoordinator ? vaWorkOrderQuery.error : selectedWorkOrderQuery.error)
     : null;
   const selectedWorkOrderError = selectedWorkOrderFailure?.message || "";
   const selectedWorkOrderErrorCode = selectedWorkOrderFailure?.code;
+  const selectedWorkOrderIsLoading = isVaCoordinator ? vaWorkOrderQuery.isLoading : selectedWorkOrderQuery.isLoading;
+  const selectedWorkOrderIsError = isVaCoordinator ? vaWorkOrderQuery.isError : selectedWorkOrderQuery.isError;
+  const selectedWorkOrderIsFetching = isVaCoordinator ? vaWorkOrderQuery.isFetching : selectedWorkOrderQuery.isFetching;
+  const refetchSelectedWorkOrder = isVaCoordinator ? vaWorkOrderQuery.refetch : selectedWorkOrderQuery.refetch;
   useEffect(() => {
     if (!selectedWorkOrderError || !selectedWO) return;
     void reportClientFailure({
@@ -1471,14 +1510,17 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   const selectedWorkOrderBase = selectedWorkOrderLookup || null;
   const workOrderDetailsQuery = useWorkOrderDetailsQuery(
     selectedWorkOrderBase,
-    isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO),
+    !isVaCoordinator && isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO),
     currentUser,
     { countEnabled: selectedWorkOrderDetailShown },
   );
-  const selectedWorkOrderDetails = workOrderDetailsQuery.data;
+  const selectedWorkOrderDetails = useMemo(() => isVaCoordinator
+    ? mapVaCoordinatorDetailsToPortalModel(vaTechnicianNotesQuery.data || [], vaAttachmentsQuery.data || [])
+    : workOrderDetailsQuery.data,
+  [isVaCoordinator, vaTechnicianNotesQuery.data, vaAttachmentsQuery.data, workOrderDetailsQuery.data]);
   const woParts: any[] = [];
   const selectedDirectoryIds = selectedWorkOrderBase as unknown as { contractor?: string; staffTodo?: { ownerId?: string } } | null;
-  const shellLabels = useDirectoryLabels([selectedDirectoryIds?.contractor, selectedDirectoryIds?.staffTodo?.ownerId], isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO), currentUser);
+  const shellLabels = useDirectoryLabels([selectedDirectoryIds?.contractor, selectedDirectoryIds?.staffTodo?.ownerId], !isVaCoordinator && isAuthenticated && selectedWorkOrderVisible && Boolean(selectedWO), currentUser);
   const { workOrders, setWorkOrders,
     loadingStates,
     patchLocalWO, localActivity, dbCall,
@@ -1923,20 +1965,21 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   );
 
   useEffect(() => {
-    if (
-      isManager
-      || !selectedWO
-      || !selectedWorkOrderQuery.isSuccess
-      || selectedWorkOrderQuery.data !== null
-    ) return;
+    if (isManager || !selectedWO) return;
+    const lookupSucceeded = isVaCoordinator ? vaWorkOrderQuery.isSuccess : selectedWorkOrderQuery.isSuccess;
+    const lookupFound = isVaCoordinator ? vaWorkOrderQuery.data !== null : selectedWorkOrderQuery.data !== null;
+    if (!lookupSucceeded || lookupFound) return;
     setSelectedWO(null);
     setAiNote(null);
-    setPage("my_jobs");
+    setPage(isVaCoordinator ? "work_orders" : "my_jobs");
   }, [
     isManager,
+    isVaCoordinator,
     selectedWO,
     selectedWorkOrderQuery.data,
     selectedWorkOrderQuery.isSuccess,
+    vaWorkOrderQuery.data,
+    vaWorkOrderQuery.isSuccess,
     setAiNote,
     setPage,
     setSelectedWO,
@@ -2080,6 +2123,11 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   }, [modal, woData, shellScope, shellFormState]);
 
   const nav = useCallback((p: string) => {
+    if (isVaCoordinator && p !== "work_orders" && p !== "wo_detail") {
+      setPage("work_orders");
+      setSelectedWO(null);
+      return;
+    }
     setFocusedBilling(false);
     setPage(p);
     setSelectedWO(null);
@@ -2091,7 +2139,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     setAiNote(null);
     setWorkOrderReturnPage(null);
     setWorkOrderStoreView(null);
-  }, []);
+  }, [isVaCoordinator]);
   const openUnassignedWorkOrders = useCallback(() => {
     setSearch("");
     setFilterC("all");
@@ -2661,7 +2709,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     () => invoices.find(i => i.num === submittedInvoiceNum),
     [invoices, submittedInvoiceNum]
   );
-  const navigationRole = portalNavigationRole({ invoiceController, isManager });
+  const navigationRole = portalNavigationRole({ invoiceController, isManager, isVaCoordinator });
   // Focused pages simplify their content/actions, not the role-based navigation.
   const focusedWorkspace = isManager && !invoiceController && (page === "simplified"
     || page === "my_schedule" || (page === "wo_detail" && ["simplified", "my_schedule"].includes(workOrderReturnPage || ""))
@@ -2669,6 +2717,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   const sideItems = useMemo(() => buildPortalNavigationItems({
     invoiceController,
     isManager,
+    isVaCoordinator,
     canInvoice: currentUser?.canInvoice,
     canLeadTeam: currentUser?.canLeadTeam,
     canManageTeam: currentUser?.canManageTeam,
@@ -2682,7 +2731,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
       pendingApproval: pendAppr || null,
       staffWork: navigationSummary?.staffWorkCount || null,
     },
-  }), [invoiceController, isManager, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
+  }), [invoiceController, isManager, isVaCoordinator, openCount, capitalCount, pendAppr, historyCount, contractorActiveBadge, contractorAttentionBadge, contractorInvoiceBadge, currentUser?.canInvoice, currentUser?.canLeadTeam, currentUser?.canManageTeam, navigationSummary?.staffWorkCount]);
   const bottomNavItems = useMemo(
     () => buildBottomNavigationItems(sideItems, navigationRole),
     [navigationRole, sideItems],
@@ -2696,6 +2745,15 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     setModal(null);
     setPage("dashboard");
   }, [page, setSelectedInvoice]);
+
+  useEffect(() => {
+    if (!isVaCoordinator || page === "work_orders" || page === "wo_detail") return;
+    setSelectedWO(null);
+    setSelectedInvoice(null);
+    setSelectedBillingInvoice(null);
+    setModal(null);
+    setPage("work_orders");
+  }, [isVaCoordinator, page, setSelectedInvoice]);
 
   const sensitiveShellIdentity = useRef<string | null>(null);
   useEffect(() => {
@@ -2930,7 +2988,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             </div>
             <div>
               <div className="display" style={{ fontSize: 18, color: T.bg, letterSpacing: -0.3, lineHeight: 1 }}>P1 Service</div>
-              <div style={{ fontSize: 10, color: T.sidebarText, letterSpacing: 0.8, textTransform: "uppercase", marginTop: 3 }}>{currentUser.role === "manager" ? "Operations" : currentUser.role === "dispatcher" ? "Dispatch" : currentUser.role === "back_office" ? "Back office" : "Contractor"}</div>
+              <div style={{ fontSize: 10, color: T.sidebarText, letterSpacing: 0.8, textTransform: "uppercase", marginTop: 3 }}>{currentUser.role === "manager" ? "Operations" : currentUser.role === "dispatcher" ? "Dispatch" : currentUser.role === "back_office" ? "Back office" : isVaCoordinator ? VA_COORDINATOR_LABEL : "Contractor"}</div>
             </div>
           </div>
         </div>
@@ -3260,6 +3318,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             search={search}
             setSearch={setSearch}
             isManager={isManager}
+            currentUser={currentUser}
             filterC={filterC}
             setFilterC={setFilterC}
             filterP={filterP}
@@ -3455,13 +3514,13 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             fmt={fmt}
           />
 
-          {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderQuery.isLoading && (
+          {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderIsLoading && (
             <div className="card" role="status" style={{ padding: "28px 20px", color: T.muted, textAlign: "center" }}>
               Loading work order...
             </div>
           )}
 
-          {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderQuery.isError && (
+          {page === "wo_detail" && selectedWO && !woData && selectedWorkOrderIsError && (
             <div className="card" role="alert" style={{ padding: "24px 20px", textAlign: "center" }}>
               <div style={{ color: T.ink, fontWeight: 700, marginBottom: 6 }}>Work order could not load</div>
               <div style={{ color: T.muted, fontSize: 12, marginBottom: 14 }}>
@@ -3470,10 +3529,10 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
               <button
                 type="button"
                 className="btn-soft"
-                onClick={() => void selectedWorkOrderQuery.refetch()}
-                disabled={selectedWorkOrderQuery.isFetching}
+                onClick={() => void refetchSelectedWorkOrder()}
+                disabled={selectedWorkOrderIsFetching}
               >
-                {selectedWorkOrderQuery.isFetching ? "Retrying..." : "Retry"}
+                {selectedWorkOrderIsFetching ? "Retrying..." : "Retry"}
               </button>
             </div>
           )}
@@ -3486,9 +3545,12 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             page={page}
             selectedWO={selectedWO}
             woData={woData}
+            isVaCoordinator={isVaCoordinator}
             workOrders={maskedWorkOrders}
-            invoices={invoices}
-            billingInvoices={billingInvoices}
+            invoices={isVaCoordinator ? [] : invoices}
+            billingInvoices={isVaCoordinator ? [] : billingInvoices}
+            vaAttachmentPaths={(vaAttachmentsQuery.data || []).map(attachment => attachment.storagePath)}
+            onMarkVaNoteCopiedToSevenEleven={markVaNoteCopiedToSevenEleven}
             modal={modal}
             isManager={isManager}
             setSelectedWO={setSelectedWO}
@@ -4583,13 +4645,9 @@ export default function PortalShell() {
     fadeIn={auth.fadeIn} imageErrors={imageErrors} setImageErrors={setImageErrors} doLogin={auth.doLogin} CSS={CSS}
   />;
 
-  if (currentUser.role === VA_COORDINATOR_ROLE) return <>
-    <style>{CSS}</style>
-    <VaCoordinatorWorkspace actor={{ id: currentUser.id, name: currentUser.name,
-      email: currentUser.email, initials: currentUser.initials, active: currentUser.active }} onSignOut={auth.logout} />
+  return <>
+    <PortalApplication key={JSON.stringify(directoryScopeKey(currentUser))} currentUser={currentUser} initialPage={authPage}
+      refreshCurrentProfile={auth.refreshCurrentProfile} authLogout={auth.logout} />
     {authToast && <div role="status" className="app-toast">{authToast}</div>}
   </>;
-
-  return <PortalApplication key={JSON.stringify(directoryScopeKey(currentUser))} currentUser={currentUser} initialPage={authPage}
-    refreshCurrentProfile={auth.refreshCurrentProfile} authLogout={auth.logout} />;
 }

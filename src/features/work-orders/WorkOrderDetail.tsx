@@ -102,6 +102,7 @@ const PART_STATUS_ORDER: Record<string, number> = {
   shipped: 2,
   received: 3,
 };
+const EMPTY_INVOICES: never[] = [];
 
 // ETA is stored as an ISO timestamp (timestamptz). Render it in the user's
 // locale. Falls through to the raw string for any legacy non-ISO value so
@@ -126,12 +127,13 @@ export default function WorkOrderDetail(props: any) {
   const [closeOutReview, setCloseOutReview] = useState<{ workOrderId: string; actorId: string; section: CloseOutReviewSection } | null>(null);
   const focused = layoutOverride?.id === props.selectedWO ? layoutOverride.focused : props.focused === true;
   const { photoUploadItems = [], retryPhotoUploads, cancelPhotoUploads, photoDeleteError = "", retryPhotoDeletion } = props;
-  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doReturnCompletedToField, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const { page, selectedWO, woData, workOrders: suppliedWorkOrders = [], invoices: suppliedInvoices = [], billingInvoices: suppliedBillingInvoices = [], modal, isManager, setSelectedWO, onBackFromWorkOrder, onViewStoreWorkOrders, setSelectedInvoice, onOpenContractorInvoice, setAiNote, setPage, slaLabel, slaRemaining, fmt, doAssign, doStraightToBilling, setReassignTarget, setModal, doCapitalFlag, doCapitalDecline, doCapitalResume, doCapitalComplete, onOpenBillingForWorkOrder, doMoveToInvoice, doFinishContractorInvoicing, doApproveInvoice, onApproveAndGoToBilling, doCloseWithoutInvoice, onRequestReopen, doReturnCompletedToField, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doRetractInvoiceRejection, openCreateInvoice, onConvertQuote, pdfBusy, activityMenuId, setActivityMenuId, setPendingDelete, currentUser, fire, aiNote, aiEnhancing, doAiEnhance, noteText, setNoteText, doPostNote, doSetTechnician, doAssignPortalTechnician, imageErrors, setImageErrors, setLightbox, doAddPhotos, doRemovePhoto, doDeleteActivity, doSetEta, doStartWork, doPauseWork, doCloseComplete, doMarkSevenElevenSynced, doMarkContractorAttention, doAcknowledgeContractorAttention, onMarkVaNoteCopiedToSevenEleven, vaAttachmentPaths = [], startDateInput, setStartDateInput, startTimeInput, setStartTimeInput, pauseDateInput, setPauseDateInput, pauseTimeInput, setPauseTimeInput, loadingStates = {}, woParts: suppliedWoParts = [], doAddPart, doUpdatePart, doDeletePart, doRequestP1PartOrder, doSetP1PartOrderStatus, staffTodo, staffTodoOwner, staffMyTodoCount = 0, staffTodoBusy = false, onAddStaffTodo, onCompleteStaffTodo, onTransferStaffTodo, onLoadMoreActivities, onLoadMorePhotos, onLoadMoreVisits, loadingMoreActivities = false, loadingMorePhotos = false, loadingMoreVisits = false } = props;
+  const isVaCoordinator = currentUser?.role === "va_coordinator";
   const detailEnabled = Boolean(
     selectedWO
     && woData
     && ["work_orders", "wo_detail", "history"].includes(page),
-  );
+  ) && !isVaCoordinator;
   const staffTodoCapacityUnknown = typeof props.staffMyTodoCount !== "number"
     || !Number.isSafeInteger(props.staffMyTodoCount) || props.staffMyTodoCount < 0;
   const { getUser } = useDirectoryLabels([woData?.contractor], detailEnabled);
@@ -161,8 +163,8 @@ export default function WorkOrderDetail(props: any) {
     selectedWO,
     detailEnabled && isManager,
   );
-  const invoices = contractorInvoiceQuery.data?.items || suppliedInvoices;
-  const billingInvoices = billingInvoiceQuery.data?.items || suppliedBillingInvoices;
+  const invoices = isVaCoordinator ? EMPTY_INVOICES : contractorInvoiceQuery.data?.items || suppliedInvoices;
+  const billingInvoices = isVaCoordinator ? EMPTY_INVOICES : billingInvoiceQuery.data?.items || suppliedBillingInvoices;
   const workOrders = storeHistoryQuery.data?.items || suppliedWorkOrders;
   const woParts = useMemo(() => {
     const rows = partsQuery.data || suppliedWoParts;
@@ -294,11 +296,10 @@ export default function WorkOrderDetail(props: any) {
   }, [woBillingInvoices, woData?.status, woData?.workflowCycle, woData?.activities]);
   const hasAnyLiveInvoice = woAllInvoices.length > 0 || woBillingInvoices.length > 0;
   const canInvoice = !isManager && currentUser?.canInvoice === true;
-  // Contractor History is a reference archive. Keep every server-changing
-  // control out of this detail even if an old or malformed row has an active
-  // status; RLS still remains the authoritative visibility boundary.
-  const contractorHistoryReadOnly = !isManager
-    && (page === "history" || woData?.status === "closed");
+  // Historical views and VA coordinator views are explicitly read-only. VA
+  // access is additionally backed by the scoped read RPCs and sync-only RPC.
+  const contractorHistoryReadOnly = isVaCoordinator || (!isManager
+    && (page === "history" || woData?.status === "closed"));
   const capitalStageActive = ["capital", "pending_capital_completion"].includes(woData?.status);
   const hasOpenVisit = (woData?.visits || []).some(
     (visit: { checkOutAt?: string | null }) => !visit.checkOutAt,
@@ -645,12 +646,14 @@ export default function WorkOrderDetail(props: any) {
                         {[woData.store ? `Store #${woData.store}` : null, woData.city || null].filter(Boolean).join(" · ") || woData.id}
                       </h1>
                       {woData.addr && <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>{woData.addr}</div>}
-                      <div className="wo-date-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-                        {[
+                      <div className="wo-date-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: isVaCoordinator ? "minmax(0, 1fr)" : "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                        {(isVaCoordinator ? [
+                          { label: "Last updated", value: dates.updated, color: T.inkSoft, bg: T.surfaceSoft, ring: T.borderSoft },
+                        ] : [
                           { label: "Created", value: dates.created, color: T.inkSoft, bg: T.surfaceSoft, ring: T.borderSoft },
                           { label: "Last updated", value: dates.updated, color: T.inkSoft, bg: T.surfaceSoft, ring: T.borderSoft },
                           { label: "SLA due", value: dates.slaDue, color: aging.color, bg: aging.bg, ring: aging.ring },
-                        ].map((item) => (
+                        ]).map((item) => (
                           <div key={item.label} style={{ padding: "10px 12px", borderRadius: 10, background: item.bg, border: `1px solid ${item.ring}`, minWidth: 0 }}>
                             <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.7, color: T.subtle, marginBottom: 4 }}>{item.label}</div>
                             <div style={{ fontSize: 11, fontWeight: 700, color: item.color, lineHeight: 1.35 }}>{item.value}</div>
@@ -666,9 +669,9 @@ export default function WorkOrderDetail(props: any) {
                         }} />
                         <CapitalWorkOrderBadge workOrder={woData} />
                         {woData.functionalStatus && <Badge conf={{ label: `7-Eleven FSM: ${woData.functionalStatus}`, ...FUNCTIONAL_STATUS[woData.functionalStatus] || { color: T.muted, bg: T.borderSoft } }} />}
-                        {sla2
+                        {!isVaCoordinator && sla2
                           ? <SlaBadge responseBreachAt={woData.responseBreachAt} resolutionBreachAt={woData.resolutionBreachAt} responseMetAt={woData.startTimeRaw} size="sm" />
-                          : sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
+                          : !isVaCoordinator && sla && <span style={{ fontSize: 11, fontWeight: 700, color: sla.color, background: sla.bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${sla.color}22` }}>SLA: {sla.text}</span>}
                       </div>
                       {(() => {
                         const classParts = [woData.businessService, woData.category, woData.subCategory].filter(Boolean);
@@ -683,8 +686,13 @@ export default function WorkOrderDetail(props: any) {
                           </div>
                         );
                       })()}
-                      <div className="detail-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 18 }}>
-                        {[
+                      <div className="detail-fields" style={{ display: "grid", gridTemplateColumns: isVaCoordinator ? "repeat(2, minmax(0, 1fr))" : "1fr 1fr 1fr", gap: 18, marginTop: 18 }}>
+                        {(isVaCoordinator ? [
+                          { l: "Technician on job", v: woData.technicianOnJob || "Not captured" },
+                          { l: "Equipment make", v: woData.assetMake || "Not captured" },
+                          { l: "Asset model", v: woData.assetModel || "Not captured" },
+                          { l: "Serial #", v: woData.assetSerial || "Not captured" },
+                        ] : [
                           { l: "Line of Service", v: woData.lineOfService || "Not set" },
                           { l: "ETA", v: formatEta(woData.eta, woData) || "Not set" },
                           ...(isManager ? [{ l: "Assigned to", v: woData.contractor ? contractorCard?.name : "Unassigned" }] : []),
@@ -694,7 +702,7 @@ export default function WorkOrderDetail(props: any) {
                           { l: "Asset model", v: woData.assetModel || "Not captured" },
                           { l: "Serial #", v: woData.assetSerial || "Not captured" },
                           ...(isManager ? [{ l: "AFM email", v: woData.afmEmail || "—" }] : []),
-                        ].map((d, i) => (
+                        ]).map((d, i) => (
                           <div key={i}>
                             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 4 }}>{d.l}</div>
                             <div style={{ fontSize: 13, fontWeight: 500, color: ["Not captured", "Not set", "Not started", "Unassigned", "—"].includes(d.v) ? T.danger : T.ink }}>{d.v}</div>
@@ -1162,22 +1170,24 @@ export default function WorkOrderDetail(props: any) {
 
                 {contractorHistoryReadOnly && (
                   <div role="status" className="card" style={{ padding: "12px 16px", marginBottom: 12, background: T.surfaceSoft, borderColor: T.borderSoft }}>
-                    <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>Closed job · read only</div>
+                    <div style={{ color: T.ink, fontSize: 12, fontWeight: 800 }}>{isVaCoordinator ? "VA coordinator · read only" : "Closed job · read only"}</div>
                     <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
-                      This record remains available for reference. Work-order, invoice, note, photo, part, and assignment changes are disabled here.
+                      {isVaCoordinator
+                        ? "Work orders, equipment details, technician notes, and photos are available for review. Other work-order, invoice, note, photo, part, and assignment changes are disabled."
+                        : "This record remains available for reference. Work-order, invoice, note, photo, part, and assignment changes are disabled here."}
                     </div>
                   </div>
                 )}
 
-                    {!focused && secondaryAlerts}
+                {!isVaCoordinator && !focused && secondaryAlerts}
                 <div className={focused ? "grid min-w-0 gap-4" : "detail-two-col"} style={focused ? undefined : { display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
                   <div className="min-w-0">
                     {!focused && jobInformation}
-                    {!woData.billingOnly && <ReceivingDispatchStatus key={`${woData.id}:${woData.contractorAssignmentVersion}`} profile={currentUser}
+                    {!isVaCoordinator && !woData.billingOnly && <ReceivingDispatchStatus key={`${woData.id}:${woData.contractorAssignmentVersion}`} profile={currentUser}
                       workOrderId={woData.id} assignmentVersion={woData.contractorAssignmentVersion} />}
 
                     {/* Actions */}
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                    {!isVaCoordinator && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
                       <DetailDisclosure focused={focused} title="Dispatch and billing actions">
                       {woData.status === "unassigned" && isManager && !invoiceController && (
                         <button
@@ -1353,9 +1363,9 @@ export default function WorkOrderDetail(props: any) {
                       {woData.status === "closed" && woInvoices[0] && <button onClick={() => doDownloadInvoice(woInvoices[0])} disabled={pdfBusy} className="btn-accent" style={{ opacity: pdfBusy ? 0.6 : 1, cursor: pdfBusy ? "default" : "pointer" }}>Download Invoice PDF</button>}
 
                       </DetailDisclosure>
-                    </div>
+                    </div>}
 
-                    {!isManager && woData.status === "pending_capital_completion" && (
+                    {!isManager && !isVaCoordinator && woData.status === "pending_capital_completion" && (
                       <div role="status" className="card" style={{ padding: "14px 16px", marginBottom: 16, background: T.warnSoft, borderColor: `${T.warn}44` }}>
                         <div style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>Capital work is waiting for P1 authorization</div>
                         <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
@@ -1366,7 +1376,7 @@ export default function WorkOrderDetail(props: any) {
                       </div>
                     )}
 
-                    {!focused && billingDocuments}
+                    {!isVaCoordinator && !focused && billingDocuments}
                     {/* Reject-invoice confirmation modal — staff-only, reason required. */}
                     {rejectingInv && (
                       <Modal onRequestClose={rejectionDismissal.requestClose} dismissDisabled={rejectingBusy} title={`Reject invoice #${rejectingInv.num}`} width={460}>
@@ -1505,7 +1515,7 @@ export default function WorkOrderDetail(props: any) {
                       );
                     })()}
 
-                    <VisitTimeline
+                    {!isVaCoordinator && <VisitTimeline
                       workOrder={woData}
                       visits={woData.visits || []}
                       totalCount={woData.visitPage?.totalCount}
@@ -1514,7 +1524,7 @@ export default function WorkOrderDetail(props: any) {
                       loadingMore={loadingMoreVisits}
                       currentUser={currentUser}
                       fire={fire}
-                    />
+                    />}
 
                     </DetailDisclosure>
                     <WorkOrderAttachments canViewDocuments={isManager || canInvoice}
@@ -1539,6 +1549,7 @@ export default function WorkOrderDetail(props: any) {
                       retryDeletion={retryPhotoDeletion}
                       fire={fire}
                       loadingStates={loadingStates}
+                      loadAllPhotoPaths={isVaCoordinator ? async () => vaAttachmentPaths : undefined}
                       readOnly={contractorHistoryReadOnly}
                     />
 
@@ -1572,19 +1583,21 @@ export default function WorkOrderDetail(props: any) {
                       doMarkSevenElevenSynced={doMarkSevenElevenSynced}
                       doMarkContractorAttention={doMarkContractorAttention}
                       doAcknowledgeContractorAttention={doAcknowledgeContractorAttention}
+                      isVaCoordinator={isVaCoordinator}
+                      onMarkVaNoteCopiedToSevenEleven={onMarkVaNoteCopiedToSevenEleven}
                       readOnly={contractorHistoryReadOnly}
                     />
                     </section>
                     {focused && <>
-                      {billingDocuments}
+                      {!isVaCoordinator && billingDocuments}
                       <DetailDisclosure focused title="More job information">
-                        {jobInformation}{secondaryAlerts}{administrativeRecords}
+                        {jobInformation}{!isVaCoordinator && <>{secondaryAlerts}{administrativeRecords}</>}
                       </DetailDisclosure>
                     </>}
                   </div>
 
                   {/* Secondary information remains available in both layouts. */}
-                  <DetailDisclosure focused={focused} title="SLA, contacts, progress and parts" id="work-order-progress">
+                  {!isVaCoordinator && <DetailDisclosure focused={focused} title="SLA, contacts, progress and parts" id="work-order-progress">
                   <div className="min-w-0">
                     {sla2 ? (
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
@@ -1723,7 +1736,7 @@ export default function WorkOrderDetail(props: any) {
                       )
                     )}
                   </div>
-                  </DetailDisclosure>
+                  </DetailDisclosure>}
                 </div>
                 {focused && isManager && !invoiceController && (canFlagWorkOrderCapital(woData) || capitalStageActive) && (
                   <section aria-label="Capital actions" className="mt-4 rounded-xl border border-p1-border bg-p1-surface p-4">

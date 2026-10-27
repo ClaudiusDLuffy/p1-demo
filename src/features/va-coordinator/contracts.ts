@@ -73,10 +73,10 @@ const pageSchema = z.object({
 export function parseVaCoordinatorWorkOrderPage(value: unknown): CursorPage<VaCoordinatorWorkOrder> {
   let decoded: unknown = value;
   if (typeof value === "string") {
-    try { decoded = JSON.parse(value); } catch { throw new Error("The team work-order results could not be verified."); }
+    try { decoded = JSON.parse(value); } catch { throw new Error("The work-order results could not be verified."); }
   }
   const result = pageSchema.safeParse(decoded);
-  if (!result.success) throw new Error("The team work-order results could not be verified.");
+  if (!result.success) throw new Error("The work-order results could not be verified.");
   return { ...result.data, nextCursor: result.data.nextCursor ? JSON.stringify(result.data.nextCursor) : null, totalCount: null };
 }
 

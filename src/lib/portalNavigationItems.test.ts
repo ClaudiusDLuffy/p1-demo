@@ -37,6 +37,18 @@ test("builds role-specific portal navigation without leaking manager pages", () 
   assert.equal(manager.filter(item => item.beta).length, 1);
   assert.ok(!contractor.some(item => item.id === "simplified"));
   assert.ok(!contractor.some(item => item.id === "va_teams"));
+
+  const vaCoordinator = buildPortalNavigationItems({
+    invoiceController: false,
+    isManager: false,
+    isVaCoordinator: true,
+    canInvoice: true,
+    canManageTeam: true,
+    counts: emptyCounts,
+  });
+  assert.deepEqual(vaCoordinator.map(item => item.id), ["work_orders"]);
+  assert.equal(portalNavigationRole({ invoiceController: false, isManager: false, isVaCoordinator: true }), "va_coordinator");
+  assert.equal(initialFocusedPortalPage("va_coordinator", "?portal=billing"), "work_orders");
 });
 
 test("restores focused tabs only for their allowed navigation roles", () => {
@@ -59,6 +71,10 @@ test("selects stable bottom navigation for each role", () => {
   const contractorRole = portalNavigationRole({ invoiceController: false, isManager: false });
   const contractor = buildPortalNavigationItems({ invoiceController: false, isManager: false, counts: emptyCounts });
   assert.deepEqual(buildBottomNavigationItems(contractor, contractorRole).map(item => item.id), ["my_jobs", "my_schedule", "history"]);
+
+  const vaRole = portalNavigationRole({ invoiceController: false, isManager: false, isVaCoordinator: true });
+  const va = buildPortalNavigationItems({ invoiceController: false, isManager: false, isVaCoordinator: true, counts: emptyCounts });
+  assert.deepEqual(buildBottomNavigationItems(va, vaRole).map(item => item.id), ["work_orders"]);
 });
 
 test("resolves contextual page titles", () => {
