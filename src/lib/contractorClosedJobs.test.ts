@@ -61,7 +61,7 @@ test("contractor closed jobs reuse the RLS-scoped history query with explicit co
 test("contractor history detail is read only across every mutation surface", () => {
   assert.match(
     detail,
-    /const contractorHistoryReadOnly = !isManager[\s\S]*page === "history" \|\| woData\?\.status === "closed"/,
+    /const contractorHistoryReadOnly = isVaCoordinator \|\| \(!isManager[\s\S]*page === "history" \|\| woData\?\.status === "closed"/,
   );
   assert.match(detail, /Closed job · read only/);
   assert.match(detail, /<PhotoGallery[\s\S]*readOnly=\{contractorHistoryReadOnly\}/);
@@ -82,7 +82,12 @@ test("contractor history detail is read only across every mutation surface", () 
 });
 
 test("read-only activity, photo, and part panels omit their write controls", () => {
-  assert.match(activityPanels, /if \(readOnly \|\| !text \|\| posting\) return/);
+  assert.match(activityPanels, /if \(!text \|\| postingThisNote\) return/);
+  assert.match(
+    activityPanels,
+    /if \(isVaCoordinator && channel === "field_note"\)[\s\S]*onPostVaSevenElevenUpdate\(workOrderId, text\)/,
+  );
+  assert.match(activityPanels, /if \(readOnly\) return/);
   assert.match(activityPanels, /const canDelete = !readOnly/);
   assert.match(
     activityPanels,

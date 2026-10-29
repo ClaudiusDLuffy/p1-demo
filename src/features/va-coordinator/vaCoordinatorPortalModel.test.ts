@@ -43,6 +43,7 @@ test("shared detail adapter exposes only technician notes and private-photo path
     text: "Synthetic field update",
     createdAt: "2026-10-27T10:00:00Z",
     authorName: "Synthetic Technician",
+    enteredByRole: "contractor",
     syncedToSevenElevenAt: null,
     syncedById: null,
     syncedByName: null,
@@ -62,8 +63,27 @@ test("shared detail adapter exposes only technician notes and private-photo path
   assert.equal(result.activities.length, 1);
   assert.equal(result.activities[0].text, notes[0].text);
   assert.equal(result.activities[0].requiresSevenElevenSync, true);
+  assert.equal(result.activities[0].enteredByRole, "contractor");
   assert.equal(result.activities[0].syncedToSevenElevenByName, null);
   assert.deepEqual(result.visits, []);
   assert.deepEqual(result.assignmentHistory, []);
   assert.equal(result.pendingSevenElevenSyncCount, 1);
+});
+
+test("VA-authored queued updates preserve individual role attribution in the portal view", () => {
+  const note: VaCoordinatorNote = {
+    id: "33333333-3333-4333-8333-333333333333",
+    workOrderId: workOrder.id,
+    text: "Synthetic VA update",
+    createdAt: "2026-10-27T10:00:00Z",
+    authorName: "Synthetic VA Coordinator",
+    enteredByRole: "va_coordinator",
+    syncedToSevenElevenAt: null,
+    syncedById: null,
+    syncedByName: null,
+    requiresSevenElevenSync: true,
+  };
+  const result = mapVaCoordinatorDetailsToPortalModel([note], []);
+  assert.equal(result.activities[0].author, "Synthetic VA Coordinator");
+  assert.equal(result.activities[0].enteredByRole, "va_coordinator");
 });

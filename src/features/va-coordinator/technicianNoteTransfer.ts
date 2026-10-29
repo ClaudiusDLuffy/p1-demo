@@ -18,7 +18,7 @@ type TransferTransport = (name: "mark_work_order_activity_synced_v1", args: { p_
 
 export function createTechnicianNoteTransferAttempt(note: VaCoordinatorNote, confirmed: boolean) {
   if (!canTransferTechnicianNote(note)) throw new TechnicianNoteTransferError("This note is not eligible for a transfer update.");
-  if (!confirmed) throw new TechnicianNoteTransferError("Confirm that you copied the technician note into 7-Eleven first.");
+  if (!confirmed) throw new TechnicianNoteTransferError("Confirm that you copied the update into 7-Eleven first.");
   const args = Object.freeze({ p_activity_id: note.id, p_synced: true as const });
   return async (transport: TransferTransport): Promise<void> => {
     try {

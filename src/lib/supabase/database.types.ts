@@ -3961,6 +3961,10 @@ export type Database = {
         Args: { p_activity_id: string; p_synced: boolean }
         Returns: undefined
       }
+      post_va_coordinator_seven_eleven_update_v1: {
+        Args: { p_work_order_id: string; p_text: string }
+        Returns: Json
+      }
       configure_va_coordinator_team_v1: {
         Args: {
           p_team_id?: string | null

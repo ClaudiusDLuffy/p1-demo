@@ -122,6 +122,8 @@ function ActivityEntryList({
       ? "Staff override"
       : staffEntered
         ? "Staff-entered"
+        : activity.enteredByRole === "va_coordinator"
+          ? "VA-entered"
         : activity.enteredByRole === "contractor"
           ? "Contractor-entered"
           : null;
@@ -297,6 +299,8 @@ type WorkOrderActivityPanelsProps = Omit<ActivityEntryListProps, "activities" | 
   doAiEnhance: () => void;
   isVaCoordinator?: boolean;
   onMarkVaNoteCopiedToSevenEleven?: (workOrderId: string, activityId: string) => Promise<boolean>;
+  onPostVaSevenElevenUpdate?: (workOrderId: string, text: string) => Promise<boolean>;
+  vaSevenElevenUpdatePosting?: boolean;
 };
 
 export default function WorkOrderActivityPanels({
@@ -317,6 +321,8 @@ export default function WorkOrderActivityPanels({
   doAiEnhance,
   isVaCoordinator = false,
   onMarkVaNoteCopiedToSevenEleven,
+  onPostVaSevenElevenUpdate,
+  vaSevenElevenUpdatePosting = false,
   workOrderId,
   isManager,
   currentUser,
@@ -345,6 +351,10 @@ export default function WorkOrderActivityPanels({
     ? Math.max(pendingSevenElevenCount, loadedPendingSevenEleven)
     : loadedPendingSevenEleven;
   const posting = isLoading("postNote_" + workOrderId);
+  const fieldNotePosting = isVaCoordinator ? vaSevenElevenUpdatePosting : posting;
+  const canPostFieldNote = isVaCoordinator
+    ? Boolean(onPostVaSevenElevenUpdate)
+    : !readOnly;
 
   const postDraft = async (
     channel: "field_note" | "internal_note" | "contractor_message",
@@ -352,7 +362,18 @@ export default function WorkOrderActivityPanels({
     clear: (next: string) => void,
   ) => {
     const text = value.trim();
-    if (readOnly || !text || posting) return;
+    const postingThisNote = isVaCoordinator && channel === "field_note"
+      ? vaSevenElevenUpdatePosting
+      : posting;
+    if (!text || postingThisNote) return;
+    if (isVaCoordinator && channel === "field_note") {
+      if (!onPostVaSevenElevenUpdate) return;
+      clear("");
+      const saved = await onPostVaSevenElevenUpdate(workOrderId, text);
+      if (!saved) clear(value);
+      return;
+    }
+    if (readOnly) return;
     clear("");
     const saved = await doPostNote(workOrderId, channel, text);
     if (saved === false) clear(value);
@@ -384,7 +405,7 @@ export default function WorkOrderActivityPanels({
       {readOnly && (
         <div role="status" className="card" style={{ padding: "11px 14px", color: T.muted, background: T.surfaceSoft, borderColor: T.borderSoft, fontSize: 11 }}>
           {isVaCoordinator
-            ? "VA access is read only. Original notes cannot be edited; only a confirmed 7-Eleven transfer can be recorded."
+            ? "Original work-order and technician data cannot be edited. You may add a queued 7-Eleven update and confirm it only after copying it into 7-Eleven."
             : "Closed-job activity is read only. New notes, acknowledgements, and deletions are disabled."}
         </div>
       )}
@@ -395,7 +416,7 @@ export default function WorkOrderActivityPanels({
               <div style={{ fontSize: 15, fontWeight: 750, color: T.ink }}>7-Eleven updates / job notes</div>
               <div style={{ marginTop: 4, maxWidth: 650, fontSize: 11, lineHeight: 1.5, color: T.muted }}>
                 {isVaCoordinator
-                  ? "Technician notes are shown as recorded. Mark a note transferred only after successfully copying it into 7-Eleven."
+                  ? "Review the update queue and add field notes for 7-Eleven. New notes are queued here, not sent; mark an update copied only after you add it in 7-Eleven."
                   : readOnly
                   ? "Recorded service notes and automated field updates for this closed job."
                   : "Post service notes here. Check in, Pause (parts) / checkout, and Job Completed are also added here automatically and alert P1 for a portal update."}
@@ -410,7 +431,7 @@ export default function WorkOrderActivityPanels({
           </div>
         </div>
         <div style={{ padding: 20 }}>
-          {!readOnly && (
+          {canPostFieldNote && (
             <>
               <label htmlFor={`seven-eleven-note-${workOrderId}`} style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.ink, marginBottom: 7 }}>
                 New 7-Eleven job note
@@ -432,7 +453,9 @@ export default function WorkOrderActivityPanels({
               />
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8, marginBottom: 18 }}>
                 <span id={`seven-eleven-note-help-${workOrderId}`} style={{ color: T.accent, fontSize: 10, fontWeight: 650 }}>
-                  Every note posted here creates a “Needs 7-Eleven update” alert.
+                  {isVaCoordinator
+                    ? "This adds an attributed item to P1’s 7-Eleven update queue. It does not send the update."
+                    : "Every note posted here creates a “Needs 7-Eleven update” alert."}
                 </span>
                 <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
                   {isManager && (
@@ -449,10 +472,12 @@ export default function WorkOrderActivityPanels({
                     type="button"
                     className="btn-accent"
                     onClick={() => void postDraft("field_note", fieldNoteText, setFieldNoteText)}
-                    disabled={posting || !fieldNoteText.trim()}
-                    style={{ minHeight: 40, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: posting || !fieldNoteText.trim() ? 0.65 : 1, cursor: posting || !fieldNoteText.trim() ? "default" : "pointer" }}
+                    disabled={fieldNotePosting || !fieldNoteText.trim()}
+                    style={{ minHeight: 40, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: fieldNotePosting || !fieldNoteText.trim() ? 0.65 : 1, cursor: fieldNotePosting || !fieldNoteText.trim() ? "default" : "pointer" }}
                   >
-                    {posting ? <><BtnSpinner />Posting...</> : "Post 7-Eleven update"}
+                    {fieldNotePosting
+                      ? <><BtnSpinner />Posting...</>
+                      : isVaCoordinator ? "Add to 7-Eleven update queue" : "Post 7-Eleven update"}
                   </button>
                 </div>
               </div>
@@ -593,7 +618,7 @@ export default function WorkOrderActivityPanels({
           }}
           dismissDisabled={transferBusy}
           closeOnBackdrop={!transferBusy}
-          description="This only records that the technician note was copied. It does not send anything to 7-Eleven."
+          description="This records that the update was copied. It does not send anything to 7-Eleven."
         >
           <div className="card" style={{ marginTop: 16, padding: 14, color: T.inkSoft, fontSize: 12, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
             {transferCandidate.text}
@@ -606,7 +631,7 @@ export default function WorkOrderActivityPanels({
               onChange={event => setTransferConfirmed(event.target.checked)}
               style={{ width: 16, height: 16, marginTop: 1, accentColor: T.accent, flexShrink: 0 }}
             />
-            I confirm I successfully copied this note into 7-Eleven.
+            I confirm I successfully copied this update into 7-Eleven.
           </label>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
             <button

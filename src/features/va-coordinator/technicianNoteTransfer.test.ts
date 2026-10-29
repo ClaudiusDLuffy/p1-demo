@@ -6,7 +6,7 @@ import type { VaCoordinatorNote } from "./contracts";
 const note: VaCoordinatorNote = {
   id: "11111111-1111-4111-8111-111111111111", workOrderId: "SYNTHETIC-WO-1",
   text: "Synthetic technician update", createdAt: "2026-10-23T10:00:00Z",
-  authorName: "Synthetic Technician", syncedToSevenElevenAt: null, syncedById: null, syncedByName: null,
+  authorName: "Synthetic Technician", enteredByRole: "contractor", syncedToSevenElevenAt: null, syncedById: null, syncedByName: null,
   requiresSevenElevenSync: true,
 };
 

@@ -7,6 +7,7 @@ export const VA_COORDINATOR_LABEL = "VA Coordinator" as const;
 export const VA_COORDINATOR_PAGE_SIZE = 25;
 export const VA_COORDINATOR_CHILD_LIMIT = 100;
 export const VA_COORDINATOR_SEARCH_LIMIT = 120;
+export const VA_COORDINATOR_UPDATE_MAX_LENGTH = 4_000;
 
 const text = z.string();
 const optionalText = text.nullable();
@@ -45,6 +46,7 @@ export const vaCoordinatorNoteSchema = z.object({
   text: text,
   createdAt: timestamp,
   authorName: text,
+  enteredByRole: z.enum(["contractor", VA_COORDINATOR_ROLE]).default("contractor"),
   syncedToSevenElevenAt: timestamp,
   syncedById: uuid.nullable(),
   syncedByName: optionalText,

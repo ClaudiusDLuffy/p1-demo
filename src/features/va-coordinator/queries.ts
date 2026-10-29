@@ -6,6 +6,7 @@ import {
   loadVaCoordinatorWorkOrder,
   loadVaCoordinatorWorkOrders,
 } from "./data/vaCoordinatorReadRepository";
+import { postVaCoordinatorSevenElevenUpdate } from "./data/vaCoordinatorUpdateRepository";
 import { runTechnicianNoteTransfer } from "./technicianNoteTransfer";
 
 export type VaCoordinatorActor = Readonly<{ id: string; active: boolean }>;
@@ -61,6 +62,18 @@ export function useTransferTechnicianNote(actor: VaCoordinatorActor, workOrderId
       runTechnicianNoteTransfer(note, confirmed),
     onSuccess: async () => {
       if (!workOrderId) return;
+      await queryClient.invalidateQueries({ queryKey: vaCoordinatorQueryKeys.notes(actor.id, workOrderId) });
+    },
+  });
+}
+
+export function usePostVaCoordinatorUpdate(actor: VaCoordinatorActor, workOrderId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ targetWorkOrderId, text }: { targetWorkOrderId: string; text: string }) =>
+      postVaCoordinatorSevenElevenUpdate(targetWorkOrderId, text),
+    onSuccess: async (_, variables) => {
+      if (!actor.active || !workOrderId || variables.targetWorkOrderId !== workOrderId) return;
       await queryClient.invalidateQueries({ queryKey: vaCoordinatorQueryKeys.notes(actor.id, workOrderId) });
     },
   });
