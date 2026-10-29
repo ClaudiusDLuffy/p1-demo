@@ -119,9 +119,9 @@ test("billing calculations persist exact quantities, markup, tax, subtotal, and 
   await dialog.getByLabel("Line 2 taxable").check();
   await dialog.getByLabel("Manual sales tax amount").fill("16.50");
 
-  await expect(dialog.getByText(/^\$450(?:\.00)?$/).first()).toBeVisible();
-  await expect(dialog.getByText(/^\$16\.5(?:0)?$/).first()).toBeVisible();
-  await expect(dialog.getByText(/^\$466\.5(?:0)?$/).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$450(?:\.00)?$/).filter({ visible: true }).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$16\.5(?:0)?$/).filter({ visible: true }).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$466\.5(?:0)?$/).filter({ visible: true }).first()).toBeVisible();
   await dialog.getByRole("button", { name: "Save as Draft", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("#P1-E2E-CALC-001", { exact: true })).toBeVisible();
@@ -136,7 +136,7 @@ test("billing calculations persist exact quantities, markup, tax, subtotal, and 
   await expect(dialog.getByLabel("Line 2 markup percent")).toHaveValue("25");
   await expect(dialog.getByLabel("Line 2 taxable")).toBeChecked();
   await expect(dialog.getByLabel("Manual sales tax amount")).toHaveValue("16.5");
-  await expect(dialog.getByText(/^\$466\.5(?:0)?$/).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$466\.5(?:0)?$/).filter({ visible: true }).first()).toBeVisible();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
 });
