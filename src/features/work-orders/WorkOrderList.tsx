@@ -11,6 +11,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Sel } from "../../components/ui/Sel";
 import { BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { NewNotesDot } from "../../components/ui/NewNotesDot";
+import { NteApprovalWaitDot } from "../../components/ui/NteApprovalWaitDot";
 import { SevenElevenSyncBadge } from "../../components/ui/SevenElevenSyncBadge";
 import { CopyWorkOrderButton } from "../../components/ui/CopyWorkOrderButton";
 import { CapitalWorkOrderBadge } from "../../components/ui/CapitalWorkOrderBadge";
@@ -39,6 +40,7 @@ import { useWorkOrderFamilyQuery, useWorkOrdersPageQuery } from "./queries";
 import { useVaCoordinatorWorkOrders } from "../va-coordinator/queries";
 import { VA_COORDINATOR_PAGE_SIZE, VA_COORDINATOR_SEARCH_LIMIT } from "../va-coordinator/contracts";
 import { mapVaCoordinatorWorkOrderToPortalModel } from "../va-coordinator/vaCoordinatorPortalModel";
+import { useWorkOrderNteWaitIndicatorsQuery } from "../billing/queries";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
@@ -211,6 +213,19 @@ export default function WorkOrderList(props: any) {
     : null;
 
   const activeWorkOrderQuery = isVaCoordinator ? vaWorkOrdersQuery : exactWorkOrderId ? exactWorkOrderQuery : workOrderPageQuery;
+  const indicatorWorkOrderIds = useMemo(
+    () => paginatedWOs.map(workOrder => workOrder.id),
+    [paginatedWOs],
+  );
+  const nteWaitIndicatorQuery = useWorkOrderNteWaitIndicatorsQuery(
+    currentUser,
+    indicatorWorkOrderIds,
+    page === "work_orders" && !selectedWO && isManager,
+  );
+  const nteWaitingWorkOrderIds = useMemo(
+    () => new Set(nteWaitIndicatorQuery.data || []),
+    [nteWaitIndicatorQuery.data],
+  );
   const collectionState = resolveWorkOrderCollectionState({
     itemCount: paginatedWOs.length,
     isPending: activeWorkOrderQuery.isPending,
@@ -537,6 +552,12 @@ export default function WorkOrderList(props: any) {
 
           <WorkOrderStatusLegend />
 
+          {isManager && nteWaitIndicatorQuery.isError && (
+            <div role="status" style={{ margin: "-6px 0 12px", color: T.warn, fontSize: 11 }}>
+              NTE status indicators could not be refreshed. Reload the work-order list to retry.
+            </div>
+          )}
+
           {collectionState === "error" && paginatedWOs.length > 0 && (
             <WorkOrderCollectionNotice
               state="error"
@@ -586,6 +607,7 @@ export default function WorkOrderList(props: any) {
                               {wo.id}
                               <CopyWorkOrderButton value={wo.id} />
                               {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                              {isManager && <NteApprovalWaitDot show={nteWaitingWorkOrderIds.has(wo.id)} />}
                             </span>
                             {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                           </span>
@@ -687,6 +709,7 @@ export default function WorkOrderList(props: any) {
                       {wo.id}
                       <CopyWorkOrderButton value={wo.id} />
                       {isManager && <NewNotesDot show={wo.hasUnreadNotes} />}
+                      {isManager && <NteApprovalWaitDot show={nteWaitingWorkOrderIds.has(wo.id)} />}
                       {isManager && <SevenElevenSyncBadge count={wo.pendingSevenElevenSyncCount} />}
                     </span>
                     <div className="mobile-card-badges" style={{ display: "flex", gap: 6 }}>

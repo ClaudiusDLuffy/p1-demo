@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canManageNteApprovalWait, isNteApprovalSubmissionBlocked } from "./nteApprovalWait";
+import {
+  canManageNteApprovalWait,
+  canViewNteApprovalWaitIndicator,
+  isNteApprovalSubmissionBlocked,
+} from "./nteApprovalWait";
 
 const manager = { active: true, role: "back_office", staffPermissions: [] };
 const invoice = { invoiceType: "staff", documentKind: "invoice", state: "draft" };
@@ -22,4 +26,16 @@ test("NTE marker cannot newly be set after QBO sync, but an existing marker can 
   const synced = { ...invoice, state: "approved", qboSyncedAt: "2026-10-01T00:00:00Z" };
   assert.equal(canManageNteApprovalWait(synced, manager), false);
   assert.equal(canManageNteApprovalWait({ ...synced, waitingOnNteApproval: true }, manager), true);
+});
+
+test("NTE list indicators are available only to active staff roles", () => {
+  for (const role of ["manager", "dispatcher", "back_office"]) {
+    assert.equal(canViewNteApprovalWaitIndicator({ active: true, role }), true);
+  }
+  for (const actor of [
+    null,
+    { active: false, role: "back_office" },
+    { active: true, role: "contractor" },
+    { active: true, role: "va_coordinator" },
+  ]) assert.equal(canViewNteApprovalWaitIndicator(actor), false);
 });

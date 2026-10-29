@@ -101,3 +101,60 @@ test("a submitted invoice cannot be marked billed while waiting on NTE approval"
   expect(sql(`select count(*) from public.invoices where id='${fixture.invoiceId}'`)).toBe("1");
   expect(sql(`select waiting_on_nte_approval from public.staff_invoice_nte_wait_flags where invoice_id='${fixture.invoiceId}'`)).toBe("f");
 });
+
+test("Work orders shows and clears the NTE wait dot with the invoice marker", async ({ page }) => {
+  const fixture = invoiceFixture();
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "7-Eleven billing");
+
+  const billingSearch = page.getByRole("searchbox", { name: "Search billing invoices and work orders" });
+  await billingSearch.fill(fixture.number);
+  await page.getByText(`#${fixture.number}`, { exact: true }).filter({ visible: true }).first().click();
+  await page.getByRole("button", { name: "Mark waiting on NTE approval", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Waiting on NTE approval" }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Back to billing", exact: true }).click();
+  await openSidebarPage(page, "Work orders");
+  const workOrderSearch = page.getByRole("textbox", { name: "Search work orders" });
+  await workOrderSearch.fill(fixture.workOrderId);
+  const workOrderRow = page.locator(".desktop-only-table").getByRole("row").filter({ hasText: fixture.workOrderId });
+  await expect(workOrderRow).toBeVisible();
+  await expect(workOrderRow.getByRole("img", { name: "NTE request submitted — awaiting approval" })).toBeVisible();
+
+  for (const width of [1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const workOrderCard = page.locator(".mobile-only-cards .mobile-card").filter({ hasText: fixture.workOrderId });
+    await expect(workOrderCard).toBeVisible();
+    const layout = await workOrderCard.evaluate(card => {
+      const cardRect = card.getBoundingClientRect();
+      const dotRect = card.querySelector('[aria-label="NTE request submitted — awaiting approval"]')?.getBoundingClientRect();
+      return {
+        cardClientWidth: card.clientWidth,
+        cardScrollWidth: card.scrollWidth,
+        cardLeft: cardRect.left,
+        cardRight: cardRect.right,
+        dotLeft: dotRect?.left,
+        dotRight: dotRect?.right,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(layout.dotLeft).toBeGreaterThanOrEqual(layout.cardLeft);
+    expect(layout.dotRight).toBeLessThanOrEqual(layout.cardRight);
+    expect(layout.cardScrollWidth).toBeLessThanOrEqual(layout.cardClientWidth + 1);
+    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
+  await openSidebarPage(page, "7-Eleven billing");
+  await billingSearch.fill(fixture.number);
+  await page.getByText(`#${fixture.number}`, { exact: true }).filter({ visible: true }).first().click();
+  await page.getByRole("button", { name: "Clear NTE wait", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Waiting on NTE approval" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to billing", exact: true }).click();
+  await openSidebarPage(page, "Work orders");
+  await workOrderSearch.fill(fixture.workOrderId);
+  const clearedRow = page.locator(".desktop-only-table").getByRole("row").filter({ hasText: fixture.workOrderId });
+  await expect(clearedRow).toBeVisible();
+  await expect(clearedRow.getByRole("img", { name: "NTE request submitted — awaiting approval" })).toHaveCount(0);
+});

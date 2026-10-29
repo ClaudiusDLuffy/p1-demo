@@ -9,7 +9,7 @@ export const STAFF_PERMISSION = {
 export type StaffPermission = typeof STAFF_PERMISSION[keyof typeof STAFF_PERMISSION];
 
 export type StaffPermissionProfile = {
-  staffPermissions?: string[] | null;
+  staffPermissions?: readonly string[] | null;
 };
 
 export function hasStaffPermission(
