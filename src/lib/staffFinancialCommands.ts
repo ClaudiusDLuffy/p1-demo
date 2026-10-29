@@ -25,6 +25,9 @@ export interface StaffFinancialCommandClient {
   rpc(name: "delete_invoice_admin_v1", args: DeleteArgs): StaffFinancialRpcQuery;
   rpc(name: "mark_staff_invoice_ready" | "mark_staff_invoice_billed",
     args: { p_invoice_id: string; p_actor_id: string }): StaffFinancialRpcQuery;
+  rpc(name: "set_staff_invoice_nte_waiting_v1", args: {
+    p_invoice_id: string; p_waiting: boolean; p_actor_id: string;
+  }): StaffFinancialRpcQuery;
 }
 export type StaffFinancialCommandOptions = { signal?: AbortSignal | null };
 

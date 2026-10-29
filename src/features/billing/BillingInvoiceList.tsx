@@ -57,6 +57,15 @@ function BillingDocumentBadge({ invoice }: { invoice: any }) {
   return null;
 }
 
+function NteApprovalWaitBadge({ invoice }: { invoice: any }) {
+  if (invoice.waitingOnNteApproval !== true) return null;
+  return (
+    <span role="status" style={{ padding: "3px 7px", borderRadius: 999, color: "#805500", background: "#FFF1C2", fontSize: 9, fontWeight: 800, letterSpacing: 0.25 }}>
+      Waiting on NTE approval
+    </span>
+  );
+}
+
 function BillingInvoiceRows({
   invoices,
   contractorBucket,
@@ -126,6 +135,7 @@ function BillingInvoiceRows({
                     <span style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                       #{invoice.num}
                       <BillingDocumentBadge invoice={invoice} />
+                      <NteApprovalWaitBadge invoice={invoice} />
                     </span>
                   </td>
                   <td style={{ padding: "13px 14px", color: T.subtle }}>{invoice.date || invoice.invoiceDate}</td>
@@ -185,6 +195,7 @@ function BillingInvoiceRows({
               <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <BillingDocumentBadge invoice={invoice} />
+                <NteApprovalWaitBadge invoice={invoice} />
                 <Badge conf={contractorBucket ? INV_STATE.approved : STAFF_INV_STATE[invoice.state]} small />
               </span>
             </div>

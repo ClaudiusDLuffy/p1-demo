@@ -2371,6 +2371,25 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
       throw e;
     }
   };
+  const doSetBillingInvoiceNteWait = async (invoice: any, waitingOnNteApproval: boolean) => {
+    try {
+      const payload = await billingFetch(
+        `/api/billing-invoices?id=${encodeURIComponent(invoice.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ action: "set_nte_waiting", waitingOnNteApproval }),
+        },
+      );
+      await refreshBillingMutation(invoice.id, invoice.wot);
+      fire(waitingOnNteApproval
+        ? `Invoice #${invoice.num} marked waiting on NTE approval`
+        : `NTE waiting tag cleared for invoice #${invoice.num}`);
+      return payload.invoice;
+    } catch (error: any) {
+      fire(`NTE status update failed: ${safeErrorMessage(error)}`);
+      throw error;
+    }
+  };
   const doConvertQuoteToBillingInvoice = async (payload: Record<string, unknown>, isFormCurrent: () => boolean = () => true, onAccepted?: () => void) => {
     const isSessionCurrent = captureInvoiceUiSession();
     const isCurrent = () => isSessionCurrent() && isFormCurrent();
@@ -3459,6 +3478,8 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
               onDownloadCsv={() => selectedBillingInvoiceData && doDownloadBillingInvoiceCsv(selectedBillingInvoiceData)}
               onMarkBilled={() => selectedBillingInvoiceData && doMarkBillingInvoiceBilled(selectedBillingInvoiceData)}
               onMarkReady={() => selectedBillingInvoiceData && doMarkBillingInvoiceReady(selectedBillingInvoiceData)}
+              onSetNteApprovalWait={(waiting: boolean) => selectedBillingInvoiceData
+                && doSetBillingInvoiceNteWait(selectedBillingInvoiceData, waiting)}
               onDelete={() => selectedBillingInvoiceData && doDeleteBillingInvoice(selectedBillingInvoiceData)}
               onOpenContractorInvoice={(invoice: any) => { setSelectedBillingInvoice(null); setSelectedInvoice(invoice.id); setPage("invoices"); }}
               currentUser={currentUser}

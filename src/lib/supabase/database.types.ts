@@ -3723,6 +3723,20 @@ export type Database = {
         }
         Returns: Json
       }
+      list_staff_invoice_nte_wait_flags_v1: {
+        Args: {
+          p_invoice_ids: string[]
+        }
+        Returns: Json
+      }
+      set_staff_invoice_nte_waiting_v1: {
+        Args: {
+          p_actor_id: string
+          p_invoice_id: string
+          p_waiting: boolean
+        }
+        Returns: Json
+      }
       deactivate_contractor_technician: {
         Args: { p_actor_id: string; p_profile_id: string }
         Returns: Json

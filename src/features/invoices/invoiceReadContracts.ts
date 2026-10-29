@@ -28,6 +28,7 @@ export type InvoiceSummary = HeaderStrings & {
   subtotal: number; salesTax: number; invoiceVersion: number; reviewRevision: number;
   lineCount: number; sourceCount: number; contractorAssignmentVersion: number | null;
   workflowCycle: number | null; taxRate?: number | null; pdfIsOriginal?: boolean;
+  waitingOnNteApproval?: boolean;
   lineTypeSummary?: InvoiceLineSubtotalSummary; sourceInvoiceIds?: string[];
   sourceInvoices?: InvoiceSourceSummary[];
   contractorCost?: number | null; grossProfit?: number | null; marginPercent?: number | null;
@@ -111,7 +112,14 @@ function parseSummary(value: unknown, raw: boolean): InvoiceSummary {
     lineCount: integer(field("lineCount", "line_count")), sourceCount: integer(field("sourceCount", "source_count") ?? 0),
     contractorAssignmentVersion: nullableNumber(field("contractorAssignmentVersion", "contractor_assignment_version")),
     workflowCycle: nullableNumber(field("workflowCycle", "workflow_cycle")),
+    // Older servers do not include this operational marker yet.
+    waitingOnNteApproval: false,
   };
+  const waitingOnNteApproval = field("waitingOnNteApproval", "waiting_on_nte_approval");
+  if (waitingOnNteApproval !== undefined) {
+    if (typeof waitingOnNteApproval !== "boolean") return invalid();
+    result.waitingOnNteApproval = waitingOnNteApproval;
+  }
   for (const key of Object.keys(headerStrings) as (keyof typeof headerStrings)[]) {
     const property = raw ? headerStrings[key] : key;
     if (Object.hasOwn(row, property)) result[key] = nullableText(row[property]);
