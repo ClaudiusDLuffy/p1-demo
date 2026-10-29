@@ -81,6 +81,20 @@ test("PATCH rejects unknown states/actions and absent captured revision before r
     assert.deepEqual(h.calls, []);
   }
 });
+test("PATCH NTE waiting action persists, returns current marker state, and clears cleanly", async () => {
+  const h = billingRouteHarness();
+  for (const waitingOnNteApproval of [true, false]) {
+    const response = await h.handlers.PATCH(h.request("PATCH", {
+      action: "set_nte_waiting", waitingOnNteApproval,
+    }, "?id=" + financialTestIds.invoice));
+    assert.equal(response.status, 200, await response.clone().text());
+    const body = await response.json();
+    assert.equal(body.invoice.waitingOnNteApproval, waitingOnNteApproval);
+    assert.equal(body.nteApproval.waitingOnNteApproval, waitingOnNteApproval);
+  }
+  assert.equal(h.calls.filter(call => call.name === "rpc:set_staff_invoice_nte_waiting_v1").length, 2);
+  assert.ok(h.calls.some(call => call.name === "rpc:list_staff_invoice_nte_wait_flags_v1"));
+});
 test("the bounded stream rejects excessive JSON before database access", async () => {
   const h = billingRouteHarness();
   const response = await h.handlers.POST(h.request("POST", { padding: "x".repeat(256 * 1024) }));

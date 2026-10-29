@@ -7,6 +7,7 @@ import { mapInvoice, sourceMetrics, type WorkOrderFinancialContext } from "./map
 import { createBillingLegacyReadRepository, type BillingLegacyReadPort, type BillingLegacyPageFacts } from "./billingLegacyReadRepository";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { FinancialInvoiceIdSchema } from "../../lib/staffInvoiceContracts";
+import { attachStaffInvoiceNteWaitFlags } from "./nteApprovalWaitFlags";
 
 type LegacyReadClient = Parameters<typeof createBillingReadRepository>[0] & BillingLegacyReadPort;
 
@@ -97,16 +98,20 @@ export async function executeLegacyBillingRead(
   if (invoiceId) {
     const facts = await legacyRepository.invoice(invoiceId, signal);
     if (!facts) return Response.json({ error: "Billing invoice not found" }, { status: 404 });
-    return Response.json({ invoice: mapLegacyPage(facts, true)[0] });
+    const [invoice] = mapLegacyPage(facts, true);
+    const flags = await repository.nteWaitFlags([invoice.id], signal);
+    return Response.json({ invoice: attachStaffInvoiceNteWaitFlags([invoice], flags)[0] });
   }
   const input = parseBillingReadInput(search);
   if (input.response === "count") return Response.json(await useCases.count(input, signal));
   const facts = await legacyRepository.page(input, signal);
   const { page } = facts;
   const mappedItems = mapLegacyPage(facts);
+  const flags = await repository.nteWaitFlags(mappedItems.map(invoice => invoice.id), signal);
+  const items = attachStaffInvoiceNteWaitFlags(mappedItems, flags);
   return Response.json({
-    ...(search.get("response") === "rows" ? {} : { invoices: mappedItems }),
-    items: mappedItems,
+    ...(search.get("response") === "rows" ? {} : { invoices: items }),
+    items,
     nextCursor: page.nextCursor,
     hasMore: page.hasMore,
     totalCount: page.totalCount,

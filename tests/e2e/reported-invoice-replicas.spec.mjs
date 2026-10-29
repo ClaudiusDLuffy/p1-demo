@@ -121,6 +121,45 @@ test('synthetic additional attestation: capital send-to-billing keeps it open wi
   await waitForApplicationRequestsToSettle(page);
 });
 
+test('reported capital without a P1 quote: reproduce missing quote-reference validation, then complete billed closeout', async ({ page }, testInfo) => {
+  const f = reportedInvoiceFixture('capital_external_quote_unrecorded');
+  const before = reportedInvoiceSnapshot(f);
+  expect(before.status).toBe('capital'); expect(before.functionalStatus).toBe('Work in Progress');
+  expect(before.openVisits).toBe(0); expect(before.invoices).toHaveLength(1);
+  expect(before.invoices[0]).toMatchObject({ invoice_type: 'contractor', state: 'paid', num: f.contractorNumber, total: 3170 });
+  expect(before.quoteSubmissionEvents).toBe(0); expect(before.externalQuoteHandoffs).toBe(0);
+  expect(before.externalBillings).toBe(0); expect(before.billedEvents).toBe(0);
+
+  const closeCommands = []; const downloads = [];
+  page.on('request', request => { if (request.url().includes('/rpc/close_out_capital_v1')) closeCommands.push(request.url()); });
+  page.on('download', download => downloads.push(download.suggestedFilename()));
+  await login(page, accounts.manager); await closeOut(page, f);
+  const dialog = page.getByRole('dialog', { name: 'Close out capital', exact: true });
+  await expect(dialog.getByLabel('Quote reference in 7-Eleven')).toBeVisible();
+  await dialog.getByLabel('Existing billed invoice reference').fill('SYNTHETIC-7E-INVOICE');
+  await dialog.getByLabel('Actual billing date').fill('2026-10-27');
+  await dialog.getByRole('checkbox', { name: /I confirm this external quote was submitted and approved/ }).check();
+  await dialog.getByRole('button', { name: 'Confirm completed and billed', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Confirm the actual quote submission');
+  expect(closeCommands).toHaveLength(0);
+  expect(reportedInvoiceSnapshot(f)).toEqual(before);
+  await page.screenshot({ path: testInfo.outputPath('capital-no-quote-reference-blocked.png') });
+
+  await dialog.getByLabel('Quote reference in 7-Eleven').fill('SYNTHETIC-APPROVED-QUOTE');
+  await dialog.getByRole('button', { name: 'Confirm completed and billed', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const after = reportedInvoiceSnapshot(f);
+  expect(after.status).toBe('closed'); expect(after.functionalStatus).toBe('Completed');
+  expect(after.capitalStatus).toBe('Installed'); expect(after.closedAt).not.toBeNull();
+  expect(after.invoices).toHaveLength(1);
+  expect(after.invoices[0]).toEqual(before.invoices[0]);
+  expect(after.externalQuoteHandoffs).toBe(1); expect(after.externalBillings).toBe(1);
+  expect(after.capitalCloseOutEvents).toBe(1); expect(after.billedEvents).toBe(0);
+  expect(downloads).toHaveLength(0);
+  expect(closeCommands).toHaveLength(1);
+  await waitForApplicationRequestsToSettle(page);
+});
+
 async function browserHeader(page, work) {
   return page.evaluate(async ({ work, origin, key }) => {
     const entry = Object.entries(localStorage).find(([name]) => name.endsWith('-auth-token'));

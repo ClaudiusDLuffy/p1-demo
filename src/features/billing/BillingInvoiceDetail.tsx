@@ -17,6 +17,7 @@ import { useInvoiceLinePage } from "../invoices/invoiceLineQueries";
 import InvoiceLinePagination from "../invoices/InvoiceLinePagination";
 import { AttachmentsButton } from "../work-orders/WorkOrderAttachments";
 import { CapitalSelfServiceModal } from "../work-orders/CapitalSelfServiceModal";
+import { canManageNteApprovalWait, isNteApprovalSubmissionBlocked } from "./nteApprovalWait";
 
 export default function BillingInvoiceDetail(props: any) {
   const {
@@ -29,6 +30,7 @@ export default function BillingInvoiceDetail(props: any) {
     onDownloadCsv,
     onMarkBilled,
     onMarkReady,
+    onSetNteApprovalWait,
     onDelete,
     currentUser,
     fmt,
@@ -37,6 +39,8 @@ export default function BillingInvoiceDetail(props: any) {
   const [reviseQuote, setReviseQuote] = useState(false);
   const [confirmBilled, setConfirmBilled] = useState(false);
   const [markingReady, setMarkingReady] = useState(false);
+  const [updatingNteWait, setUpdatingNteWait] = useState(false);
+  const [nteWaitError, setNteWaitError] = useState("");
   const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
   const [billing, setBilling] = useState(false);
   const billingInFlight = useRef(false);
@@ -57,6 +61,8 @@ export default function BillingInvoiceDetail(props: any) {
     && !invoice.qboSyncedAt;
   const canMarkBilled = canDelete && invoice.state === "submitted";
   const canMarkReady = canDelete && invoice.state === "draft";
+  const waitingOnNteApproval = isNteApprovalSubmissionBlocked(invoice);
+  const canManageNteWait = canManageNteApprovalWait(invoice, currentUser);
   const capitalHandoff = invoice.documentKind === "capital_quote";
   const canExportCapitalCsv = canDelete && currentUser?.active === true;
   const capitalFinalInvoice = Boolean(
@@ -74,7 +80,9 @@ export default function BillingInvoiceDetail(props: any) {
             Download PDF
           </button>
           {canMarkBilled && (
-            <button onClick={() => { setBillingError(""); setConfirmBilled(true); }} className="btn-accent">
+            <button onClick={() => { setBillingError(""); setConfirmBilled(true); }} disabled={waitingOnNteApproval}
+              title={waitingOnNteApproval ? "Clear the NTE waiting tag after approval before submitting" : undefined}
+              className="btn-accent" style={{ opacity: waitingOnNteApproval ? 0.55 : 1 }}>
               {capitalHandoff ? "Mark submitted to 7-Eleven" : "Billed to 7-Eleven"}
             </button>
           )}
@@ -88,9 +96,10 @@ export default function BillingInvoiceDetail(props: any) {
                   setMarkingReady(false);
                 }
               }}
-              disabled={markingReady}
+              disabled={markingReady || waitingOnNteApproval}
+              title={waitingOnNteApproval ? "Clear the NTE waiting tag after approval before submitting" : undefined}
               className="btn-accent"
-              style={{ display: "flex", alignItems: "center", gap: 6, opacity: markingReady ? 0.7 : 1 }}
+              style={{ display: "flex", alignItems: "center", gap: 6, opacity: markingReady || waitingOnNteApproval ? 0.55 : 1 }}
             >
               {markingReady ? <><BtnSpinner />Updating...</> : "Ready for 7-Eleven"}
             </button>
@@ -99,6 +108,26 @@ export default function BillingInvoiceDetail(props: any) {
             <button onClick={onEdit} className="btn-primary" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Ico d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" size={13} color="currentColor" />
               {capitalHandoff ? "Edit capital quote" : "Edit invoice"}
+            </button>
+          )}
+          {canManageNteWait && (
+            <button
+              type="button"
+              className="btn-soft"
+              disabled={updatingNteWait}
+              onClick={async () => {
+                setUpdatingNteWait(true);
+                setNteWaitError("");
+                try {
+                  await onSetNteApprovalWait?.(!waitingOnNteApproval);
+                } catch (error) {
+                  setNteWaitError(safeErrorMessage(error));
+                } finally {
+                  setUpdatingNteWait(false);
+                }
+              }}
+            >
+              {updatingNteWait ? <><BtnSpinner />Updating...</> : waitingOnNteApproval ? "Clear NTE wait" : "Mark waiting on NTE approval"}
             </button>
           )}
           {capitalHandoff && canDelete && invoice.state === "approved" && workOrder?.status === "pending_capital_completion"
@@ -113,6 +142,13 @@ export default function BillingInvoiceDetail(props: any) {
           {canDelete && ["draft", "submitted"].includes(invoice.state) && <button onClick={() => setConfirmDelete(true)} className="btn-soft" style={{ color: T.danger, borderColor: `${T.danger}44` }}>Delete</button>}
         </div>
       </div>
+
+      {waitingOnNteApproval && (
+        <div role="status" style={{ maxWidth: 860, margin: "0 0 16px", padding: "11px 14px", borderRadius: 10, border: "1px solid #E8C86A", background: "#FFF8DF", color: "#705000", fontSize: 12, lineHeight: 1.5 }}>
+          Waiting on NTE approval. Clear this tag after approval before marking the invoice ready or submitted to 7-Eleven.
+        </div>
+      )}
+      {nteWaitError && <p role="alert" className="mb-3 text-sm text-p1-danger">NTE status update failed: {nteWaitError}</p>}
 
       {confirmDelete && (
         <Modal onClose={() => { if (!deleting) setConfirmDelete(false); }} dismissDisabled={deleting} title="Delete billing invoice" width={420}>
@@ -169,7 +205,7 @@ export default function BillingInvoiceDetail(props: any) {
                   setBilling(false);
                 }
               }}
-              disabled={billing}
+              disabled={billing || waitingOnNteApproval}
               className="btn-accent"
               style={{ display: "flex", alignItems: "center", gap: 6, opacity: billing ? 0.7 : 1 }}
             >

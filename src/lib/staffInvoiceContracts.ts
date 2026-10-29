@@ -102,7 +102,11 @@ export const StaffInvoiceSaveSchema = z.object({
   }
 });
 export type StaffInvoiceSaveCommand = z.infer<typeof StaffInvoiceSaveSchema>;
-export const StaffInvoiceActionSchema = z.object({ action: z.enum(["mark_ready", "mark_billed"]) }).strict();
+export const StaffInvoiceActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.enum(["mark_ready", "mark_billed"]) }).strict(),
+  z.object({ action: z.literal("set_nte_waiting"), waitingOnNteApproval: z.boolean() }).strict(),
+]);
+export type StaffInvoiceAction = z.infer<typeof StaffInvoiceActionSchema>;
 export const StaffInvoicePatchSchema = z.union([StaffInvoiceActionSchema, StaffInvoiceSaveSchema]);
 export const FinancialDeleteSchema = z.object({
   ...commandIdentity, expectedInvoiceVersion: version,

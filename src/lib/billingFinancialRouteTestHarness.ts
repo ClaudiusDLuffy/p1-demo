@@ -38,6 +38,7 @@ export function billingRouteHarness(options: { controller?: boolean; auditFailur
     invoice_type: options.contractor ? "contractor" : "staff", invoice_version: 1,
     work_order_id: "WOTSYNTHETIC", subtotal: 10, sales_tax: 0, total: 10,
     invoice_date: "2026-09-08", service_date: "2026-09-08", deleted_at: null };
+  let nteWaiting = false;
   let committedLineCount = 0;
   let committedSourceCount = 0;
   class Query implements PromiseLike<PortResult> {
@@ -127,6 +128,11 @@ export function billingRouteHarness(options: { controller?: boolean; auditFailur
       workflow_cycle: invoice.work_order_id === null ? null : 0,
       external_work_order_id: options.externalRoot || null,
     }, error: options.readError ?? null };
+    if (name === "list_staff_invoice_nte_wait_flags_v1") return { data: {
+      items: ((payload.p_invoice_ids as string[] | undefined) || []).map(invoiceId => ({
+        invoiceId, waitingOnNteApproval: nteWaiting,
+      })),
+    }, error: options.readError ?? null };
     if (name === "get_invoice_source_summaries_v1") return { data: { invoices: [] }, error: options.readError ?? null };
     if (name === "list_invoice_lines_page_v1") return { data: { invoiceVersion: invoice.invoice_version, items: [], hasMore: false, nextCursor: null }, error: options.readError ?? null };
     if (name.includes("staff_invoice_num")) return { data: "P1-SYNTHETIC", error: null };
@@ -140,6 +146,10 @@ export function billingRouteHarness(options: { controller?: boolean; auditFailur
       return { data: { applied: true, reason: "billed", invoiceId: financialTestIds.invoice, documentKind: "invoice",
         workOrderId: invoice.work_order_id, transitioned: true, workOrderClosed: true,
         pendingCapitalCompletion: false, workOrderStatus: "closed", visitsClosed: 1, ...options.commandResultOverride }, error: null };
+    }
+    if (name === "set_staff_invoice_nte_waiting_v1") {
+      nteWaiting = payload.p_waiting === true;
+      return { data: { invoiceId: payload.p_invoice_id, waitingOnNteApproval: nteWaiting, changed: true }, error: null };
     }
     if (name === "save_staff_billing_invoice_v4") {
       const command = payload.p_payload as Row;

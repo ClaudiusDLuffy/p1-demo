@@ -552,3 +552,37 @@ for (const action of ["mark_ready", "mark_billed"] as const) {
     assert.equal(h.calls.length, 1);
   });
 }
+
+test("PATCH NTE waiting marker validates the invoice-bound set/clear receipt", async () => {
+  for (const waitingOnNteApproval of [true, false]) {
+    const h = rpcHarness(() => Response.json({
+      invoiceId: ids.invoice, waitingOnNteApproval, changed: true,
+    }));
+    const result = await createBillingUpdateCommandRepository().action(
+      { action: "set_nte_waiting", waitingOnNteApproval }, ids.invoice, h.context(),
+    );
+    assert.deepEqual(result, { invoiceId: ids.invoice, waitingOnNteApproval, changed: true });
+    assert.equal(h.calls[0].name, "set_staff_invoice_nte_waiting_v1");
+    assert.deepEqual(h.calls[0].args, {
+      p_invoice_id: ids.invoice, p_waiting: waitingOnNteApproval, p_actor_id: ids.actor,
+    });
+  }
+});
+
+test("PATCH NTE waiting marker rejects a receipt that does not match the requested state", async () => {
+  const h = rpcHarness(() => Response.json({ invoiceId: ids.invoice, waitingOnNteApproval: false, changed: true }));
+  await assert.rejects(createBillingUpdateCommandRepository().action(
+    { action: "set_nte_waiting", waitingOnNteApproval: true }, ids.invoice, h.context(),
+  ), (error: unknown) => z.object({ code: z.literal("FINANCIAL_RESULT_INVALID") }).safeParse(error).success);
+  assert.equal(h.calls.length, 1, "The state-setting action is not blindly replayed after an invalid receipt");
+});
+
+test("PATCH NTE waiting marker rejects unexpected receipt fields", async () => {
+  const h = rpcHarness(() => Response.json({
+    invoiceId: ids.invoice, waitingOnNteApproval: true, changed: true, private_detail: "synthetic-private-canary",
+  }));
+  await assert.rejects(createBillingUpdateCommandRepository().action(
+    { action: "set_nte_waiting", waitingOnNteApproval: true }, ids.invoice, h.context(),
+  ), (error: unknown) => z.object({ code: z.literal("FINANCIAL_RESULT_INVALID") }).safeParse(error).success);
+  assert.equal(h.calls.length, 1);
+});
