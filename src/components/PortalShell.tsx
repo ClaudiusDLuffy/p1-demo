@@ -100,7 +100,10 @@ import {
   BILLING_INVOICES_KEY,
   useBillingInvoiceByIdQuery,
 } from "../features/billing/queries";
-import { billingInvoiceByIdKey } from "../features/billing/billingQueryKeys";
+import {
+  billingInvoiceByIdKey,
+  WORK_ORDER_NTE_WAIT_INDICATORS_KEY,
+} from "../features/billing/billingQueryKeys";
 import { directoryActorScope } from "../lib/counts/queryKeys";
 import {
   T, PRIORITY, MONTHS, WEEKDAYS,
@@ -2387,6 +2390,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
         },
       );
       await refreshBillingMutation(invoice.id, invoice.wot);
+      await qc.invalidateQueries({ queryKey: WORK_ORDER_NTE_WAIT_INDICATORS_KEY });
       fire(waitingOnNteApproval
         ? `Invoice #${invoice.num} marked waiting on NTE approval`
         : `NTE waiting tag cleared for invoice #${invoice.num}`);

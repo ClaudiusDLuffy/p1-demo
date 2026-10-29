@@ -4,7 +4,12 @@ import { countReadPolicy, useCountQueryVisibility } from "../../lib/counts/count
 import { directoryActorScope, invoiceByIdKey } from "../../lib/counts/queryKeys";
 import { useDirectoryActor } from "../directory/queries";
 import type { DirectoryActor } from "../directory/contracts";
-import { billingInvoiceByIdKey, billingInvoiceCountKey, billingInvoicePageKey } from "./billingQueryKeys";
+import {
+  billingInvoiceByIdKey,
+  billingInvoiceCountKey,
+  billingInvoicePageKey,
+  workOrderNteWaitIndicatorsKey,
+} from "./billingQueryKeys";
 import { billingCountFilters, type BillingCountFilters, type BillingInvoicePageParams } from "./billingReadContracts";
 import { readBillingCount, readBillingInvoice, readBillingRows } from "./billingReads";
 import {
@@ -14,6 +19,8 @@ import {
 } from "../../lib/billingTaxRules";
 import { supabase } from "../../lib/supabase/client";
 import { canonicalBillingReadUuid } from "./billingReadUuid";
+import { canViewNteApprovalWaitIndicator } from "./nteApprovalWait";
+import { loadWorkOrderNteWaitIndicatorIds } from "./data/workOrderNteWaitIndicatorRepository";
 
 export const BILLING_INVOICES_KEY = ["billing-invoices"] as const;
 export { BILLING_INVOICE_PAGES_KEY, BILLING_INVOICE_BY_ID_KEY, BILLING_INVOICE_COUNT_KEY } from "./billingQueryKeys";
@@ -98,5 +105,26 @@ export function useBillingTaxRulesQuery(enabled = true) {
     },
     staleTime: 60_000,
     enabled,
+  });
+}
+
+/** Keep the Work orders list indicator scoped to the active staff actor and
+ * the currently visible page; the database's existing RLS remains decisive. */
+export function useWorkOrderNteWaitIndicatorsQuery(
+  actor: DirectoryActor | null | undefined,
+  workOrderIds: readonly string[],
+  enabled = true,
+) {
+  const allowed = Boolean(enabled && canViewNteApprovalWaitIndicator(actor));
+  const ids = [...new Set(workOrderIds)].sort();
+  const client = supabase() as unknown as Parameters<typeof loadWorkOrderNteWaitIndicatorIds>[0];
+  return useQuery({
+    queryKey: workOrderNteWaitIndicatorsKey(directoryActorScope(actor), ids),
+    queryFn: ({ signal }) => loadWorkOrderNteWaitIndicatorIds(client, ids, signal),
+    staleTime: 0,
+    retry: 1,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    enabled: allowed && ids.length > 0,
   });
 }
