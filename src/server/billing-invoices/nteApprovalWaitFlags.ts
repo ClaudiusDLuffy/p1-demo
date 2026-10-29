@@ -49,3 +49,26 @@ export function attachStaffInvoiceNteWaitFlags<T extends { id: string }>(
     waitingOnNteApproval: flags.get(invoice.id.toLowerCase()) ?? false,
   }));
 }
+
+type InvoiceNteWaitTarget = { id: string; invoiceType?: unknown };
+type NteWaitFlagReader = (invoiceIds: readonly string[], signal: AbortSignal) => Promise<ReadonlyMap<string, boolean>>;
+
+/** Contractor source invoices are not eligible for staff NTE flags. Keep mixed
+ * staff/contractor read pages intact while querying only the eligible staff IDs. */
+export async function attachApplicableStaffInvoiceNteWaitFlags<T extends InvoiceNteWaitTarget>(
+  invoices: readonly T[],
+  readFlags: NteWaitFlagReader,
+  signal: AbortSignal,
+): Promise<(T & { waitingOnNteApproval: boolean })[]> {
+  const staffInvoices = invoices.filter(invoice => invoice.invoiceType === "staff");
+  const flags = staffInvoices.length
+    ? await readFlags(staffInvoices.map(invoice => invoice.id), signal)
+    : new Map<string, boolean>();
+
+  return invoices.map(invoice => ({
+    ...invoice,
+    waitingOnNteApproval: invoice.invoiceType === "staff"
+      ? flags.get(invoice.id.toLowerCase()) ?? false
+      : false,
+  }));
+}

@@ -1,7 +1,7 @@
 import { parseBillingCount, parseBillingRows, type BillingReadInput } from "../../features/billing/billingReadContracts";
 import { loadCompactBillingRead, type CompactBillingReadPort } from "../../lib/server/billingCompactReads";
 import type { CompactBillingRead } from "../../lib/server/billingCompactReadInput";
-import { loadStaffInvoiceNteWaitFlags, type NteApprovalWaitReadClient } from "./nteApprovalWaitFlags";
+import { attachApplicableStaffInvoiceNteWaitFlags, loadStaffInvoiceNteWaitFlags, type NteApprovalWaitReadClient } from "./nteApprovalWaitFlags";
 import { AppError } from "../../lib/errors/AppError";
 
 export type BillingReadRepository = {
@@ -19,20 +19,22 @@ export function createBillingReadRepository(client: CompactBillingReadPort, cont
       if (input.kind === "page") {
         if (!result || typeof result !== "object" || Array.isArray(result)
           || !Array.isArray((result as Record<string, unknown>).items)) throw new AppError("INTERNAL_ERROR");
-        const page = result as Record<string, unknown> & { items: { id: string }[] };
-        const flags = await loadStaffInvoiceNteWaitFlags(client as unknown as NteApprovalWaitReadClient,
-          page.items.map(item => item.id), signal);
-        return { ...page, items: page.items.map(item => ({ ...item,
-          waitingOnNteApproval: flags.get(item.id.toLowerCase()) ?? false })) };
+        const page = result as Record<string, unknown> & { items: { id: string; invoiceType?: string | null }[] };
+        const items = await attachApplicableStaffInvoiceNteWaitFlags(page.items,
+          (invoiceIds, readSignal) => loadStaffInvoiceNteWaitFlags(
+            client as unknown as NteApprovalWaitReadClient, invoiceIds, readSignal), signal);
+        return { ...page, items };
       }
       if (input.kind === "summary") {
         if (!result || typeof result !== "object" || Array.isArray(result)
           || !("invoice" in result) || !result.invoice || typeof result.invoice !== "object" || Array.isArray(result.invoice)) {
           throw new AppError("INTERNAL_ERROR");
         }
-        const invoice = (result as { invoice: { id: string } }).invoice;
-        const flags = await loadStaffInvoiceNteWaitFlags(client as unknown as NteApprovalWaitReadClient, [invoice.id], signal);
-        return { ...result, invoice: { ...invoice, waitingOnNteApproval: flags.get(invoice.id.toLowerCase()) ?? false } };
+        const invoice = (result as { invoice: { id: string; invoiceType?: string | null } }).invoice;
+        const [annotated] = await attachApplicableStaffInvoiceNteWaitFlags([invoice],
+          (invoiceIds, readSignal) => loadStaffInvoiceNteWaitFlags(
+            client as unknown as NteApprovalWaitReadClient, invoiceIds, readSignal), signal);
+        return { ...result, invoice: annotated };
       }
       return result;
     },

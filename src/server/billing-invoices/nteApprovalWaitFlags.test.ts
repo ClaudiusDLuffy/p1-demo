@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadStaffInvoiceNteWaitFlags, attachStaffInvoiceNteWaitFlags } from "./nteApprovalWaitFlags";
+import { loadStaffInvoiceNteWaitFlags, attachApplicableStaffInvoiceNteWaitFlags, attachStaffInvoiceNteWaitFlags } from "./nteApprovalWaitFlags";
 
 const ids = ["85000000-0000-4000-8000-000000000001", "85000000-0000-4000-8000-000000000002"];
 
@@ -50,4 +50,31 @@ test("NTE marker reads short-circuit empty pages and reject duplicate request id
   assert.equal((await loadStaffInvoiceNteWaitFlags(empty, [], new AbortController().signal)).size, 0);
   assert.equal(empty.calls.length, 0);
   await assert.rejects(loadStaffInvoiceNteWaitFlags(client({ items: [] }), [ids[0], ids[0]], new AbortController().signal), { code: "INTERNAL_ERROR" });
+});
+
+test("NTE annotation queries only staff invoices in mixed billing reads", async () => {
+  const signal = new AbortController().signal;
+  const calls: string[][] = [];
+  const annotated = await attachApplicableStaffInvoiceNteWaitFlags([
+    { id: ids[0], invoiceType: "contractor", num: "synthetic source" },
+    { id: ids[1], invoiceType: "staff", num: "synthetic P1" },
+  ], async (invoiceIds, receivedSignal) => {
+    assert.equal(receivedSignal, signal);
+    calls.push([...invoiceIds]);
+    return new Map([[ids[1], true]]);
+  }, signal);
+
+  assert.deepEqual(calls, [[ids[1]]]);
+  assert.deepEqual(annotated.map(invoice => invoice.waitingOnNteApproval), [false, true]);
+});
+
+test("contractor-only source reads skip the staff NTE database function", async () => {
+  let called = false;
+  const annotated = await attachApplicableStaffInvoiceNteWaitFlags([
+    { id: ids[0], invoiceType: "contractor" },
+  ], async () => { called = true; throw new Error("must not read a staff-only marker for contractor invoices"); },
+  new AbortController().signal);
+
+  assert.equal(called, false);
+  assert.deepEqual(annotated, [{ id: ids[0], invoiceType: "contractor", waitingOnNteApproval: false }]);
 });
