@@ -65,7 +65,7 @@ export function mapVaCoordinatorDetailsToPortalModel(
     text: note.text,
     type: "note",
     activityChannel: "field_note" as const,
-    enteredByRole: "contractor",
+    enteredByRole: note.enteredByRole,
     isStaffOverride: false,
     isStaffOnly: false,
     overrideForContractorId: null,

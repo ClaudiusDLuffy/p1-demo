@@ -57,6 +57,7 @@ import {
   useVaCoordinatorWorkOrder,
 } from "../features/va-coordinator/queries";
 import { useVaCoordinatorNoteTransfer } from "../features/va-coordinator/hooks/useVaCoordinatorNoteTransfer";
+import { useVaCoordinatorSevenElevenUpdate } from "../features/va-coordinator/hooks/useVaCoordinatorSevenElevenUpdate";
 import {
   mapVaCoordinatorDetailsToPortalModel,
   mapVaCoordinatorWorkOrderToPortalModel,
@@ -1475,6 +1476,11 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     actor: vaCoordinatorActor,
     workOrderId: selectedWO,
     notes: vaTechnicianNotesQuery.data,
+    notify: fire,
+  });
+  const vaSevenElevenUpdate = useVaCoordinatorSevenElevenUpdate({
+    actor: vaCoordinatorActor,
+    workOrderId: selectedWO,
     notify: fire,
   });
   const selectedWorkOrderQuery = useWorkOrderByIdQuery(
@@ -3572,6 +3578,8 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             billingInvoices={isVaCoordinator ? [] : billingInvoices}
             vaAttachmentPaths={(vaAttachmentsQuery.data || []).map(attachment => attachment.storagePath)}
             onMarkVaNoteCopiedToSevenEleven={markVaNoteCopiedToSevenEleven}
+            onPostVaSevenElevenUpdate={vaSevenElevenUpdate.postUpdate}
+            vaSevenElevenUpdatePosting={vaSevenElevenUpdate.isPosting}
             modal={modal}
             isManager={isManager}
             setSelectedWO={setSelectedWO}

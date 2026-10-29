@@ -25,8 +25,11 @@ test("VA coordinator uses the standard portal with scoped read access and confir
   await page.getByRole("button", { name: "Previous", exact: true }).click();
   await expect(page.getByText(/^Page 1/)).toBeVisible();
 
-  // This synthetic WO is assigned outside the retired team mapping. Its
-  // presence confirms VA access is global to non-deleted work orders.
+  // Search for a closed WO first to confirm the VA list stays scoped to open
+  // work. The report-only synthetic WO is assigned to another technician and
+  // confirms list visibility is global rather than assignment/team-scoped.
+  await page.getByRole("textbox", { name: "Search work orders" }).fill("E2E-CLOSED-REOPEN");
+  await expect(page.getByRole("row").filter({ hasText: "E2E-CLOSED-REOPEN" })).toHaveCount(0);
   await page.getByRole("textbox", { name: "Search work orders" }).fill(WORK_ORDER_ID);
   const row = page.getByRole("row").filter({ hasText: WORK_ORDER_ID });
   await expect(row).toBeVisible();
@@ -35,10 +38,13 @@ test("VA coordinator uses the standard portal with scoped read access and confir
   await expect(page.getByText("Assigned specifically to the report-only technician.", { exact: true })).toBeVisible();
   await expect(page.locator(".detail-fields").getByText("Synthetic Report Technician", { exact: true })).toBeVisible();
 
-  // The shared detail view is read-only: no normal staff or billing actions,
-  // no note editor, and no internal note payload.
+  // The shared detail view keeps original work-order data read-only and
+  // exposes only the VA's dedicated pending-update composer.
   await expect(page.getByRole("button", { name: /Edit work order|Reassign|Close work order|Invoice/i })).toHaveCount(0);
-  await expect(page.locator("textarea")).toHaveCount(0);
+  await expect(page.locator("textarea")).toHaveCount(1);
+  await expect(page.getByRole("textbox", { name: "New 7-Eleven job note" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add to 7-Eleven update queue", exact: true })).toBeDisabled();
+  await expect(page.getByText("General chat & activity", { exact: true })).toBeVisible();
   await expect(page.getByText("Synthetic VA hidden internal note.", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/Invoice \/ estimate documents|Contractor bill/i)).toHaveCount(0);
 
@@ -48,6 +54,19 @@ test("VA coordinator uses the standard portal with scoped read access and confir
   const transferNote = page.getByText(transferNoteText, { exact: true });
   await expect(transferNote).toBeVisible();
   const transferNoteCard = transferNote.locator("..");
+
+  // Human-style VA post: it is stored in the P1 queue under the VA's account,
+  // clearly marked as VA-entered, and is not sent automatically.
+  const vaUpdateText = "Synthetic VA-authored update queued for 7-Eleven.";
+  await page.getByRole("textbox", { name: "New 7-Eleven job note" }).fill(vaUpdateText);
+  await page.getByRole("button", { name: "Add to 7-Eleven update queue", exact: true }).click();
+  const vaUpdate = page.getByText(vaUpdateText, { exact: true });
+  await expect(vaUpdate).toBeVisible();
+  const vaUpdateCard = vaUpdate.locator("..");
+  await expect(vaUpdateCard).toContainText(accounts.vaCoordinator.name);
+  await expect(vaUpdateCard).toContainText("VA-entered");
+  await expect(vaUpdateCard.getByRole("button", { name: "Mark copied to 7-Eleven", exact: true })).toBeVisible();
+  await expect(page.getByText("Update added to the 7-Eleven queue under your account.", { exact: false })).toBeVisible();
 
   // Photos render through the normal gallery, but paths are obtained from the
   // narrowly scoped VA attachment RPC.
@@ -60,7 +79,8 @@ test("VA coordinator uses the standard portal with scoped read access and confir
   await expect(photoDialog.getByRole("img", { name: "Work-order photo" })).toBeVisible();
   await photoDialog.getByRole("button", { name: "Close dialog" }).click();
 
-  // The only supported write is a positively confirmed note-copy audit event.
+  // Copy completion requires a positive confirmation and is recorded against
+  // the signed-in VA, for both technician notes and VA-authored queue entries.
   await transferNoteCard.getByRole("button", { name: "Mark copied to 7-Eleven", exact: true }).click();
   const transferDialog = page.getByRole("dialog", { name: "Confirm 7-Eleven update" });
   await expect(transferDialog.getByRole("button", { name: "Confirm copied", exact: true })).toBeDisabled();
@@ -69,9 +89,15 @@ test("VA coordinator uses the standard portal with scoped read access and confir
 
   await transferNoteCard.getByRole("button", { name: "Mark copied to 7-Eleven", exact: true }).click();
   const confirmedDialog = page.getByRole("dialog", { name: "Confirm 7-Eleven update" });
-  await confirmedDialog.getByRole("checkbox", { name: "I confirm I successfully copied this note into 7-Eleven." }).check();
+  await confirmedDialog.getByRole("checkbox", { name: "I confirm I successfully copied this update into 7-Eleven." }).check();
   await confirmedDialog.getByRole("button", { name: "Confirm copied", exact: true }).click();
   await expect(transferNoteCard.getByRole("status")).toContainText(`Updated in 7-Eleven by ${accounts.vaCoordinator.name}`);
+
+  await vaUpdateCard.getByRole("button", { name: "Mark copied to 7-Eleven", exact: true }).click();
+  const vaTransferDialog = page.getByRole("dialog", { name: "Confirm 7-Eleven update" });
+  await vaTransferDialog.getByRole("checkbox", { name: "I confirm I successfully copied this update into 7-Eleven." }).check();
+  await vaTransferDialog.getByRole("button", { name: "Confirm copied", exact: true }).click();
+  await expect(vaUpdateCard.getByRole("status")).toContainText(`Updated in 7-Eleven by ${accounts.vaCoordinator.name}`);
 
   // The same work-order page also uses the portal's normal mobile shell.
   await page.setViewportSize({ width: 390, height: 844 });

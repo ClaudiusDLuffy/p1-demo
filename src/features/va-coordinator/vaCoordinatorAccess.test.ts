@@ -7,6 +7,7 @@ const migration = readFileSync(resolve(process.cwd(), "supabase/migrations/0175_
 const managerBackOfficeTeamManagementMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0178_manager_backoffice_va_team_management.sql"), "utf8");
 const testAccountExclusionMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0179_va_team_test_account_exclusion.sql"), "utf8");
 const allWorkOrdersMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0180_va_coordinator_all_work_orders_archive_teams.sql"), "utf8");
+const openWorkOrdersAndUpdatesMigration = readFileSync(resolve(process.cwd(), "supabase/migrations/0182_va_open_work_orders_and_queued_updates.sql"), "utf8");
 const staffAuthorization = readFileSync(resolve(process.cwd(), "supabase/migrations/0101_enforce_active_staff_authorization.sql"), "utf8");
 const portalShell = readFileSync(resolve(process.cwd(), "src/components/PortalShell.tsx"), "utf8");
 const workOrderList = readFileSync(resolve(process.cwd(), "src/features/work-orders/WorkOrderList.tsx"), "utf8");
@@ -29,11 +30,12 @@ test("VA list uses the role-scoped page and never falls back to a generic cached
   assert.match(workOrderList, /listQueryEnabled && !isVaCoordinator/);
 });
 
-test("VA detail is read-only apart from its confirmed note-transfer callback", () => {
+test("VA detail is read-only apart from its queue-post and confirmed transfer callbacks", () => {
   assert.match(workOrderDetail, /currentUser\?\.role === "va_coordinator"/);
   assert.match(workOrderDetail, /contractorHistoryReadOnly = isVaCoordinator \|\|/);
   assert.match(workOrderDetail, /loadAllPhotoPaths=\{isVaCoordinator \?/);
   assert.match(workOrderDetail, /onMarkVaNoteCopiedToSevenEleven=\{onMarkVaNoteCopiedToSevenEleven\}/);
+  assert.match(workOrderDetail, /onPostVaSevenElevenUpdate=\{onPostVaSevenElevenUpdate\}/);
   assert.match(workOrderDetail, /!isVaCoordinator && !focused && billingDocuments/);
   assert.match(workOrderDetail, /!isVaCoordinator && !woData\.billingOnly && <ReceivingDispatchStatus/);
 });
@@ -114,6 +116,38 @@ test("current VA access covers every non-deleted work order without changing the
   assert.doesNotMatch(list, /'(?:invoice[^']*|billing[^']*|nte[^']*|contractor_id|pricing[^']*)'/i);
   assert.match(list, /coalesce\(work_order\.incident_id/);
   assert.match(allWorkOrdersMigration, /work_orders_va_coordinator_updated_cursor_idx/);
+});
+
+test("VA global access is now active-work-order-only and blocks closed/cancelled detail and writes", () => {
+  assert.match(openWorkOrdersAndUpdatesMigration, /work_order\.status <> 'closed'/);
+  assert.match(openWorkOrdersAndUpdatesMigration, /functional_status is distinct from 'Cancelled'/);
+  const access = openWorkOrdersAndUpdatesMigration.match(/create or replace function public\.can_access_va_coordinator_work_order\([\s\S]*?\n\$\$;/)?.[0] || "";
+  assert.match(access, /public\.is_va_coordinator\(\)/);
+  assert.match(access, /work_order\.deleted_at is null/);
+  assert.match(access, /work_order\.status <> 'closed'/);
+  assert.match(access, /functional_status is distinct from 'Cancelled'/);
+  assert.doesNotMatch(access, /assigned_technician_profile_id\s*=|team_members|team_technicians/);
+});
+
+test("VA update RPC queues only attributed field notes and includes them in the safe queue read", () => {
+  const post = openWorkOrdersAndUpdatesMigration.match(/create or replace function public\.post_va_coordinator_seven_eleven_update_v1\([\s\S]*?\n\$\$;/)?.[0] || "";
+  const listNotes = openWorkOrdersAndUpdatesMigration.match(/create or replace function public\.list_va_coordinator_technician_notes_v1\([\s\S]*?\n\$\$;/)?.[0] || "";
+  const listPhotos = openWorkOrdersAndUpdatesMigration.match(/create or replace function public\.list_va_coordinator_photos_v1\([\s\S]*?\n\$\$;/)?.[0] || "";
+  assert.match(post, /security definer/);
+  assert.match(post, /public\.is_va_coordinator\(\)/);
+  assert.match(post, /status|can_access_va_coordinator_work_order/);
+  assert.match(post, /author_id, author_name, text, type, event_key, event_data/);
+  assert.match(post, /'field_note', false, true, false, false/);
+  assert.match(post, /'enteredByRole', v_activity\.entered_by_role/);
+  assert.doesNotMatch(post, /\b(?:invoice|billing|nte|pricing)\b|submit.*7-Eleven/i);
+  assert.match(listNotes, /a\.activity_channel = 'field_note'/);
+  assert.match(listNotes, /'enteredByRole', n\.entered_by_role/);
+  assert.doesNotMatch(listNotes, /internal_note|contractor_message/);
+  assert.doesNotMatch(listNotes, /contractor_assignment_version|contractor_assignment_started_at/);
+  assert.match(listPhotos, /binding\.state = 'finalized'/);
+  assert.doesNotMatch(listPhotos, /contractor_assignment_started_at/);
+  assert.match(openWorkOrdersAndUpdatesMigration, /create or replace function public\.can_read_va_coordinator_photo[\s\S]*?public\.can_access_va_coordinator_work_order\(work_order\.id\)/);
+  assert.match(openWorkOrdersAndUpdatesMigration, /grant execute on function public\.post_va_coordinator_seven_eleven_update_v1\(text, text\) to authenticated/);
 });
 
 test("VA team management is hidden and existing team configuration is archived, not deleted", () => {

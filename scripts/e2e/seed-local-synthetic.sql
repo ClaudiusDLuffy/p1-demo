@@ -520,12 +520,12 @@ values
    'Synthetic Report Technician', 'Synthetic VA WebKit note to transfer.', 'note',
    'contractor', 'note', '{}'::jsonb, true, false, 1, 0, 'field_note');
 
-insert into public.photos (work_order_id, storage_path, uploader_id, uploader_name, caption)
+insert into public.photos (work_order_id, storage_path, uploader_id, uploader_name, caption, created_at)
 values
   ('E2E-SUB-TEAM', 'wo/E2E-SUB-TEAM/va-coordinator-synthetic.png', :'team_member_id'::uuid,
-    'Synthetic Team Member', 'Synthetic VA team attachment'),
+    'Synthetic Team Member', 'Synthetic VA team attachment', now()),
   ('E2E-REPORT-START', 'wo/E2E-REPORT-START/va-coordinator-out-of-scope.png', :'report_tech_id'::uuid,
-    'Synthetic Report Technician', 'Synthetic out-of-team attachment');
+    'Synthetic Report Technician', 'Synthetic prior-assignment photo', now() - interval '20 minutes');
 insert into storage.objects (bucket_id, name, owner, metadata)
 values
   ('photos', 'wo/E2E-SUB-TEAM/va-coordinator-synthetic.png', :'team_member_id'::uuid, '{}'::jsonb),
