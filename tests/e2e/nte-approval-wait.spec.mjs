@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { accounts, expect, login, openSidebarPage, test } from "./fixtures.mjs";
 import { linkedBillingSql as sql } from "../../scripts/e2e/linked-billing-test-support.mjs";
 
-function draftInvoiceFixture() {
+function invoiceFixture(state = "draft") {
   const suffix = randomUUID().slice(0, 8);
   const workOrderId = `E2E-NTE-WO-${suffix}`;
   const invoiceId = randomUUID();
@@ -10,20 +10,20 @@ function draftInvoiceFixture() {
   sql(`insert into public.work_orders(id,status,functional_status,store_number,store_state,summary)
     values('${workOrderId}','pending_invoice','Completed','E2E001','TX','Synthetic NTE approval wait');
     insert into public.invoices(id,work_order_id,num,invoice_type,document_kind,state,invoice_date,subtotal,total)
-    values('${invoiceId}','${workOrderId}','${number}','staff','invoice','draft',current_date,100,100);
+    values('${invoiceId}','${workOrderId}','${number}','staff','invoice','${state}',current_date,100,100);
     insert into public.invoice_lines(invoice_id,position,type,description,qty,rate,is_taxable)
     values('${invoiceId}',1,'Labor','Synthetic NTE approval labor',1,100,false);`);
-  return { invoiceId, number };
+  return { workOrderId, invoiceId, number };
 }
 
 test("NTE wait is auditable, visible in the invoice list, and must be cleared before submission", async ({ page }) => {
-  const fixture = draftInvoiceFixture();
+  const fixture = invoiceFixture();
   await login(page, accounts.backoffice);
   await openSidebarPage(page, "7-Eleven billing");
 
   const search = page.getByRole("searchbox", { name: "Search billing invoices and work orders" });
   await search.fill(fixture.number);
-  await page.getByText(`#${fixture.number}`, { exact: true }).first().click();
+  await page.getByText(`#${fixture.number}`, { exact: true }).filter({ visible: true }).first().click();
   const detail = page.locator(".invoice-detail-container");
   await expect(detail).toContainText(`#${fixture.number}`);
 
@@ -31,6 +31,9 @@ test("NTE wait is auditable, visible in the invoice list, and must be cleared be
   await expect(page.getByRole("status").filter({ hasText: "Waiting on NTE approval" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Ready for 7-Eleven", exact: true })).toBeDisabled();
   expect(sql(`select waiting_on_nte_approval from public.staff_invoice_nte_wait_flags where invoice_id='${fixture.invoiceId}'`)).toBe("t");
+  expect(sql(`select profile.email from public.staff_invoice_nte_wait_flags flag
+    join public.profiles profile on profile.id=flag.updated_by
+    where flag.invoice_id='${fixture.invoiceId}'`)).toBe(accounts.backoffice.email);
 
   // Exercise the database guard separately from the disabled UI control.
   sql(`do $$ begin
@@ -43,7 +46,7 @@ test("NTE wait is auditable, visible in the invoice list, and must be cleared be
   await page.getByRole("button", { name: "Back to billing", exact: true }).click();
   await expect(page.getByText("Waiting on NTE approval", { exact: true }).first()).toBeVisible();
   await search.fill(fixture.number);
-  await page.getByText(`#${fixture.number}`, { exact: true }).first().click();
+  await page.getByText(`#${fixture.number}`, { exact: true }).filter({ visible: true }).first().click();
   await page.getByRole("button", { name: "Clear NTE wait", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Waiting on NTE approval" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ready for 7-Eleven", exact: true })).toBeEnabled();
@@ -55,4 +58,46 @@ test("NTE wait is auditable, visible in the invoice list, and must be cleared be
   await page.getByRole("button", { name: "Back to billing", exact: true }).click();
   await search.fill(fixture.number);
   await expect(page.getByText("Waiting on NTE approval", { exact: true })).toHaveCount(0);
+});
+
+test("a submitted invoice cannot be marked billed while waiting on NTE approval", async ({ page }) => {
+  const fixture = invoiceFixture("submitted");
+  await login(page, accounts.manager);
+  await openSidebarPage(page, "7-Eleven billing");
+  const search = page.getByRole("searchbox", { name: "Search billing invoices and work orders" });
+  await search.fill(fixture.number);
+  await page.getByText(`#${fixture.number}`, { exact: true }).filter({ visible: true }).first().click();
+
+  await page.getByRole("button", { name: "Mark waiting on NTE approval", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Billed to 7-Eleven", exact: true })).toBeDisabled();
+  expect(sql(`select state from public.invoices where id='${fixture.invoiceId}'`)).toBe("submitted");
+  expect(sql(`select total from public.invoices where id='${fixture.invoiceId}'`)).toBe("100.00");
+  expect(sql(`select profile.email from public.staff_invoice_nte_wait_flags flag
+    join public.profiles profile on profile.id=flag.updated_by
+    where flag.invoice_id='${fixture.invoiceId}'`)).toBe(accounts.manager.email);
+
+  sql(`do $$ begin
+    update public.invoices set state='approved' where id='${fixture.invoiceId}';
+    raise exception 'NTE wait must prevent billing';
+  exception when sqlstate 'PT409' then null;
+  end $$;`);
+  expect(sql(`select state from public.invoices where id='${fixture.invoiceId}'`)).toBe("submitted");
+
+  await page.getByRole("button", { name: "Back to billing", exact: true }).click();
+  await search.fill(fixture.number);
+  await expect(page.getByText("Waiting on NTE approval", { exact: true }).first()).toBeVisible();
+  const invoiceRow = page.getByRole("row").filter({ hasText: fixture.number }).last();
+  await expect(invoiceRow).toBeVisible();
+  await invoiceRow.click();
+  await page.getByRole("button", { name: "Clear NTE wait", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Billed to 7-Eleven", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Billed to 7-Eleven", exact: true }).click();
+  const confirmation = page.getByRole("dialog", { name: "Confirm 7-Eleven billing", exact: true });
+  await confirmation.getByRole("button", { name: "Billed to 7-Eleven", exact: true }).click();
+  await expect(confirmation).toBeHidden();
+
+  expect(sql(`select state from public.invoices where id='${fixture.invoiceId}'`)).toBe("approved");
+  expect(sql(`select status from public.work_orders where id='${fixture.workOrderId}'`)).toBe("closed");
+  expect(sql(`select count(*) from public.invoices where id='${fixture.invoiceId}'`)).toBe("1");
+  expect(sql(`select waiting_on_nte_approval from public.staff_invoice_nte_wait_flags where invoice_id='${fixture.invoiceId}'`)).toBe("f");
 });
