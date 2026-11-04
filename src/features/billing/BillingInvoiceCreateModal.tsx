@@ -4,7 +4,7 @@
 import { apiFetch } from "../../lib/errors/apiFetch";
 import { safeErrorMessage } from "../../lib/errors/normalizeUnknown";
 import { billingWorkOrderVisitsKey, directoryActorScope } from "../../lib/counts/queryKeys";
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -36,6 +36,10 @@ import {
   STAFF_BILLING_LINE_TYPES,
 } from "../../lib/staffBilling";
 import { billingWorkOrderOptions } from "../../lib/billingWorkOrderOptions";
+import {
+  countWorkOrderBoundBillingLines,
+  makeWorkOrderBoundBillingLinesManual,
+} from "./billingSourceWorkOrderChange";
 import { isCapitalWorkOrder } from "../../lib/workOrderView";
 import { requiresVisitDurationReview, VISIT_DURATION_REVIEW_MESSAGE } from "../../lib/visitDurationReview";
 import { supabase } from "../../lib/supabase/client";
@@ -93,6 +97,11 @@ import {
 import { StaffFinancialLineInputSchema } from "../../lib/staffInvoiceContracts";
 
 const BillingLineSchema = StaffFinancialLineInputSchema;
+type PendingWorkOrderChange = {
+  fromWorkOrderId: string;
+  workOrderId: string;
+  sourceInvoiceNumbers: string[];
+};
 
 const decimalScale = (value: number) => {
   const [coefficient, exponent = "0"] = value.toString().toLowerCase().split("e");
@@ -230,6 +239,8 @@ export default function BillingInvoiceCreateModal(props: any) {
   const [pullingLines, setPullingLines] = useState(false);
   const [woSearch, setWoSearch] = useState("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [pendingWorkOrderChange, setPendingWorkOrderChange] = useState<PendingWorkOrderChange | null>(null);
+  const [sourceWorkOrderChangeNotice, setSourceWorkOrderChangeNotice] = useState("");
   const sourceReadIdentity = JSON.stringify([directoryActorScope(currentUser), modal, selectedSourceIds]);
   const latestSourceReadIdentity = useRef(sourceReadIdentity);
   latestSourceReadIdentity.current = sourceReadIdentity;
@@ -323,6 +334,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   const numberField = register("num", {
     onChange: () => { numberEditedRef.current = true; setNumberEdited(true); },
   });
+  const workOrderIdField = register("workOrderId");
   const { fields, append, remove, replace, move } = useFieldArray({ control, name: "lines" });
   const watchedLines = watch("lines");
   const lines = useMemo(() => watchedLines || [], [watchedLines]);
@@ -894,6 +906,8 @@ export default function BillingInvoiceCreateModal(props: any) {
       editingInvoice?.sourceInvoiceIds
       || (resolvedInitialSourceInvoice?.id ? [resolvedInitialSourceInvoice.id] : [])
     ));
+    setPendingWorkOrderChange(null);
+    setSourceWorkOrderChangeNotice("");
     setSourceSnapshots(restoredDraft?.sourceSnapshots || Object.fromEntries(
       (editingInvoice?.sourceInvoices || []).map((invoice: any) => [invoice.id, invoice]),
     ));
@@ -1312,6 +1326,50 @@ export default function BillingInvoiceCreateModal(props: any) {
     <p role="alert">The complete invoice has not been loaded. Close and reopen Edit before making changes.</p>
   </Modal>;
 
+  const commitWorkOrderSelection = (workOrderId: string, keepLinesAsManual = false) => {
+    let detachedLineCount = 0;
+    if (keepLinesAsManual) {
+      const result = makeWorkOrderBoundBillingLinesManual(getValues("lines") || []);
+      detachedLineCount = result.detachedLineCount;
+      if (detachedLineCount > 0) replace(result.lines);
+      const sourceNumbers = pendingWorkOrderChange?.sourceInvoiceNumbers || [];
+      const sourceDescription = sourceNumbers.length > 0
+        ? ` Contractor invoice${sourceNumbers.length === 1 ? "" : "s"} ${sourceNumbers.map((number: string) => `#${number}`).join(", ")} remain on ${pendingWorkOrderChange.fromWorkOrderId || "their original work order"} and are not linked to this invoice.`
+        : " The original contractor invoices remain on their work order and are not linked to this invoice.";
+      setSourceWorkOrderChangeNotice(
+        detachedLineCount > 0
+          ? `${detachedLineCount} work-order-linked line${detachedLineCount === 1 ? " was" : "s were"} kept as manual line items.${sourceDescription} Review the amounts before saving.`
+          : `Selected contractor source links were cleared; line values were unchanged.${sourceDescription} Review the invoice before saving.`,
+      );
+    } else {
+      setSourceWorkOrderChangeNotice("");
+    }
+    workOrderSelectionAuthored.current = true;
+    hydratedWorkOrderId.current = null;
+    setValue("workOrderId", workOrderId, { shouldDirty: true, shouldValidate: true });
+    setWoSearch("");
+    setPendingWorkOrderChange(null);
+  };
+
+  const requestWorkOrderSelection = (workOrderId: string) => {
+    const nextWorkOrderId = workOrderId || "";
+    const currentWorkOrderId = selectedWorkOrderId || "";
+    if (nextWorkOrderId === currentWorkOrderId) {
+      setWoSearch("");
+      return;
+    }
+    const sourceLineCount = countWorkOrderBoundBillingLines(getValues("lines") || []);
+    if (selectedSourceIds.length > 0 || sourceLineCount > 0) {
+      setPendingWorkOrderChange({
+        fromWorkOrderId: currentWorkOrderId,
+        workOrderId: nextWorkOrderId,
+        sourceInvoiceNumbers: selectedSourceInvoices.map((invoice: { num?: string | number | null }) => String(invoice.num || "")).filter(Boolean),
+      });
+      return;
+    }
+    commitWorkOrderSelection(nextWorkOrderId);
+  };
+
   const toggleSourceInvoice = (invoiceId: string) => {
     const owner = sourceOwnerById.get(invoiceId);
     if (owner && owner.id !== editingInvoice?.id) return;
@@ -1570,10 +1628,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                     role="option"
                     aria-selected={selectedWorkOrderId === wo.id}
                     onClick={() => {
-                      workOrderSelectionAuthored.current = true;
-                      hydratedWorkOrderId.current = null;
-                      setValue("workOrderId", wo.id, { shouldDirty: true, shouldValidate: true });
-                      setWoSearch("");
+                      requestWorkOrderSelection(wo.id);
                     }}
                     title={`${wo.id} - Store #${wo.store || "-"} - ${wo.summary || "No summary"}${isCapitalWorkOrder(wo) ? " - Capital" : ""}`}
                     style={{ width: "100%", minWidth: 0, padding: "9px 10px", border: "none", borderRadius: 7, background: selectedWorkOrderId === wo.id ? T.accentSoft : T.surface, color: T.ink, cursor: "pointer", textAlign: "left", fontFamily: "inherit", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -1585,10 +1640,16 @@ export default function BillingInvoiceCreateModal(props: any) {
                 ))}
               </div>
             )}
-            <Sel aria-label="Invoice work order" {...fieldAria("workOrderId")} {...register("workOrderId", { onChange: () => {
-              workOrderSelectionAuthored.current = true;
-              hydratedWorkOrderId.current = null;
-            } })} value={selectedWorkOrderId || ""} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}>
+            <Sel
+              aria-label="Invoice work order"
+              {...fieldAria("workOrderId")}
+              name={workOrderIdField.name}
+              ref={workOrderIdField.ref}
+              onBlur={workOrderIdField.onBlur}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => requestWorkOrderSelection(event.target.value)}
+              value={selectedWorkOrderId || ""}
+              style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}
+            >
               <option value="">Standalone invoice</option>
               {workOrderOptions.map((wo: any) => (
                 <option key={wo.id} value={wo.id}>{wo.id} - Store #{wo.store || "-"} - {wo.summary || "No summary"}{isCapitalWorkOrder(wo) ? " · Capital" : ""}</option>
@@ -1637,6 +1698,12 @@ export default function BillingInvoiceCreateModal(props: any) {
             {headerError("territory")}
           </label>
         </div>
+
+        {sourceWorkOrderChangeNotice && (
+          <div role="status" style={{ padding: "10px 12px", margin: "-4px 0 16px", borderRadius: 9, border: `1px solid ${T.warn}66`, background: T.warnSoft, color: T.ink, fontSize: 11, lineHeight: 1.5 }}>
+            {sourceWorkOrderChangeNotice}
+          </div>
+        )}
 
         <label style={{ display: "block", marginBottom: 16 }}>
           <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Tag</span>
@@ -2310,6 +2377,54 @@ export default function BillingInvoiceCreateModal(props: any) {
           fmt={fmt}
         />
       </Modal>
+      {pendingWorkOrderChange && (
+        <Modal
+          title="Move imported lines to another work order?"
+          description="Source invoice and purchased-part links are restricted to their original work order."
+          closeLabel="Cancel work-order change"
+          onClose={() => {
+            setPendingWorkOrderChange(null);
+            setWoSearch("");
+          }}
+          width={520}
+        >
+          <div style={{ color: T.ink, fontSize: 13, lineHeight: 1.55 }}>
+            <p style={{ margin: "0 0 12px" }}>
+              Changing from <strong>{pendingWorkOrderChange.fromWorkOrderId || "Standalone invoice"}</strong> to <strong>{pendingWorkOrderChange.workOrderId || "Standalone invoice"}</strong> cannot move contractor invoices or work-order parts between records.
+            </p>
+            {pendingWorkOrderChange.sourceInvoiceNumbers.length > 0 && (
+              <p style={{ margin: "0 0 12px" }}>
+                Selected contractor invoice{pendingWorkOrderChange.sourceInvoiceNumbers.length === 1 ? "" : "s"}: {pendingWorkOrderChange.sourceInvoiceNumbers.map((number: string) => `#${number}`).join(", ")}.
+              </p>
+            )}
+            <p style={{ margin: "0 0 12px" }}>
+              Continue to keep the displayed descriptions, quantities, and rates as manual line items and clear their source links and source-cost markup. Review every amount before saving. This does not move or close the original work order, change the contractor invoice, or mark it billed.
+            </p>
+            <p style={{ margin: "0 0 18px", color: T.muted }}>
+              After the replacement P1 invoice is submitted, use “Billed under another work order” on the original only if that invoice covers the completed original work. That records the coverage and closes the original without changing its contractor invoice.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn-soft"
+                onClick={() => {
+                  setPendingWorkOrderChange(null);
+                  setWoSearch("");
+                }}
+              >
+                Keep current work order
+              </button>
+              <button
+                type="button"
+                className="btn-accent"
+                onClick={() => commitWorkOrderSelection(pendingWorkOrderChange.workOrderId, true)}
+              >
+                Continue with manual lines
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {dismissal.dialog}
     </>
   );
