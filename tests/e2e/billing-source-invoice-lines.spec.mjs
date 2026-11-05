@@ -125,6 +125,173 @@ test("same-work-order source pull saves and links the P1 draft to its contractor
     sourceCount: 1, sourceNum: "E2E-SUBMITTED-APPROVE" });
 });
 
+test("submits copied contractor lines on a replacement work order without moving the source bill", async ({ page }) => {
+  const sourceBefore = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', work_order_id, 'state', state, 'total', total
+  ) from public.invoices where num='E2E-SUBMITTED-REJECT' and deleted_at is null`));
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "7-Eleven billing");
+  await page.getByRole("button", { name: "+ Create Invoice", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-REVIEW-REJECT");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-REVIEW-REJECT / }).click();
+  await dialog.getByRole("checkbox", { name: /E2E-SUBMITTED-REJECT/ }).check();
+  await dialog.getByRole("button", { name: "Pull lines + calculate", exact: true }).click();
+  await expect(page.getByText("Pulled 1 line item", { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Line 1 description", { exact: true })).toHaveValue("Synthetic rejection labor");
+
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-STAFF-BILLING");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-STAFF-BILLING / }).click();
+  const confirmMove = page.getByRole("dialog", { name: "Move imported lines to another work order?", exact: true });
+  await expect(confirmMove).toBeVisible();
+  await confirmMove.getByRole("button", { name: "Continue with manual lines", exact: true }).click();
+  await expect(dialog.getByText("Contractor invoices on E2E-STAFF-BILLING", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/kept as manual line items/)).toContainText("not linked to this invoice");
+  await expect(dialog.getByLabel("Line 1 description", { exact: true })).toHaveValue("Synthetic rejection labor");
+  await expect(dialog.getByLabel("Line 1 quantity", { exact: true })).toHaveValue("1");
+  await expect(dialog.getByLabel("Line 1 rate", { exact: true })).toHaveValue("110");
+  await dialog.getByLabel("Invoice #", { exact: true }).fill("P1-E2E-CROSS-WO-SUBMIT");
+
+  let submittedCommand;
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/billing-invoices" && request.method() === "POST") {
+      submittedCommand = request.postDataJSON();
+    }
+  });
+  await dialog.getByRole("button", { name: "Submit Invoice", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(submittedCommand.workOrderId).toBe("E2E-STAFF-BILLING");
+  expect(submittedCommand.state).toBe("submitted");
+  expect(submittedCommand.sourceInvoiceIds).toEqual([]);
+  expect(submittedCommand.lines[0].sourceInvoiceLineId).toBeNull();
+  expect(submittedCommand.lines[0].sourceUnitCost).toBeNull();
+  expect(submittedCommand.lines[0].markupPercent).toBeNull();
+
+  const saved = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', i.work_order_id, 'state', i.state, 'total', i.total,
+    'sourceCount', (select count(*) from public.staff_invoice_sources s where s.staff_invoice_id=i.id),
+    'lineSourceId', (select source_invoice_line_id from public.invoice_lines l where l.invoice_id=i.id limit 1)
+  ) from public.invoices i where i.num='P1-E2E-CROSS-WO-SUBMIT' and i.deleted_at is null`));
+  expect(saved).toEqual({ workOrderId: "E2E-STAFF-BILLING", state: "submitted", total: 110,
+    sourceCount: 0, lineSourceId: null });
+
+  const sourceAfter = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', work_order_id, 'state', state, 'total', total,
+    'activeP1Links', (select count(*) from public.staff_invoice_sources link
+      join public.invoices staff on staff.id=link.staff_invoice_id
+      where link.contractor_invoice_id=invoices.id and staff.deleted_at is null)
+  ) from public.invoices where num='E2E-SUBMITTED-REJECT' and deleted_at is null`));
+  expect(sourceAfter).toEqual({ ...sourceBefore, activeP1Links: 0 });
+});
+
+test("moves a saved P1 draft from the original WO to the replacement before submitting", async ({ page }) => {
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "7-Eleven billing");
+  await page.getByRole("button", { name: "+ Create Invoice", exact: true }).click();
+
+  let dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-REVIEW-REJECT");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-REVIEW-REJECT / }).click();
+  await dialog.getByRole("checkbox", { name: /E2E-SUBMITTED-REJECT/ }).check();
+  await dialog.getByRole("button", { name: "Pull lines + calculate", exact: true }).click();
+  await expect(page.getByText("Pulled 1 line item", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Invoice #", { exact: true }).fill("P1-E2E-RELINK-SUBMIT");
+  await dialog.getByRole("button", { name: "Save as Draft", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: "Edit invoice", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Edit invoice", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Edit invoice #P1-E2E-RELINK-SUBMIT", exact: true });
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-STAFF-BILLING");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-STAFF-BILLING / }).click();
+  const confirmMove = page.getByRole("dialog", { name: "Move imported lines to another work order?", exact: true });
+  await expect(confirmMove).toBeVisible();
+  await confirmMove.getByRole("button", { name: "Continue with manual lines", exact: true }).click();
+  await expect(dialog.getByText("Contractor invoices on E2E-STAFF-BILLING", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Update Invoice", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  const moved = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', i.work_order_id, 'state', i.state, 'total', i.total,
+    'sourceCount', (select count(*) from public.staff_invoice_sources s where s.staff_invoice_id=i.id),
+    'sourceLineId', (select source_invoice_line_id from public.invoice_lines l where l.invoice_id=i.id limit 1)
+  ) from public.invoices i where i.num='P1-E2E-RELINK-SUBMIT' and i.deleted_at is null`));
+  expect(moved).toEqual({ workOrderId: "E2E-STAFF-BILLING", state: "submitted", total: 110,
+    sourceCount: 0, sourceLineId: null });
+  const source = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', work_order_id, 'state', state,
+    'activeP1Links', (select count(*) from public.staff_invoice_sources link
+      join public.invoices staff on staff.id=link.staff_invoice_id
+      where link.contractor_invoice_id=invoices.id and staff.deleted_at is null)
+  ) from public.invoices where num='E2E-SUBMITTED-REJECT' and deleted_at is null`));
+  expect(source).toEqual({ workOrderId: "E2E-REVIEW-REJECT", state: "submitted", activeP1Links: 0 });
+});
+
+test("a deleted P1 draft does not block reusing its contractor invoice on a replacement WO", async ({ page }) => {
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "7-Eleven billing");
+  await page.getByRole("button", { name: "+ Create Invoice", exact: true }).click();
+
+  let dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-REVIEW-REJECT");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-REVIEW-REJECT / }).click();
+  await dialog.getByRole("checkbox", { name: /E2E-SUBMITTED-REJECT/ }).check();
+  await dialog.getByRole("button", { name: "Pull lines + calculate", exact: true }).click();
+  await expect(page.getByText("Pulled 1 line item", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Invoice #", { exact: true }).fill("P1-E2E-REPLACEMENT-OLD-LINK");
+  await dialog.getByRole("button", { name: "Save as Draft", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete billing invoice", exact: true });
+  await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(deleteDialog).toBeHidden();
+  const deletedInvoice = JSON.parse(sql(`select jsonb_build_object(
+    'deleted', deleted_at is not null,
+    'sourceLinkCount', (select count(*) from public.staff_invoice_sources s where s.staff_invoice_id=i.id)
+  ) from public.invoices i where i.num='P1-E2E-REPLACEMENT-OLD-LINK'`));
+  expect(deletedInvoice).toEqual({ deleted: true, sourceLinkCount: 1 });
+
+  await page.reload();
+  await openSidebarPage(page, "7-Eleven billing");
+  await page.getByRole("button", { name: "+ Create Invoice", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-REVIEW-REJECT");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-REVIEW-REJECT / }).click();
+  const reusableSource = dialog.getByRole("checkbox", { name: /E2E-SUBMITTED-REJECT/ });
+  await expect(reusableSource).toBeEnabled();
+  await reusableSource.check();
+  await dialog.getByRole("button", { name: "Pull lines + calculate", exact: true }).click();
+  await expect(page.getByText("Pulled 1 line item", { exact: true })).toBeVisible();
+
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-STAFF-BILLING");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-STAFF-BILLING / }).click();
+  const confirmMove = page.getByRole("dialog", { name: "Move imported lines to another work order?", exact: true });
+  await confirmMove.getByRole("button", { name: "Continue with manual lines", exact: true }).click();
+  await dialog.getByLabel("Invoice #", { exact: true }).fill("P1-E2E-REPLACEMENT-REUSED-SOURCE");
+  await dialog.getByRole("button", { name: "Submit Invoice", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  const result = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', invoice.work_order_id, 'state', invoice.state, 'total', invoice.total,
+    'sourceCount', (select count(*) from public.staff_invoice_sources source where source.staff_invoice_id=invoice.id),
+    'sourceLineId', (select line.source_invoice_line_id from public.invoice_lines line where line.invoice_id=invoice.id limit 1),
+    'originalSourceLinkCount', (select count(*) from public.staff_invoice_sources source
+      where source.contractor_invoice_id=(select id from public.invoices where num='E2E-SUBMITTED-REJECT'))
+  ) from public.invoices invoice where invoice.num='P1-E2E-REPLACEMENT-REUSED-SOURCE' and invoice.deleted_at is null`));
+  expect(result).toEqual({ workOrderId: "E2E-STAFF-BILLING", state: "submitted", total: 110,
+    sourceCount: 0, sourceLineId: null, originalSourceLinkCount: 1 });
+});
+
 test("paid QuickBooks-synced contractor source remains unchanged when used on its own work order", async ({ page }) => {
   const sourceBefore = JSON.parse(sql(`select jsonb_build_object(
     'state', state, 'qboInvoiceId', qbo_invoice_id, 'qboSyncedAt', qbo_synced_at, 'paidAt', paid_at
@@ -200,4 +367,50 @@ test("manual five-line replacement draft matches the reported $1,711 total witho
   ) from public.invoices i where i.num='P1-E2E-REPLACEMENT-1711' and i.deleted_at is null`));
   expect(saved).toEqual({ workOrderId: "E2E-STAFF-BILLING", state: "draft", total: 1711,
     lineCount: 5, sourceCount: 0 });
+});
+
+test("submits the reported five-line $1,711 replacement invoice successfully", async ({ page }) => {
+  await login(page, accounts.backoffice);
+  await openSidebarPage(page, "7-Eleven billing");
+  await page.getByRole("button", { name: "+ Create Invoice", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
+  await dialog.getByLabel("Search work order", { exact: true }).fill("E2E-STAFF-BILLING");
+  await page.getByRole("listbox", { name: "Matching work orders" })
+    .getByRole("option", { name: /^E2E-STAFF-BILLING / }).click();
+  await dialog.getByLabel("Invoice #", { exact: true }).fill("P1-E2E-REPLACEMENT-1711-SUBMIT");
+
+  await dialog.getByRole("button", { name: /^\+ Travel/ }).click();
+  await dialog.getByLabel("Line 1 description", { exact: true }).fill("Synthetic travel");
+  await dialog.getByLabel("Line 1 quantity", { exact: true }).fill("1");
+  await dialog.getByLabel("Line 1 rate", { exact: true }).fill("110");
+  await dialog.getByRole("button", { name: /^\+ Labor/ }).click();
+  await dialog.getByLabel("Line 2 description", { exact: true }).fill("Synthetic labor");
+  await dialog.getByLabel("Line 2 quantity", { exact: true }).fill("5.5");
+  await dialog.getByLabel("Line 2 rate", { exact: true }).fill("110");
+  await dialog.getByRole("button", { name: /^\+ OT Labor/ }).click();
+  await dialog.getByLabel("Line 3 description", { exact: true }).fill("Synthetic overtime");
+  await dialog.getByLabel("Line 3 quantity", { exact: true }).fill("1");
+  await dialog.getByLabel("Line 3 rate", { exact: true }).fill("165");
+  await dialog.getByRole("button", { name: /^\+ Refrigerant/ }).click();
+  await dialog.getByLabel("Line 4 quantity", { exact: true }).fill("17");
+  await dialog.getByLabel("Line 4 rate", { exact: true }).fill("35");
+  await dialog.getByRole("button", { name: /^\+ TVRN/ }).click();
+  await dialog.getByLabel("Line 5 quantity", { exact: true }).fill("1");
+  await dialog.getByLabel("Line 5 rate", { exact: true }).fill("236");
+  await dialog.getByLabel("Line 4 taxable", { exact: true }).uncheck();
+  await dialog.getByLabel("Line 5 taxable", { exact: true }).uncheck();
+  await dialog.getByLabel("Manual sales tax amount", { exact: true }).fill("0");
+  await expect(dialog.getByText(/^\$1,711(?:\.00)?$/).filter({ visible: true }).first()).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Submit Invoice", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const saved = JSON.parse(sql(`select jsonb_build_object(
+    'workOrderId', i.work_order_id, 'state', i.state, 'subtotal', i.subtotal,
+    'salesTax', i.sales_tax, 'total', i.total,
+    'lineCount', (select count(*) from public.invoice_lines l where l.invoice_id=i.id),
+    'sourceCount', (select count(*) from public.staff_invoice_sources s where s.staff_invoice_id=i.id)
+  ) from public.invoices i where i.num='P1-E2E-REPLACEMENT-1711-SUBMIT' and i.deleted_at is null`));
+  expect(saved).toEqual({ workOrderId: "E2E-STAFF-BILLING", state: "submitted", subtotal: 1711,
+    salesTax: 0, total: 1711, lineCount: 5, sourceCount: 0 });
 });
