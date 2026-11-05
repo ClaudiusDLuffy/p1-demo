@@ -1,6 +1,6 @@
 {
   "name": "p1-demo",
-  "version": "2.3.4",
+  "version": "2.3.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
