@@ -36,6 +36,7 @@ function harness(draft: Record<string, unknown> | null = null) {
   const resets: unknown[] = [];
   const parseCalls: { file: File; signal: AbortSignal; resolve(value: ParsedInvoicePdf): void; reject(error: unknown): void }[] = [];
   let stateIndex = 0, refIndex = 0, effectIndex = 0, submitCount = 0, saveCount = 0;
+  let invalid: ((errors: unknown) => unknown) | undefined;
   const reset = (value: unknown) => { resets.push(value); if (typeof value === "object" && value !== null) Object.assign(form, value); };
   const props: Record<string, unknown> = { modal: "createInvoice", woData: { id: "WOTSYNTH1", store: "100", contractorAssignmentVersion: 1, workflowCycle: 1 },
     currentUser: { id: "synthetic-user", name: "Synthetic" }, fmt: String, resumeDraft: draft, resetNewInv: () => undefined,
@@ -67,7 +68,9 @@ function harness(draft: Record<string, unknown> | null = null) {
         useForm: () => ({ control: {}, register: (field: string, options?: { onChange?: (event: unknown) => void }) => ({ name: field, onChange: options?.onChange }), formState: { errors: {} },
           watch: (field: string) => form[field], reset,
           setValue: (field: string, value: unknown) => { form[field] = value; formCalls.push({ field, value }); },
-          handleSubmit: (fn: (data: unknown) => unknown) => () => fn(form),
+          handleSubmit: (fn: (data: unknown) => unknown, onInvalid?: (errors: unknown) => unknown) => {
+            invalid = onInvalid; return () => fn(form);
+          },
         }),
         useFieldArray: () => ({ fields: Array.isArray(form.lines) ? form.lines : [], append: () => undefined, remove: () => undefined,
           replace: (lines: unknown) => { form.lines = lines; } }),
@@ -98,9 +101,56 @@ function harness(draft: Record<string, unknown> | null = null) {
     },
     unmount: () => { effects.forEach(effect => effect.cleanup?.()); dismissal.unmount(); },
     submitCount: () => submitCount, saveCount: () => saveCount,
+    invalid: (errors: unknown) => invalid?.(errors),
   };
 }
 const file = (name: string) => new File(["%PDF-1.7\nsynthetic"], name, { type: "application/pdf" });
+
+test("a failed submit renders its action-specific message inside the real invoice form", async () => {
+  const h = harness();
+  h.props.doSubmitInvoice = async (_work: unknown, _data: unknown, _invoice: unknown,
+    report: (feedback: { kind: string; message: string }) => void) => {
+    report({ kind: "error", message: "Synthetic current invoice conflict" }); return false;
+  };
+  const form = h.render().find(node => node.type === "form");
+  assert.ok(form && typeof form.props.onSubmit === "function"); await form.props.onSubmit();
+  const panel = h.render().find(node => node.props["data-invoice-action-feedback"] !== undefined);
+  assert.ok(panel); assert.equal(panel.props.role, "alert");
+  assert.equal(label(panel), "Synthetic current invoice conflict");
+  assert.equal(h.props.modal, "createInvoice"); h.unmount();
+});
+
+test("missing date validation receives a visible, field-specific form summary", () => {
+  const h = harness(); h.invalid({ serviceDate: { message: "Service date is required" } });
+  const panel = h.render().find(node => node.props["data-invoice-action-feedback"] !== undefined);
+  assert.ok(panel); assert.match(label(panel), /Service date/);
+  assert.equal(h.submitCount(), 0); h.unmount();
+});
+
+test("unexpected invoice callback failure keeps authored data and reports an unconfirmed outcome", async () => {
+  const h = harness(); h.form.num = "SYNTHETIC-KEEP";
+  h.props.doSubmitInvoice = async () => { throw new Error("synthetic private provider body"); };
+  const form = h.render().find(node => node.type === "form");
+  assert.ok(form && typeof form.props.onSubmit === "function"); await form.props.onSubmit();
+  const panel = h.render().find(node => node.props["data-invoice-action-feedback"] !== undefined);
+  assert.ok(panel); assert.match(label(panel), /could not be confirmed/);
+  assert.doesNotMatch(label(panel), /private provider/);
+  assert.equal(h.form.num, "SYNTHETIC-KEEP"); h.unmount();
+});
+
+test("a previous open's inline feedback cannot contaminate the reopened invoice", async () => {
+  const h = harness(); let report: (feedback: { kind: string; message: string }) => void = () => undefined;
+  let finish: (ok: boolean) => void = () => undefined;
+  h.props.doSubmitInvoice = (_work: unknown, _data: unknown, _invoice: unknown, callback: typeof report) => {
+    report = callback; return new Promise<boolean>(resolve => { finish = resolve; });
+  };
+  const form = h.render().find(node => node.type === "form");
+  assert.ok(form && typeof form.props.onSubmit === "function"); const pending = form.props.onSubmit();
+  h.props.modal = null; h.render(); h.props.modal = "createInvoice"; h.render();
+  report({ kind: "error", message: "Obsolete synthetic error" }); finish(false); await pending;
+  assert.equal(h.render().some(node => node.props["data-invoice-action-feedback"] !== undefined), false);
+  h.unmount();
+});
 
 for (const save of [false, true]) {
   test(`${save ? "save" : "submit"} accepted after a same-invoice reopen cannot reset or close the new form`, async () => {

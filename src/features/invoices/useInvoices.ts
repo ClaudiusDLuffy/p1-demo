@@ -54,12 +54,19 @@ import { loadDirectorySelection } from "../directory/api";
 import { directoryActorScope, workOrderCountKey, invoiceCountKey } from "../../lib/counts/queryKeys";
 import { useInvoiceDocumentAction } from "./useInvoiceDocumentAction";
 import { rejectPartialInvoiceDocument } from "./invoiceDocumentRead";
+import type { InvoiceActionFeedback, InvoiceFeedbackReporter } from "../../lib/invoiceActionFeedback";
 
 const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
 const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
 const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
 
 export default function useInvoices({ currentUser, fire }: any) {
+  const invoiceReporter = (isCurrent: () => boolean, onFeedback?: InvoiceFeedbackReporter) =>
+    (message: string, kind: InvoiceActionFeedback["kind"] = "error") => {
+      if (!isCurrent()) return;
+      fire(message);
+      onFeedback?.({ kind, message });
+    };
   const qc = useQueryClient();
   const readScope = directoryActorScope(currentUser);
   const readCompleteDocument = useInvoiceDocumentAction(currentUser);
@@ -185,7 +192,7 @@ export default function useInvoices({ currentUser, fire }: any) {
 
   // Persist + upload the system-generated PDF. Shared by submit-new and
   // submit-existing-draft so both paths produce the same artifact in storage.
-  const generateAndUploadPdf = async (header: any, draft: any, wo: any, mappedLines: any[], subtotal: number, tax: number, total: number, fullStoreAddr: string, isCurrent: () => boolean) => {
+  const generateAndUploadPdf = async (header: any, draft: any, wo: any, mappedLines: any[], subtotal: number, tax: number, total: number, fullStoreAddr: string, isCurrent: () => boolean, onWarning: (message: string) => void = fire) => {
     try {
       const { generateInvoicePDFBlob } = await import("../../lib/invoicePdf");
       if (!isCurrent()) return;
@@ -201,18 +208,18 @@ export default function useInvoices({ currentUser, fire }: any) {
       await uploadInvoicePdf(header.id, draft.num, blob, "invoice_generated");
     } catch (e: any) {
       // Non-fatal — PDF regenerates on first download via the same path.
-      if (isCurrent()) fire(`PDF upload skipped: ${safeErrorMessage(e)}`);
+      if (isCurrent()) onWarning(`PDF upload skipped: ${safeErrorMessage(e)}`);
     }
   };
 
   // Validates + assembles the submit payload. Returns null when the form
   // can't be persisted; the caller surfaced the user-facing error.
-  const buildInvoicePayload = (wo: any, draft: any, requireFullLines = true) => {
-    if (!draft.num) { fire("Enter an invoice number"); return null; }
+  const buildInvoicePayload = (wo: any, draft: any, requireFullLines = true, notify: (message: string) => void = fire) => {
+    if (!draft.num) { notify("Enter an invoice number"); return null; }
     const uploadOnly = !!draft.uploadOnly;
     const hasUploadedPdf = !!draft.pdfFile || !!draft.hasExistingPdf;
     if (uploadOnly && !hasUploadedPdf) {
-      fire("Attach the contractor invoice PDF"); return null;
+      notify("Attach the contractor invoice PDF"); return null;
     }
     const candidateLines = requireFullLines
       ? (draft.lines || [])
@@ -222,21 +229,21 @@ export default function useInvoices({ currentUser, fire }: any) {
       || !Number.isFinite(Number(line.qty)) || Number(line.qty) <= 0
       || !Number.isFinite(Number(line.rate)) || Number(line.rate) < 0,
     )) {
-      fire("Check every invoice line's description, quantity, and rate before submitting."); return null;
+      notify("Check every invoice line's description, quantity, and rate before submitting."); return null;
     }
     const validLines = candidateLines.map((line: any) =>
       normalizeInvoiceLineNumbers(line),
     );
     if (!uploadOnly && requireFullLines && validLines.length === 0) {
-      fire("Add at least one line item with qty and rate. Travel descriptions are optional."); return null;
+      notify("Add at least one line item with qty and rate. Travel descriptions are optional."); return null;
     }
     const uploadedTotal = Number(draft.uploadedTotal || 0);
     if (uploadOnly && requireFullLines && (!Number.isFinite(uploadedTotal) || uploadedTotal <= 0)) {
-      fire("Enter the total shown on the uploaded invoice"); return null;
+      notify("Enter the total shown on the uploaded invoice"); return null;
     }
     const tax = uploadOnly ? 0 : Number(draft.tax || 0);
     if (!Number.isFinite(tax) || tax < 0) {
-      fire("Enter a valid non-negative tax amount"); return null;
+      notify("Enter a valid non-negative tax amount"); return null;
     }
     const subtotal = uploadOnly ? Math.max(uploadedTotal, 0) : invSubtotal(validLines);
     const total = uploadOnly ? Math.max(uploadedTotal, 0) : subtotal + tax;
@@ -268,15 +275,17 @@ export default function useInvoices({ currentUser, fire }: any) {
     }
   };
 
-  const doSaveDraftInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null, isCurrent: () => boolean = () => true) => {
+  const doSaveDraftInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null, isCurrent: () => boolean = () => true, onFeedback?: InvoiceFeedbackReporter) => {
     if (!isCurrent()) return false;
+    const report = invoiceReporter(isCurrent, onFeedback);
     const draft = formData ?? newInv;
-    const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ false);
+    const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ false, report);
     if (!payload) return false;
     const { validLines, tax, total, fullStoreAddr, uploadOnly } = payload;
     const userTypedNum = !!draft.userTypedNum;
     const operationId = draft.commandContext?.operationId;
     let attemptStarted = false;
+    let pdfWarning: string | null = null;
     try {
       invoiceAttempts.current.begin(operationId, { action: "draft", context: draft.commandContext,
         draft: { ...draft, pdfFile: draft.pdfFile ? { name: draft.pdfFile.name, size: draft.pdfFile.size, lastModified: draft.pdfFile.lastModified } : null } });
@@ -308,13 +317,19 @@ export default function useInvoices({ currentUser, fire }: any) {
             { eventKey: "invoice_uploaded", eventData: { invoiceId: result.id, invoiceNum: result.num, fileName: draft.pdfFile.name, fileSize: draft.pdfFile.size } },
           );
         } catch (e: any) {
-          if (isCurrent()) fire(`Draft saved, but PDF upload failed: ${safeErrorMessage(e)}`);
+          if (isCurrent()) {
+            pdfWarning = `Draft saved, but PDF upload failed: ${safeErrorMessage(e)}`;
+            report(pdfWarning, "warning");
+          }
         }
       }
       if (!isCurrent()) { invoiceAttempts.current.finish(operationId); return true; }
       invalidateWorkOrderData();
       invalidateInvoiceData();
       announceSavedNum("draft saved", result, draft.num || null);
+      // The form closes after a saved draft. Do not overwrite its PDF warning
+      // with the ordinary success toast on that now-visible page.
+      if (pdfWarning) fire(pdfWarning);
       resetNewInv();
       invoiceAttempts.current.finish(operationId);
       return true;
@@ -324,18 +339,19 @@ export default function useInvoices({ currentUser, fire }: any) {
       invalidateWorkOrderData();
       invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
-        fire(safeErrorMessage(e));
+        report(safeErrorMessage(e));
       } else {
-        fire(`Draft save failed: ${safeErrorMessage(e)}`);
+        report(`Draft save failed: ${safeErrorMessage(e)}`);
       }
       return false;
     }
   };
 
-  const doSubmitInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null, isCurrent: () => boolean = () => true) => {
+  const doSubmitInvoice = async (wo: any, formData?: any, existingInvoiceId?: string | null, isCurrent: () => boolean = () => true, onFeedback?: InvoiceFeedbackReporter) => {
     if (!isCurrent()) return false;
+    const report = invoiceReporter(isCurrent, onFeedback);
     const draft = formData ?? newInv;
-    const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ true);
+    const payload = buildInvoicePayload(wo, draft, /* requireFullLines */ true, report);
     if (!payload) return false;
     const { validLines, subtotal, tax, total, mappedLines, fullStoreAddr, uploadOnly } = payload;
     const userTypedNum = !!draft.userTypedNum;
@@ -345,7 +361,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     if (existingInvoiceId && draft.resubmittingRejected) {
       releaseInvoiceLock = acquireInvoiceMutationLocks([existingInvoiceId]);
       if (!releaseInvoiceLock) {
-        fire("This invoice already has an update in progress");
+        report("This invoice already has an update in progress");
         return false;
       }
     }
@@ -396,7 +412,7 @@ export default function useInvoices({ currentUser, fire }: any) {
           } catch (error: any) {
             // Line-item invoices remain valid without a cached generated PDF;
             // the normal download path can regenerate it later.
-            if (isCurrent()) fire(`PDF upload skipped: ${safeErrorMessage(error)}`);
+            if (isCurrent()) report(`PDF upload skipped: ${safeErrorMessage(error)}`, "warning");
           }
         }
         if (replacementPdfPath) invoiceAttempts.current.rememberPdf(operationId, replacementPdfPath);
@@ -459,10 +475,11 @@ export default function useInvoices({ currentUser, fire }: any) {
             { eventKey: "invoice_uploaded", eventData: { invoiceId: header.id, invoiceNum: finalNum, fileName: draft.pdfFile.name, fileSize: draft.pdfFile.size } },
           );
         } catch (e: any) {
-          if (isCurrent()) fire(`Invoice saved, but PDF upload failed: ${safeErrorMessage(e)}`);
+          if (isCurrent()) report(`Invoice saved, but PDF upload failed: ${safeErrorMessage(e)}`, "warning");
         }
       } else if (!pdfHandled && !draft.hasExistingPdf) {
-        await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, header.subtotal, header.salesTax, header.total, fullStoreAddr, isCurrent);
+        await generateAndUploadPdf(header, draftForPdf, wo, mappedLines, header.subtotal, header.salesTax, header.total, fullStoreAddr, isCurrent,
+          message => report(message, "warning"));
       }
       if (!isCurrent()) { invoiceAttempts.current.finish(operationId); return true; }
       invalidateWorkOrderData();
@@ -480,11 +497,11 @@ export default function useInvoices({ currentUser, fire }: any) {
       invalidateWorkOrderData();
       invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
-        fire(safeErrorMessage(e));
+        report(safeErrorMessage(e));
       } else if (isRpcConflict(e)) {
-        fire(rpcConflictMessage("Invoice"));
+        report(rpcConflictMessage("Invoice"));
       } else {
-        fire(`Invoice save failed: ${safeErrorMessage(e)}`);
+        report(`Invoice save failed: ${safeErrorMessage(e)}`);
       }
       return false;
     } finally {

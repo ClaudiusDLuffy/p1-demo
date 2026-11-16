@@ -33,7 +33,7 @@ function harness(failingName?: string, pdf?: { generate: (...args: unknown[]) =>
 }, documents?: {
   summary: Record<string, unknown>;
   complete?: Record<string, unknown>;
-}, beforeResult?: () => void) {
+}, beforeResult?: () => void, failure: unknown = new Error("Synthetic failure")) {
   const messages: string[] = [];
   const invalidations: string[] = [];
   const stateChanges: unknown[] = [];
@@ -49,7 +49,7 @@ function harness(failingName?: string, pdf?: { generate: (...args: unknown[]) =>
   const db = new Proxy({}, { get: (_target, name: string) => async (...args: unknown[]) => {
     calls.push({ name, args });
     beforeResult?.();
-    if (name === failingName) throw new Error("Synthetic failure");
+    if (name === failingName) throw failure;
     if (name === "loadInvoicesPage") return { items: [], hasMore: false, nextCursor: null };
     if (name === "uploadInvoicePdfObject") return `${invoiceId}/synthetic.pdf`;
     if (name === "downloadInvoicePdfBlob") return new Blob(["synthetic original"]);
@@ -166,6 +166,72 @@ test("manual PDF total remains valid without extracted line items or tax", async
   assert.equal((save.args[0] as Record<string, unknown>).totalOverride, 123.45);
   assert.equal((save.args[0] as Record<string, unknown>).salesTax, 0);
   assert.equal((save.args[1] as unknown[]).length, 0);
+});
+
+test("invoice submit reports a safe conflict inside its owning form without changing its command", async () => {
+  const h = harness("insertInvoice", undefined, undefined, undefined, undefined,
+    { code: "PT409", message: "synthetic private provider details" });
+  const feedback: unknown[] = [];
+  assert.equal(await h.hook.doSubmitInvoice(workOrder, draft, null, () => true,
+    (value: unknown) => feedback.push(value)), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(feedback)), [{ kind: "error",
+    message: "Invoice changed in another session. Latest data is being refreshed; review it before trying again." }]);
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual((h.calls[0].args[0] as Record<string, unknown>).commandContext, draft.commandContext);
+  assert.doesNotMatch(JSON.stringify(feedback), /private provider/);
+});
+
+test("invoice permission rejection is reported safely to the current form", async () => {
+  const h = harness("insertInvoice", undefined, undefined, undefined, undefined,
+    { code: "42501", message: "synthetic secret provider body" });
+  const feedback: { kind: string; message: string }[] = [];
+  assert.equal(await h.hook.doSubmitInvoice(workOrder, draft, null, () => true,
+    (value: { kind: string; message: string }) => feedback.push(value)), false);
+  assert.equal(feedback[0].kind, "error");
+  assert.match(feedback[0].message, /permission/i);
+  assert.doesNotMatch(feedback[0].message, /secret|provider body/);
+});
+
+test("invoice preflight validation reports inline without invoking a financial command", async () => {
+  const h = harness(); const feedback: unknown[] = [];
+  assert.equal(await h.hook.doSubmitInvoice(workOrder,
+    { ...draft, uploadOnly: true, uploadedTotal: "0", lines: [] }, null, () => true,
+    (value: unknown) => feedback.push(value)), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(feedback)), [{ kind: "error", message: "Enter the total shown on the uploaded invoice" }]);
+  assert.equal(h.calls.length, 0);
+});
+
+test("PDF upload failure remains a warning after successful submission, not a second submit", async () => {
+  const h = harness("uploadInvoicePdf"); const feedback: { kind: string; message: string }[] = [];
+  assert.equal(await h.hook.doSubmitInvoice(workOrder,
+    { ...draft, pdfFile: { name: "synthetic.pdf", size: 20 } }, null, () => true,
+    (value: { kind: string; message: string }) => feedback.push(value)), true);
+  assert.equal(feedback.length, 1); assert.equal(feedback[0].kind, "warning");
+  assert.match(feedback[0].message, /Invoice saved, but PDF upload failed/);
+  assert.equal(h.calls.filter(call => call.name === "insertInvoice").length, 1);
+  assert.ok(h.stateChanges.includes("TEST-1"));
+});
+
+test("draft failures report inline while saved-draft PDF warnings survive the success toast", async () => {
+  const failure = harness("insertInvoice"); const errors: unknown[] = [];
+  assert.equal(await failure.hook.doSaveDraftInvoice(workOrder, draft, null, () => true,
+    (value: unknown) => errors.push(value)), false);
+  assert.equal((errors[0] as { kind: string }).kind, "error");
+  const saved = harness("uploadInvoicePdf"); const warnings: { kind: string; message: string }[] = [];
+  assert.equal(await saved.hook.doSaveDraftInvoice(workOrder,
+    { ...draft, pdfFile: { name: "synthetic.pdf", size: 20 } }, null, () => true,
+    (value: { kind: string; message: string }) => warnings.push(value)), true);
+  assert.equal(warnings[0].kind, "warning");
+  assert.match(saved.messages.at(-1) || "", /Draft saved, but PDF upload failed/);
+});
+
+test("an obsolete actor/form never receives an inline invoice error", async () => {
+  let current = true;
+  const h = harness("insertInvoice", undefined, undefined, undefined, () => { current = false; });
+  const feedback: unknown[] = [];
+  assert.equal(await h.hook.doSubmitInvoice(workOrder, draft, null, () => current,
+    (value: unknown) => feedback.push(value)), false);
+  assert.deepEqual(feedback, []); assert.deepEqual(h.messages, []);
 });
 
 test("manual PDF upload failure remains visible after committed invoice save", async () => {

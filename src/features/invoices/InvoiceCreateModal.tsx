@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm, useFieldArray, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateInvoiceSchema, CreateInvoiceForm } from "../../lib/schemas";
 import { Modal } from "../../components/ui/Modal";
@@ -17,6 +17,7 @@ import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useWorkOrderPartsQuery } from "../work-orders/queries";
 import { contractorInvoiceSnapshotFor } from "../../lib/contractorInvoiceCommands";
 import type { ContractorInvoiceContext, ContractorInvoiceSnapshot } from "../../lib/contractorInvoiceCommandContracts";
+import type { InvoiceActionFeedback, InvoiceFeedbackReporter } from "../../lib/invoiceActionFeedback";
 import { browserDraftSession } from "../../lib/drafts/browserDraftSession";
 import type { DraftLease } from "../../lib/drafts/draftSession";
 import {
@@ -48,8 +49,8 @@ type InvoiceModalProps = {
   modal: string | null; woData?: InvoiceModalWorkOrder | null;
   currentUser?: { id?: string; company?: string | null; name?: string | null } | null;
   fmt(value: number): string; setModal(value: string | null): void; resetNewInv(): void;
-  doSubmitInvoice(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null): Promise<boolean | void>;
-  doSaveDraftInvoice?(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null): Promise<boolean | void>;
+  doSubmitInvoice(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null, onFeedback?: InvoiceFeedbackReporter): Promise<boolean | void>;
+  doSaveDraftInvoice?(workOrder: InvoiceModalWorkOrder, data: InvoiceModalPayload, invoiceId: string | null, onFeedback?: InvoiceFeedbackReporter): Promise<boolean | void>;
   doDownloadInvoice?(invoice: InvoiceModalDraft): Promise<void> | void;
   pdfBusy?: boolean;
   resumeDraft?: InvoiceModalDraft | null; nextInvNumFromDb?(): Promise<string>; woParts?: readonly unknown[];
@@ -132,6 +133,13 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
   // value (and surface a friendly toast if it collides). If untouched, the
   // hook can replace it with a freshly-resolved DB number on submit.
   const [numTouched, setNumTouched] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<InvoiceActionFeedback | null>(null);
+  const feedbackPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!actionFeedback) return;
+    feedbackPanelRef.current?.scrollIntoView({ block: "nearest" });
+    feedbackPanelRef.current?.focus({ preventScroll: true });
+  }, [actionFeedback]);
   const {
     register,
     handleSubmit,
@@ -211,6 +219,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     setNumTouched(false);
     setPdfFile(null);
     setPdfError("");
+    setActionFeedback(null);
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
     correctionDraftLeaseRef.current?.close();
@@ -403,6 +412,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     resetNewInv();
     setPdfFile(null);
     setPdfError("");
+    setActionFeedback(null);
     setPdfParseStatus("idle");
     setPdfLineStatus("idle");
     setPdfLinesReviewed(false);
@@ -477,6 +487,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
   };
   const onSubmit = async (data: CreateInvoiceForm) => {
     if (submitLockRef.current) return;
+    setActionFeedback(null);
     stopPendingPdfRead();
     if (isRejectedResubmission && replacementPdfNeedsReselection && !pdfFile) {
       setPdfError("Reattach the replacement PDF before resubmitting, or choose Keep current attached PDF.");
@@ -489,6 +500,12 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
     submitLockRef.current = true;
     setSubmitting(true);
     const submitGeneration = hydrationGenerationRef.current;
+    let feedbackReported = false;
+    const report: InvoiceFeedbackReporter = feedback => {
+      if (hydrationGenerationRef.current !== submitGeneration) return;
+      feedbackReported = true;
+      setActionFeedback(feedback);
+    };
     try {
     const ok = await doSubmitInvoice(woData, {
       ...data,
@@ -500,17 +517,31 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       submissionKey: submissionKeyRef.current,
       commandContext: invoiceSnapshotRef.current && { ...invoiceSnapshotRef.current, operationId: submissionKeyRef.current },
       resubmittingRejected: isRejectedResubmission,
-    }, existingInvoiceId);
+    }, existingInvoiceId, report);
     if (ok && hydrationGenerationRef.current === submitGeneration) {
       discardCorrectionDraft();
       reset();
+    } else if (!ok && !feedbackReported) {
+      report({ kind: "error", message: "Invoice submission could not be confirmed. Your form has been kept; review the current work order before trying again." });
     }
+    } catch {
+      report({ kind: "error", message: "Invoice submission could not be confirmed. Your form has been kept; review the current work order before trying again." });
     } finally {
       if (hydrationGenerationRef.current === submitGeneration) {
         submitLockRef.current = false;
         setSubmitting(false);
       }
     }
+  };
+  const onInvalid = (validationErrors: FieldErrors<CreateInvoiceForm>) => {
+    const labels: [keyof CreateInvoiceForm, string][] = [
+      ["num", "Invoice number"], ["invoiceDate", "Invoice date"], ["serviceDate", "Service date"],
+      ["terms", "Terms"], ["uploadedTotal", "Invoice total"], ["lines", "Line items"],
+    ];
+    const invalid = labels.filter(([field]) => validationErrors[field]).map(([, label]) => label);
+    setActionFeedback({ kind: "error", message: invalid.length
+      ? `Check the highlighted invoice fields: ${invalid.join(", ")}.`
+      : "Check the highlighted invoice fields before submitting." });
   };
 
   return (
@@ -522,7 +553,7 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       closeOnBackdrop={false}
     >
       {dismissal.dialog}
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)}>
         <div style={{ fontSize: 13, color: T.muted, marginBottom: isRejectedResubmission ? 12 : 20 }}>
           Invoice from {currentUser?.company || currentUser?.name || "your company"} to P1 Pros - Work Order {externalWorkOrderId}
           {portalReassignmentReference && (
@@ -590,9 +621,9 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input aria-invalid={Boolean(errors.num)} aria-describedby={errors.num ? `${formId}-number-error` : undefined} {...numberField} ref={input => { numberField.ref(input); numberInputRef.current = input; }} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span id={`${formId}-number-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} /></label>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel aria-label="Terms" {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel></label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" aria-label="Invoice date" aria-invalid={Boolean(errors.invoiceDate)} aria-describedby={errors.invoiceDate ? `${formId}-invoice-date-error` : undefined} {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.invoiceDate && <span id={`${formId}-invoice-date-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.invoiceDate.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" aria-label="Service date" aria-invalid={Boolean(errors.serviceDate)} aria-describedby={errors.serviceDate ? `${formId}-service-date-error` : undefined} {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.serviceDate && <span id={`${formId}-service-date-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.serviceDate.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel aria-label="Terms" aria-invalid={Boolean(errors.terms)} aria-describedby={errors.terms ? `${formId}-terms-error` : undefined} {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel>{errors.terms && <span id={`${formId}-terms-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.terms.message}</span>}</label>
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
@@ -928,6 +959,14 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
           )}
         </div>
 
+        {actionFeedback && (
+          <div ref={feedbackPanelRef} role="alert" aria-live="assertive" tabIndex={-1} data-invoice-action-feedback
+            style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, fontSize: 12, lineHeight: 1.5,
+              color: actionFeedback.kind === "warning" ? T.warn : T.danger,
+              background: actionFeedback.kind === "warning" ? T.warnSoft : T.dangerSoft }}>
+            {actionFeedback.message}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <button type="button" disabled={submitting || savingDraft} onClick={() => dismissal.requestClose("cancel_button")} className="btn-soft">Cancel</button>
           {/* Save draft bypasses the lines-complete validation — a draft can
@@ -942,7 +981,14 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
                 stopPendingPdfRead();
                 submitLockRef.current = true;
                 setSavingDraft(true);
+                setActionFeedback(null);
                 const saveGeneration = hydrationGenerationRef.current;
+                let feedbackReported = false;
+                const report: InvoiceFeedbackReporter = feedback => {
+                  if (hydrationGenerationRef.current !== saveGeneration) return;
+                  feedbackReported = true;
+                  setActionFeedback(feedback);
+                };
                 try {
                   const data: InvoiceModalPayload = {
                     num: watch("num"),
@@ -959,8 +1005,11 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
                     hasExistingPdf: !!resumeDraft?.pdfStoragePath,
                     commandContext: invoiceSnapshotRef.current && { ...invoiceSnapshotRef.current, operationId: draftOperationKeyRef.current },
                   };
-                  const ok = await doSaveDraftInvoice(woData, data, existingInvoiceId);
+                  const ok = await doSaveDraftInvoice(woData, data, existingInvoiceId, report);
                   if (ok && hydrationGenerationRef.current === saveGeneration) { setModal(null); resetNewInv(); }
+                  else if (!ok && !feedbackReported) report({ kind: "error", message: "Draft save could not be confirmed. Your form has been kept; review the current invoice before trying again." });
+                } catch {
+                  report({ kind: "error", message: "Draft save could not be confirmed. Your form has been kept; review the current invoice before trying again." });
                 } finally {
                   if (hydrationGenerationRef.current === saveGeneration) { submitLockRef.current = false; setSavingDraft(false); }
                 }
