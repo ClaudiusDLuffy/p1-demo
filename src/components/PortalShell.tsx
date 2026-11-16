@@ -150,6 +150,7 @@ import {
 import { billingApiFetch as billingFetch } from "../lib/billingApi";
 import { useInvoiceDocumentAction } from "../features/invoices/useInvoiceDocumentAction";
 import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt } from "../lib/staffFinancialClient";
+import type { InvoiceFeedbackReporter } from "../lib/invoiceActionFeedback";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -1830,6 +1831,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   // Holds the draft invoice (if any) the user clicked "Resume" on. Cleared
   // on modal close. Passed to InvoiceCreateModal to hydrate the form.
   const [resumeDraft, setResumeDraft] = useState<any>(null);
+  const [invoiceSubmissionWarning, setInvoiceSubmissionWarning] = useState<{ scope: string; message: string } | null>(null);
   const loadCompleteInvoice = useInvoiceDocumentAction(currentUser, `${page}:${selectedInvoice || ""}:${selectedBillingInvoice || ""}`);
   const invoiceOpenSequence = useRef(0);
   const { data: resumeDraftWorkOrder } = useWorkOrderByIdQuery(
@@ -1837,15 +1839,22 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     isAuthenticated && modal === "createInvoice" && Boolean(resumeDraft?.wot),
     currentUser,
   );
-  const doSubmitInvoice = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
+  const doSubmitInvoice = async (wo: any, data?: any, existingInvoiceId?: string | null, onFeedback?: InvoiceFeedbackReporter) => {
     const isCurrent = captureInvoiceUiSession();
-    const ok = await submitInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null, isCurrent);
+    const scope = JSON.stringify(directoryScopeKey(currentUser));
+    setInvoiceSubmissionWarning(null);
+    const report: InvoiceFeedbackReporter = feedback => {
+      if (!isCurrent()) return;
+      if (feedback.kind === "warning") setInvoiceSubmissionWarning({ scope, message: feedback.message });
+      onFeedback?.(feedback);
+    };
+    const ok = await submitInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null, isCurrent, report);
     if (ok && isCurrent()) { setResumeDraft(null); setModal("invoiceSubmitted"); }
     return ok;
   };
-  const doSaveDraft = async (wo: any, data?: any, existingInvoiceId?: string | null) => {
+  const doSaveDraft = async (wo: any, data?: any, existingInvoiceId?: string | null, onFeedback?: InvoiceFeedbackReporter) => {
     const isCurrent = captureInvoiceUiSession();
-    const ok = await doSaveDraftInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null, isCurrent);
+    const ok = await doSaveDraftInvoice(wo, data, existingInvoiceId ?? resumeDraft?.id ?? null, isCurrent, onFeedback);
     if (ok && isCurrent()) setResumeDraft(null);
     return ok;
   };
@@ -4591,6 +4600,12 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
         const inv = submittedInvoice;
         return (
           <Modal onClose={() => { setModal(null); setSubmittedInvoiceNum(null); }} title={`Invoice #${submittedInvoiceNum} submitted`} width={440}>
+            {invoiceSubmissionWarning?.scope === JSON.stringify(directoryScopeKey(currentUser)) && (
+              <div role="alert" data-invoice-submission-warning style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 10,
+                color: T.warn, background: T.warnSoft, fontSize: 12, lineHeight: 1.5 }}>
+                {invoiceSubmissionWarning.message}
+              </div>
+            )}
             <div style={{ fontSize: 13, color: T.muted, marginBottom: 22, lineHeight: 1.55 }}>
               Submitted to AFM for approval. You can find a copy in your Invoices tab anytime.
               {!isManager && currentUser?.canInvoice === true && (
