@@ -236,7 +236,10 @@ export async function loadWorkOrdersCount(params: WorkOrderPageParams = {}, sign
   const filters: Record<string, unknown> = { ...args };
   delete filters.p_limit;
   delete filters.p_cursor;
-  return parseExactCount(await boundedReadRpc(tableMode ? "count_work_orders_table_v2" : "count_work_orders_v1", filters, signal));
+  const rpc = params.ntePendingApproval === true
+    ? tableMode ? "count_work_orders_nte_table_v1" : "count_work_orders_nte_v1"
+    : tableMode ? "count_work_orders_table_v2" : "count_work_orders_v1";
+  return parseExactCount(await boundedReadRpc(rpc, filters, signal));
 }
 
 export async function loadPortalNavigationSummary(signal?: AbortSignal): Promise<Partial<PortalNavigationSummary>> {

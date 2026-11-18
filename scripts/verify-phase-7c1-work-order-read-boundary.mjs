@@ -74,7 +74,8 @@ export function verifyWorkOrderReadBoundary(sources) {
     fail(!repoCalls.some(call => called(call) === name), `Repository does not execute ${name}`);
   }
   fail(repoCalls.some(call => called(call) === "rpc"), "Repository bypasses the shared cancellable transport");
-  const expectedRpcs = new Set(["list_work_orders_rows_v1", "list_work_orders_table_rows_v2", "get_portal_work_order"]);
+  const expectedRpcs = new Set(["list_work_orders_rows_v1", "list_work_orders_table_rows_v2",
+    "list_work_orders_nte_rows_v1", "list_work_orders_nte_table_rows_v1", "get_portal_work_order"]);
   const rpcLiterals = [];
   walk(repository, node => {
     if (ts.isStringLiteralLike(node) && /^(?:list_|count_|get_portal_|save_|update_|delete_)/.test(node.text)) rpcLiterals.push(node.text);

@@ -20,5 +20,5 @@ test("desktop work orders keep status near the work-order number", () => {
   );
   assert.match(list, /onClick=\{\(\) => selectTableSort\(column\)\}/);
   assert.match(list, /renderColumnFilter\(column\)/);
-  assert.match(list, /minWidth: 1180/);
+  assert.match(list, /minWidth: isVaCoordinator \? 760 : 1180/);
 });

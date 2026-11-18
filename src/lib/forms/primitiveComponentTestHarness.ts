@@ -40,6 +40,7 @@ export function primitiveHarness(path: string, mocks: Record<string, unknown> = 
     useState: state, useId: () => `synthetic-${cursor++}`,
     useRef: (initial: unknown) => { const slot = cursor++; if (!(slot in slots)) slots[slot] = { current: initial }; return slots[slot]; },
     useCallback: (callback: unknown) => callback, useMemo: (callback: () => unknown) => callback(),
+    useDeferredValue: (value: unknown) => value,
     useEffect: (callback: () => void | (() => void)) => effects.push(callback),
     useLayoutEffect: (callback: () => void | (() => void)) => effects.push(callback),
     useImperativeHandle: (_ref: unknown, callback: () => unknown) => imperative.push(callback),

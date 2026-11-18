@@ -41,6 +41,7 @@ import { useVaCoordinatorWorkOrders } from "../va-coordinator/queries";
 import { VA_COORDINATOR_PAGE_SIZE, VA_COORDINATOR_SEARCH_LIMIT } from "../va-coordinator/contracts";
 import { mapVaCoordinatorWorkOrderToPortalModel } from "../va-coordinator/vaCoordinatorPortalModel";
 import { useWorkOrderNteWaitIndicatorsQuery } from "../billing/queries";
+import { canViewNteApprovalWaitIndicator } from "../billing/nteApprovalWait";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
 
@@ -79,6 +80,9 @@ export default function WorkOrderList(props: any) {
   const [columnFilters, setColumnFilters] = useState<WorkOrderColumnFilters>({});
   const [viewMode, setViewMode] = useState<"recent" | "needs_action">("recent");
   const [filterState, setFilterState] = useState("all");
+  const [filterNte, setFilterNte] = useState("all");
+  const canFilterNte = isManager && canViewNteApprovalWaitIndicator(currentUser);
+  const ntePendingApproval = canFilterNte && filterNte === "pending";
   const [hideClosed, setHideClosed] = useState(!storeView);
   const [pagingDirection, setPagingDirection] = useState<"prev" | "next" | null>(null);
   const pageSize = isVaCoordinator ? VA_COORDINATOR_PAGE_SIZE : 10;
@@ -137,6 +141,7 @@ export default function WorkOrderList(props: any) {
         filterP,
         filterStatus,
         filterState,
+        ntePendingApproval,
         sortBy,
         tableSort,
         columnFilters: deferredColumnFilters,
@@ -175,6 +180,7 @@ export default function WorkOrderList(props: any) {
       : filterStatus,
     state: exactStoreNumber ? "all" : filterState,
     needsAction: exactStoreNumber ? false : viewMode === "needs_action",
+    ntePendingApproval: exactStoreNumber ? false : ntePendingApproval,
     sort: exactStoreNumber ? "newest" : sortBy,
     pendingFirst: exactStoreNumber ? false : isManager,
     limit: pageSize,
@@ -197,7 +203,7 @@ export default function WorkOrderList(props: any) {
     : workOrderPageQuery.data;
   const paginatedWOs = exactWorkOrderId
     ? exactWorkOrderQuery.data || []
-    : serverPage?.items || (isVaCoordinator ? [] : fallbackTableWOs.slice(0, pageSize));
+    : serverPage?.items || (isVaCoordinator || ntePendingApproval ? [] : fallbackTableWOs.slice(0, pageSize));
   const { getUser } = useDirectoryLabels(exactWorkOrderId ? [] : paginatedWOs.map(workOrder => (workOrder as unknown as { contractor?: string }).contractor), listQueryEnabled);
   const totalRows = exactWorkOrderId
     ? exactWorkOrderQuery.data?.length || 0
@@ -473,6 +479,15 @@ export default function WorkOrderList(props: any) {
               <option value="all">All work orders</option>
               <option value="unassigned">Unassigned only</option>
             </Sel>}
+            {canFilterNte && <Sel
+              aria-label="Filter work orders by NTE approval"
+              value={filterNte}
+              onChange={e => setFilterNte(e.target.value)}
+              style={{ width: 220, maxWidth: "100%", padding: "10px 14px", borderRadius: 10, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "inherit", background: T.surface }}
+            >
+              <option value="all">All NTE approval states</option>
+              <option value="pending">NTE Pending Approval</option>
+            </Sel>}
             {!isVaCoordinator && <Sel
               value={filterState}
               onChange={(e: { target: { value: string } }) => setFilterState(e.target.value)}
@@ -506,8 +521,8 @@ export default function WorkOrderList(props: any) {
                 Hide closed calls
               </label>
             )}
-            {(isVaCoordinator ? Boolean(search) : (filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || search || viewMode !== "recent" || storeView || hasWorkOrderColumnFilters(columnFilters))) && (
-              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setSearch(""); setViewMode("recent"); setHideClosed(true); setColumnFilters({}); onClearStoreView?.(); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+            {(isVaCoordinator ? Boolean(search) : (filterC !== "all" || filterP !== "all" || filterStatus !== "all" || filterState !== "all" || ntePendingApproval || search || viewMode !== "recent" || storeView || hasWorkOrderColumnFilters(columnFilters))) && (
+              <button onClick={() => { setFilterC("all"); setFilterP("all"); setFilterStatus("all"); setFilterState("all"); setFilterNte("all"); setSearch(""); setViewMode("recent"); setHideClosed(true); setColumnFilters({}); onClearStoreView?.(); }} style={{ fontSize: 12, color: T.muted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
                 Clear
               </button>
             )}

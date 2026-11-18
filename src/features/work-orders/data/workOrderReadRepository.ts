@@ -96,7 +96,10 @@ export function createWorkOrderReadRepository(dependencies: WorkOrderReadDepende
   return {
     async loadWorkOrdersPage(params: WorkOrderPageParams = {}, signal?: AbortSignal): Promise<CursorPage<WorkOrderReadModel>> {
       const { tableMode, args } = workOrderReadArgs(params);
-      const data = await dependencies.read(tableMode ? "list_work_orders_table_rows_v2" : "list_work_orders_rows_v1", args, signal);
+      const rpc = params.ntePendingApproval === true
+        ? tableMode ? "list_work_orders_nte_table_rows_v1" : "list_work_orders_nte_rows_v1"
+        : tableMode ? "list_work_orders_table_rows_v2" : "list_work_orders_rows_v1";
+      const data = await dependencies.read(rpc, args, signal);
       const page = parseWorkOrderReadPage(data);
       return { ...page, items: page.items.map(row => mapWorkOrderListRow(row, dependencies.now())) };
     },
