@@ -144,6 +144,27 @@ for (const domain of ["work", "invoice"] as const) {
     } finally { h.close(); }
   });
 }
+test("NTE filtering never presents an unfiltered placeholder page or reuses its total", async () => {
+  const h = harness();
+  try {
+    const page = (ntePendingApproval: boolean) => h.render(() => h.work.useWorkOrdersPageQuery({ scope: "active", ntePendingApproval }));
+    page(false); h.calls.find(call => call.kind === "rows")?.resolve(rows("unfiltered")); await tick();
+    page(false); h.calls.find(call => call.kind === "count")?.resolve({ totalCount: 200 }); await tick();
+    assert.equal(page(false).data?.items[0]?.id, "unfiltered");
+    const loading = page(true);
+    assert.equal(loading.data, undefined);
+    const filteredRows = h.calls.filter(call => call.kind === "rows").at(-1)!;
+    assert.equal((filteredRows.args as WorkOrderPageParams).ntePendingApproval, true);
+    filteredRows.resolve(rows("nte-only")); await tick();
+    assert.equal(page(true).data?.totalCount, null);
+    const count = h.calls.filter(call => call.kind === "count").at(-1)!;
+    assert.equal((count.args as WorkOrderPageParams).ntePendingApproval, true);
+    count.resolve({ totalCount: 12 }); await tick();
+    assert.equal(page(true).data?.totalCount, 12);
+    assert.equal(page(true).data?.items[0]?.id, "nte-only");
+  } finally { h.close(); }
+});
+
 test("hidden feature and inactive identity counts stay disabled; foreground fresh cache avoids duplicate count", async () => {
   const h = harness();
   try {

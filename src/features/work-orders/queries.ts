@@ -129,7 +129,10 @@ export function useWorkOrdersPageQuery(
     queryFn: ({ signal }) => loadWorkOrdersPage(params, signal),
     staleTime: 30_000,
     retry: (failureCount, error) => retryWorkOrderRead(params, failureCount, error),
-    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope ? previous : undefined,
+    // Never show an ordinary page as NTE-filtered while its replacement loads.
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope
+      && Boolean((previousQuery.queryKey[2] as WorkOrderPageParams | undefined)?.ntePendingApproval)
+        === Boolean(params.ntePendingApproval) ? previous : undefined,
     enabled: enabled && !!actor?.id && actor.active === true,
   });
   // Exact totals are secondary information. Starting a second full filtered

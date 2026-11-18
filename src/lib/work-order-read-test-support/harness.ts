@@ -18,6 +18,8 @@ const root = process.cwd();
 const requireHere = createRequire(join(root, "package.json"));
 const allowedRpcs = new Set([
   "list_work_orders_rows_v1", "list_work_orders_table_rows_v2", "get_portal_work_order",
+  "list_work_orders_nte_rows_v1", "list_work_orders_nte_table_rows_v1",
+  "count_work_orders_nte_v1", "count_work_orders_nte_table_v1",
 ]);
 
 /**
@@ -109,6 +111,7 @@ export function createWorkOrderReadHarness(plans: readonly ReadPlan[], now = Dat
     calls,
     familyCalls,
     loadPage: (params?: Record<string, unknown>, signal?: AbortSignal) => invoke("loadWorkOrdersPage", [params, signal]),
+    loadCount: (params?: Record<string, unknown>, signal?: AbortSignal) => invoke("loadWorkOrdersCount", [params, signal]),
     loadExact: (id: string, signal?: AbortSignal) => invoke("loadWorkOrderById", [id, signal]),
     loadFamily: (id: string, signal?: AbortSignal) => invoke("loadWorkOrderFamily", [id, signal]),
     remainingPlans: () => pending.length,

@@ -18,7 +18,8 @@ const tableMigration = read("supabase/migrations/0086_work_order_table_sorting.s
 test("work-order lists use RLS-aware cursor pages instead of global detail rows", () => {
   const listLoader = read("src/features/work-orders/data/workOrderReadRepository.ts");
   assert.ok(/\? "list_work_orders_table_rows_v2"\s*:\s*"list_work_orders_rows_v1"/.test(listLoader));
-  assert.ok(/dependencies\.read\(tableMode[^\n]+args, signal\)/.test(listLoader));
+  assert.match(listLoader, /const rpc = params\.ntePendingApproval === true/);
+  assert.match(listLoader, /dependencies\.read\(rpc, args, signal\)/);
   assert.match(listLoader, /parseWorkOrderReadPage\(data\)/);
   assert.doesNotMatch(listLoader, /\.from\("photos"\)/);
   assert.doesNotMatch(listLoader, /\.from\("work_order_visits"\)/);
@@ -71,7 +72,7 @@ test("portal and billing merge scoped detail queries without a second initial re
     "contractors should return to My Jobs only after a successful not-found lookup",
   );
   assert.doesNotMatch(portal, /qc\.resetQueries/);
-  assert.match(portal, /const isAuthenticated = !!currentUser\?\.id/);
+  assert.match(portal, /const isAuthenticated = currentUser\.active === true/);
 });
 
 test("the portal shell does not restore hidden global preload queries", () => {

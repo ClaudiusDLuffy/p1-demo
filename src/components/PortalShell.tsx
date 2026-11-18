@@ -2404,7 +2404,12 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
         },
       );
       await refreshBillingMutation(invoice.id, invoice.wot);
-      await qc.invalidateQueries({ queryKey: WORK_ORDER_NTE_WAIT_INDICATORS_KEY });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: WORK_ORDER_NTE_WAIT_INDICATORS_KEY }),
+        invalidatePortalPlan(qc, currentUser, { refreshIdentity: false, targets: [
+          { family: "work_pages" }, { family: "work_counts" },
+        ] }, isPortalVisible()),
+      ]);
       fire(waitingOnNteApproval
         ? `Invoice #${invoice.num} marked waiting on NTE approval`
         : `NTE waiting tag cleared for invoice #${invoice.num}`);

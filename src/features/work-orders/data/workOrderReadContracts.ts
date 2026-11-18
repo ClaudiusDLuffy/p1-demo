@@ -20,6 +20,7 @@ export type WorkOrderPageParams = {
   from?: string;
   to?: string;
   needsAction?: boolean;
+  ntePendingApproval?: boolean;
   sort?: "sla_due" | "newest" | "oldest" | "priority";
   pendingFirst?: boolean;
   limit?: number;
