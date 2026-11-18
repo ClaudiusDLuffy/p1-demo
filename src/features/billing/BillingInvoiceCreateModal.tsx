@@ -603,10 +603,9 @@ export default function BillingInvoiceCreateModal(props: any) {
     ? money(Number(salesTaxOverride))
     : rateBasedSalesTax;
   const total = subtotal + salesTax;
-  const lineTypeSummary = useMemo(
-    () => summarizeInvoiceLineTypes(lines, salesTax),
-    [lines, salesTax],
-  );
+  // Watched nested fields can change without a new array identity. Recompute
+  // this small display summary so category amounts stay in sync with the rows.
+  const lineTypeSummary = summarizeInvoiceLineTypes(lines, salesTax);
 
   const sourceOwnerById = useMemo(() => {
     const owners = new Map<string, { id: string; num: string }>();
@@ -696,6 +695,13 @@ export default function BillingInvoiceCreateModal(props: any) {
       || !latestDirty.current
       || typeof window === "undefined"
     ) return false;
+    // A reload during revalidation must not replace a recoverable draft with
+    // one that the restore boundary will reject, or pair it with another WO.
+    const snapshot = financialSnapshot.current;
+    if (!snapshot || snapshot.key !== financialContextKey) {
+      setDraftState("error");
+      return false;
+    }
     try {
       const payload = createBillingDraftPayload({
         form: getValues(),
@@ -704,7 +710,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         partsMarkup,
         customTerritory,
         numberEdited,
-        financialSnapshot: financialSnapshot.current,
+        financialSnapshot: snapshot,
       });
       const result = draftLease.current?.save(payload);
       if (result?.status !== "persisted") { setDraftState("error"); return false; }
@@ -717,6 +723,8 @@ export default function BillingInvoiceCreateModal(props: any) {
     }
   }, [
     customTerritory,
+    financialContextKey,
+    financialContextReady,
     getValues,
     modal,
     numberEdited,
