@@ -166,7 +166,9 @@ export default function useWorkOrders({
         ? { ...workOrder, ...selectedWorkOrderDetails }
         : workOrder
     ));
-  }, [selectedWorkOrderDetails, selectedWorkOrderId]);
+  // Child reads may finish before the base record exists in local state. Reapply
+  // the current authorized projection when the base arrives as well.
+  }, [selectedWorkOrderDetails, selectedWorkOrderId, workOrdersData]);
 
   const restoreWorkOrders = (snapshot: any) => {
     qc.setQueryData(WORK_ORDERS_KEY, snapshot);

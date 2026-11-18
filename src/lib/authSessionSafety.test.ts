@@ -44,8 +44,10 @@ test("stale profile responses cannot overwrite the newly signed-in identity", ()
 });
 
 test("portal data is gated by the live provider session and silent loss is monitored", () => {
-  assert.match(portalShell, /currentUser:\s*hydratedUser,\s*hasSession/);
-  assert.match(portalShell, /const currentUser\s*=\s*hasSession\s*\?\s*hydratedUser\s*:\s*null/);
+  assert.match(portalShell, /const auth = useAuth\(/);
+  assert.match(portalShell, /const currentUser\s*=\s*auth\.hasSession\s*\?\s*auth\.currentUser\s*:\s*null/);
+  assert.match(portalShell, /if \(!currentUser \|\| currentUser\.active !== true\) return <LoginForm/);
+  assert.match(portalShell, /<PortalApplication key=\{JSON\.stringify\(directoryScopeKey\(currentUser\)\)\}/);
   assert.match(authHook, /auth\.getSession\(\)/);
   assert.match(authHook, /SESSION_WATCHDOG_MS\s*=\s*30_000/);
   assert.match(authHook, /clearSessionState\(expectedUserId,\s*SESSION_EXPIRED_MESSAGE\)/);

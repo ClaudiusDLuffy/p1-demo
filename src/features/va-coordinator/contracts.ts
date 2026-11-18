@@ -46,7 +46,9 @@ export const vaCoordinatorNoteSchema = z.object({
   text: text,
   createdAt: timestamp,
   authorName: text,
-  enteredByRole: z.enum(["contractor", VA_COORDINATOR_ROLE]).default("contractor"),
+  // Match the existing authorized field-note projection in migration 0182.
+  // Origin is presentation metadata; the RPC still excludes private channels.
+  enteredByRole: z.enum(["contractor", "manager", "dispatcher", "back_office", VA_COORDINATOR_ROLE, "system"]).default("contractor"),
   syncedToSevenElevenAt: timestamp,
   syncedById: uuid.nullable(),
   syncedByName: optionalText,

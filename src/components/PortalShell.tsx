@@ -3596,6 +3596,16 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
             invoices={isVaCoordinator ? [] : invoices}
             billingInvoices={isVaCoordinator ? [] : billingInvoices}
             vaAttachmentPaths={(vaAttachmentsQuery.data || []).map(attachment => attachment.storagePath)}
+            vaNotesReadState={isVaCoordinator ? {
+              pending: vaTechnicianNotesQuery.isPending, failed: vaTechnicianNotesQuery.isError,
+              fetching: vaTechnicianNotesQuery.isFetching, hasData: vaTechnicianNotesQuery.data !== undefined,
+              retry: vaTechnicianNotesQuery.refetch,
+            } : undefined}
+            vaPhotosReadState={isVaCoordinator ? {
+              pending: vaAttachmentsQuery.isPending, failed: vaAttachmentsQuery.isError,
+              fetching: vaAttachmentsQuery.isFetching, hasData: vaAttachmentsQuery.data !== undefined,
+              retry: vaAttachmentsQuery.refetch,
+            } : undefined}
             onMarkVaNoteCopiedToSevenEleven={markVaNoteCopiedToSevenEleven}
             onPostVaSevenElevenUpdate={vaSevenElevenUpdate.postUpdate}
             vaSevenElevenUpdatePosting={vaSevenElevenUpdate.isPosting}
