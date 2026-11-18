@@ -151,6 +151,7 @@ import { billingApiFetch as billingFetch } from "../lib/billingApi";
 import { useInvoiceDocumentAction } from "../features/invoices/useInvoiceDocumentAction";
 import { captureStaffInvoiceSnapshot, createStaffFinancialAttempt } from "../lib/staffFinancialClient";
 import type { InvoiceFeedbackReporter } from "../lib/invoiceActionFeedback";
+import { invoiceDetailRouteFromUrl } from "../lib/invoiceDetailRoute";
 
 const InvoiceCreateModal = dynamic(
   () => import("../features/invoices/InvoiceCreateModal"),
@@ -659,8 +660,10 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     padding: 0 !important;
   }
   .invoice-top-header-left {
-    flex: 0 0 auto !important;
+    flex: 0 1 auto !important;
     min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-wrap: anywhere;
   }
   .invoice-top-header-right {
     flex: 1 !important;
@@ -1193,7 +1196,9 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   refreshCurrentProfile: () => Promise<boolean>;
   authLogout: () => Promise<void>;
 }) {
-  const [page, setPage] = useState(initialPage);
+  const [initialInvoiceRoute] = useState(() => typeof window === "undefined"
+    ? null : invoiceDetailRouteFromUrl(window.location.href, currentUser));
+  const [page, setPage] = useState(initialInvoiceRoute ? "invoices" : initialPage);
   const [selectedWO, setSelectedWO] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterC, setFilterC] = useState("all");
@@ -1589,14 +1594,14 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   const {
     newInv, setNewInv,
     selectedInvoice, setSelectedInvoice,
-    submittedInvoiceNum, setSubmittedInvoiceNum,
+    submittedInvoiceNum, setSubmittedInvoiceNum, submittedInvoiceTarget,
     pdfBusy,
     nextInvNum, nextInvNumFromDb, resetNewInv,
     doSubmitInvoice: submitInvoice,
     doSaveDraftInvoice,
     doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
     lineAmount, invSubtotal,
-  } = useInvoices({ currentUser, fire });
+  } = useInvoices({ currentUser, fire, initialInvoiceId: initialInvoiceRoute?.invoiceId ?? null });
   const selectedInvoiceInBootstrap = selectedInvoice
     ? invoices.find((invoice: any) => invoice.id === selectedInvoice) || null
     : null;
@@ -2743,10 +2748,6 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
   const contractorActiveBadge = navigationSummary?.contractorActiveCount ?? null;
   const contractorInvoiceBadge = navigationSummary?.contractorInvoiceCount || null;
   const contractorAttentionBadge = navigationSummary?.contractorAttentionCount || null;
-  const submittedInvoice = useMemo(
-    () => invoices.find(i => i.num === submittedInvoiceNum),
-    [invoices, submittedInvoiceNum]
-  );
   const navigationRole = portalNavigationRole({ invoiceController, isManager, isVaCoordinator });
   // Focused pages simplify their content/actions, not the role-based navigation.
   const focusedWorkspace = isManager && !invoiceController && (page === "simplified"
@@ -4597,7 +4598,7 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
       )}
 
       {modal === "invoiceSubmitted" && submittedInvoiceNum && (() => {
-        const inv = submittedInvoice;
+        const inv = submittedInvoiceTarget;
         return (
           <Modal onClose={() => { setModal(null); setSubmittedInvoiceNum(null); }} title={`Invoice #${submittedInvoiceNum} submitted`} width={440}>
             {invoiceSubmissionWarning?.scope === JSON.stringify(directoryScopeKey(currentUser)) && (

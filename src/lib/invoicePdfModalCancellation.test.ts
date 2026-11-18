@@ -32,6 +32,7 @@ function harness(draft: Record<string, unknown> | null = null) {
   const effects: { dependencies: readonly unknown[]; cleanup?: () => void }[] = [];
   const queuedEffects: (() => void)[] = [];
   const form: Record<string, unknown> = { lines: [], num: "", uploadOnly: false, uploadedTotal: "" };
+  const fieldErrors: Record<string, { message: string }> = {};
   const formCalls: { field: string; value: unknown }[] = [];
   const resets: unknown[] = [];
   const parseCalls: { file: File; signal: AbortSignal; resolve(value: ParsedInvoicePdf): void; reject(error: unknown): void }[] = [];
@@ -65,7 +66,7 @@ function harness(draft: Record<string, unknown> | null = null) {
         },
       };
       if (name === "react-hook-form") return {
-        useForm: () => ({ control: {}, register: (field: string, options?: { onChange?: (event: unknown) => void }) => ({ name: field, onChange: options?.onChange }), formState: { errors: {} },
+        useForm: () => ({ control: {}, register: (field: string, options?: { onChange?: (event: unknown) => void }) => ({ name: field, onChange: options?.onChange }), formState: { errors: fieldErrors },
           watch: (field: string) => form[field], reset,
           setValue: (field: string, value: unknown) => { form[field] = value; formCalls.push({ field, value }); },
           handleSubmit: (fn: (data: unknown) => unknown, onInvalid?: (errors: unknown) => unknown) => {
@@ -91,7 +92,7 @@ function harness(draft: Record<string, unknown> | null = null) {
   const click = (name: string) => { const node = render().find(node => node.type === "button" && label(node) === name);
     assert.ok(node && typeof node.props.onClick === "function"); return node.props.onClick(); };
   render();
-  return { props, form, formCalls, resets, parseCalls, render, states, click,
+  return { props, form, fieldErrors, formCalls, resets, parseCalls, render, states, click,
     select: (file: File) => input()({ target: { files: [file], value: "synthetic" } }),
     discard: async () => {
       const dialog = render().find(node => node.type === "DiscardChangesDialog");
@@ -105,6 +106,18 @@ function harness(draft: Record<string, unknown> | null = null) {
   };
 }
 const file = (name: string) => new File(["%PDF-1.7\nsynthetic"], name, { type: "application/pdf" });
+
+test("invoice number and uploaded total keep stable accessible names when field errors appear", () => {
+  const h = harness(); h.form.uploadOnly = true;
+  for (const [name, accessibleName] of [["num", "Invoice #"], ["uploadedTotal", "Invoice total"]]) {
+    h.fieldErrors[name] = { message: "Synthetic required field" };
+    const input = h.render().find(node => node.type === "input" && node.props.name === name);
+    assert.ok(input); assert.equal(input.props["aria-label"], accessibleName);
+    assert.equal(input.props["aria-invalid"], true);
+    assert.ok(input.props["aria-describedby"]);
+  }
+  h.unmount();
+});
 
 test("a failed submit renders its action-specific message inside the real invoice form", async () => {
   const h = harness();

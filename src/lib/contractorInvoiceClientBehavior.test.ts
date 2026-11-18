@@ -101,6 +101,17 @@ function harness(failingName?: string, pdf?: { generate: (...args: unknown[]) =>
   return { hook, messages, invalidations, stateChanges, calls, exactReads, documentReads };
 }
 
+test("accepted submission retains an exact scoped download identity without relying on a loaded invoice list", async () => {
+  const h = harness();
+  assert.equal(await h.hook.doSubmitInvoice(workOrder, draft), true);
+  const target = h.stateChanges.find(value => typeof value === "object" && value !== null
+    && "projection" in value && value.projection === "summary") as Record<string, unknown> | undefined;
+  assert.ok(target); assert.equal(target.id, invoiceId); assert.equal(target.num, "TEST-1");
+  assert.equal(typeof target.scope, "string");
+  assert.deepEqual(Object.keys(target).sort(), ["id", "num", "projection", "scope"]);
+  assert.equal(h.documentReads.length, 0);
+});
+
 test("placing a payment hold refreshes the cancelled handoff package and accounting queue", async () => {
   const h = harness();
   assert.equal(await h.hook.doPlaceInvoicePaymentHold(

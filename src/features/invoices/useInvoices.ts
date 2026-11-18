@@ -60,7 +60,7 @@ const lineAmount = (l: any) => (parseFloat(l.qty) || 0) * (parseFloat(l.rate) ||
 const invSubtotal = (lines: any[]) => lines.reduce((s, l) => s + lineAmount(l), 0);
 const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat(tax as any) || 0);
 
-export default function useInvoices({ currentUser, fire }: any) {
+export default function useInvoices({ currentUser, fire, initialInvoiceId = null }: any) {
   const invoiceReporter = (isCurrent: () => boolean, onFeedback?: InvoiceFeedbackReporter) =>
     (message: string, kind: InvoiceActionFeedback["kind"] = "error") => {
       if (!isCurrent()) return;
@@ -79,7 +79,7 @@ export default function useInvoices({ currentUser, fire }: any) {
       qc.invalidateQueries({ queryKey: [...scope, "unresolved"] }),
     ]);
   };
-  const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<string | null>(initialInvoiceId);
   const [submittedInvoiceNum, setSubmittedInvoiceNum] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const deletionContexts = useRef(new Map<string, InvoiceDeletionSnapshot>());
@@ -188,6 +188,12 @@ export default function useInvoices({ currentUser, fire }: any) {
     lines: defaultInvLines(),
   });
   const [newInv, setNewInv] = useState<any>(blankNewInv());
+  // A confirmation can open outside the invoice list, whose bounded query may
+  // not be enabled. Keep only the accepted identity; download still performs
+  // its normal authorized exact header/document reads on demand.
+  const [submittedInvoiceTarget, setSubmittedInvoiceTarget] = useState<{
+    id: string; num: string; projection: "summary"; scope: string;
+  } | null>(null);
   const resetNewInv = () => setNewInv(blankNewInv());
 
   // Persist + upload the system-generated PDF. Shared by submit-new and
@@ -484,6 +490,7 @@ export default function useInvoices({ currentUser, fire }: any) {
       if (!isCurrent()) { invoiceAttempts.current.finish(operationId); return true; }
       invalidateWorkOrderData();
       invalidateInvoiceData();
+      setSubmittedInvoiceTarget({ id: header.id, num: finalNum, projection: "summary", scope: readScope });
       setSubmittedInvoiceNum(finalNum);
       if (collidedFrom && collidedFrom !== finalNum) {
         fire(`Invoice #${collidedFrom} already exists — saved as #${finalNum} instead.`);
@@ -782,6 +789,7 @@ export default function useInvoices({ currentUser, fire }: any) {
     newInv, setNewInv,
     selectedInvoice, setSelectedInvoice,
     submittedInvoiceNum, setSubmittedInvoiceNum,
+    submittedInvoiceTarget: submittedInvoiceTarget?.scope === readScope ? submittedInvoiceTarget : null,
     pdfBusy, setPdfBusy,
     nextInvNum, nextInvNumFromDb, defaultInvLines, blankNewInv, resetNewInv,
     doSubmitInvoice, doSaveDraftInvoice, doDownloadInvoice, doDeleteInvoice, doRejectInvoice, doBatchReviewInvoices, doRetractInvoiceRejection, doCorrectInvoiceTotal, doPlaceInvoicePaymentHold, doReleaseInvoicePaymentHold,
