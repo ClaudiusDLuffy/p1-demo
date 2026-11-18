@@ -23,6 +23,7 @@ const roleLabel = (role: string) => ({
   dispatcher: "Dispatcher",
   back_office: "Back Office",
   contractor: "Contractor",
+  va_coordinator: "VA Coordinator",
 }[role] || role);
 
 export default function ManageAccountModal(props: any) {

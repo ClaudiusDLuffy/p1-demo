@@ -4,6 +4,8 @@ import { BtnSpinner, BtnSpinnerDark } from "../../components/ui/BtnSpinner";
 import { Modal } from "../../components/ui/Modal";
 import { T } from "../../lib/constants";
 import { isReservedLifecycleEvent } from "../../lib/workOrderLifecycleContracts";
+import { VaCoordinatorReadFeedback, canDisplayVaReadContent, vaQueueBadgeStyle, type VaCoordinatorReadState } from "../va-coordinator/VaCoordinatorReadFeedback";
+import { useWorkOrderDraftSession } from "./useWorkOrderDraftSession";
 
 export type WorkOrderActivityChannel =
   | "field_note"
@@ -301,6 +303,7 @@ type WorkOrderActivityPanelsProps = Omit<ActivityEntryListProps, "activities" | 
   onMarkVaNoteCopiedToSevenEleven?: (workOrderId: string, activityId: string) => Promise<boolean>;
   onPostVaSevenElevenUpdate?: (workOrderId: string, text: string) => Promise<boolean>;
   vaSevenElevenUpdatePosting?: boolean;
+  vaNotesReadState?: VaCoordinatorReadState;
 };
 
 export default function WorkOrderActivityPanels({
@@ -323,6 +326,7 @@ export default function WorkOrderActivityPanels({
   onMarkVaNoteCopiedToSevenEleven,
   onPostVaSevenElevenUpdate,
   vaSevenElevenUpdatePosting = false,
+  vaNotesReadState,
   workOrderId,
   isManager,
   currentUser,
@@ -355,6 +359,7 @@ export default function WorkOrderActivityPanels({
   const canPostFieldNote = isVaCoordinator
     ? Boolean(onPostVaSevenElevenUpdate)
     : !readOnly;
+  const { captureDraftSession, markDraftEdited } = useWorkOrderDraftSession({ workOrderId, actorId: currentUser?.id });
 
   const postDraft = async (
     channel: "field_note" | "internal_note" | "contractor_message",
@@ -366,17 +371,18 @@ export default function WorkOrderActivityPanels({
       ? vaSevenElevenUpdatePosting
       : posting;
     if (!text || postingThisNote) return;
+    const isCurrentDraftSession = captureDraftSession(channel === "field_note" ? "field_note" : "general");
     if (isVaCoordinator && channel === "field_note") {
       if (!onPostVaSevenElevenUpdate) return;
       clear("");
       const saved = await onPostVaSevenElevenUpdate(workOrderId, text);
-      if (!saved) clear(value);
+      if (!saved && isCurrentDraftSession()) clear(value);
       return;
     }
     if (readOnly) return;
     clear("");
     const saved = await doPostNote(workOrderId, channel, text);
-    if (saved === false) clear(value);
+    if (saved === false && isCurrentDraftSession()) clear(value);
   };
 
   const entryListProps = {
@@ -423,8 +429,10 @@ export default function WorkOrderActivityPanels({
               </div>
             </div>
             <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ padding: "4px 8px", borderRadius: 999, background: pendingSevenEleven ? T.warnSoft : T.successSoft, color: pendingSevenEleven ? "#73560C" : T.success, border: `1px solid ${pendingSevenEleven ? `${T.warn}55` : `${T.success}44`}`, fontSize: 10, fontWeight: 700 }}>
-                {pendingSevenEleven ? `${pendingSevenEleven} awaiting portal update` : "Portal updates current"}
+              <span style={{ padding: "4px 8px", borderRadius: 999, ...vaQueueBadgeStyle(isVaCoordinator ? vaNotesReadState : undefined, pendingSevenEleven > 0), fontSize: 10, fontWeight: 700 }}>
+                {isVaCoordinator && vaNotesReadState?.failed ? "Queue unavailable"
+                  : isVaCoordinator && vaNotesReadState?.pending ? "Loading queue…"
+                  : pendingSevenEleven ? `${pendingSevenEleven} awaiting portal update` : "Portal updates current"}
               </span>
               <span style={{ fontSize: 10, fontWeight: 700, color: T.accent }}>{sevenEleven.length} loaded</span>
             </div>
@@ -440,7 +448,7 @@ export default function WorkOrderActivityPanels({
                 id={`seven-eleven-note-${workOrderId}`}
                 aria-describedby={`seven-eleven-note-help-${workOrderId}`}
                 value={fieldNoteText}
-                onChange={event => setFieldNoteText(event.target.value)}
+                onChange={event => { markDraftEdited("field_note"); setFieldNoteText(event.target.value); }}
                 onKeyDown={event => {
                   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                     event.preventDefault();
@@ -499,11 +507,12 @@ export default function WorkOrderActivityPanels({
               )}
             </>
           )}
-          <ActivityEntryList
+          {isVaCoordinator && <VaCoordinatorReadFeedback state={vaNotesReadState} subject="queued updates" />}
+          {(!isVaCoordinator || canDisplayVaReadContent(vaNotesReadState)) && <ActivityEntryList
             {...entryListProps}
             activities={sevenEleven}
             emptyMessage="No 7-Eleven updates have been recorded on the loaded timeline."
-          />
+          />}
         </div>
       </div>
 
@@ -548,7 +557,7 @@ export default function WorkOrderActivityPanels({
           <textarea
             id={`general-activity-note-${workOrderId}`}
             value={generalText}
-            onChange={event => setGeneralText(event.target.value)}
+            onChange={event => { markDraftEdited("general"); setGeneralText(event.target.value); }}
             onKeyDown={event => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                 event.preventDefault();
@@ -620,7 +629,7 @@ export default function WorkOrderActivityPanels({
           closeOnBackdrop={!transferBusy}
           description="This records that the update was copied. It does not send anything to 7-Eleven."
         >
-          <div className="card" style={{ marginTop: 16, padding: 14, color: T.inkSoft, fontSize: 12, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+          <div className="card" style={{ marginTop: 16, padding: 14, color: T.inkSoft, fontSize: 12, lineHeight: 1.55, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
             {transferCandidate.text}
           </div>
           <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginTop: 16, color: T.ink, fontSize: 12, lineHeight: 1.5 }}>

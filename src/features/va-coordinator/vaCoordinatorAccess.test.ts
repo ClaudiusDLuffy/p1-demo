@@ -25,7 +25,7 @@ test("VA accounts use the standard portal shell with the scoped VA work-order re
 
 test("VA list uses the role-scoped page and never falls back to a generic cached work-order list", () => {
   assert.match(workOrderList, /useVaCoordinatorWorkOrders\(/);
-  assert.match(workOrderList, /serverPage\?\.items \|\| \(isVaCoordinator \? \[\]/);
+  assert.match(workOrderList, /serverPage\?\.items \|\| \(isVaCoordinator \|\| ntePendingApproval \? \[\]/);
   assert.match(workOrderList, /isVaCoordinator \? "Search work order, store, city, or summary/);
   assert.match(workOrderList, /listQueryEnabled && !isVaCoordinator/);
 });

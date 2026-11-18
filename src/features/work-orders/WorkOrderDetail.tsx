@@ -54,6 +54,7 @@ import {
   resolveWorkOrderClosedBy,
 } from "../../lib/workOrderView";
 import PhotoGallery from "../photos/PhotoGallery";
+import { VaCoordinatorReadFeedback, canDisplayVaReadContent } from "../va-coordinator/VaCoordinatorReadFeedback";
 import ReceivingDispatchStatus from "../receiving-dispatch/ReceivingDispatchStatus";
 import { useBillingInvoicePageQuery } from "../billing/queries";
 import { useInvoicesPageQuery } from "../invoices/queries";
@@ -1530,7 +1531,8 @@ export default function WorkOrderDetail(props: any) {
                     <WorkOrderAttachments canViewDocuments={isManager || canInvoice}
                       focusRequested={props.attachmentTarget === woData.id && selectedWO === woData.id}
                       onFocused={props.onAttachmentsFocused}>
-                    <PhotoGallery
+                    {isVaCoordinator && <VaCoordinatorReadFeedback state={props.vaPhotosReadState} subject="authorized photos" />}
+                    {(!isVaCoordinator || canDisplayVaReadContent(props.vaPhotosReadState)) && <PhotoGallery
                       woId={woData.id}
                       photos={woData.photos || []}
                       totalCount={woData.photoPage?.totalCount}
@@ -1551,7 +1553,7 @@ export default function WorkOrderDetail(props: any) {
                       loadingStates={loadingStates}
                       loadAllPhotoPaths={isVaCoordinator ? async () => vaAttachmentPaths : undefined}
                       readOnly={contractorHistoryReadOnly}
-                    />
+                    />}
 
                     </WorkOrderAttachments>
                     <section id="work-order-activity" tabIndex={-1} aria-label="Work order activity history" className="min-w-0 scroll-mt-4">
@@ -1587,6 +1589,7 @@ export default function WorkOrderDetail(props: any) {
                       onMarkVaNoteCopiedToSevenEleven={onMarkVaNoteCopiedToSevenEleven}
                       onPostVaSevenElevenUpdate={onPostVaSevenElevenUpdate}
                       vaSevenElevenUpdatePosting={vaSevenElevenUpdatePosting}
+                      vaNotesReadState={props.vaNotesReadState}
                       readOnly={contractorHistoryReadOnly}
                     />
                     </section>

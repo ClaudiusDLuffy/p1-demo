@@ -37,3 +37,14 @@ test("read repository rejects a detail response for a different work order", asy
   const repository = createVaCoordinatorReadRepository({ read: async () => ({ ...parent, id: "OTHER", address: null, description: null, assetYear: null }) });
   await assert.rejects(repository.loadWorkOrder(parent.id), error => error instanceof AppError && error.code === "INTERNAL_ERROR");
 });
+
+test("queued notes accept every origin authorized by the 0182 projection without dropping the entire queue", async () => {
+  const roles = ["contractor", "manager", "dispatcher", "back_office", "va_coordinator", "system"];
+  const notes = roles.map((enteredByRole, index) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    workOrderId: parent.id, text: `Synthetic ${enteredByRole} queued note`, createdAt: time, authorName: "Synthetic author",
+    enteredByRole, syncedToSevenElevenAt: null, syncedById: null, syncedByName: null, requiresSevenElevenSync: true }));
+  const repository = createVaCoordinatorReadRepository({ read: async () => notes });
+  assert.deepEqual((await repository.loadTechnicianNotes(parent.id, 100)).map(note => note.enteredByRole), roles);
+  const invalid = createVaCoordinatorReadRepository({ read: async () => [{ ...notes[0], enteredByRole: "unknown_role" }] });
+  await assert.rejects(invalid.loadTechnicianNotes(parent.id, 100), error => error instanceof AppError && error.code === "INTERNAL_ERROR");
+});
