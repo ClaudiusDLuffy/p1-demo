@@ -6,13 +6,14 @@ import { linkedBillingSql as sql } from './linked-billing-test-support.mjs';
 // Only supplied dates, totals, states and audit semantics are reproduced.
 // Identities, WO IDs, invoice numbers and line descriptions are synthetic.
 export function reportedInvoiceFixture(kind) {
-  assert.ok(['regular_billed_still_open', 'capital_different_company', 'capital_external_quote_unrecorded'].includes(kind));
+  assert.ok(['regular_billed_still_open', 'capital_different_company', 'capital_external_quote_unrecorded', 'capital_final_invoice'].includes(kind));
   assert.equal(sql("select count(*) from auth.users where email not like '%@p1.invalid'"), '0');
   const actors = JSON.parse(sql(`select jsonb_object_agg(email,id) from public.profiles
     where active and email in ('e2e.manager@p1.invalid','e2e.company.admin@p1.invalid','e2e.direct@p1.invalid')`));
   for (const email of ['e2e.manager@p1.invalid','e2e.company.admin@p1.invalid','e2e.direct@p1.invalid']) assert.ok(actors[email]);
   const regular = kind === 'regular_billed_still_open';
   const externalQuoteUnrecorded = kind === 'capital_external_quote_unrecorded';
+  const finalInvoice = kind === 'capital_final_invoice';
   const hasStaffInvoice = !externalQuoteUnrecorded;
   const work = `WOT99${String(randomInt(0, 10_000_000_000)).padStart(10, '0')}`;
   const staffInvoice = randomUUID(), contractorInvoice = randomUUID();
@@ -84,8 +85,28 @@ export function reportedInvoiceFixture(kind) {
       contractor_invoicing_completion_source=${regular ? "'contractor'" : 'null'},
       updated_at='${workUpdated}' where id='${work}';
     commit;`);
-  return { kind, work, staffInvoice: hasStaffInvoice ? staffInvoice : null, contractorInvoice,
+  const result = { kind, work, staffInvoice: hasStaffInvoice ? staffInvoice : null, contractorInvoice,
     staffNumber: hasStaffInvoice ? staffNumber : null, contractorNumber, staffTotal, contractorTotal };
+  if (finalInvoice) {
+    // Follow the real guarded capital transition, then create a final invoice.
+    // Never reclassify an immutable quote or disable its protection trigger.
+    const finalId=randomUUID(), finalNumber=`SYNTHETIC-FINAL-${suffix}`;
+    sql(`begin;
+      select set_config('request.jwt.claims',jsonb_build_object('sub','${staffActor}','role','authenticated')::text,true);
+      select public.close_out_capital_v1(w.id,w.contractor_assignment_version,w.workflow_cycle,w.lifecycle_version,
+        '${randomUUID()}',jsonb_build_object('outcome','send_to_billing','confirmed',true,
+          'documentId',i.id,'invoiceVersion',i.invoice_version,'markQuoteSubmitted',true,
+          'quoteReference','','invoiceReference','','billedOn',null))
+        from public.work_orders w join public.invoices i on i.id='${staffInvoice}' where w.id='${work}';
+      select set_config('request.jwt.claims','{}',true);
+      insert into public.invoices(id,num,work_order_id,invoice_type,document_kind,state,invoice_date,subtotal,sales_tax,total)
+        values('${finalId}','${finalNumber}','${work}','staff','invoice','approved',current_date,${staffTotal},0,${staffTotal});
+      insert into public.invoice_lines(invoice_id,position,type,description,qty,rate,is_taxable)
+        values('${finalId}',1,'Labor','Synthetic final billing line',1,${staffTotal},false);
+      commit;`);
+    return {...result,sourceQuote:staffInvoice,sourceQuoteNumber:staffNumber,staffInvoice:finalId,staffNumber:finalNumber};
+  }
+  return result;
 }
 
 export function reportedInvoiceSnapshot(fixture) {

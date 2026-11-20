@@ -151,11 +151,16 @@ export async function login(page, account, initialPath = "/") {
   await page.getByPlaceholder("you@p1pros.com").fill(account.email);
   await page.locator('input[type="password"]').fill(process.env.P1_E2E_PASSWORD || syntheticPassword);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  if ((page.viewportSize()?.width || 0) <= 720) {
-    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeHidden();
-    await expect(page.locator(".app-root")).toBeVisible();
-  } else {
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeHidden();
+  await expect(page.locator(".app-root")).toBeVisible();
+  if (await page.locator(".desktop-sidebar").isVisible()) {
     await expect(page.locator(".desktop-sidebar").getByText(account.name, { exact: true })).toBeVisible();
+  } else {
+    // Tablet navigation also uses the drawer; do not assume a 720px breakpoint.
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    const menu = page.getByRole("dialog", { name: "Navigation menu", exact: true });
+    await expect(menu.getByText(account.name, { exact: true })).toBeVisible();
+    await menu.getByRole("button", { name: "Close menu", exact: true }).click();
   }
 }
 

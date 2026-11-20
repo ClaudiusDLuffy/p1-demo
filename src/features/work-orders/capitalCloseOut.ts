@@ -18,6 +18,32 @@ export const capitalCloseOutFieldsSchema = z.object({
   }
 });
 export type CapitalCloseOutOutcome = z.infer<typeof capitalCloseOutFieldsSchema>["outcome"];
+export type CapitalCloseOutField = "quoteReference" | "markQuoteSubmitted" | "invoiceReference" | "billedOn";
+export type CapitalCloseOutFieldError = { field: CapitalCloseOutField; message: string };
+
+/** Field feedback only; the guarded command remains authoritative for eligibility. */
+export function validateCapitalCloseOutForm(input: {
+  outcome: CapitalCloseOutOutcome; needsSubmission: boolean; hasDocument: boolean;
+  markQuoteSubmitted: boolean; quoteReference: string; invoiceReference: string; billedOn: string;
+}): CapitalCloseOutFieldError | null {
+  if (input.needsSubmission && !input.hasDocument) {
+    if (!input.quoteReference.trim()) return { field: "quoteReference",
+      message: "Enter the approved quote reference from 7-Eleven. The billed invoice reference is a separate field below." };
+    if (!reference.safeParse(input.quoteReference).success) return { field: "quoteReference",
+      message: "Use a quote reference of 100 characters or fewer, without control characters." };
+  }
+  if (input.needsSubmission && !input.markQuoteSubmitted) return { field: "markQuoteSubmitted",
+    message: "Confirm the actual quote submission using the checkbox above before closing out the capital." };
+  if (input.outcome === "billed") {
+    if (!input.invoiceReference.trim()) return { field: "invoiceReference",
+      message: "Enter the existing billed invoice reference. This is separate from the approved quote reference." };
+    if (!reference.safeParse(input.invoiceReference).success) return { field: "invoiceReference",
+      message: "Use an invoice reference of 100 characters or fewer, without control characters." };
+    if (!z.iso.date().safeParse(input.billedOn).success) return { field: "billedOn",
+      message: "Enter the actual billing date before confirming completed and billed." };
+  }
+  return null;
+}
 export type CapitalCloseOutFunctions = {
   close_out_capital_v1: { Args: ReturnType<typeof lifecycleRpcContext> & { p_payload: Json }; Returns: Json };
 };

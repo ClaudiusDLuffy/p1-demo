@@ -3,13 +3,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "../../components/ui/Modal";
+import { Input } from "../../components/ui/Input";
+import { T } from "../../lib/constants";
 import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { directoryActorScope } from "../../lib/counts/queryKeys";
 import { useDirectoryActor } from "../directory/queries";
 import { canRecordExternalBilling } from "../billing/externalBillingContracts";
 import { useWorkOrderByIdQuery } from "./queries";
-import { capitalCloseOutError, createCapitalCloseOutAttempt, runCapitalCloseOutAttempt,
-  type CapitalCloseOutOutcome, type CapitalCloseOutReceipt } from "./capitalCloseOut";
+import { capitalCloseOutError, createCapitalCloseOutAttempt, runCapitalCloseOutAttempt, validateCapitalCloseOutForm,
+  type CapitalCloseOutField, type CapitalCloseOutFieldError, type CapitalCloseOutOutcome, type CapitalCloseOutReceipt } from "./capitalCloseOut";
 
 export type CapitalCloseOutDocument = {
   id: string; num: string; state: string; documentKind?: string; invoiceVersion: number;
@@ -39,6 +41,19 @@ export function CapitalCloseOutModal(props: Props) {
   const [markQuoteSubmitted, setMarkQuoteSubmitted] = useState(false);
   const [busy, setBusy] = useState(false); const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState(""); const [receipt, setReceipt] = useState<CapitalCloseOutReceipt | null>(null);
+  const [fieldError, setFieldError] = useState<CapitalCloseOutFieldError | null>(null);
+  const quoteInput = useRef<HTMLInputElement>(null); const submissionInput = useRef<HTMLInputElement>(null);
+  const invoiceInput = useRef<HTMLInputElement>(null); const dateInput = useRef<HTMLInputElement>(null);
+  const fieldFeedbackRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (!fieldError) return;
+    // Run after the inline message has committed; its height can change the
+    // scrollable dialog. Keep both the control and its explanation in view.
+    const control = { quoteReference: quoteInput, markQuoteSubmitted: submissionInput,
+      invoiceReference: invoiceInput, billedOn: dateInput }[fieldError.field].current;
+    control?.focus(); control?.scrollIntoView({ block: "center" });
+    fieldFeedbackRef.current?.scrollIntoView({ block: "nearest" });
+  }, [fieldError]);
   const sending = useRef(false); const attempt = useRef<ReturnType<typeof createCapitalCloseOutAttempt> | null>(null);
   const attemptScope = useRef<string | null>(null);
   const reconciling = uncertain && attempt.current !== null && attemptScope.current === scope;
@@ -51,6 +66,15 @@ export function CapitalCloseOutModal(props: Props) {
   const blocker = props.completionBlocker || (outcome === "billed" ? props.billedBlocker : undefined);
   const dirty = !receipt && Boolean(outcome !== "billed" || documentId || invoiceReference !== null || quoteReference || billedOn || markQuoteSubmitted);
   const dismissal = useUnsavedChangesGuard({ dirty, busy, scopeKey: scope, onClose });
+  const clearFieldError = (field: CapitalCloseOutField) => {
+    setFieldError(current => current?.field === field ? null : current); setError("");
+  };
+  const inputStyle = (field: CapitalCloseOutField) => ({ minHeight: 44, fontSize: 16,
+    borderColor: fieldError?.field === field ? T.danger : T.muted });
+  const fieldFeedback = (field: CapitalCloseOutField) => fieldError?.field === field
+    ? <p ref={fieldFeedbackRef} id={`${id}-${field}-error`} role="alert" className="text-sm text-red-700">{fieldError.message}</p> : null;
+  const describedBy = (field: CapitalCloseOutField, hint?: string) =>
+    [hint, fieldError?.field === field ? `${id}-${field}-error` : null].filter(Boolean).join(" ") || undefined;
   async function save(event: FormEvent) {
     event.preventDefault();
     if (sending.current || receipt || !canRecordExternalBilling(actor)) return;
@@ -60,10 +84,15 @@ export function CapitalCloseOutModal(props: Props) {
     if (!reconciling && (!work.data || work.data.id !== workOrderId || work.isError || !props.hasCompleteEvidence || blocker)) {
       setError(blocker || "Load the complete current work order, invoice, and activity history first."); return;
     }
-    if (!reconciling && needsSubmission && (!markQuoteSubmitted || (!document && !quoteReference.trim()))) {
-      setError("Confirm the actual quote submission here before closing out the capital."); return;
+    if (!reconciling) {
+      const invalid = validateCapitalCloseOutForm({ outcome, needsSubmission, hasDocument: Boolean(document),
+        markQuoteSubmitted, quoteReference, invoiceReference: reference, billedOn });
+      if (invalid) {
+        setError(""); setFieldError(invalid);
+        return;
+      }
     }
-    sending.current = true; setBusy(true); setError("");
+    sending.current = true; setBusy(true); setError(""); setFieldError(null);
     const generation = session.current.generation;
     const current = () => session.current.mounted && session.current.generation === generation && session.current.scope === scope;
     try {
@@ -90,33 +119,52 @@ export function CapitalCloseOutModal(props: Props) {
     } finally { if (current()) { sending.current = false; setBusy(false); } }
   }
   if (!canRecordExternalBilling(actor)) return null;
-  return <><Modal title="Close out capital" description={workOrderId} width={560} dismissDisabled={busy} onRequestClose={dismissal.requestClose}>
+  return <><Modal title="Close out capital" description={workOrderId} width={560} contentStyle={{ width: "100%", padding: 20 }} dismissDisabled={busy} onRequestClose={dismissal.requestClose}>
     {receipt ? <div className="space-y-3"><p role="status">{receipt.outcome === "billed" ? "Completed and billed. Moved to History." : "Completed and sent to billing. This job remains open until billed."}</p>
       {error && <p role="alert">{error}</p>}<button type="button" className="btn-primary" onClick={onClose}>Done</button></div>
       : <form noValidate onSubmit={save} className="space-y-4">
-        <fieldset disabled={busy || uncertain} className="space-y-3">
+        <fieldset disabled={busy || uncertain} className="min-w-0 space-y-3">
           <legend className="mb-2 text-sm font-semibold">The capital job is finished</legend>
           <label className="flex items-start gap-2 rounded-lg border p-3"><input type="radio" name={`${id}-outcome`} value="billed" checked={outcome === "billed"}
-            onChange={() => { setOutcome("billed"); setError(""); }} /><span><strong>Completed and billed</strong><span className="block text-sm">Move straight to History using the existing bill.</span></span></label>
+            onChange={() => { setOutcome("billed"); setError(""); setFieldError(null); }} /><span><strong>Completed and billed</strong><span className="block text-sm">Move straight to History using the existing bill.</span></span></label>
           <label className="flex items-start gap-2 rounded-lg border p-3"><input type="radio" name={`${id}-outcome`} value="send_to_billing" checked={outcome === "send_to_billing"}
-            onChange={() => { setOutcome("send_to_billing"); setError(""); }} /><span><strong>Completed, send to billing</strong><span className="block text-sm">Only if it has not been billed yet. Keep it open in billing.</span></span></label>
+            onChange={() => { setOutcome("send_to_billing"); setError(""); setFieldError(null); }} /><span><strong>Completed, send to billing</strong><span className="block text-sm">Only if it has not been billed yet. Keep it open in billing.</span></span></label>
           {sorted.length > 1 && <label className="grid gap-1 text-sm" htmlFor={`${id}-document`}>Existing quote or invoice
             <select id={`${id}-document`} className="input" value={document?.id ?? ""} onChange={event => {
-              setDocumentId(event.target.value); setInvoiceReference(null); setMarkQuoteSubmitted(false); setError("");
+              setDocumentId(event.target.value); setInvoiceReference(null); setMarkQuoteSubmitted(false); setError(""); setFieldError(null);
             }}>{sorted.map(row => <option key={row.id} value={row.id}>{row.num} ({row.documentKind === "capital_quote" ? "quote" : "invoice"}, {row.state})</option>)}</select></label>}
           {document && <p className="text-sm">Using {document.documentKind === "capital_quote" ? "quote" : "invoice"} #{document.num}.</p>}
           {needsSubmission && <div className="space-y-2 rounded-lg border p-3">
-            {!document && <label className="grid gap-1 text-sm" htmlFor={`${id}-quote`}>Quote reference in 7-Eleven
-              <input id={`${id}-quote`} className="input" maxLength={100} value={quoteReference} onChange={event => setQuoteReference(event.target.value)} /></label>}
-            <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={markQuoteSubmitted} onChange={event => setMarkQuoteSubmitted(event.target.checked)} />
+            {!document && <>
+              <p id={`${id}-quote-help`} className="text-sm">No P1 quote is attached. Enter the real approved quote reference from 7-Eleven here, not the billed invoice reference.</p>
+              <label className="grid min-w-0 gap-2 text-sm font-semibold" htmlFor={`${id}-quote`}>Quote reference in 7-Eleven (required)
+                <Input ref={quoteInput} id={`${id}-quote`} className="w-full min-w-0" style={inputStyle("quoteReference")}
+                  required maxLength={100} placeholder="Enter the approved quote reference" value={quoteReference}
+                  aria-invalid={fieldError?.field === "quoteReference" || undefined} aria-describedby={describedBy("quoteReference", `${id}-quote-help`)}
+                  onChange={event => { setQuoteReference(event.target.value); clearFieldError("quoteReference"); }} /></label>
+              {fieldFeedback("quoteReference")}
+            </>}
+            <label className="flex items-start gap-2 text-sm"><input ref={submissionInput} id={`${id}-submitted`} type="checkbox" required checked={markQuoteSubmitted}
+              aria-invalid={fieldError?.field === "markQuoteSubmitted" || undefined} aria-describedby={describedBy("markQuoteSubmitted")}
+              onChange={event => { setMarkQuoteSubmitted(event.target.checked); clearFieldError("markQuoteSubmitted"); }} />
               <span>{document ? "Mark this quote submitted now. I already submitted it in 7-Eleven." : "I confirm this external quote was submitted and approved in 7-Eleven."}</span></label>
+            {fieldFeedback("markQuoteSubmitted")}
             <p className="text-xs">This records the actual submission in P1. It does not send anything to 7-Eleven.</p>
           </div>}
           {outcome === "billed" && <>
-            <label className="grid gap-1 text-sm" htmlFor={`${id}-invoice`}>Existing billed invoice reference
-              <input id={`${id}-invoice`} className="input" maxLength={100} value={reference} onChange={event => setInvoiceReference(event.target.value)} /></label>
-            <label className="grid gap-1 text-sm" htmlFor={`${id}-date`}>Actual billing date
-              <input id={`${id}-date`} className="input" type="date" value={billedOn} onChange={event => setBilledOn(event.target.value)} /></label>
+            <label className="grid min-w-0 gap-2 text-sm font-semibold" htmlFor={`${id}-invoice`}>Existing billed invoice reference (required)
+              <Input ref={invoiceInput} id={`${id}-invoice`} className="w-full min-w-0" style={inputStyle("invoiceReference")}
+                required maxLength={100} placeholder="Enter the existing billed invoice reference" value={reference}
+                aria-invalid={fieldError?.field === "invoiceReference" || undefined} aria-describedby={describedBy("invoiceReference", `${id}-invoice-help`)}
+                onChange={event => { setInvoiceReference(event.target.value); clearFieldError("invoiceReference"); }} /></label>
+            <p id={`${id}-invoice-help`} className="text-xs">Use the invoice that already billed this job. A quote reference alone does not confirm billing.</p>
+            {fieldFeedback("invoiceReference")}
+            <label className="grid min-w-0 gap-2 text-sm font-semibold" htmlFor={`${id}-date`}>Actual billing date (required)
+              <Input ref={dateInput} id={`${id}-date`} className="w-full min-w-0" style={inputStyle("billedOn")}
+                required type="date" value={billedOn} aria-invalid={fieldError?.field === "billedOn" || undefined}
+                aria-describedby={describedBy("billedOn")}
+                onChange={event => { setBilledOn(event.target.value); clearFieldError("billedOn"); }} /></label>
+            {fieldFeedback("billedOn")}
           </>}
         </fieldset>
         {!props.hasCompleteEvidence && <div className="space-y-2"><p role="status">Complete invoice and activity history is needed to avoid duplicate billing.</p>
