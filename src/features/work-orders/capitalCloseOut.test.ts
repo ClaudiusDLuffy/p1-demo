@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
-import { CapitalCloseOutError, capitalCloseOutFieldsSchema, createCapitalCloseOutAttempt } from "./capitalCloseOut";
+import { CapitalCloseOutError, capitalCloseOutFieldsSchema, createCapitalCloseOutAttempt, validateCapitalCloseOutForm } from "./capitalCloseOut";
 
 const operation = "20000000-0000-4000-8000-000000000001";
 const document = "20000000-0000-4000-8000-000000000002";
@@ -71,4 +71,22 @@ test("billing and confirmation requirements are strict and unbilled outcomes can
     { documentId: null }, { unexpected: true }, { invoiceReference: "bad\u0000reference" }, { outcome: "send_to_billing" }]) {
     assert.equal(capitalCloseOutFieldsSchema.safeParse({ ...fields, ...patch }).success, false);
   }
+});
+
+test("field validation distinguishes missing quote, attestation, invoice and date", () => {
+  const valid = {outcome: "billed" as const, needsSubmission: true, hasDocument: false,
+    markQuoteSubmitted: true, quoteReference: "QUOTE-1", invoiceReference: "BILL-1", billedOn: "2026-10-01"};
+  assert.equal(validateCapitalCloseOutForm(valid), null);
+  for (const [patch, field] of [
+    [{quoteReference: "   "}, "quoteReference"], [{quoteReference: "x".repeat(101)}, "quoteReference"],
+    [{quoteReference: "bad\u0000ref"}, "quoteReference"], [{markQuoteSubmitted: false}, "markQuoteSubmitted"],
+    [{invoiceReference: "   "}, "invoiceReference"], [{invoiceReference: "x".repeat(101)}, "invoiceReference"],
+    [{invoiceReference: "bad\u0000ref"}, "invoiceReference"], [{billedOn: ""}, "billedOn"],
+    [{billedOn: "2026-02-30"}, "billedOn"],
+  ] as const) assert.equal(validateCapitalCloseOutForm({...valid, ...patch})?.field, field);
+  assert.equal(validateCapitalCloseOutForm({...valid, quoteReference: "é".repeat(100), invoiceReference: "A & B / #123"}), null);
+  assert.equal(validateCapitalCloseOutForm({...valid, hasDocument: true, quoteReference: ""}), null);
+  assert.equal(validateCapitalCloseOutForm({...valid, needsSubmission: false, quoteReference: "", markQuoteSubmitted: false}), null);
+  assert.equal(validateCapitalCloseOutForm({...valid, outcome: "send_to_billing", invoiceReference: "", billedOn: ""}), null);
+  assert.equal(validateCapitalCloseOutForm({...valid, outcome: "send_to_billing", quoteReference: ""})?.field, "quoteReference");
 });
