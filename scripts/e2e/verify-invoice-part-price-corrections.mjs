@@ -2,7 +2,12 @@
 // All records created here are synthetic and every test transaction rolls back.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {linkedBillingSql as sql} from './linked-billing-test-support.mjs';
+import {linkedBillingSql} from './linked-billing-test-support.mjs';
+import {partPriceCompatibilityPrelude} from './part-price-migration-compatibility.mjs';
+const compatibilityVariant=process.env.P1_PART_PRICE_COMPAT_VARIANT;
+const compatibilityPrelude=compatibilityVariant?partPriceCompatibilityPrelude(compatibilityVariant):'';
+const sql=statement=>linkedBillingSql(compatibilityPrelude && statement.startsWith('begin;')
+  ? 'begin;'+compatibilityPrelude+statement.slice('begin;'.length) : statement);
 assert.equal(sql("select count(*) from auth.users where email not like '%@p1.invalid'"),'0');
 assert.equal(sql("select to_regclass('public.invoice_part_price_audit') is not null"),'t');
 const actors=JSON.parse(sql(`select jsonb_object_agg(email,id) from public.profiles where email in
