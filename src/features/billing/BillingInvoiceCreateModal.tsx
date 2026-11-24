@@ -95,6 +95,8 @@ import {
   firstFinancialValidationIssue,
 } from "../../lib/forms/financialValidationErrors";
 import { StaffFinancialLineInputSchema } from "../../lib/staffInvoiceContracts";
+import BillingPartPriceEditor from "./BillingPartPriceEditor";
+import { correctedPartPrice, effectivePartPriceCost, refreshedP1PartPrice } from "../../lib/billingPartPriceCorrection";
 
 const BillingLineSchema = StaffFinancialLineInputSchema;
 type PendingWorkOrderChange = {
@@ -235,6 +237,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   } = props;
   const readCompleteDocument = useInvoiceDocumentAction(currentUser, modal || "closed");
   const [submitting, setSubmitting] = useState(false);
+  const [openPriceEditors, setOpenPriceEditors] = useState<Record<string, boolean>>({});
   const submittingRef = useRef(false);
   const [pullingLines, setPullingLines] = useState(false);
   const [woSearch, setWoSearch] = useState("");
@@ -336,6 +339,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   });
   const workOrderIdField = register("workOrderId");
   const { fields, append, remove, replace, move } = useFieldArray({ control, name: "lines" });
+  const hasOpenPriceEditor = fields.some(field => openPriceEditors[field.id]);
   const watchedLines = watch("lines");
   const lines = useMemo(() => watchedLines || [], [watchedLines]);
   const allLinesTaxable = lines.length > 0
@@ -650,7 +654,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   // than suggesting a zero-cost job; this callback never writes an invoice.
   const calculatorCost = selectedSourceInvoices.length ? contractorCost
     : lines.length && lines.every((line: any) => line.sourceUnitCost != null)
-      ? lines.reduce((sum: number, line: any) => sum + Number(line.sourceUnitCost) * Number(line.qty || 0), 0)
+      ? lines.reduce((sum: number, line: any) => sum + Number(effectivePartPriceCost(line)) * Number(line.qty || 0), 0)
       : null;
   useEffect(() => {
     onProfitValuesChange?.({ context: `${editorScope}:${selectedWorkOrderId || "unlinked"}`,
@@ -663,7 +667,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       || line.sourceUnitCost == null
     ) return sum;
     return sum + Math.max(
-      (Number(line.rate) - Number(line.sourceUnitCost)) * Number(line.qty || 0),
+      (Number(line.rate) - Number(effectivePartPriceCost(line))) * Number(line.qty || 0),
       0,
     );
   }, 0);
@@ -875,6 +879,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             taxTreatmentManual: true,
             sourceInvoiceLineId: line.sourceInvoiceLineId || null,
             sourceWorkOrderPartId: line.sourceWorkOrderPartId || null,
+            ...(line.priceCorrection ? { priceCorrection: line.priceCorrection } : {}),
             sourceUnitCost: line.sourceUnitCost == null
               ? null
               : Number(line.sourceUnitCost),
@@ -1016,6 +1021,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       || !selectedWorkOrderId
       || !draftHydrated.current
       || !billableP1PartsQuery.isSuccess
+      || hasOpenPriceEditor
     ) return;
     const partFingerprint = (billableP1PartsQuery.data || [])
       .map((part: any) => `${part.partId}:${part.qty}:${part.unitCost}:${part.markedUpUnitRate}`)
@@ -1043,11 +1049,10 @@ export default function BillingInvoiceCreateModal(props: any) {
         type: "Parts/Hardware",
         desc: description,
         qty: Number(part.qty || 1),
-        rate: Number(part.markedUpUnitRate),
+        ...refreshedP1PartPrice(Number(part.unitCost), line.priceCorrection),
         sourceInvoiceLineId: null,
         sourceWorkOrderPartId: part.partId,
         sourceUnitCost: Number(part.unitCost),
-        markupPercent: 25,
         isTaxable: line.taxTreatmentManual
           ? Boolean(line.isTaxable)
           : taxabilityForLine("Parts/Hardware", description).taxable,
@@ -1058,7 +1063,7 @@ export default function BillingInvoiceCreateModal(props: any) {
         || normalized.qty !== Number(line.qty)
         || normalized.rate !== Number(line.rate)
         || normalized.sourceUnitCost !== Number(line.sourceUnitCost)
-        || normalized.markupPercent !== Number(line.markupPercent)
+        || normalized.markupPercent !== (line.markupPercent == null ? null : Number(line.markupPercent))
       ) refreshedExisting = true;
       return normalized;
     });
@@ -1092,6 +1097,7 @@ export default function BillingInvoiceCreateModal(props: any) {
     editingInvoice?.id,
     fire,
     getValues,
+    hasOpenPriceEditor,
     modal,
     replace,
     selectedWorkOrderId,
@@ -1268,10 +1274,10 @@ export default function BillingInvoiceCreateModal(props: any) {
     return removed;
   };
 
-  const dirty = isDirty || restoredDirty.current || JSON.stringify([selectedSourceIds, partsMarkup, customTerritory, numberEdited]) !== externalDraftBaseline.current;
+  const dirty = hasOpenPriceEditor || isDirty || restoredDirty.current || JSON.stringify([selectedSourceIds, partsMarkup, customTerritory, numberEdited]) !== externalDraftBaseline.current;
   latestDirty.current = dirty;
   const dismissal = useUnsavedChangesGuard({ scopeKey: `${editorScope}:${editorSession.current.generation}`, dirty, enabled: modal === "createBillingInvoice" && currentUser?.active !== false,
-    busy: submitting || pullingLines, persistence: draftState === "saving" ? "dirty_persisting" : draftState === "error" ? "persist_failed"
+    busy: submitting || pullingLines || hasOpenPriceEditor, persistence: draftState === "saving" ? "dirty_persisting" : draftState === "error" ? "persist_failed"
       : (draftState === "saved" || draftState === "restored") && draftLease.current?.isPersisted() ? "dirty_persisted" : "dirty_not_persisted",
     onClose: () => { draftLease.current?.close(); draftLease.current = null; onClose?.(); },
     onDiscard: () => resetAfterSaveOrDiscard(true),
@@ -1360,6 +1366,10 @@ export default function BillingInvoiceCreateModal(props: any) {
   };
 
   const requestWorkOrderSelection = (workOrderId: string) => {
+    if (hasOpenPriceEditor) {
+      setActionError("Apply or cancel the open part price edit before changing work orders.");
+      return;
+    }
     const nextWorkOrderId = workOrderId || "";
     const currentWorkOrderId = selectedWorkOrderId || "";
     if (nextWorkOrderId === currentWorkOrderId) {
@@ -1387,6 +1397,7 @@ export default function BillingInvoiceCreateModal(props: any) {
   };
 
   const pullSourceLines = async () => {
+    if (hasOpenPriceEditor) return;
     if (selectedSourceIds.length === 0) {
       fire?.("Select at least one contractor invoice");
       return;
@@ -1445,8 +1456,12 @@ export default function BillingInvoiceCreateModal(props: any) {
         });
       });
 
+      const preservedCorrections = new Map((getValues("lines") || [])
+        .filter(line => line.sourceInvoiceLineId && line.priceCorrection)
+        .map(line => [line.sourceInvoiceLineId, line.priceCorrection]));
       const imported = sourceLines.map((line: any) => {
         const parts = isStaffBillingPartsLine(line.type);
+        const priceCorrection = parts ? preservedCorrections.get(line.sourceInvoiceLineId) : null;
         return {
           ...line,
           rate: importedStaffBillingRate(
@@ -1457,6 +1472,7 @@ export default function BillingInvoiceCreateModal(props: any) {
           markupPercent: parts ? partMarkupPercent : null,
           isTaxable: taxabilityForLine(line.type, line.desc).taxable,
           taxTreatmentManual: false,
+          ...(priceCorrection ? { priceCorrection, ...correctedPartPrice(priceCorrection) } : {}),
         };
       });
       const p1PartLines = (getValues("lines") || []).filter(
@@ -1476,6 +1492,10 @@ export default function BillingInvoiceCreateModal(props: any) {
 
   const submit = async (data: z.output<typeof BillingInvoiceSchema>, state: "draft" | "submitted") => {
     if (submittingRef.current) return;
+    if (fields.some(field => openPriceEditors[field.id])) {
+      setActionError("Apply or cancel the open part price edit before saving the invoice.");
+      return;
+    }
     if (!financialContextReady) {
       const message = "Wait for the current work-order version to finish loading, then try again.";
       setActionError(`Invoice was not saved. ${message}`);
@@ -1566,7 +1586,7 @@ export default function BillingInvoiceCreateModal(props: any) {
       <Modal
         onClose={closeKeepingDraft}
         onRequestClose={dismissal.requestClose}
-        dismissDisabled={submitting || pullingLines}
+        dismissDisabled={submitting || pullingLines || hasOpenPriceEditor}
         title={isEditing
           ? `Edit ${isCapitalQuote ? "capital quote" : "invoice"} #${editingInvoice.num}`
           : isCapitalQuote
@@ -1801,7 +1821,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                     <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.subtle, marginBottom: 4 }}>Parts markup %</span>
                     <input className="numeric-readable" type="number" min="0" max="999" step="0.1" value={partsMarkup} onChange={(e: any) => setPartsMarkup(e.target.value)} style={{ width: 92, padding: "7px 9px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 12 }} />
                   </label>
-                  <button type="button" disabled={pullingLines} onClick={() => void pullSourceLines()} className="btn-primary" style={{ padding: "8px 12px", fontSize: 11, opacity: pullingLines ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                  <button type="button" disabled={pullingLines || hasOpenPriceEditor} onClick={() => void pullSourceLines()} className="btn-primary" style={{ padding: "8px 12px", fontSize: 11, opacity: pullingLines ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
                     {pullingLines ? <><BtnSpinner />Pulling...</> : "Pull lines + calculate"}
                   </button>
                 </div>
@@ -1891,6 +1911,7 @@ export default function BillingInvoiceCreateModal(props: any) {
               ? null
               : Number(line.sourceUnitCost);
             const isP1PurchasedPart = Boolean(line.sourceWorkOrderPartId);
+            const priceCorrected = Boolean(line.priceCorrection);
             const quantityConstraints = invoiceQuantityInputConstraints(line.type);
             const typeRegistration = register(`lines.${i}.type` as const);
             const descriptionRegistration = register(`lines.${i}.desc` as const);
@@ -1954,10 +1975,10 @@ export default function BillingInvoiceCreateModal(props: any) {
                   aria-label={`Line ${i + 1} type`}
                   aria-invalid={errors.lines?.[i]?.type ? true : undefined}
                   aria-describedby={errors.lines?.[i]?.type ? `${formId}-lines-error` : undefined}
-                  aria-disabled={isP1PurchasedPart}
+                  aria-disabled={isP1PurchasedPart || priceCorrected}
                   value={line.type}
                   onChange={(event: any) => {
-                    if (isP1PurchasedPart) return;
+                    if (isP1PurchasedPart || priceCorrected) return;
                     const nextType = normalizeStaffBillingLineType(event.target.value);
                     setValue(`lines.${i}.type` as const, nextType, {
                       shouldDirty: true,
@@ -2049,7 +2070,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                   aria-label={`Line ${i + 1} rate`}
                   aria-invalid={errors.lines?.[i]?.rate ? true : undefined}
                   aria-describedby={errors.lines?.[i]?.rate ? `${formId}-lines-error` : undefined}
-                  readOnly={isP1PurchasedPart}
+                  readOnly={isP1PurchasedPart || priceCorrected}
                   onChange={(event: any) => {
                     void rateRegistration.onChange(event);
                     if (!isStaffBillingPartsLine(line.type) || sourceUnitCost == null) return;
@@ -2072,7 +2093,7 @@ export default function BillingInvoiceCreateModal(props: any) {
                       max="999"
                       step="0.1"
                       value={line.markupPercent ?? ""}
-                      disabled={isP1PurchasedPart || (sourceUnitCost == null && !(Number(line.rate) > 0))}
+                      disabled={isP1PurchasedPart || priceCorrected || (sourceUnitCost == null && !(Number(line.rate) > 0))}
                       onChange={(event: any) => {
                         const next = applyStaffBillingPartsMarkup(
                           sourceUnitCost,
@@ -2139,6 +2160,15 @@ export default function BillingInvoiceCreateModal(props: any) {
                   >
                     ×
                   </button>
+                )}
+                {isStaffBillingPartsLine(line.type) && Boolean(line.sourceWorkOrderPartId || line.sourceInvoiceLineId) && (
+                  <BillingPartPriceEditor recordedCost={sourceUnitCost} value={line.priceCorrection}
+                    onEditingChange={open => setOpenPriceEditors(current => ({ ...current, [field.id]: open }))} onChange={correction => {
+                    const price = correction ? correctedPartPrice(correction) : refreshedP1PartPrice(sourceUnitCost ?? 0);
+                    setValue(`lines.${i}.priceCorrection` as const, correction, { shouldDirty: true, shouldTouch: true });
+                    setValue(`lines.${i}.markupPercent` as const, price.markupPercent, { shouldDirty: true });
+                    setValue(`lines.${i}.rate` as const, price.rate, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+                  }} />
                 )}
               </div>
             );
@@ -2365,11 +2395,11 @@ export default function BillingInvoiceCreateModal(props: any) {
           <button type="button" onClick={discardAndClose} className="btn-soft" style={{ color: T.danger }}>Discard draft</button>
           <button type="button" onClick={closeKeepingDraft} className="btn-soft">Close</button>
           {editingInvoice?.state !== "submitted" && (
-            <button type="button" disabled={submitting || !financialContextReady} onClick={submitValidInvoice("draft")} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
+            <button type="button" disabled={submitting || hasOpenPriceEditor || !financialContextReady} onClick={submitValidInvoice("draft")} className="btn-soft" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
               {submitting ? <><BtnSpinner />Saving...</> : isEditing ? "Save Draft" : "Save as Draft"}
             </button>
           )}
-          <button type="submit" disabled={submitting || !financialContextReady} className="btn-accent" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
+          <button type="submit" disabled={submitting || hasOpenPriceEditor || !financialContextReady} className="btn-accent" style={{ display: "flex", alignItems: "center", gap: 6, opacity: submitting || !financialContextReady ? 0.7 : 1 }}>
             {submitting
               ? <><BtnSpinner />{isEditing ? "Updating..." : "Submitting..."}</>
               : isEditing

@@ -3,6 +3,7 @@ export type BillingLineSourceMetadata = {
   sourceWorkOrderPartId?: unknown;
   sourceUnitCost?: unknown;
   markupPercent?: unknown;
+  priceCorrection?: unknown;
 };
 
 function hasValue(value: unknown): boolean {
@@ -34,6 +35,7 @@ export function makeWorkOrderBoundBillingLinesManual<T extends BillingLineSource
       sourceWorkOrderPartId: null,
       sourceUnitCost: null,
       markupPercent: null,
+      ...(line.priceCorrection !== undefined ? { priceCorrection: null } : {}),
     };
   });
   return { lines: nextLines, detachedLineCount };

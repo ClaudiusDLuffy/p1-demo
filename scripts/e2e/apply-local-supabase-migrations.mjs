@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { readMigrationInventory } from "../migration-inventory.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationsDirectory = join(repositoryRoot, "supabase/migrations");
@@ -26,6 +27,12 @@ function runDocker(arguments_, options = {}) {
 }
 
 function assertDisposableTarget() {
+  assert.equal(process.env.DOCKER_HOST || "", "");
+  assert.equal(process.env.DOCKER_CONTEXT || "", "");
+  assert.equal(runDocker(["context", "show"]), "desktop-linux");
+  assert.equal(runDocker(["context", "inspect", "desktop-linux", "--format", "{{.Endpoints.docker.Host}}"]),
+    "unix:///Users/nxs/.docker/run/docker.sock");
+  assert.equal(runDocker(["inspect", container, "--format", "{{.HostConfig.Privileged}}"]), "false");
   const actualProject = runDocker([
     "inspect",
     container,
@@ -171,10 +178,7 @@ function removeHistoricalCompatibilityFixtures() {
 
 assertDisposableTarget();
 
-const migrationNames = readdirSync(migrationsDirectory)
-  .filter(name => /^\d+.*\.sql$/.test(name))
-  .sort();
-assert.equal(migrationNames.length, 184, "Migration inventory changed; review the local installer");
+const migrationNames = readMigrationInventory(repositoryRoot);
 
 for (const [index, name] of migrationNames.entries()) {
   const source = readFileSync(join(migrationsDirectory, name), "utf8");

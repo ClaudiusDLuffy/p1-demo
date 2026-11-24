@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DRAFT_MAX_BYTES } from "./drafts/draftSession";
 import { isSafeDraftText } from "./drafts/safeDraftText";
+import { BillingPartPriceCorrectionSchema } from "./billingPartPriceCorrection";
 
 export const BILLING_DRAFT_VERSION = 2;
 export const BILLING_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -13,7 +14,8 @@ const id = z.preprocess(
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
 const lineSchema = z.object({ type: text(80).default("Other"), desc: text(4000).default(""), qty: partialNumber.default(""), rate: partialNumber.default(""),
   isTaxable: z.boolean().default(false), taxTreatmentManual: z.boolean().default(false), sourceInvoiceLineId: id.default(null), sourceWorkOrderPartId: id.default(null),
-  sourceUnitCost: partialNumber.default(null), markupPercent: partialNumber.default(null) }).strict();
+  sourceUnitCost: partialNumber.default(null), markupPercent: partialNumber.default(null),
+  priceCorrection: BillingPartPriceCorrectionSchema.nullable().optional() }).strict();
 const formSchema = z.object({ num: text(80).default(""), invoiceDate: text(10).default(""), serviceDate: text(10).default(""), dueDate: text(10).default(""),
   workOrderId: text(120).default(""), territory: text(200).default(""), equipmentTag: text(200).default("7-ELEVEN: Miscellaneous"),
   storeNumber: text(80).default(""), storeAddress: text(1000).default(""), terms: text(200).default("Net 30"), cme: text(200).default(""),

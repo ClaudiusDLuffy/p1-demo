@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { QUICKBOOKS_EQUIPMENT_TAGS } from "./quickBooksEquipmentTags";
 import { isValidStaffBillingRate, normalizeStaffBillingLineType } from "./staffBilling";
+import { BillingPartPriceCorrectionSchema, correctedPartPrice } from "./billingPartPriceCorrection";
 
 export const FINANCIAL_BODY_BYTES = 256 * 1024;
 export const FINANCIAL_MAX_LINES = 1000;
@@ -47,6 +48,7 @@ export const StaffFinancialLineInputSchema = z.object({
   sourceInvoiceLineId: optionalUuid, sourceWorkOrderPartId: optionalUuid,
   sourceUnitCost: money.nullable().optional().transform(value => value ?? null),
   markupPercent: decimal(999, 1).nullable().optional().transform(value => value ?? null),
+  priceCorrection: BillingPartPriceCorrectionSchema.nullable().optional(),
 }).strict().superRefine((line, context) => {
   if (!isValidStaffBillingRate(line.type, line.rate)) {
     context.addIssue({ code: "custom", path: ["rate"], message: "A zero rate is allowed only for Warranty" });
@@ -60,6 +62,15 @@ export const StaffFinancialLineInputSchema = z.object({
   if (line.sourceInvoiceLineId && line.sourceWorkOrderPartId) {
     context.addIssue({ code: "custom", path: ["sourceWorkOrderPartId"], message: "A line cannot have two source owners" });
   }
+  if (line.priceCorrection) {
+    const price = correctedPartPrice(line.priceCorrection);
+    if (normalizeStaffBillingLineType(line.type) !== "Parts/Hardware" || !(line.sourceInvoiceLineId || line.sourceWorkOrderPartId)) {
+      context.addIssue({ code: "custom", path: ["priceCorrection"], message: "A price correction requires a sourced parts line" });
+    }
+    if (line.rate !== price.rate || line.markupPercent !== price.markupPercent) {
+      context.addIssue({ code: "custom", path: ["rate"], message: "Apply the price correction again to use its calculated billing price" });
+    }
+  }
 });
 
 export const StaffFinancialLineSchema = StaffFinancialLineInputSchema.transform(line => ({
@@ -67,6 +78,7 @@ export const StaffFinancialLineSchema = StaffFinancialLineInputSchema.transform(
   qty: line.qty, rate: line.rate, isTaxable: line.isTaxable,
   sourceInvoiceLineId: line.sourceInvoiceLineId, sourceWorkOrderPartId: line.sourceWorkOrderPartId,
   sourceUnitCost: line.sourceUnitCost, markupPercent: line.markupPercent,
+  ...(line.priceCorrection !== undefined ? { priceCorrection: line.priceCorrection } : {}),
 }));
 
 const commandIdentity = {

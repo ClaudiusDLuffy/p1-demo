@@ -42,7 +42,7 @@ test("route delegates canonical parts and tax together to the financial transact
   const response = await harness.handlers.POST(harness.request("POST", validBillingRequest()));
   assert.equal(response.status, 200);
   assert.deepEqual(harness.calls.filter(call => call.name.startsWith("rpc:")).map(call => call.name),
-    ["rpc:save_staff_billing_invoice_v4", "rpc:get_invoice_summary_v1"]);
+    ["rpc:save_staff_billing_invoice_v4", "rpc:get_invoice_summary_v1", "rpc:list_staff_invoice_nte_wait_flags_v1"]);
   // One authoritative financial transaction, followed by one bounded summary
   // read. Parts/tax calculation stays in SQL; no full-line refresh is allowed.
   assert.ok(!harness.calls.some(call => call.name === "from:invoice_lines"));
@@ -59,6 +59,6 @@ test("billing editor refreshes, locks, and cannot omit a P1-purchased part", () 
   assert.match(editor, /useBillableP1PartsQuery/);
   assert.match(editor, /replace\(\[\.\.\.normalizedCurrentLines, \.\.\.additions\]\)/);
   assert.match(editor, /readOnly=\{isP1PurchasedPart\}/);
-  assert.match(editor, /disabled=\{isP1PurchasedPart\}/);
+  assert.match(editor, /disabled=\{isP1PurchasedPart \|\| priceCorrected/);
   assert.match(editor, /P1-purchased parts are required on this invoice/);
 });
