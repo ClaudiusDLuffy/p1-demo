@@ -46,6 +46,13 @@ test.beforeEach(async({page})=>{
     return route.abort('blockedbyclient');
   });
 });
+test.afterEach(async({page})=>{
+  // Drain page-level JWT retry handlers before the shared diagnostics fixture
+  // removes them. Ignoring an in-flight handler error can otherwise fall
+  // through to the context guard after the request was already handled.
+  // Keep that context-level external-network guard active until closure.
+  await page.unrouteAll({behavior:'wait'});
+});
 for(const width of [1440,390]) for(const basis of ['purchase_cost','billing_rate']) {
   test(`part price ${basis}: apply, cancel, save, reopen and reload at ${width}px`,async({page},info)=>{
     const f=invoicePartPriceFixture();const rate=basis==='purchase_cost'?'4094.21':'3275.37';

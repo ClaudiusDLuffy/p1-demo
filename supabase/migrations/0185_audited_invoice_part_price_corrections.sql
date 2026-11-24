@@ -72,16 +72,36 @@ create index invoice_part_price_audit_invoice on public.invoice_part_price_audit
 
 -- Fail closed on any unexpected installed function shape. Preserve the exact
 -- current definitions, including Warranty, close-out, ACL and security patches.
+-- Match LF or CRLF anchors without rewriting the surrounding function body:
+-- normalizing an entire definition could change newlines inside SQL literals.
 create function pg_temp.patch_part_price_function(p_signature text,p_old text,p_new text)
 returns void language plpgsql as $$
-declare v_oid oid:=to_regprocedure(p_signature); v_definition text;
+declare
+  v_oid oid:=to_regprocedure(p_signature); v_definition text;
+  v_old_lf text; v_old_crlf text; v_new_lf text;
+  v_lf_count integer; v_crlf_count integer:=0;
 begin
   if v_oid is null then raise exception 'Required function missing: %',p_signature; end if;
+  if p_old is null or p_old='' or p_new is null then
+    raise exception 'Invalid patch template in %; review required',p_signature;
+  end if;
   v_definition:=pg_get_functiondef(v_oid);
-  if length(v_definition)-length(replace(v_definition,p_old,''))<>length(p_old) then
+  -- The migration file itself may also have been pasted with CRLF endings.
+  v_old_lf:=replace(p_old,E'\r\n',E'\n');
+  v_new_lf:=replace(p_new,E'\r\n',E'\n');
+  v_old_crlf:=replace(v_old_lf,E'\n',E'\r\n');
+  v_lf_count:=(length(v_definition)-length(replace(v_definition,v_old_lf,'')))/length(v_old_lf);
+  if v_old_crlf<>v_old_lf then
+    v_crlf_count:=(length(v_definition)-length(replace(v_definition,v_old_crlf,'')))/length(v_old_crlf);
+  end if;
+  if v_lf_count+v_crlf_count<>1 then
     raise exception 'Unexpected function shape in %; review required',p_signature;
   end if;
-  execute replace(v_definition,p_old,p_new);
+  if v_crlf_count=1 then
+    execute replace(v_definition,v_old_crlf,replace(v_new_lf,E'\n',E'\r\n'));
+  else
+    execute replace(v_definition,v_old_lf,v_new_lf);
+  end if;
 end;
 $$;
 
