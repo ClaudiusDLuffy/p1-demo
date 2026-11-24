@@ -42,6 +42,7 @@ export const coreErrorCodes = Object.freeze({
   NOT_FOUND: entry("This record is unavailable. Refresh the list.", 404, "never", "refresh_record"),
   METHOD_NOT_ALLOWED: entry("This request method is not supported.", 405, "never", "correct_fields"),
   CONFLICT: entry("This action conflicts with the current record. Refresh and review its status.", 409, "never", "refresh_record"),
+  INVOICE_NUMBER_CONFLICT: entry("That invoice number already exists for this contractor, possibly on another work order. Review the existing invoice, or enter a different number for a genuinely new invoice. Your form entries have been kept.", 409, "never", "correct_fields", true),
   STALE_VERSION: entry("The record changed. Refresh and review it before trying again.", 409, "never", "refresh_record"),
   INVALID_TRANSITION: entry("This action is not available in the current state. Refresh the record.", 422, "never", "refresh_record"),
   DUPLICATE_OPERATION: entry("This operation already exists. Review its recorded outcome.", 409, "never", "reconcile"),

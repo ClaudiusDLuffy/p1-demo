@@ -23,6 +23,10 @@ import { DetailDisclosure } from "../../components/ui/DetailDisclosure";
 import { ExternalBillingModal } from "./ExternalBillingModal";
 import { LinkedBillingModal } from "./LinkedBillingModal";
 import { canRecordExternalBilling } from "./externalBillingContracts";
+import { ListExportControl } from "../list-export/ListExportControl";
+import { exportBillingBucketRows, exportContractorInvoiceRows, exportWorkOrderRows } from "../list-export/listExportReads";
+import { invoiceListCsv, workOrderListCsv } from "../list-export/listExportCsv";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
 
 type BillingSortKey = "invoice" | "date" | "work_order" | "store" | "territory" | "total" | "status" | "recent";
 
@@ -455,6 +459,15 @@ export default function BillingInvoiceList(props: any) {
             </button>
             {expanded.ready !== false && (
               <div id="billing-bucket-ready" style={{ borderTop: `1px solid ${T.borderSoft}` }}>
+                <div style={{ padding: "10px 14px" }}>
+                  <ListExportControl label="Export Ready to Bill work orders list"
+                    identity={JSON.stringify([directoryActorScope(currentUser), "ready", pagingSignature, search])}
+                    enabled={page === "billing" && !controller && currentUser?.active === true}
+                    disabled={readyQuery.isFetching || search.trim() !== deferredSearch}
+                    read={(signal, progress) => exportWorkOrderRows({ scope: "ready_to_bill", search: deferredSearch,
+                      sort: "newest", tableSortColumn: readySortColumn, tableSortDirection: sortDirection }, signal, progress)}
+                    format={workOrderListCsv} fileName="p1-ready-to-bill.csv" />
+                </div>
                 {visibleReadyWorkOrders.map((workOrder: any, index: number) => (
                   <div
                     key={workOrder.id}
@@ -558,6 +571,16 @@ export default function BillingInvoiceList(props: any) {
               </button>
               {isExpanded && (
                 <div id={`billing-bucket-${bucket.id}`} style={{ borderTop: `1px solid ${T.borderSoft}` }}>
+                  <div style={{ padding: "10px 14px" }}>
+                    <ListExportControl label={`Export ${bucket.label} billing list`}
+                      identity={JSON.stringify([directoryActorScope(currentUser), bucket.id, pagingSignature, search])}
+                      enabled={page === "billing" && currentUser?.active === true}
+                      disabled={bucket.query.isFetching || search.trim() !== deferredSearch}
+                      read={(signal, progress) => contractorBucket
+                        ? exportContractorInvoiceRows({ state: "approved", search: deferredSearch, sort: contractorSort, direction: sortDirection }, signal, progress)
+                        : exportBillingBucketRows(bucket.id, { search: deferredSearch, sort: staffSort, direction: sortDirection }, signal, progress)}
+                      format={invoiceListCsv} fileName={`p1-billing-${bucket.id}.csv`} />
+                  </div>
                   <BillingInvoiceRows
                     invoices={invoiceRows}
                     contractorBucket={contractorBucket}

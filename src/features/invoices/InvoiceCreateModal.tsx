@@ -162,7 +162,10 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
       lines: initialLines(),
     },
   });
-  const numberField = register("num", { onChange: () => { numTouchedRef.current = true; setNumTouched(true); } });
+  const numberField = register("num", { onChange: () => {
+    numTouchedRef.current = true; setNumTouched(true);
+    setActionFeedback(current => current?.field === "num" ? null : current);
+  } });
   const { fields, append, remove, replace } = useFieldArray({ control, name: "lines" });
   const watchedLines = watch("lines") || [];
   const watchedTax = watch("tax");
@@ -620,7 +623,18 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
         </div>
 
         <div className="modal-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span><input aria-label="Invoice #" aria-invalid={Boolean(errors.num)} aria-describedby={errors.num ? `${formId}-number-error` : undefined} {...numberField} ref={input => { numberField.ref(input); numberInputRef.current = input; }} readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557" style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink, fontSize: 13, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />{errors.num && <span id={`${formId}-number-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}</label>
+          <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice #</span>
+            <input aria-label="Invoice #" aria-invalid={Boolean(errors.num) || actionFeedback?.field === "num"}
+              aria-describedby={[errors.num ? `${formId}-number-error` : "",
+                actionFeedback?.field === "num" ? `${formId}-action-feedback` : ""].filter(Boolean).join(" ") || undefined}
+              {...numberField} ref={input => { numberField.ref(input); numberInputRef.current = input; }}
+              readOnly={isRejectedResubmission} aria-readonly={isRejectedResubmission} placeholder="e.g. 6557"
+              style={{ width: "100%", padding: "10px 13px", borderRadius: 10,
+                border: `1px solid ${errors.num || actionFeedback?.field === "num" ? T.danger : T.border}`,
+                background: isRejectedResubmission ? T.surfaceSoft : T.surface, color: T.ink,
+                fontSize: 16, cursor: isRejectedResubmission ? "not-allowed" : "text" }} />
+            {errors.num && <span id={`${formId}-number-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.num.message}</span>}
+          </label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Invoice date</span><input type="date" aria-label="Invoice date" aria-invalid={Boolean(errors.invoiceDate)} aria-describedby={errors.invoiceDate ? `${formId}-invoice-date-error` : undefined} {...register("invoiceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.invoiceDate && <span id={`${formId}-invoice-date-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.invoiceDate.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Service date</span><input type="date" aria-label="Service date" aria-invalid={Boolean(errors.serviceDate)} aria-describedby={errors.serviceDate ? `${formId}-service-date-error` : undefined} {...register("serviceDate")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }} />{errors.serviceDate && <span id={`${formId}-service-date-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.serviceDate.message}</span>}</label>
           <label><span style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Terms</span><Sel aria-label="Terms" aria-invalid={Boolean(errors.terms)} aria-describedby={errors.terms ? `${formId}-terms-error` : undefined} {...register("terms")} style={{ width: "100%", padding: "10px 13px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, color: T.ink, fontSize: 13 }}><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></Sel>{errors.terms && <span id={`${formId}-terms-error`} role="alert" style={{ fontSize: 11, color: T.danger }}>{errors.terms.message}</span>}</label>
@@ -961,11 +975,17 @@ export default function InvoiceCreateModal(props: InvoiceModalProps) {
         </div>
 
         {actionFeedback && (
-          <div ref={feedbackPanelRef} role="alert" aria-live="assertive" tabIndex={-1} data-invoice-action-feedback
+          <div ref={feedbackPanelRef} id={`${formId}-action-feedback`} role="alert" aria-live="assertive" tabIndex={-1} data-invoice-action-feedback
             style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, fontSize: 12, lineHeight: 1.5,
               color: actionFeedback.kind === "warning" ? T.warn : T.danger,
               background: actionFeedback.kind === "warning" ? T.warnSoft : T.dangerSoft }}>
             {actionFeedback.message}
+            {actionFeedback.field === "num" && <button type="button" className="btn-soft"
+              style={{ display: "block", marginTop: 8, minHeight: 44 }}
+              onClick={() => {
+                numberInputRef.current?.scrollIntoView({ block: "center" });
+                numberInputRef.current?.focus({ preventScroll: true }); numberInputRef.current?.select();
+              }}>Review invoice number</button>}
           </div>
         )}
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>

@@ -44,6 +44,11 @@ import { useWorkOrderNteWaitIndicatorsQuery } from "../billing/queries";
 import { canViewNteApprovalWaitIndicator } from "../billing/nteApprovalWait";
 import { resolveWorkOrderCollectionState, WorkOrderCollectionNotice } from "./WorkOrderCollectionNotice";
 import WorkOrderStatusLegend from "./WorkOrderStatusLegend";
+import { ListExportControl } from "../list-export/ListExportControl";
+import { exportWorkOrderRows } from "../list-export/listExportReads";
+import { workOrderListCsv } from "../list-export/listExportCsv";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
+import type { WorkOrderPageParams } from "./data/workOrderReadContracts";
 
 export default function WorkOrderList(props: any) {
   const {
@@ -168,7 +173,7 @@ export default function WorkOrderList(props: any) {
     exactWorkOrderId,
     !isVaCoordinator && page === "work_orders" && !selectedWO && Boolean(exactWorkOrderId),
   );
-  const workOrderPageQuery = useWorkOrdersPageQuery({
+  const workOrderReadParams: WorkOrderPageParams = {
     scope: exactStoreNumber ? "all" : hideClosed ? "active" : "all",
     search: exactStoreNumber ? "" : deferredSearch,
     contractorId: exactStoreNumber ? null : filterC !== "all" ? filterC : null,
@@ -183,8 +188,6 @@ export default function WorkOrderList(props: any) {
     ntePendingApproval: exactStoreNumber ? false : ntePendingApproval,
     sort: exactStoreNumber ? "newest" : sortBy,
     pendingFirst: exactStoreNumber ? false : isManager,
-    limit: pageSize,
-    cursor: effectiveCursor.cursor,
     storeNumber: scopedStoreNumber,
     tableSortColumn: exactStoreNumber ? "created" : tableSort.column,
     tableSortDirection: exactStoreNumber ? "desc" : tableSort.direction,
@@ -196,6 +199,9 @@ export default function WorkOrderList(props: any) {
     createdDateFilter: exactStoreNumber ? undefined : deferredColumnFilters.createdDate,
     updatedDateFilter: exactStoreNumber ? undefined : deferredColumnFilters.updatedDate,
     slaFilter: exactStoreNumber ? "all" : deferredColumnFilters.sla === "overdue" ? "overdue" : "all",
+  };
+  const workOrderPageQuery = useWorkOrdersPageQuery({ ...workOrderReadParams,
+    limit: pageSize, cursor: effectiveCursor.cursor,
   }, listQueryEnabled && !isVaCoordinator);
 
   const serverPage = isVaCoordinator && vaWorkOrdersQuery.data
@@ -527,6 +533,17 @@ export default function WorkOrderList(props: any) {
               </button>
             )}
           </div>
+
+          {!isVaCoordinator && <div style={{ marginBottom: 14 }}>
+            <ListExportControl
+              label="Export work orders list"
+              identity={JSON.stringify([directoryActorScope(currentUser), cursorSignature, search, columnFilters])}
+              enabled={page === "work_orders" && !selectedWO && currentUser?.active === true}
+              disabled={activeWorkOrderQuery.isFetching || search !== deferredSearch || columnFilters !== deferredColumnFilters}
+              read={(signal, progress) => exportWorkOrderRows(workOrderReadParams, signal, progress, exactWorkOrderId)}
+              format={workOrderListCsv} fileName="p1-work-orders.csv"
+            />
+          </div>}
 
           {!isVaCoordinator && exactWorkOrderId && (
             <div

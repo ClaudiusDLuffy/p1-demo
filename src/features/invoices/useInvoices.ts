@@ -62,10 +62,10 @@ const invTotal = (lines: any[], tax: number) => invSubtotal(lines) + (parseFloat
 
 export default function useInvoices({ currentUser, fire, initialInvoiceId = null }: any) {
   const invoiceReporter = (isCurrent: () => boolean, onFeedback?: InvoiceFeedbackReporter) =>
-    (message: string, kind: InvoiceActionFeedback["kind"] = "error") => {
+    (message: string, kind: InvoiceActionFeedback["kind"] = "error", field?: InvoiceActionFeedback["field"]) => {
       if (!isCurrent()) return;
       fire(message);
-      onFeedback?.({ kind, message });
+      onFeedback?.({ kind, message, ...(field ? { field } : {}) });
     };
   const qc = useQueryClient();
   const readScope = directoryActorScope(currentUser);
@@ -345,7 +345,7 @@ export default function useInvoices({ currentUser, fire, initialInvoiceId = null
       invalidateWorkOrderData();
       invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
-        report(safeErrorMessage(e));
+        report(safeErrorMessage(e), "error", "num");
       } else {
         report(`Draft save failed: ${safeErrorMessage(e)}`);
       }
@@ -504,7 +504,7 @@ export default function useInvoices({ currentUser, fire, initialInvoiceId = null
       invalidateWorkOrderData();
       invalidateInvoiceData();
       if (e?.code === "INVOICE_NUM_CONFLICT") {
-        report(safeErrorMessage(e));
+        report(safeErrorMessage(e), "error", "num");
       } else if (isRpcConflict(e)) {
         report(rpcConflictMessage("Invoice"));
       } else {
