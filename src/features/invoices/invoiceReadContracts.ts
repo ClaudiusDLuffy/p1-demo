@@ -1,6 +1,7 @@
 import { AppError } from "../../lib/errors/AppError";
 import { STAFF_BILLING_LINE_TYPES } from "../../lib/staffBilling";
 import type { InvoiceLineSubtotalSummary } from "../../lib/invoiceLineSubtotals";
+import { BillingPartPriceCorrectionSchema, type BillingPartPriceCorrection } from "../../lib/billingPartPriceCorrection";
 
 const headerStrings = {
   workOrderId: "work_order_id", externalWorkOrderId: "external_work_order_id", storeNumber: "store_number", contractorId: "contractor_id",
@@ -38,6 +39,7 @@ export type InvoiceLine = {
   qty: number; rate: number; amount: number; isTaxable: boolean;
   sourceInvoiceLineId: string | null; sourceWorkOrderPartId: string | null;
   sourceUnitCost: number | null; markupPercent: number | null;
+  priceCorrection?: BillingPartPriceCorrection | null;
 };
 export type InvoiceLinePage = {
   projection: "line_page"; items: InvoiceLine[]; invoiceVersion: number;
@@ -172,7 +174,13 @@ export function parseInvoiceLinePage(value: unknown, raw = true): InvoiceLinePag
       sourceInvoiceLineId: nullableText(field("sourceInvoiceLineId", "source_invoice_line_id")),
       sourceWorkOrderPartId: nullableText(field("sourceWorkOrderPartId", "source_work_order_part_id")),
       sourceUnitCost: nullableNumber(field("sourceUnitCost", "source_unit_cost")),
-      markupPercent: nullableNumber(field("markupPercent", "markup_percent")) };
+      markupPercent: nullableNumber(field("markupPercent", "markup_percent")),
+      ...(field("priceCorrection", "price_correction") != null ? {
+        priceCorrection: (() => {
+          const parsed = BillingPartPriceCorrectionSchema.safeParse(field("priceCorrection", "price_correction"));
+          return parsed.success ? parsed.data : invalid();
+        })(),
+      } : {}) };
   });
   const nextCursor = page.nextCursor == null ? null : text(page.nextCursor, 8192);
   const pageSize = integer(page.pageSize, 1);

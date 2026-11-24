@@ -16,7 +16,7 @@ const linePage = (extra: Record<string, unknown> = {}) => ({
     qty: 2, rate: 50, amount: 100, is_taxable: false }], ...extra,
 });
 
-test("current compact billing list is one rows RPC, no line/detail fanout or duplicate aliases", async () => {
+test("current compact billing list uses rows plus bounded NTE flags, no line/detail fanout or duplicate aliases", async () => {
   const h = billingRouteHarness({ compactRpc: name => name === "list_staff_invoices_rows_v2"
     ? { data: { items: [summary()], hasMore: true, nextCursor: "synthetic-next" }, error: null } : undefined });
   const response = await h.handlers.GET(h.request("GET", undefined, "?contract=compact-v1&response=rows"));
@@ -31,7 +31,8 @@ test("current compact billing list is one rows RPC, no line/detail fanout or dup
   assert.ok(!("lines" in body.items[0]));
   assert.ok(!("wot" in body.items[0]));
   assert.doesNotMatch(text, /SYNTHETIC_PRIVATE_FIELD|invoice_date_raw|sourceInvoices/);
-  assert.deepEqual(h.calls.filter(call => call.name.startsWith("rpc:")).map(call => call.name), ["rpc:list_staff_invoices_rows_v2"]);
+  assert.deepEqual(h.calls.filter(call => call.name.startsWith("rpc:")).map(call => call.name),
+    ["rpc:list_staff_invoices_rows_v2", "rpc:list_staff_invoice_nte_wait_flags_v1"]);
   assert.ok(!h.calls.some(call => ["from:invoice_lines", "from:staff_invoice_sources", "from:invoices", "from:work_orders"].includes(call.name)));
 });
 
@@ -44,7 +45,8 @@ test("current compact exact billing summary returns authoritative header without
   assert.equal(body.invoice.lineCount, 1000);
   assert.equal(body.invoice.total, 525);
   assert.ok(!("lines" in body.invoice));
-  assert.equal(h.calls.filter(call => call.name.startsWith("rpc:")).length, 1);
+  assert.deepEqual(h.calls.filter(call => call.name.startsWith("rpc:")).map(call => call.name),
+    ["rpc:get_invoice_summary_v1", "rpc:list_staff_invoice_nte_wait_flags_v1"]);
 });
 
 for (const cursor of ["", "&cursor=synthetic-previous"]) test(`line page uses one header gate and one bounded RPC, never a count: ${cursor || "first"}`, async () => {
