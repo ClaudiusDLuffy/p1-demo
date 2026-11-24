@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AppError } from "./errors/AppError";
-import { normalizeUnknownError } from "./errors/normalizeUnknown";
+import { normalizeUnknownError, safeErrorMessage } from "./errors/normalizeUnknown";
+import { safeContractorInvoiceError } from "./contractorInvoiceCommands";
 import { publicError } from "./errors/publicError";
 import { queryRetry, queryRetryDelay } from "./errors/retryPolicy";
 import { normalizeCorrelationId } from "./observability/correlationId";
@@ -35,4 +36,16 @@ test("correlation input accepts only normalized UUIDs, never tokens", () => {
     assert.match(normalizeCorrelationId(value), /^[0-9a-f-]{36}$/);
     assert.notEqual(normalizeCorrelationId(value), value);
   }
+});
+
+test("contractor invoice-number conflicts retain actionable safe feedback instead of a generic conflict", () => {
+  const original = safeContractorInvoiceError({ code: "23505", message: "private SQL fixture-secret" });
+  const message = safeErrorMessage(original);
+  assert.match(message, /invoice number already exists for this contractor/i);
+  assert.match(message, /another work order/i);
+  assert.doesNotMatch(message, /conflicts with the current record|private SQL|fixture-secret/);
+  assert.equal(queryRetry(0, original), false);
+  // A unique violation outside the invoice command remains generic: do not
+  // infer invoice ownership from an arbitrary provider constraint error.
+  assert.equal(normalizeUnknownError({ code: "23505" }).code, "CONFLICT");
 });

@@ -24,6 +24,10 @@ import { useUnsavedChangesGuard } from "../../lib/forms/useUnsavedChangesGuard";
 import { useCursorPagination } from "../../lib/useCursorPagination";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
 import { useInvoicesPageQuery } from "./queries";
+import { ListExportControl } from "../list-export/ListExportControl";
+import { exportContractorInvoiceRows } from "../list-export/listExportReads";
+import { invoiceListCsv } from "../list-export/listExportCsv";
+import { directoryActorScope } from "../../lib/counts/queryKeys";
 
 type InvoiceWorkOrderIdentity = {
   wot?: string | null;
@@ -125,13 +129,14 @@ export default function InvoiceList(props: any) {
     previous: previousPage,
     next: nextPage,
   } = useCursorPagination(pagingSignature);
-  const invoicePageQuery = useInvoicesPageQuery({
+  const invoiceReadParams = {
     state: invTab || "all",
     search: deferredSearch,
     sort: sortKey,
     direction: sortDirection,
-    limit: 25,
-    cursor: pagePosition.cursor,
+  };
+  const invoicePageQuery = useInvoicesPageQuery({ ...invoiceReadParams,
+    limit: 25, cursor: pagePosition.cursor,
   }, page === "invoices" && !selectedInvoice);
   const visibleInvoices: any[] = useMemo(
     () => (invoicePageQuery.data?.items || []) as any[],
@@ -346,6 +351,14 @@ export default function InvoiceList(props: any) {
                     />
                   </label>
                 </div>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <ListExportControl label="Export contractor invoices list"
+                  identity={JSON.stringify([directoryActorScope(currentUser), pagingSignature, search])}
+                  enabled={page === "invoices" && !selectedInvoice && currentUser?.active === true}
+                  disabled={invoicePageQuery.isFetching || search.trim() !== deferredSearch}
+                  read={(signal, progress) => exportContractorInvoiceRows(invoiceReadParams, signal, progress)}
+                  format={invoiceListCsv} fileName="p1-contractor-invoices.csv" />
               </div>
               {canBatchReview && selectedReviewInvoices.length > 0 && (
                 <div
