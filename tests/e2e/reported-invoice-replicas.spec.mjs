@@ -89,7 +89,7 @@ test('reported capital: approved quote without a submission event requires expli
   const dialog = page.getByRole('dialog', { name: 'Close out capital', exact: true });
   await expect(dialog).toContainText(`Using quote #${f.staffNumber}`);
   await expect(dialog.getByRole('checkbox', { name: /Mark this quote submitted now/ })).not.toBeChecked();
-  await dialog.getByRole('button', { name: 'Confirm completed and billed', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Close and send to History', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('Confirm the actual quote submission');
   expect(closeCommands).toHaveLength(0); expect(reportedInvoiceSnapshot(f)).toEqual(before);
   await page.screenshot({ path: testInfo.outputPath('capital-replica-attestation.png') });
@@ -139,7 +139,7 @@ test('reported capital without a P1 quote: reproduce missing quote-reference val
   await dialog.getByLabel('Existing billed invoice reference').fill('SYNTHETIC-7E-INVOICE');
   await dialog.getByLabel('Actual billing date').fill('2026-10-27');
   await dialog.getByRole('checkbox', { name: /I confirm this external quote was submitted and approved/ }).check();
-  await dialog.getByRole('button', { name: 'Confirm completed and billed', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Close and send to History', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('Enter the approved quote reference from 7-Eleven');
   await expect(dialog.getByLabel('Quote reference in 7-Eleven')).toBeFocused();
   await expect(dialog.getByLabel('Quote reference in 7-Eleven')).toHaveAttribute('aria-invalid', 'true');
@@ -148,7 +148,7 @@ test('reported capital without a P1 quote: reproduce missing quote-reference val
   await page.screenshot({ path: testInfo.outputPath('capital-no-quote-reference-blocked.png') });
 
   await dialog.getByLabel('Quote reference in 7-Eleven').fill('SYNTHETIC-APPROVED-QUOTE');
-  await dialog.getByRole('button', { name: 'Confirm completed and billed', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Close and send to History', exact: true }).click();
   await expect(dialog).toBeHidden();
   const after = reportedInvoiceSnapshot(f);
   expect(after.status).toBe('closed'); expect(after.functionalStatus).toBe('Completed');

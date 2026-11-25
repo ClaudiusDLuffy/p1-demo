@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal } from "../../components/ui/Modal";
 import { Input } from "../../components/ui/Input";
 import { T } from "../../lib/constants";
@@ -10,6 +10,8 @@ import { directoryActorScope } from "../../lib/counts/queryKeys";
 import { useDirectoryActor } from "../directory/queries";
 import { canRecordExternalBilling } from "../billing/externalBillingContracts";
 import { useWorkOrderByIdQuery } from "./queries";
+import { loadCapitalCloseOutEvidence } from "./capitalCloseOutEvidence";
+import { workOrderCloseOutOptions } from "../../lib/workOrderCloseOut";
 import { capitalCloseOutError, createCapitalCloseOutAttempt, runCapitalCloseOutAttempt, validateCapitalCloseOutForm,
   type CapitalCloseOutField, type CapitalCloseOutFieldError, type CapitalCloseOutOutcome, type CapitalCloseOutReceipt } from "./capitalCloseOut";
 
@@ -20,7 +22,6 @@ export type CapitalCloseOutDocument = {
 type Props = {
   workOrderId: string; documents: readonly CapitalCloseOutDocument[]; hasCompleteEvidence: boolean;
   billedBlocker?: string; completionBlocker?: string;
-  canLoadMoreHistory?: boolean; historyLoading?: boolean; onLoadMoreHistory?(): Promise<void>;
   onReviewDocument(documentId: string | null): void;
   onClose(): void; onDone?(outcome: CapitalCloseOutOutcome): void;
 };
@@ -31,6 +32,22 @@ export function CapitalCloseOutModal(props: Props) {
   const actor = useDirectoryActor(); const qc = useQueryClient(); const id = useId();
   const work = useWorkOrderByIdQuery(workOrderId);
   const scope = JSON.stringify([directoryActorScope(actor), workOrderId]);
+  const history = useQuery({
+    queryKey: ["capital-close-out-evidence", scope, work.data?.lifecycleVersion, work.data?.updatedAt],
+    queryFn: ({ signal }) => loadCapitalCloseOutEvidence(work.data!, signal),
+    enabled: !props.hasCompleteEvidence && work.data?.id === workOrderId && canRecordExternalBilling(actor),
+    staleTime: 0, retry: false,
+  });
+  const loadedHistory = props.hasCompleteEvidence || history.isError || history.isFetching ? undefined : history.data;
+  const hasCompleteEvidence = props.hasCompleteEvidence || Boolean(loadedHistory);
+  const checkedOptions = loadedHistory && work.data ? workOrderCloseOutOptions({
+    workOrder: { ...work.data, visits: loadedHistory.visits,
+      hasPendingSevenElevenSync: work.data.hasPendingSevenElevenSync || loadedHistory.hasPendingSevenElevenSync,
+      hasPendingContractorAttention: work.data.hasPendingContractorAttention || loadedHistory.hasPendingContractorAttention },
+    hasCompleteEvidence: true, hasCurrentInvoice: false, hasStaffDocuments: loadedHistory.documents.length > 0,
+    hasAnyDocuments: loadedHistory.documents.length > 0,
+    hasUnresolvedContractorInvoices: loadedHistory.hasUnresolvedContractorInvoices, canCloseFollowUp: false,
+  }) : null;
   const session = useRef({ scope, generation: 0, mounted: true });
   if (session.current.scope !== scope) session.current = { scope, generation: session.current.generation + 1, mounted: true };
   useEffect(() => { session.current.mounted = true; return () => { session.current.mounted = false; session.current.generation++; }; }, []);
@@ -57,13 +74,18 @@ export function CapitalCloseOutModal(props: Props) {
   const sending = useRef(false); const attempt = useRef<ReturnType<typeof createCapitalCloseOutAttempt> | null>(null);
   const attemptScope = useRef<string | null>(null);
   const reconciling = uncertain && attempt.current !== null && attemptScope.current === scope;
-  const sorted = [...props.documents].sort((a, b) => Number(b.documentKind === "invoice") - Number(a.documentKind === "invoice")
+  const sorted = [...(loadedHistory?.documents ?? props.documents)].sort((a, b) => Number(b.documentKind === "invoice") - Number(a.documentKind === "invoice")
     || Date.parse(b.updatedAt || b.createdAt || "") - Date.parse(a.updatedAt || a.createdAt || ""));
   const document = documentId ? sorted.find(row => row.id === documentId) : sorted[0];
   const needsSubmission = !document || (document.documentKind === "capital_quote"
     && (!document.submissionRecorded || !["approved", "paid"].includes(document.state)));
   const reference = invoiceReference ?? document?.num ?? "";
-  const blocker = props.completionBlocker || (outcome === "billed" ? props.billedBlocker : undefined);
+  const checkedCompletion = checkedOptions?.find(option => option.action === "capital_to_billing");
+  const checkedBilling = checkedOptions?.find(option => option.action === "capital_billed");
+  const changedCapital = "This capital changed. Close and reopen the form to review its current status.";
+  const completionBlocker = checkedOptions ? checkedCompletion ? checkedCompletion.blocked : changedCapital : props.completionBlocker;
+  const billedBlocker = checkedOptions ? checkedBilling ? checkedBilling.blocked : changedCapital : props.billedBlocker;
+  const blocker = completionBlocker || (outcome === "billed" ? billedBlocker : undefined);
   const dirty = !receipt && Boolean(outcome !== "billed" || documentId || invoiceReference !== null || quoteReference || billedOn || markQuoteSubmitted);
   const dismissal = useUnsavedChangesGuard({ dirty, busy, scopeKey: scope, onClose });
   const clearFieldError = (field: CapitalCloseOutField) => {
@@ -81,7 +103,7 @@ export function CapitalCloseOutModal(props: Props) {
     if (attempt.current && attemptScope.current !== scope) {
       setError("The account or work order changed. Close and reopen this form before continuing."); return;
     }
-    if (!reconciling && (!work.data || work.data.id !== workOrderId || work.isError || !props.hasCompleteEvidence || blocker)) {
+    if (!reconciling && (!work.data || work.data.id !== workOrderId || work.isError || !hasCompleteEvidence || blocker)) {
       setError(blocker || "Load the complete current work order, invoice, and activity history first."); return;
     }
     if (!reconciling) {
@@ -167,20 +189,22 @@ export function CapitalCloseOutModal(props: Props) {
             {fieldFeedback("billedOn")}
           </>}
         </fieldset>
-        {!props.hasCompleteEvidence && <div className="space-y-2"><p role="status">Complete invoice and activity history is needed to avoid duplicate billing.</p>
-          {props.canLoadMoreHistory && props.onLoadMoreHistory && <button type="button" className="btn-soft" disabled={busy || uncertain || props.historyLoading}
-            onClick={async () => { try { await props.onLoadMoreHistory?.(); } catch { setError("History could not load. Retry before confirming."); } }}>
-            {props.historyLoading ? "Loading history…" : "Load more close-out history"}</button>}</div>}
+        {!hasCompleteEvidence && <div className="space-y-2" aria-live="polite">
+          {history.isError ? <><p role="alert" className="text-sm text-red-700">The complete history could not be checked. Nothing was changed. Retry before closing.</p>
+            <button type="button" className="btn-soft min-h-11" disabled={busy || uncertain || history.isFetching}
+              onClick={() => void history.refetch()}>Retry history check</button></>
+            : <p role="status">Checking invoice, activity and visit history automatically…</p>}
+        </div>}
         {work.isPending && <p role="status">Loading current capital…</p>}
         {work.isError && <p role="alert">The capital could not load. <button type="button" disabled={busy} onClick={() => void work.refetch()}>Retry loading</button></p>}
-        {blocker && <p role="status" className="text-sm text-amber-800">{blocker}</p>}
+        {blocker && hasCompleteEvidence && <p role="status" className="text-sm text-amber-800">{blocker}</p>}
         <p className="text-sm">{outcome === "billed" ? "By confirming, you attest the job is complete and already billed using this reference and date." : "By confirming, you attest the job is complete but still needs billing."} No new invoice or CSV export is created.</p>
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         <div className="flex flex-wrap justify-end gap-2">
           {document && <button type="button" className="btn-soft" disabled={busy || uncertain} onClick={() => props.onReviewDocument(document.id)}>Review existing document</button>}
           <button type="button" className="btn-soft" disabled={busy} onClick={() => dismissal.requestClose("cancel_button")}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy || (!reconciling && (!work.data || work.isError || !props.hasCompleteEvidence || Boolean(blocker)))}>
-            {busy ? "Recording…" : uncertain ? "Retry same request" : outcome === "billed" ? "Confirm completed and billed" : "Confirm send to billing"}</button>
+          <button type="submit" className="btn-primary min-h-11" disabled={busy || (!reconciling && (!work.data || work.isError || !hasCompleteEvidence || Boolean(blocker)))}>
+            {busy ? "Recording…" : uncertain ? "Retry same request" : outcome === "billed" ? "Close and send to History" : "Confirm send to billing"}</button>
         </div>
       </form>}
   </Modal>{dismissal.dialog}</>;
