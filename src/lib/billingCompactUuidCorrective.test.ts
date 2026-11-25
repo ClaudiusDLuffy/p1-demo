@@ -66,7 +66,8 @@ for (const mode of ["summary", "sources", "lines"] as const) {
       assert.deepEqual(rpc.payload, mode === "sources" ? { p_invoice_ids: [id] }
         : mode === "summary" ? { p_invoice_id: id }
         : { p_invoice_id: id, p_limit: 50, p_cursor: null, p_expected_version: 2 });
-      assert.equal(h.calls.filter(call => call.name.startsWith("rpc:")).length, 1);
+      assert.equal(h.calls.filter(call => call.name.startsWith("rpc:")).length, mode === "summary" ? 2 : 1);
+      if(mode === "summary")assert.deepEqual(h.calls.find(call=>call.name==="rpc:list_staff_invoice_nte_wait_flags_v1")?.payload,{p_invoice_ids:[id]});
       assert.equal(h.calls.filter(call => call.name === "from:invoices").length, mode === "lines" ? 1 : 0);
     }
   });

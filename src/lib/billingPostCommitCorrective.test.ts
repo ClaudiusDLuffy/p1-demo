@@ -21,13 +21,14 @@ function transport(value: unknown, onFetch?: (signal: AbortSignal | null | undef
     global: { fetch: async (input, init) => {
       calls.push({ url: String(input), body: init?.body, signal: init?.signal });
       onFetch?.(init?.signal);
-      return Response.json(value);
+      return Response.json(String(input).endsWith("/list_staff_invoice_nte_wait_flags_v1")
+        ? {items:[{invoiceId,waitingOnNteApproval:false}]} : value);
     } },
   });
   return { client, calls };
 }
 
-test("post-commit installed transport uses one exact summary RPC with the identical request signal", async () => {
+test("post-commit installed transport uses bounded summary and NTE RPCs with the identical request signal", async () => {
   const controller = new AbortController();
   const h = transport(summary());
   const result = await loadStaffInvoiceById(h.client, invoiceId, controller.signal);
@@ -37,10 +38,14 @@ test("post-commit installed transport uses one exact summary RPC with the identi
   assert.equal(result.contractorAssignmentVersion, 3);
   assert.equal(result.lineCount, 1000);
   assert.equal("lines" in result, false);
-  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls.length, 2);
   assert.equal(h.calls[0].url, "https://synthetic.invalid/rest/v1/rpc/get_invoice_summary_v1");
   assert.equal(h.calls[0].body, JSON.stringify({ p_invoice_id: invoiceId }));
   assert.equal(h.calls[0].signal, controller.signal);
+  assert.equal(h.calls[1].url,"https://synthetic.invalid/rest/v1/rpc/list_staff_invoice_nte_wait_flags_v1");
+  assert.equal(h.calls[1].body,JSON.stringify({p_invoice_ids:[invoiceId]}));
+  assert.equal(h.calls[1].signal,controller.signal);
+  assert.equal(result.waitingOnNteApproval,false);
   assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024);
 });
 

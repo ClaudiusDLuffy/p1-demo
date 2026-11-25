@@ -35,6 +35,7 @@ async function asAccount(browser, account, run) {
   try {
     await login(page, account);
     await run(page);
+    await waitForApplicationRequestsToSettle(page);
     expect(fatal, `${account.name} browser errors and HTTP 5xx responses`).toEqual([]);
   } finally {
     await context.close();

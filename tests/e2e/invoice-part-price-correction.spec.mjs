@@ -53,11 +53,11 @@ test.afterEach(async({page})=>{
   // Keep that context-level external-network guard active until closure.
   await page.unrouteAll({behavior:'wait'});
 });
-for(const width of [1440,390]) for(const basis of ['purchase_cost','billing_rate']) {
+for(const width of [1440,390,320]) for(const basis of ['purchase_cost','billing_rate']) {
   test(`part price ${basis}: apply, cancel, save, reopen and reload at ${width}px`,async({page},info)=>{
     const f=invoicePartPriceFixture();const rate=basis==='purchase_cost'?'4094.21':'3275.37';
     const reason='Verified synthetic contractor receipt for UI testing';
-    await page.setViewportSize({width,height:width===390?844:1000});
+    await page.setViewportSize({width,height:width<=390?568:1000});
     await login(page,accounts.backoffice);await billing(page);
     await page.getByRole('button',{name:'+ Create Invoice',exact:true}).click();
     let dialog=page.getByRole('dialog',{name:'Create P1 to 7-Eleven invoice',exact:true});
@@ -88,6 +88,22 @@ for(const width of [1440,390]) for(const basis of ['purchase_cost','billing_rate
     await expect(dialog.getByRole('button',{name:'Save as Draft',exact:true})).toBeEnabled();
     await dialog.getByRole('button',{name:'Save as Draft',exact:true}).click();
     await expect(dialog).toBeHidden();
+    if(width<=390){
+      const header=page.locator('.invoice-top-header');
+      await expect(header.locator('.invoice-company-details')).toBeVisible();
+      const bounds=await header.evaluate(element=>{
+        const parent=element.getBoundingClientRect();
+        const left=element.querySelector('.invoice-top-header-left').getBoundingClientRect();
+        const right=element.querySelector('.invoice-top-header-right').getBoundingClientRect();
+        return {sellerWidth:right.width,height:parent.height,left:left.left,right:right.right,
+          parentLeft:parent.left,parentRight:parent.right};
+      });
+      expect(bounds.sellerWidth).toBeGreaterThanOrEqual(80);
+      expect(bounds.height).toBeLessThan(240);
+      expect(bounds.left).toBeGreaterThanOrEqual(bounds.parentLeft-1);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.parentRight+1);
+      await page.screenshot({path:info.outputPath('mobile-invoice-header.png')});
+    }
     const saved=invoicePartPriceSnapshot(f);
     expect(saved.purchaseCost).toBe(1.01);expect(saved.invoices).toHaveLength(1);expect(saved.audit).toHaveLength(1);
     expect(saved.audit[0].actor).toBe(f.actor);expect(saved.audit[0].correction).toEqual({basis,amount:3275.37,reason});

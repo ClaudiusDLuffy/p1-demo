@@ -116,10 +116,13 @@ export const DirectorySelect = forwardRef<HTMLInputElement, Props>(function Dire
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [open]);
+  const positioned = position !== null;
   useEffect(() => {
-    if (!open) return;
+    // A hidden first popup commit cannot receive focus. Wait for the visible
+    // positioned commit, and do not steal focus again when scrolling moves it.
+    if (!open || !positioned) return;
     searchInput.current?.focus({ preventScroll: true });
-  }, [open]);
+  }, [open, positioned]);
   const choose = (nextValue: string, item: DirectoryItem | null) => {
     setInternalValue(nextValue);
     onChange?.({ target: { name, value: nextValue }, currentTarget: { name, value: nextValue }, type: "change" }, item);

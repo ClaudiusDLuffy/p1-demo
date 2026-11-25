@@ -1247,6 +1247,8 @@ export type Database = {
           num: string
           paid_at: string | null
           pdf_storage_path: string | null
+          manual_contractor_bill: boolean
+          manual_contractor_bill_note: string | null
           prior_assignment_id: string | null
           prior_assignment_note: string | null
           qbo_invoice_id: string | null
@@ -1293,6 +1295,8 @@ export type Database = {
           num: string
           paid_at?: string | null
           pdf_storage_path?: string | null
+          manual_contractor_bill?: boolean
+          manual_contractor_bill_note?: string | null
           prior_assignment_id?: string | null
           prior_assignment_note?: string | null
           qbo_invoice_id?: string | null
@@ -1339,6 +1343,8 @@ export type Database = {
           num?: string
           paid_at?: string | null
           pdf_storage_path?: string | null
+          manual_contractor_bill?: boolean
+          manual_contractor_bill_note?: string | null
           prior_assignment_id?: string | null
           prior_assignment_note?: string | null
           qbo_invoice_id?: string | null
@@ -3178,6 +3184,9 @@ export type Database = {
     }
     Functions: {
       get_prior_contractor_invoice_context_v1: { Args: { p_work_order_id: string }; Returns: Json };
+      save_verified_manual_contractor_invoice_v1: { Args: { p_work_order_id: string; p_expected_assignment_version: number;
+        p_expected_workflow_cycle: number; p_contractor_id: string; p_invoice_id: string | null;
+        p_expected_invoice_version: number | null; p_operation_id: string; p_payload: Json }; Returns: Json };
       save_prior_contractor_invoice_v1: { Args: { p_work_order_id: string; p_expected_assignment_version: number;
         p_expected_workflow_cycle: number; p_assignment_id: string; p_invoice_id: string | null;
         p_expected_invoice_version: number | null; p_operation_id: string; p_payload: Json }; Returns: Json };

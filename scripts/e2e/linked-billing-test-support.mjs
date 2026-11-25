@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
+import {localTestDatabase,localTestProject} from './local-test-target.mjs';
 
-const container = "supabase_db_p1-demo-e2e";
+const container = localTestDatabase;
 assert.equal(process.env.DOCKER_HOST || "", "");
 assert.equal(process.env.DOCKER_CONTEXT || "", "");
 assert.equal(execFileSync("docker", ["context", "show"], { encoding: "utf8" }).trim(), "desktop-linux");
 assert.equal(execFileSync("docker", ["context", "inspect", "desktop-linux", "--format", "{{.Endpoints.docker.Host}}"], { encoding: "utf8" }).trim(), "unix:///Users/nxs/.docker/run/docker.sock");
-assert.equal(execFileSync("docker", ["inspect", container, "--format", '{{index .Config.Labels "com.supabase.cli.project"}} {{.HostConfig.Privileged}}'], { encoding: "utf8" }).trim(), "p1-demo-e2e false");
+assert.equal(execFileSync("docker", ["inspect", container, "--format", '{{index .Config.Labels "com.supabase.cli.project"}} {{.HostConfig.Privileged}}'], { encoding: "utf8" }).trim(), `${localTestProject} false`);
 const args = ["exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-Atq"];
 export function linkedBillingSql(statement) {
   return execFileSync("docker", args, { input: statement, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();

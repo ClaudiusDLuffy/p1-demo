@@ -75,9 +75,9 @@ test("Tag saves the real value; calculator follows each quote; sent quote revisi
   }
   await openDetail(page,a.id);
   await openQuote(page);
-  await page.getByRole("button",{name:"Submit Quote to 7-Eleven",exact:true}).click();
-  const submit=page.getByRole("dialog",{name:"Confirm capital quote",exact:true});
-  await submit.getByRole("button",{name:"Submit Quote to 7-Eleven",exact:true}).click();
+  await page.getByRole("button",{name:"Mark submitted to 7-Eleven",exact:true}).click();
+  const submit=page.getByRole("dialog",{name:"Mark quote submitted to 7-Eleven",exact:true});
+  await submit.getByRole("button",{name:"Mark submitted to 7-Eleven",exact:true}).click();
   await expect(submit).toBeHidden();
   await expect(page.getByRole("button",{name:"Create quote revision",exact:true})).toBeVisible();
   const original=sql(`select to_jsonb(i)::text from public.invoices i where id='${a.invoice}';`);
@@ -96,8 +96,8 @@ test("Tag saves the real value; calculator follows each quote; sent quote revisi
   await edit.getByLabel("Line 1 description").fill("Synthetic revised labor scope");
   await edit.getByRole("button",{name:"Update Quote",exact:true}).click();
   await expect(edit).toBeHidden();
-  await page.getByRole("button",{name:"Submit Quote to 7-Eleven",exact:true}).click();
-  await page.getByRole("dialog",{name:"Confirm capital quote",exact:true}).getByRole("button",{name:"Submit Quote to 7-Eleven",exact:true}).click();
+  await page.getByRole("button",{name:"Mark submitted to 7-Eleven",exact:true}).click();
+  await page.getByRole("dialog",{name:"Mark quote submitted to 7-Eleven",exact:true}).getByRole("button",{name:"Mark submitted to 7-Eleven",exact:true}).click();
   expect(sql(`select to_jsonb(i)::text from public.invoices i where id='${a.invoice}';`)).toBe(original);
   await page.screenshot({path:testInfo.outputPath("TAG-AND-QUOTE-REVISION.png")});
   await waitForApplicationRequestsToSettle(page);
@@ -108,29 +108,19 @@ test("external quote and completed capital are self-service without duplicate qu
   await login(page,accounts.manager); await openDetail(page,f.id,true);
   await expect(page.getByRole("button",{name:"Capital Completed",exact:true})).toHaveCount(0);
   await page.getByRole("button",{name:"Close out",exact:true}).click();
-  await page.getByRole("dialog",{name:"Close out work order",exact:true}).getByRole("button",{name:"Quote was approved outside the portal",exact:true}).click();
-  const handoff=page.getByRole("dialog",{name:"Record external capital quote",exact:true});
-  await handoff.getByLabel("Approved external quote reference (required)").fill("SYNTHETIC-EXTERNAL-REF");
-  await expect(handoff.getByLabel("Additional details (optional)")).toHaveValue("");
-  await handoff.getByRole("checkbox").check();
-  await handoff.getByRole("button",{name:"Record external capital quote",exact:true}).click();
-  await expect(handoff.getByRole("status")).toContainText("No invoice was created");
-  await handoff.getByRole("button",{name:"Done",exact:true}).click();
-  expect(Number(sql(`select count(*) from public.invoices where work_order_id='${f.id}';`))).toBe(0);
-  await page.getByRole("button",{name:"Close out",exact:true}).click();
-  await page.getByRole("dialog",{name:"Close out work order",exact:true}).getByRole("button",{name:"Installation is complete",exact:true}).click();
-  const completion=page.getByRole("dialog",{name:"Confirm capital installation",exact:true});
-  await expect(completion.getByLabel("Additional details (optional)")).toHaveValue("");
-  await completion.getByRole("button",{name:"Confirm capital installation",exact:true}).click();
-  await expect(completion.getByRole("alert")).toContainText("Confirm the facts");
+  const completion=page.getByRole("dialog",{name:"Close out capital",exact:true});
+  await completion.getByRole("radio",{name:/Completed, send to billing/}).check();
+  await completion.getByLabel("Quote reference in 7-Eleven (required)").fill("SYNTHETIC-EXTERNAL-REF");
+  await completion.getByRole("button",{name:"Confirm send to billing",exact:true}).click();
+  await expect(completion.getByRole("alert")).toContainText("Confirm");
   await completion.getByRole("checkbox").check();
-  await completion.getByRole("button",{name:"Confirm capital installation",exact:true}).click();
-  await expect(completion.getByRole("status")).toContainText("not yet billed or closed");
+  await completion.getByRole("button",{name:"Confirm send to billing",exact:true}).click();
+  await expect(completion).toBeHidden();
   expect(sql(`select status::text||':'||functional_status::text||':'||capital_status||':'||(closed_at is null)::text from public.work_orders where id='${f.id}';`))
     .toBe("pending_invoice:Completed:Installed:true");
-  await completion.getByRole("button",{name:"Done",exact:true}).click();
-  await page.getByRole("button",{name:"Close out",exact:true}).click();
-  await page.getByRole("dialog",{name:"Close out work order",exact:true}).getByRole("button",{name:"Review or prepare final P1 invoice",exact:true}).click();
+  expect(Number(sql(`select count(*) from public.invoices where work_order_id='${f.id}';`))).toBe(0);
+  await page.locator('.billing-ready-row').filter({has:page.getByText(f.id,{exact:true})})
+    .getByRole('button',{name:'Create invoice',exact:true}).click();
   const final=page.getByRole("dialog",{name:"Create P1 to 7-Eleven invoice",exact:true});
   await expect(final).toBeVisible();
   await final.getByRole("button",{name:"+ Labor $110",exact:true}).click();
@@ -148,7 +138,9 @@ test("external quote and completed capital are self-service without duplicate qu
   await page.getByRole("button",{name:"Download SaasAnt CSV",exact:true}).click();
   const download=await downloadPromise;
   const csv=readFileSync(await download.path(),"utf8");
-  expect(csv.split("\r\n")[0]).toContain("Equipment Tag");
+  // The SaasAnt invoice schema calls this column Tag, not the reference-only
+  // contractor export's Equipment Tag column.
+  expect(csv.split("\r\n")[0].split(",")).toContain("Tag");
   expect(csv).toContain("7-ELEVEN: Fountain");
   await openSidebarPage(page,"Capital");
   await expect(page.getByText(f.id,{exact:true})).toHaveCount(0);

@@ -1136,17 +1136,31 @@ export async function markWorkOrderNotesSeen(
   workOrderId: string,
   latestNoteAt: string,
 ): Promise<string> {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(latestNoteAt)
+      || !Number.isFinite(Date.parse(latestNoteAt))) {
+    throw new Error("The work-order note timestamp is invalid.");
+  }
   const sb = supabase();
   const { data, error } = await (sb.from("work_orders") as any)
     .update({ staff_notes_seen_at: latestNoteAt })
     .eq("id", workOrderId)
+    // A late detail refetch can briefly expose the same unread note again.
+    // Make acknowledgement monotonic and idempotent in the database predicate
+    // so duplicate effects cannot advance updated_at during a guarded close.
+    .or(`staff_notes_seen_at.is.null,staff_notes_seen_at.lt.${latestNoteAt}`)
     .select("updated_at")
-    .single();
+    .maybeSingle();
   if (error) throw normalizeUnknownError(error);
-  if (typeof data?.updated_at !== "string" || !data.updated_at) {
+  if (typeof data?.updated_at === "string" && data.updated_at) return data.updated_at;
+  // Another reader may already have acknowledged this or a newer note.
+  // Read its exact concurrency token without touching the work-order row.
+  const { data: current, error: readError } = await sb.from("work_orders")
+    .select("updated_at").eq("id", workOrderId).single();
+  if (readError) throw normalizeUnknownError(readError);
+  if (typeof current?.updated_at !== "string" || !current.updated_at) {
     throw new Error("The work-order read acknowledgment did not return its updated version.");
   }
-  return data.updated_at;
+  return current.updated_at;
 }
 
 /** @deprecated Raw visit writes are denied after 0123; use startWorkOrderVisit. */

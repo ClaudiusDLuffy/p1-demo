@@ -78,7 +78,9 @@ test("same high-fanout billing fixture has a compact bounded page without droppi
   // Preserved Phase7A loadStaffInvoicesPage produces these exact bytes. The
   // earlier 308775 expectation concealed 50 pairs of null versions instead
   // of the verified work-order assignmentVersion:2/workflowCycle:1 facts.
-  assert.equal(legacyBytes, 308475, "Verified Phase7A legacy high-fanout serialization");
+  // The bounded NTE read adds exactly one false marker per staff header.
+  assert.equal(legacyBytes, 308475 + staff.length * bytes({ waitingOnNteApproval: false }) - staff.length,
+    "Legacy high-fanout serialization plus explicit NTE header markers");
   for (const row of legacyValue.items) {
     assert.equal(row.assignmentVersion, 2);
     assert.equal(row.workflowCycle, 1);

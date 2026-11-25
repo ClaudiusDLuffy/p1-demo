@@ -121,16 +121,17 @@ test("capital completion explains an open visit and cannot bypass a missing appr
     insert into public.work_order_visits(work_order_id,contractor_id,checked_in_by,check_in_at)
       select '${active}',id,id,now()-interval '1 hour' from public.profiles where email='e2e.direct@p1.invalid';`);
   await login(page, accounts.manager);
-  let choices = await openSimplified(page, active);
-  await expect(choices.getByRole("button", { name: "Installation is complete", exact: true })).toBeDisabled();
+  await openSimplified(page, active);
+  let choices=page.getByRole("dialog",{name:"Close out capital",exact:true});
+  await expect(choices.getByRole("button", { name: "Close and send to History", exact: true })).toBeDisabled();
   await expect(choices).toContainText("actual checkout");
   await choices.getByRole("button", { name: "Cancel", exact: true }).click();
-  choices = await openSimplified(page, missing);
-  await choices.getByRole("button", { name: "Installation is complete", exact: true }).click();
-  const form = page.getByRole("dialog", { name: "Confirm capital installation", exact: true });
-  await form.getByRole("checkbox").check();
-  await form.getByRole("button", { name: "Confirm capital installation", exact: true }).click();
-  await expect(form.getByRole("alert")).toContainText("approved capital quote is required");
+  await openSimplified(page, missing);
+  const form = page.getByRole("dialog", { name: "Close out capital", exact: true });
+  await form.getByRole("radio",{name:/Completed, send to billing/}).check();
+  await form.getByRole("button", { name: "Confirm send to billing", exact: true }).click();
+  await expect(form.getByRole("alert")).toContainText("quote reference");
+  await expect(form.getByLabel("Quote reference in 7-Eleven (required)",{exact:true})).toHaveAttribute("aria-invalid","true");
   expect(sql(`select status::text from public.work_orders where id='${missing}'`)).toBe("pending_capital_completion");
   expect(Number(sql(`select count(*) from public.work_order_visits where work_order_id='${active}' and check_out_at is null`))).toBe(1);
   await waitForApplicationRequestsToSettle(page);

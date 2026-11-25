@@ -17,6 +17,7 @@ const headerStrings = {
   paymentHoldBy: "payment_hold_by", paymentHoldReason: "payment_hold_reason", contractorName: "contractor_name",
   originalPdfName: "original_pdf_name",
   priorAssignmentId: "prior_assignment_id", priorAssignmentNote: "prior_assignment_note",
+  manualContractorBillNote: "manual_contractor_bill_note",
 } as const;
 type HeaderStrings = { -readonly [Key in keyof typeof headerStrings]?: string | null };
 export type InvoiceSourceSummary = {
@@ -30,6 +31,7 @@ export type InvoiceSummary = HeaderStrings & {
   lineCount: number; sourceCount: number; contractorAssignmentVersion: number | null;
   workflowCycle: number | null; taxRate?: number | null; pdfIsOriginal?: boolean;
   waitingOnNteApproval?: boolean;
+  manualContractorBill?: boolean;
   lineTypeSummary?: InvoiceLineSubtotalSummary; sourceInvoiceIds?: string[];
   sourceInvoices?: InvoiceSourceSummary[];
   contractorCost?: number | null; grossProfit?: number | null; marginPercent?: number | null;
@@ -118,6 +120,9 @@ function parseSummary(value: unknown, raw: boolean): InvoiceSummary {
     waitingOnNteApproval: false,
   };
   const waitingOnNteApproval = field("waitingOnNteApproval", "waiting_on_nte_approval");
+  const manualContractorBill = field("manualContractorBill", "manual_contractor_bill");
+  if (manualContractorBill != null && typeof manualContractorBill !== "boolean") return invalid();
+  result.manualContractorBill = manualContractorBill === true;
   if (waitingOnNteApproval !== undefined) {
     if (typeof waitingOnNteApproval !== "boolean") return invalid();
     result.waitingOnNteApproval = waitingOnNteApproval;

@@ -13,18 +13,22 @@ export const priorInvoiceContextSchema = z.object({
   workOrderId: z.string().min(1), assignmentVersion: version, workflowCycle: version,
   assignments: z.array(z.object({ id: z.uuid(), contractorId: z.uuid(), contractorName: z.string().nullable(),
     assignmentVersion: version, startedAt: z.string().nullable(), endedAt: z.string() })).max(100),
-  drafts: z.array(z.object({ id: z.uuid(), assignmentId: z.uuid(), num: z.string(), invoiceDate: z.iso.date(),
-    total: money, salesTax: money, note: z.string(), state: z.enum(["draft", "rejected"]), invoiceVersion: version, hasPdf: z.boolean() })).max(100),
+  manualIntake: z.object({ eligible: z.boolean(), currentContractorId: z.uuid().nullable() }).optional(),
+  drafts: z.array(z.object({ id: z.uuid(), assignmentId: z.uuid().nullable(), manualContractorId: z.uuid().nullable().optional(),
+    contractorName: z.string().nullable().optional(), num: z.string(), invoiceDate: z.iso.date(),
+    total: money, salesTax: money, note: z.string(), state: z.enum(["draft", "rejected"]), invoiceVersion: version, hasPdf: z.boolean(),
+  }).refine(draft => (draft.assignmentId !== null) !== Boolean(draft.manualContractorId))).max(100),
 });
 export type PriorInvoiceContext = z.infer<typeof priorInvoiceContextSchema>;
 export const priorInvoiceReceiptSchema = z.object({
-  invoiceId: z.uuid(), invoiceNum: z.string(), workOrderId: z.string(), assignmentId: z.uuid(),
+  invoiceId: z.uuid(), invoiceNum: z.string(), workOrderId: z.string(), assignmentId: z.uuid().nullable(),
+  manualContractorId: z.uuid().nullable().optional(),
   assignmentVersion: version, workflowCycle: version, invoiceVersion: version, total: money,
   state: z.enum(["draft", "rejected", "submitted", "revised"]), operationId: z.uuid(), applied: z.boolean(), activityId: z.uuid(),
 });
 export type PriorInvoiceReceipt = z.infer<typeof priorInvoiceReceiptSchema>;
 type Functions = Database["public"]["Functions"];
-type CommandName = "save_prior_contractor_invoice_v1" | "submit_prior_contractor_invoice_v1";
+type CommandName = "save_prior_contractor_invoice_v1" | "submit_prior_contractor_invoice_v1" | "save_verified_manual_contractor_invoice_v1";
 type Transport = <Name extends CommandName>(name: Name, args: Functions[Name]["Args"])
   => PromiseLike<{ data: unknown; error: unknown }>;
 export class PriorInvoiceError extends Error {
@@ -38,7 +42,7 @@ export function priorInvoiceError(cause: unknown): PriorInvoiceError {
   if (code === "42501") return new PriorInvoiceError("Only active operational P1 staff can record prior contractor invoices.");
   if (code === "23505") return new PriorInvoiceError("That invoice number already exists for this contractor. Review the existing bill instead of uploading it again.");
   if (["PT409", "40001"].includes(code || "")) return new PriorInvoiceError("The invoice or assignment changed. Close and reopen this form to review the current record.");
-  if (["22023", "23514", "22007", "22008"].includes(code || "")) return new PriorInvoiceError("Check the past assignment, invoice date, amount and tax. A verified original PDF is required before review.");
+  if (["22023", "23514", "22007", "22008"].includes(code || "")) return new PriorInvoiceError("Check the contractor, past assignment or manual verification, invoice date, amount and tax. A verified original PDF is required before review.");
   if (code === "PGRST202") return new PriorInvoiceError("The prior-contractor invoice database update is not installed yet.");
   if (code === "P0002") return new PriorInvoiceError("This work order or prior invoice is no longer available. Refresh and review its history.");
   return new PriorInvoiceError("The save could not be confirmed. Retry the same unchanged request; do not create another bill.", true);
@@ -67,8 +71,42 @@ export function createPriorInvoiceDraftAttempt(context: PriorInvoiceContext, ass
     } catch (cause) { throw priorInvoiceError(cause); }
   };
 }
+export function createManualInvoiceDraftAttempt(context: PriorInvoiceContext, contractorId: string, fields: PriorInvoiceFields,
+  verified: boolean, existing: PriorInvoiceContext["drafts"][number] | null = null, operationId = crypto.randomUUID()) {
+  const c = priorInvoiceContextSchema.parse(context);
+  if (!verified) throw new PriorInvoiceError("Verify the original invoice, contractor and earlier work, and confirm this is not a duplicate.");
+  if (!z.uuid().safeParse(contractorId).success || (!existing && contractorId === c.manualIntake?.currentContractorId)) {
+    throw new PriorInvoiceError("Select the earlier contractor shown on the original bill. Use the normal invoice workflow for the current contractor.");
+  }
+  if (existing ? existing.assignmentId !== null || existing.manualContractorId !== contractorId
+    : !c.manualIntake?.eligible || c.assignments.length !== 0) {
+    throw new PriorInvoiceError("Verified manual intake is only available when this manually entered work order has no recorded past assignment.");
+  }
+  const payload = Object.freeze({ ...priorInvoiceFieldsSchema.parse(fields), verified: true });
+  const args: Functions["save_verified_manual_contractor_invoice_v1"]["Args"] = Object.freeze({
+    p_work_order_id: c.workOrderId, p_expected_assignment_version: c.assignmentVersion, p_expected_workflow_cycle: c.workflowCycle,
+    p_contractor_id: contractorId, p_invoice_id: existing?.id ?? null, p_expected_invoice_version: existing?.invoiceVersion ?? null,
+    p_operation_id: operationId, p_payload: payload,
+  });
+  return async (transport: Transport) => {
+    try {
+      const { data, error } = await transport("save_verified_manual_contractor_invoice_v1", args); if (error) throw error;
+      const parsed = priorInvoiceReceiptSchema.safeParse(data);
+      if (!parsed.success) throw new PriorInvoiceError("The manual save response could not be verified. Retry the same request.", true);
+      const result = parsed.data;
+      if (result.operationId !== operationId || result.workOrderId !== c.workOrderId || result.assignmentId !== null
+        || result.manualContractorId !== contractorId || result.assignmentVersion !== c.assignmentVersion
+        || result.workflowCycle !== c.workflowCycle || result.invoiceNum !== payload.num || result.total !== payload.total
+        || !["draft", "rejected"].includes(result.state)
+        || (existing && (result.invoiceId !== existing.id || result.invoiceVersion <= existing.invoiceVersion))) {
+        throw new PriorInvoiceError("The manual save response did not match the verified bill. Retry the same request.", true);
+      }
+      return result;
+    } catch (cause) { throw priorInvoiceError(cause); }
+  };
+}
 export function createPriorInvoiceSubmitAttempt(context: PriorInvoiceContext, invoice: { id: string; invoiceVersion: number },
-  operationId = crypto.randomUUID()) {
+  operationId = crypto.randomUUID(), identity?: { assignmentId: string | null; manualContractorId: string | null }) {
   const c = priorInvoiceContextSchema.parse(context);
   const args = { p_invoice_id: invoice.id, p_expected_invoice_version: invoice.invoiceVersion,
     p_expected_assignment_version: c.assignmentVersion, p_expected_workflow_cycle: c.workflowCycle, p_operation_id: operationId };
@@ -80,6 +118,7 @@ export function createPriorInvoiceSubmitAttempt(context: PriorInvoiceContext, in
       const result = parsed.data;
       if (result.operationId !== operationId || result.invoiceId !== invoice.id || result.workOrderId !== c.workOrderId
         || result.assignmentVersion !== c.assignmentVersion || result.workflowCycle !== c.workflowCycle
+        || (identity && (result.assignmentId !== identity.assignmentId || (result.manualContractorId ?? null) !== identity.manualContractorId))
         || result.invoiceVersion <= invoice.invoiceVersion || !["submitted", "revised"].includes(result.state)) {
         throw new PriorInvoiceError("The submission could not be verified. Retry the same request.", true);
       }

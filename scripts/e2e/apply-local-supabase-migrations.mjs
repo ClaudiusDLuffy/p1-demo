@@ -4,11 +4,12 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readMigrationInventory } from "../migration-inventory.mjs";
+import {localTestDatabase,localTestProject} from './local-test-target.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationsDirectory = join(repositoryRoot, "supabase/migrations");
-const container = "supabase_db_p1-demo-e2e";
-const project = "p1-demo-e2e";
+const container = localTestDatabase;
+const project = localTestProject;
 
 function runDocker(arguments_, options = {}) {
   const result = spawnSync("docker", arguments_, {

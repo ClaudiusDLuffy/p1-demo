@@ -84,9 +84,9 @@ test("WOTEST7 preserves an open visit through capital review and resumes as Visi
     await dialog.getByLabel("Line 1 rate").fill("125");
     await dialog.getByRole("button", { name: "Prepare Quote", exact: true }).click();
     await expect(dialog).toBeHidden();
-    await page.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
-    const confirm = page.getByRole("dialog", { name: "Confirm capital quote" });
-    await confirm.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
+    await page.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
+    const confirm = page.getByRole("dialog", { name: "Mark quote submitted to 7-Eleven" });
+    await confirm.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
     await expect(confirm).toBeHidden();
     await page.getByRole("button", { name: `Back to ${WORK_ORDER_ID}`, exact: true }).click();
     await expect(page.getByText("Portal: Pending Capital Completion", { exact: true })).toBeVisible();
@@ -98,7 +98,11 @@ test("WOTEST7 preserves an open visit through capital review and resumes as Visi
   await asAccount(browser, accounts.manager, async page => {
     await openStaffWorkOrder(page);
     await expect(page.getByRole("button", { name: "Waiting for active visit checkout", exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Checkout required before completion", exact: true })).toBeDisabled();
+    await page.getByRole("button",{name:"Close out",exact:true}).click();
+    const close=page.getByRole("dialog",{name:"Close out capital",exact:true});
+    await expect(close.getByRole("button",{name:"Close and send to History",exact:true})).toBeDisabled();
+    await expect(close).toContainText("actual checkout");
+    await close.getByRole("button",{name:"Cancel",exact:true}).click();
   });
 
   // On an iPhone-sized viewport, the assigned technician records the original

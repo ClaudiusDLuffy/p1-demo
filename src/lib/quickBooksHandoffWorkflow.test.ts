@@ -96,7 +96,8 @@ test("the contractor payables package cannot be mistaken for Lynzy's SaasAnt rec
     read("src/features/billing/BillingInvoiceDetail.tsx"),
     /!capitalHandoff[\s\S]*Download SaasAnt CSV/,
   );
-  assert.match(portalShell, /Capital quotes cannot use the SaasAnt customer-invoice format/);
+  assert.match(portalShell, /exportInvoice\.documentKind === "capital_quote" && \(!isManager \|\| invoiceController \|\| currentUser\?\.active !== true\)/);
+  assert.match(portalShell, /Only operational billing staff can download a capital quote CSV/);
 });
 
 test("a selected handoff remains available when the full approved queue exceeds the archive limit", () => {

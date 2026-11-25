@@ -6,6 +6,7 @@ import { createClient as createSb } from "@supabase/supabase-js";
 import type { PrivateObjectDatabase } from "../privateObjectContracts";
 import { getPublicSupabaseConfig } from "../config/public";
 import { createBrowserAuthStorage } from "./browserAuthStorage";
+import { createBrowserAuthLock } from "./browserAuthLock";
 
 const REMEMBER_ME_KEY = "p1_remember_me";
 const REMEMBERED_EMAIL_KEY = "p1_remembered_email";
@@ -57,6 +58,8 @@ export function createClient() {
         autoRefreshToken: true,
         detectSessionInUrl: true,
         storage: authStorage(),
+        ...(typeof navigator !== "undefined" && navigator.locks
+          ? { lock: createBrowserAuthLock(navigator.locks) } : {}),
       },
     }
   );

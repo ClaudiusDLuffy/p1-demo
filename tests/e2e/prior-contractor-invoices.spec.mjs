@@ -18,7 +18,12 @@ test.beforeEach(async ({ context }) => {
 });
 async function openPrior(page, f, actor = accounts.manager) {
   await login(page, actor);
-  if (page.viewportSize().width <= 720) {
+  const panel=await openPriorWorkOrder(page,f);
+  await panel.getByRole('button', { name: 'Upload previous contractor invoice', exact: true }).click();
+  return page.getByRole('dialog', { name: 'Upload previous contractor invoice', exact: true });
+}
+async function openPriorWorkOrder(page,f){
+  if (!await page.locator('.desktop-sidebar').isVisible()) {
     await page.getByRole('button', { name: 'Open menu', exact: true }).click();
     await page.getByRole('dialog', { name: 'Navigation menu', exact: true }).getByRole('button', { name: 'Work orders', exact: true }).click();
   } else await openSidebarPage(page, 'Work orders');
@@ -35,8 +40,7 @@ async function openPrior(page, f, actor = accounts.manager) {
   if (await disclosure.isVisible().catch(() => false)) await disclosure.click();
   const panel = page.getByRole('region', { name: 'Previous contractor invoices', exact: true });
   await expect(panel).toBeVisible();
-  await panel.getByRole('button', { name: 'Upload previous contractor invoice', exact: true }).click();
-  return page.getByRole('dialog', { name: 'Upload previous contractor invoice', exact: true });
+  return panel;
 }
 async function fill(dialog, f, { file = true, number = `SYNTHETIC-PRIOR-${randomUUID().slice(0, 8)}` } = {}) {
   await dialog.getByLabel('Previous contractor assignment', { exact: true }).selectOption(f.history);
@@ -50,7 +54,9 @@ async function fill(dialog, f, { file = true, number = `SYNTHETIC-PRIOR-${random
 }
 async function attach(dialog, number) {
   const pdf = new jsPDF(); pdf.text(`Synthetic contractor invoice ${number}`, 15, 20); pdf.text('Total 125.50 / tax included 5.50', 15, 35);
-  await dialog.getByLabel('Original invoice PDF', { exact: true }).setInputFiles({ name: 'synthetic-prior.pdf',
+  const chooser=dialog.page().waitForEvent('filechooser');
+  await dialog.getByLabel('Original invoice PDF', { exact: true }).click();
+  await (await chooser).setFiles({ name: 'synthetic-prior.pdf',
     mimeType: 'application/pdf', buffer: Buffer.from(pdf.output('arraybuffer')) });
 }
 const invoice = f => JSON.parse(sql(`select to_jsonb(i) from public.invoices i where work_order_id=${q(f.work)} and prior_assignment_id is not null and deleted_at is null order by created_at desc limit 1`));
@@ -83,6 +89,13 @@ for (const [label, options, actor] of [['regular', {}, accounts.manager], ['capi
     await page.screenshot({ path: testInfo.outputPath('prior-invoice-approved.png') });
   });
 }
+test('a fresh work-order SLA countdown carries rounded minutes into hours',async({page})=>{
+  const f=priorInvoiceFixture();
+  await login(page,accounts.manager);await openSidebarPage(page,'Work orders');await openWorkOrder(page,f.work);
+  const countdown=page.getByText('SLA countdown',{exact:true}).locator('..').locator('.display');
+  await expect(countdown).toHaveText(/^(72h 0m|71h 59m)$/);
+  await expect(countdown).not.toContainText('60m');
+});
 test('save without PDF, reopen retained draft, attach and submit same invoice', async ({ page }) => {
   const f = priorInvoiceFixture(); const before = parent(f); const dialog = await openPrior(page, f); const number = await fill(dialog, f, { file: false });
   await dialog.getByRole('button', { name: 'Save draft', exact: true }).click();
@@ -93,6 +106,42 @@ test('save without PDF, reopen retained draft, attach and submit same invoice', 
   const resumed = page.getByRole('dialog', { name: 'Upload previous contractor invoice', exact: true });
   await attach(resumed, number); await submit(resumed);
   expect(invoice(f).id).toBe(id); expect(invoice(f).state).toBe('submitted'); expect(parent(f)).toEqual(before);
+});
+for (const width of [1280,1024,768,390,320]) {
+  test(`previous contractor upload > validation > native file picker > persisted receipt at ${width}px`,async({page})=>{
+    await page.setViewportSize({width,height:width<=390?568:900});
+    const f=priorInvoiceFixture(),before=parent(f),dialog=await openPrior(page,f,accounts.backoffice);
+    const number=await fill(dialog,f,{file:false});
+    await dialog.getByRole('button',{name:'Upload and send for review',exact:true}).click();
+    await expect(dialog.getByRole('alert')).toContainText('Attach the original invoice PDF');
+    await attach(dialog,number);await submit(dialog);
+    expect(invoice(f)).toMatchObject({num:number,state:'submitted',total:125.5});
+    expect(parent(f)).toEqual(before);
+    await page.reload();await expect(page.locator('.app-root')).toBeVisible();
+    await openPriorWorkOrder(page,f);
+    await expect(page.locator('.wo-invoice-row').filter({hasText:`#${number}`})).toContainText('Previous contractor bill');
+  });
+}
+test('a known rejected duplicate number stays correctable without reopening or duplicating an invoice', async ({page})=>{
+  const f=priorInvoiceFixture();const before=parent(f);let dialog=await openPrior(page,f);
+  const number=await fill(dialog,f,{file:false});
+  await dialog.getByRole('button',{name:'Save draft',exact:true}).click();
+  await expect(dialog.getByRole('status')).toHaveText('Previous contractor invoice draft saved.');
+  await dialog.getByRole('button',{name:'Done',exact:true}).click();
+  const panel=page.getByRole('region',{name:'Previous contractor invoices',exact:true});
+  await panel.getByRole('button',{name:'Upload previous contractor invoice',exact:true}).click();
+  dialog=page.getByRole('dialog',{name:'Upload previous contractor invoice',exact:true});
+  await fill(dialog,f,{file:false,number});
+  await dialog.getByRole('button',{name:'Save draft',exact:true}).click();
+  await expect(dialog.getByRole('alert')).toContainText('already exists for this contractor');
+  expect(sql(`select count(*) from public.invoices where work_order_id=${q(f.work)} and deleted_at is null`)).toBe('1');
+  await expect(dialog.getByLabel('Contractor invoice number',{exact:true})).toBeEnabled();
+  await dialog.getByLabel('Contractor invoice number',{exact:true}).fill('SYNTHETIC-SEPARATE-BILL-'+randomUUID().slice(0,8));
+  await dialog.getByLabel('Audit note',{exact:true}).fill('Synthetic distinct original bill: corrected an accidentally entered number.');
+  await dialog.getByRole('button',{name:'Save draft',exact:true}).click();
+  await expect(dialog.getByRole('status')).toHaveText('Previous contractor invoice draft saved.');
+  expect(parent(f)).toEqual(before);
+  expect(sql(`select count(*) from public.invoices where work_order_id=${q(f.work)} and deleted_at is null`)).toBe('2');
 });
 test('missing PDF/confirmation creates no bill; cancellation discards the unsaved form', async ({ page }) => {
   const f = priorInvoiceFixture(); const dialog = await openPrior(page, f); await fill(dialog, f, { file: false });
@@ -149,3 +198,43 @@ test('reject a prior bill, correct the same bill as staff, resubmit and approve 
   await invoiceActions(page, row, number); await row.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect.poll(() => invoice(f).state).toBe('approved'); expect(parent(f)).toEqual(before);
 });
+
+for (const width of [1280, 390]) {
+  test(`email-source WO without history explains unavailable upload and refreshes verified history at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 568 : 900 });
+    const f = priorInvoiceFixture({ noPreviousAssignment: true });
+    sql(`update public.work_orders set source='email' where id=${q(f.work)}`);
+    const before = parent(f);
+    await login(page, accounts.backoffice);
+    const panel = await openPriorWorkOrder(page, f);
+    await expect(panel.getByRole('heading', { name: 'No previous contractor assignment found', exact: true })).toBeVisible();
+    await expect(panel).toContainText('current contractor');
+    await expect(panel).toContainText('Do not reassign the work order just to enable this upload');
+    await expect(panel.getByRole('button', { name: 'Upload previous contractor invoice', exact: true })).toHaveCount(0);
+    const refreshed = page.waitForResponse(response => response.url().includes('/rpc/get_prior_contractor_invoice_context_v1') && response.status() === 200);
+    await panel.getByRole('button', { name: 'Refresh assignment history', exact: true }).click();
+    await refreshed;
+    await expect(panel.getByRole('heading', { name: 'No previous contractor assignment found', exact: true })).toBeVisible();
+    expect(parent(f)).toEqual(before);
+    expect(sql(`select count(*) from public.invoices where work_order_id=${q(f.work)}`)).toBe('0');
+    // Simulate a separate, legitimate staff reassignment in the disposable
+    // system. Refresh must observe the resulting authoritative history; the
+    // upload UI must never fabricate a former contractor or change the WO.
+    sql(`update public.work_orders set contractor_id=(select id from public.profiles where email='e2e.company.admin@p1.invalid') where id=${q(f.work)}`);
+    const reassigned = parent(f);
+    await panel.getByRole('button', { name: 'Refresh assignment history', exact: true }).click();
+    const upload = panel.getByRole('button', { name: 'Upload previous contractor invoice', exact: true });
+    await expect(upload).toBeEnabled();
+    await upload.click();
+    const dialog = page.getByRole('dialog', { name: 'Upload previous contractor invoice', exact: true });
+    await expect(dialog.getByLabel('Previous contractor assignment', { exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+    await page.reload();
+    await expect(page.locator('.app-root')).toBeVisible();
+    const reopened = await openPriorWorkOrder(page, f);
+    await expect(reopened.getByRole('button', { name: 'Upload previous contractor invoice', exact: true })).toBeEnabled();
+    expect(parent(f)).toEqual(reassigned);
+    expect(sql(`select count(*) from public.invoices where work_order_id=${q(f.work)}`)).toBe('0');
+  });
+}

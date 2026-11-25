@@ -143,5 +143,5 @@ test("capital quote saves capture an exact work-order version and handle thrown 
   assert.doesNotMatch(modal, /selectedWorkOrderId \? selectedWorkOrder : null/);
   assert.match(modal, /recordStaffFinancialAttemptError\(financialAttempt\.current, err\)/);
   assert.match(modal, /if \(!financialContextReady\)/);
-  assert.match(modal, /disabled=\{submitting \|\| !financialContextReady\}/);
+  assert.match(modal, /disabled=\{submitting \|\| hasOpenPriceEditor \|\| !financialContextReady\}/);
 });

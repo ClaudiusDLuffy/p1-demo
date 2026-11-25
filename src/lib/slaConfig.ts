@@ -66,6 +66,12 @@ export function computeSlaState(
 }
 
 // Format a remaining-hours value into a tight, glanceable countdown.
+export function formatHourMinuteDuration(hours: number): string {
+  if (!Number.isFinite(hours)) return "Not set";
+  const minutes = Math.round(Math.abs(hours) * 60);
+  return `${hours < 0 ? "-" : ""}${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 export function formatRemaining(hours: number): string {
   if (!Number.isFinite(hours)) return "Not set";
   if (hours <= 0) {
@@ -75,6 +81,6 @@ export function formatRemaining(hours: number): string {
     return `${Math.floor(past / 24)}d past`;
   }
   if (hours < 1) return `${Math.round(hours * 60)}m left`;
-  if (hours < 24) return `${Math.floor(hours)}h ${Math.round((hours % 1) * 60)}m`;
+  if (hours < 24) return formatHourMinuteDuration(hours);
   return `${Math.floor(hours / 24)}d ${Math.floor(hours % 24)}h`;
 }

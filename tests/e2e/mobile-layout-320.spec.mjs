@@ -39,14 +39,33 @@ async function scrollContent(page, deltaY, webkit) {
     await page.mouse.move(160, 284);
     await page.mouse.wheel(0, deltaY);
   }
-  await page.waitForTimeout(80);
+  // Firefox's wheel scrolling can continue after the input call resolves.
+  // Observe the real scroller settling before deciding whether to reverse or
+  // stop; otherwise inertia can move a just-reached control behind the header.
+  const content=page.locator(".content-pad");
+  const deadline=Date.now()+2000;let previous=null,quietSince=null;
+  while(Date.now()<deadline){
+    const position=await content.evaluate(element=>element.scrollTop);
+    if(position===previous){quietSince??=Date.now();if(Date.now()-quietSince>=150)return;}
+    else{previous=position;quietSince=null;}
+    await page.waitForTimeout(30);
+  }
+  throw new Error("The portal scroller did not settle after the real scrolling input.");
 }
 
 async function reachByNormalScroll(page, locator, direction = 1, webkit = false) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     const box = await locator.boundingBox();
-    if (box && box.y >= 0 && box.y + Math.min(box.height, 44) <= 568) return;
-    await scrollContent(page, direction * 420, webkit);
+    const content = await page.locator('.content-pad').boundingBox();
+    if (!content) throw new Error('Missing visible portal scroller.');
+    const top = Math.max(0, content.y), bottom = Math.min(568, content.y + content.height);
+    // Window coordinates alone include the fixed header and bottom navigation.
+    // A control behind either is still clipped by the real content scroller.
+    if (box && box.y >= top && box.y + Math.min(box.height, 44) <= bottom) return;
+    const delta = box ? box.y < top
+      ? -Math.min(420, top - box.y + 60)
+      : Math.min(420, box.y + box.height - bottom + 60) : direction * 420;
+    await scrollContent(page, delta, webkit);
   }
   throw new Error(`Control was not reachable by normal ${direction > 0 ? "down" : "up"} scrolling.`);
 }
@@ -67,7 +86,11 @@ async function assertNarrowLayout(page) {
         .filter(element => {
           if (!(element instanceof HTMLElement) || element.offsetParent === null) return false;
           const rect = element.getBoundingClientRect();
-          return rect.left < -1 || rect.right > window.innerWidth + 1 || element.scrollWidth > element.clientWidth + 1;
+          // Firefox reports clientWidth=0 on normal inline text while giving
+          // it a nonzero scrollWidth. Its bounding rect still detects actual
+          // viewport overflow; scroll-box overflow applies to measurable boxes.
+          return rect.left < -1 || rect.right > window.innerWidth + 1
+            || (element.clientWidth > 0 && element.scrollWidth > element.clientWidth + 1);
         })
         .slice(0, 12)
         .map(element => ({

@@ -8,7 +8,7 @@ import type { WorkOrderPageParams } from "../features/work-orders/data/workOrder
 for (const table of [false, true]) {
   test(`NTE ${table ? "table" : "preset"} rows and count use paired reads with identical membership filters`, async () => {
     const h = createWorkOrderReadHarness([respond(rawPage([])), respond({ totalCount: 12 })]);
-    const params = { ntePendingApproval: true, search: "Synthetic", state: "TX", priority: "p2",
+    const params: WorkOrderPageParams = { ntePendingApproval: true, search: "Synthetic", state: "TX", priority: "p2",
       status: "pending_invoice", limit: 10, cursor: "synthetic-cursor",
       ...(table ? { summaryFilter: "approval", tableSortColumn: "summary" } : {}) };
     const signal = new AbortController().signal;

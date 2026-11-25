@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import {test,expect} from '@playwright/test';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {join} from 'node:path';
-import {accounts} from './fixtures.mjs';
+import {accounts,test,expect,login as loginToLocalPortal} from './fixtures.mjs';
+import {registerAuditPage} from '../../scripts/e2e/recursive-audit-support.mjs';
+import {localTestProject} from '../../scripts/e2e/local-test-target.mjs';
 import {syntheticPassword} from '../../scripts/e2e/local-supabase-runtime.mjs';
 import {ntePendingFilterFixture,nteFixtureFingerprint} from '../../scripts/e2e/nte-pending-filter-fixtures.mjs';
 import {linkedBillingSql as sql} from '../../scripts/e2e/linked-billing-test-support.mjs';
@@ -12,6 +13,7 @@ let fixture,before;
 const coverage=[];
 const record=(path,action,expected,actual)=>coverage.push({path,action,expected,actual,status:'Pass'});
 const appOrigin='https://portal.example.invalid',databaseOrigin='https://synthetic.supabase.co';
+const isolatedDevelopmentAudit=Boolean(process.env.P1_RECURSIVE_AUDIT_DIR)&&localTestProject==='p1-demo-recursive-20261125-fi5oom';
 const evidence=process.env.P1_NTE_EVIDENCE_DIR;
 test.beforeAll(()=>{
   fixture=process.env.P1_NTE_FIXTURE_FILE?JSON.parse(readFileSync(process.env.P1_NTE_FIXTURE_FILE,'utf8')):ntePendingFilterFixture();
@@ -27,6 +29,10 @@ test.beforeEach(async({context})=>{
   // Synthetic HTTPS URLs exercise the normal application CSP, not hosted services.
   await context.route('**/*',async route=>{
     const request=route.request(),url=new URL(request.url());
+    // The separate audit-owned stack runs the normal local development app.
+    // Keep the original synthetic HTTPS/CSP production-build branch intact.
+    if(isolatedDevelopmentAudit)return ['127.0.0.1','localhost','[::1]'].includes(url.hostname)||['blob:','data:'].includes(url.protocol)
+      ?route.continue():route.abort('blockedbyclient');
     let destination;
     if(url.origin===appOrigin)destination=new URL(url.pathname+url.search,'http://127.0.0.1:3187');
     else if(url.origin===databaseOrigin&&/^\/(auth|rest|storage)\/v1(?:\/|$)/.test(url.pathname))destination=new URL(url.pathname+url.search,'http://127.0.0.1:54321');
@@ -42,10 +48,18 @@ test.beforeEach(async({context})=>{
       }
     }catch{return route.abort('aborted').catch(()=>{});}
   });
-  await context.routeWebSocket('**/*',socket=>socket.close());
+  // Do not close the localhost Next development socket during this audit.
+  // The standalone production-CSP test still blocks every WebSocket.
+  await context.routeWebSocket('**/*',socket=>{
+    const url=new URL(socket.url());
+    if(isolatedDevelopmentAudit&&['127.0.0.1','localhost','[::1]'].includes(url.hostname))socket.connectToServer();
+    else socket.close();
+  });
 });
 
 async function login(page,account){
+  if(isolatedDevelopmentAudit)return loginToLocalPortal(page,account);
+  await registerAuditPage(page,test.info(),account.name);
   await page.goto('/');await page.getByPlaceholder('you@p1pros.com').fill(account.email);
   await page.locator('input[type=password]').fill(syntheticPassword);
   await page.getByRole('button',{name:'Sign in',exact:true}).click();

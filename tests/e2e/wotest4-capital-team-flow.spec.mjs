@@ -106,9 +106,9 @@ async function fillKnownBillingCalculation(dialog, prefix, { includesPurchasedPa
   }
   await dialog.getByLabel("Manual sales tax amount").fill("16.50");
 
-  await expect(dialog.getByText(includesPurchasedPart ? /^\$714\.38$/ : /^\$450(?:\.00)?$/).first()).toBeVisible();
-  await expect(dialog.getByText(/^\$16\.5(?:0)?$/).first()).toBeVisible();
-  await expect(dialog.getByText(includesPurchasedPart ? /^\$730\.88$/ : /^\$466\.5(?:0)?$/).first()).toBeVisible();
+  await expect(dialog.getByText(includesPurchasedPart ? /^\$714\.38$/ : /^\$450(?:\.00)?$/).filter({ visible: true }).first()).toBeVisible();
+  await expect(dialog.getByText(/^\$16\.5(?:0)?$/).filter({ visible: true }).first()).toBeVisible();
+  await expect(dialog.getByText(includesPurchasedPart ? /^\$730\.88$/ : /^\$466\.5(?:0)?$/).filter({ visible: true }).first()).toBeVisible();
 }
 
 test("WOTEST4 combines team dispatch, capital approval, field return visits, files, parts, and final billing", async ({ browser }) => {
@@ -217,13 +217,13 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     await expect(page.getByRole("button", { name: /Create or upload invoice/ })).toHaveCount(0);
   });
 
-  // Prepare the complete capital quote, verify calculations, PDF access, and
-  // the rule that capital quotes cannot be exported as customer-invoice CSV.
+  // Prepare the complete capital quote and verify explicit PDF/CSV downloads.
+  // Optional manual CSV access does not itself submit, bill, or close the WO.
   await asAccount(browser, accounts.backoffice, async page => {
     await openStaffWorkOrder(page);
     await page.getByRole("button", { name: "Create capital quote", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Create capital quote for 7-Eleven" });
-    await expect(dialog.getByText(/separate from the final invoice/i)).toBeVisible();
+    await expect(dialog.getByText(/does not upload it to 7-Eleven or confirm billing/i)).toBeVisible();
     await fillKnownBillingCalculation(dialog, CAPITAL_QUOTE_NUMBER);
     await dialog.getByRole("button", { name: "Prepare Quote", exact: true }).click();
     await expect(dialog).toBeHidden();
@@ -231,10 +231,13 @@ test("WOTEST4 combines team dispatch, capital approval, field return visits, fil
     const quotePdf = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download PDF", exact: true }).click();
     expect((await quotePdf).suggestedFilename()).toMatch(/WOTEST4-CAP-Q.*\.pdf/i);
-    await expect(page.getByRole("button", { name: "Download SaasAnt CSV", exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
-    const confirm = page.getByRole("dialog", { name: "Confirm capital quote" });
-    await confirm.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
+    const quoteCsv = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download SaasAnt CSV", exact: true }).click();
+    expect((await quoteCsv).suggestedFilename()).toMatch(/\.csv$/i);
+    await expect(page.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
+    const confirm = page.getByRole("dialog", { name: "Mark quote submitted to 7-Eleven" });
+    await confirm.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
     await expect(confirm).toBeHidden();
   });
 
