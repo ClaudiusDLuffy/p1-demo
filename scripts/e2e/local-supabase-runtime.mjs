@@ -2,9 +2,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "dotenv";
+import {localTestEnvFile,localTestGateway} from './local-test-target.mjs';
 
-const DEFAULT_ENV_FILE = ".env.e2e.local";
-const DEFAULT_GATEWAY = "supabase_kong_p1-demo-e2e";
+const DEFAULT_ENV_FILE = localTestEnvFile;
+const DEFAULT_GATEWAY = localTestGateway;
 
 function uniqueMatch(source, pattern, label) {
   const matches = [...new Set(source.match(pattern) || [])];

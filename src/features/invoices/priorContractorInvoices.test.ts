@@ -30,6 +30,12 @@ test("arbitrary contractor selections and mismatched draft receipts fail closed"
     await assert.rejects(attempt(async () => ({ data: receipt(op, extra), error: null })));
   }
 });
+test("missing past-assignment history cannot be replaced by the current contractor or a caller-supplied ID", () => {
+  const empty = { ...context, assignments: [] };
+  for (const assignmentId of ["", randomUUID(), context.assignments[0].id]) {
+    assert.throws(() => createPriorInvoiceDraftAttempt(empty, assignmentId, fields), /Select a recorded past assignment/);
+  }
+});
 test("submission checks the exact invoice and version without billing or payment", async () => {
   const id = randomUUID(), op = randomUUID(); const attempt = createPriorInvoiceSubmitAttempt(context, { id, invoiceVersion: 2 }, op);
   await attempt(async () => ({ data: receipt(op, { invoiceId: id, invoiceVersion: 3, state: "submitted" }), error: null }));

@@ -78,3 +78,11 @@ test("explicit document action has a four-request maximum", async () => {
   await assert.rejects(read(document.id, "edit")); assert.equal(h.pending.length, 4);
   h.pending.forEach(request => request.finish()); await Promise.all(requests);
 });
+
+test("selected invoice keeps its authoritative versioned header after an optimistic review", () => {
+  const shell = readFileSync(resolve("src/components/PortalShell.tsx"), "utf8");
+  const query = shell.slice(shell.indexOf("const { data: selectedInvoiceLookup }"), shell.indexOf("const { data: selectedInvoiceWorkOrder }"));
+  assert.doesNotMatch(query, /&& !selectedInvoiceInBootstrap/);
+  assert.match(query, /selectedInvoiceLookup\s*\? \[\.\.\.invoices\.filter\([\s\S]*invoice\.id !== selectedInvoice\), selectedInvoiceLookup\]/);
+  assert.match(query, /selectedInvoiceLookup \|\| selectedInvoiceInBootstrap/);
+});

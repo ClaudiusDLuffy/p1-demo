@@ -9,6 +9,7 @@ async function navigate(page, label) {
 async function openForm(page, source) {
   await navigate(page, "7-Eleven billing");
   await page.getByRole("searchbox", { name: "Search billing invoices and work orders" }).fill(source);
+  await waitForApplicationRequestsToSettle(page);
   const row = page.locator(".billing-ready-row").filter({ hasText: source });
   const button = row.getByRole("button", { name: "Billed under another work order", exact: true });
   await expect(button).toBeVisible();
@@ -36,9 +37,10 @@ async function details(page, id) {
 }
 for (const width of [1440, 320]) {
   test.describe(`${width}px linked billing`, () => {
+    test.use({ viewport: { width, height: width === 320 ? 568 : 1000 } });
     if (width === 320) test.use({ isMobile: true, hasTouch: true });
     test("validates coverage, closes without duplicate invoices and links both histories", async ({ page }, testInfo) => {
-      const f = fixture(); await page.setViewportSize({ width, height: width === 320 ? 568 : 1000 });
+      const f = fixture();
       await login(page, accounts.backoffice); const dialog = await openForm(page, f.source);
       await dialog.getByRole("button", { name: "Link invoice and close" }).click();
       await expect(dialog.getByRole("alert")).toContainText("Select a submitted invoice");

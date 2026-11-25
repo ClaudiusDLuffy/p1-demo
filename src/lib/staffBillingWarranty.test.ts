@@ -118,7 +118,7 @@ test("changing an editable line to Warranty clears markup and defaults its rate 
   const output: { change?: (event: { target: { value: string } }) => void } = {};
   const values: Record<string, unknown> = {};
   let registered = 0;
-  const context = { exports: output, ...billing, isP1PurchasedPart: false, i: 0, line: { desc: "Synthetic repair" },
+  const context = { exports: output, ...billing, isP1PurchasedPart: false, priceCorrected: false, i: 0, line: { desc: "Synthetic repair" },
     sourceUnitCost: 150, partsMarkup: "25", typeRegistration: { onChange: () => { registered += 1; } },
     taxabilityForLine: () => ({ taxable: false }),
     setValue: (field: string, value: unknown) => { values[field] = value; } };
@@ -135,4 +135,7 @@ test("changing an editable line to Warranty clears markup and defaults its rate 
   context.isP1PurchasedPart = true;
   output.change({ target: { value: "Warranty" } });
   assert.equal(registered, 0);
+  context.isP1PurchasedPart=false;context.priceCorrected=true;
+  const before={...values};output.change({target:{value:"Warranty"}});
+  assert.deepEqual(values,before,"An audited price correction cannot be silently reclassified");
 });

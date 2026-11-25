@@ -91,9 +91,9 @@ async function submitCapitalQuote(page, workOrderId, quoteNumber, description) {
   await dialog.getByLabel("Line 1 rate").fill("175");
   await dialog.getByRole("button", { name: "Prepare Quote", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await page.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
-  const confirm = page.getByRole("dialog", { name: "Confirm capital quote" });
-  await confirm.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
+  await page.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "Mark quote submitted to 7-Eleven" });
+  await confirm.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
   await expect(confirm).toBeHidden();
   await page.getByRole("button", { name: `Back to ${workOrderId}`, exact: true }).click();
   await expect(page.getByText("Portal: Pending Capital Completion", { exact: true })).toBeVisible();
@@ -424,9 +424,9 @@ test("completed field work and a submitted invoice can enter capital and return 
     await dialog.getByLabel("Line 1 rate").fill("200");
     await dialog.getByRole("button", { name: "Prepare Quote", exact: true }).click();
     await expect(dialog).toBeHidden();
-    await backoffice.page.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
-    const confirm = backoffice.page.getByRole("dialog", { name: "Confirm capital quote" });
-    await confirm.getByRole("button", { name: "Submit Quote to 7-Eleven", exact: true }).click();
+    await backoffice.page.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
+    const confirm = backoffice.page.getByRole("dialog", { name: "Mark quote submitted to 7-Eleven" });
+    await confirm.getByRole("button", { name: "Mark submitted to 7-Eleven", exact: true }).click();
     await expect(confirm).toBeHidden();
     await backoffice.page.getByRole("button", { name: `Back to ${workOrderId}`, exact: true }).click();
     await expect(backoffice.page.getByText("Portal: Pending Capital Completion", { exact: true })).toBeVisible();

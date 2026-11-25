@@ -213,7 +213,10 @@ test("reload during a held server sign-out cannot restore persisted credentials"
   try {
     await menuAction(page, "Sign out");
     await expect.poll(() => intercepted).toBe(true);
-    await expect(page.getByRole("button", { name: "Signing out...", exact: true })).toBeDisabled();
+    // Local credentials are cleared immediately, before the held network
+    // logout finishes. The authenticated shell must not remain usable.
+    await expect(page.locator(".desktop-sidebar")).toHaveCount(0);
+    await expect(page.getByRole("button",{name:"Sign in",exact:true})).toBeVisible();
     expect(await page.evaluate(() => [localStorage, sessionStorage].every(storage =>
       Object.keys(storage).every(key => !/^sb-.+-auth-token(?:\.\d+)?$/.test(key)),
     ))).toBe(true);

@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {accounts, expect, login as loginToPortal, openSidebarPage, test} from './fixtures.mjs';
 import {reportedInvoiceFixture, reportedInvoiceSnapshot} from '../../scripts/e2e/reported-invoice-fixtures.mjs';
 import {linkedBillingSql as sql} from '../../scripts/e2e/linked-billing-test-support.mjs';
+import {recordAuditRouteOutcome} from '../../scripts/e2e/recursive-audit-support.mjs';
 
 const auditDir = process.env.P1_CAPITAL_AUDIT_DIR;
 const login = (page,actor) => loginToPortal(page,actor,'/?portal=simplified');
@@ -36,7 +37,7 @@ async function screenshot(page,info,label,surface=dialogFor(page)) {
 test.beforeEach(async({context})=>{
   await context.route('**/*', async route => {
     const url=new URL(route.request().url());
-    if(['127.0.0.1','localhost','[::1]'].includes(url.hostname)) await route.continue();
+    if(['127.0.0.1','localhost','[::1]'].includes(url.hostname)) await recordAuditRouteOutcome(route,()=>route.continue());
     else await route.abort('blockedbyclient');
   });
 });
@@ -253,7 +254,10 @@ test('lost capital receipt freezes fields and retries the same operation without
   });
 });
 
-test('touch emulation capital validation and mobile navigation',async({page},info)=>{
+test('touch emulation capital validation and mobile navigation',async({browser},info)=>{
+  const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});
+  const page=await context.newPage();
+  try {
   const actor=accounts.backoffice,f=reportedInvoiceFixture('capital_external_quote_unrecorded');
   info._viewport=`${page.viewportSize().width}x${page.viewportSize().height} touch emulation (not physical device)`;
   await login(page,actor);const dialog=await openCloseOut(page,f);
@@ -269,4 +273,5 @@ test('touch emulation capital validation and mobile navigation',async({page},inf
     await dialog.getByRole('button',{name:'Confirm send to billing',exact:true}).tap();await expect(dialog).toBeHidden();
     expect(reportedInvoiceSnapshot(f).status).toBe('pending_invoice');
   });
+  } finally { await context.close(); }
 });

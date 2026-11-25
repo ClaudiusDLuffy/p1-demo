@@ -1,13 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accounts, expect, login, openSidebarPage, openWorkOrder, test, waitForApplicationRequestsToSettle } from "./fixtures.mjs";
+import {linkedBillingSql as sql} from '../../scripts/e2e/linked-billing-test-support.mjs';
 
 // The runner already verifies localhost credentials; this explicitly named
 // disposable database contains only synthetic fixtures.
-function sql(statement) {
-  return execFileSync("docker", ["exec", "-i", "supabase_db_p1-demo-e2e", "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-At"],
-    { input: statement, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-}
 function fixture() {
   const id = `E2E-EXTERNAL-UI-${randomUUID().slice(0,8)}`;
   sql(`insert into public.work_orders(id,status,functional_status,billing_only,store_number,summary)
@@ -49,10 +45,10 @@ async function verifyNoDuplicate(id) {
 }
 for (const width of [1440, 320]) {
   test.describe(`${width}px external billing`, () => {
+  test.use({ viewport: { width, height: width === 320 ? 568 : 1000 } });
   if (width === 320) test.use({ isMobile: true, hasTouch: true });
   test(`external billing validates, records a shared reference, clears the queue and retains history at ${width}px`, async ({ page }, testInfo) => {
     const first = fixture(); const second = fixture();
-    await page.setViewportSize({ width, height: width === 320 ? 568 : 1000 });
     await login(page, accounts.backoffice);
     let dialog = await openForm(page, first);
     await dialog.getByRole("button", { name: "Record external billing and close" }).click();

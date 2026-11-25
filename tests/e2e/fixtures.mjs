@@ -1,5 +1,7 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect as baseExpect } from "@playwright/test";
 import { syntheticPassword } from "../../scripts/e2e/local-supabase-runtime.mjs";
+import {auditedExpect,registerAuditPage,finishAuditRoutes,recordAuditRouteOutcome,auditPointerDiagnostics} from "../../scripts/e2e/recursive-audit-support.mjs";
+const expect=auditedExpect(baseExpect);
 
 export const accounts = {
   manager: { email: "e2e.manager@p1.invalid", name: "Synthetic Manager" },
@@ -21,6 +23,7 @@ export const accounts = {
 
 export const test = base.extend({
   diagnostics: [async ({ page }, use, testInfo) => {
+    await registerAuditPage(page,testInfo);
     const events = [];
     page.on("pageerror", error => events.push({ kind: "pageerror", message: error.message }));
     page.on("console", message => {
@@ -36,7 +39,17 @@ export const test = base.extend({
       if (response.status() >= 500) events.push({ kind: "http", status: response.status(), url: response.url().replace(/\?.*$/, "") });
     });
     await use(events);
-    await page.unrouteAll({ behavior: "ignoreErrors" });
+    const pointerEvents=await auditPointerDiagnostics(page);
+    if(pointerEvents)await testInfo.attach("pointer-diagnostics.json",{
+      body:Buffer.from(JSON.stringify(pointerEvents,null,2)),contentType:"application/json",
+    });
+    // Stop both routing layers together. Otherwise an in-flight removed page
+    // handler can fall through into a still-active context handler after its
+    // request was already completed. App diagnostics remain authoritative.
+    await Promise.all([
+      page.unrouteAll({ behavior: "ignoreErrors" }),
+      finishAuditRoutes(page),
+    ]);
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(events, null, 2)),
       contentType: "application/json",
@@ -97,6 +110,7 @@ export async function waitForApplicationRequestsToSettle(page, {
 }
 
 export async function login(page, account, initialPath = "/") {
+  await registerAuditPage(page,test.info(),account.name);
   // Normal role-switch scenarios wait for the previous server sign-out.
   // Immediate-reload coverage deliberately bypasses this helper.
   const signingOut = page.getByRole("button", { name: "Signing out...", exact: true });
@@ -126,20 +140,26 @@ export async function login(page, account, initialPath = "/") {
         if (!/response has been disposed|fetch response has been disposed|test ended|target page, context or browser has been closed/i.test(String(error))) {
           // APIRequest error strings may embed credentials from request
           // headers. Keep an unexpected harness failure safe to report.
-          throw new Error("The local test request could not be inspected.");
+          const description = String(error);
+          const category = /request context disposed/i.test(description) ? "request context disposed"
+            : /ECONNRESET/i.test(description) ? "connection reset"
+            : /ECONNREFUSED/i.test(description) ? "connection refused"
+            : /timed?\s*out|timeout/i.test(description) ? "timeout"
+            : /cancell?ed|abort/i.test(description) ? "canceled request" : "unclassified transport error";
+          throw new Error(`The local test request could not be inspected (${category}).`);
         }
         await route.abort("aborted").catch(() => undefined);
         return;
       }
       if (status !== 401) {
-        await route.fulfill({ status, headers, body });
+        await recordAuditRouteOutcome(route,()=>route.fulfill({ status, headers, body }));
         return;
       }
 
       const text = body.toString("utf8");
       const isLocalClockRace = text.includes("PGRST303") && text.includes("JWT issued at future");
       if (!isLocalClockRace || attempt === 4) {
-        await route.fulfill({ status, headers, body });
+        await recordAuditRouteOutcome(route,()=>route.fulfill({ status, headers, body }));
         return;
       }
 
@@ -148,6 +168,14 @@ export async function login(page, account, initialPath = "/") {
   };
   await page.route("**/rest/v1/**", localJwtClockRetry);
   await page.goto(initialPath);
+  if (process.env.P1_RECURSIVE_AUDIT_DIR) {
+    // The local development page can expose server-rendered inputs before
+    // React has attached their controlled change handlers. Wait for the
+    // existing mount-effect reveal, not a delay or an authentication retry.
+    await baseExpect(page.locator('div[style*="transition: opacity"]').filter({
+      has: page.getByPlaceholder("you@p1pros.com"),
+    })).toHaveCSS("opacity", "1");
+  }
   await page.getByPlaceholder("you@p1pros.com").fill(account.email);
   await page.locator('input[type="password"]').fill(process.env.P1_E2E_PASSWORD || syntheticPassword);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -162,6 +190,14 @@ export async function login(page, account, initialPath = "/") {
     await expect(menu.getByText(account.name, { exact: true })).toBeVisible();
     await menu.getByRole("button", { name: "Close menu", exact: true }).click();
   }
+  // The fresh-token clock discrepancy is confined to initial authentication.
+  // Once those reads settle, remove this temporary interceptor. Keeping a
+  // route.fetch proxy for the entire scenario changes the lifetime of canceled
+  // queries during reload/navigation and can double-handle an abandoned route.
+  // All subsequent interactions use native browser requests; fault-specific
+  // routes and the localhost-only context guard stay installed.
+  await waitForApplicationRequestsToSettle(page);
+  await page.unroute("**/rest/v1/**", localJwtClockRetry);
 }
 
 export function sidebar(page) {
@@ -169,23 +205,32 @@ export function sidebar(page) {
 }
 
 export async function openSidebarPage(page, label) {
-  await sidebar(page).locator("button").filter({ hasText: label }).first().click();
+  // Navigation immediately after reload must wait for authentication hydration
+  // before deciding whether this viewport uses the sidebar or drawer.
+  await expect(page.locator('.app-root')).toBeVisible();
+  if(await sidebar(page).isVisible())await sidebar(page).locator("button").filter({hasText:label}).first().click();
+  else{
+    await page.getByRole("button",{name:"Open menu",exact:true}).click();
+    const menu=page.getByRole("dialog",{name:"Navigation menu",exact:true});
+    await menu.getByRole("button",{name:label,exact:true}).click();
+    await expect(menu).toBeHidden();
+  }
 }
 
 export async function openWorkOrder(page, id) {
-  let target = page.getByText(id, { exact: true }).first();
+  let target = page.getByText(id, { exact: true }).filter({visible:true}).first();
   if (!await target.isVisible().catch(() => false)) {
     const search = page.locator('input[placeholder^="Search WO#"], input[aria-label="Search my jobs"]').first();
     if (await search.isVisible().catch(() => false)) {
       await search.fill(id);
-      target = page.getByText(id, { exact: true }).first();
+      target = page.getByText(id, { exact: true }).filter({visible:true}).first();
     }
   }
   if (!await target.isVisible().catch(() => false)) {
     const hideClosed = page.getByRole("checkbox", { name: "Hide closed calls" });
     if (await hideClosed.isVisible().catch(() => false) && await hideClosed.isChecked()) {
       await hideClosed.uncheck();
-      target = page.getByText(id, { exact: true }).first();
+      target = page.getByText(id, { exact: true }).filter({visible:true}).first();
     }
   }
   await expect(target).toBeVisible();

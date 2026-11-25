@@ -39,7 +39,7 @@ test("Work orders includes capital while the focused Capital view remains", () =
     list,
     /fallbackStateFilteredWOs\.filter\(\(w: any\) =>[\s\S]{0,120}pending_capital_completion/,
   );
-  assert.match(list, /placeholder="Search WO#, INC#, store, keyword\.\.\."/);
+  assert.match(list, /placeholder=\{isVaCoordinator \? "Search work order, store, city, or summary\.\.\." : "Search WO#, INC#, store, keyword\.\.\."\}/);
   assert.ok((list.match(/<CapitalWorkOrderBadge workOrder=\{wo\}/g) || []).length >= 2);
   assert.match(capitalView, /scope: "capital"/);
   assert.match(capitalView, /all jobs remain searchable in Work orders/);

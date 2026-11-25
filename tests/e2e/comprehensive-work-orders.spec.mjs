@@ -15,11 +15,19 @@ async function cancelDialog(page, title) {
 
 async function expectComboboxOptions(page, combobox, expected) {
   await combobox.click();
+  // WebKit does not focus a button on pointer click. A non-searchable
+  // combobox must explicitly own keyboard focus while its menu is open.
+  if (await combobox.getAttribute("role") === "combobox") await expect(combobox).toBeFocused();
+  else {
+    const listId = await combobox.getAttribute("aria-controls");
+    await expect(page.locator(`input[role="combobox"][aria-controls="${listId}"]`)).toBeFocused();
+  }
   const options = page.getByRole("listbox").getByRole("option");
   await expect(options).toHaveCount(expected.length);
   const labels = (await options.allTextContents()).map(label => label.replace(/Selected$/, ""));
   expect(labels).toEqual(expected);
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
 }
 
 test("work-order list filters and create-form dropdowns expose the complete supported values", async ({ page }) => {
@@ -138,7 +146,17 @@ test("staff work-order lifecycle controls reach their intended queues", async ({
 
   await openSidebarPage(page, "Work orders");
   await openWorkOrder(page, "E2E-CAPITAL-COMPLETE");
-  await page.getByRole("button", { name: "Capital Completed", exact: true }).click();
+  await page.getByRole("button", { name: "Close out", exact: true }).click();
+  const capitalCloseOut=page.getByRole("dialog",{name:"Close out capital",exact:true});
+  await capitalCloseOut.getByRole("radio",{name:/Completed, send to billing/}).check();
+  const quoteReference=capitalCloseOut.getByLabel("Quote reference in 7-Eleven (required)");
+  if(await quoteReference.isVisible())await quoteReference.fill("SYNTHETIC-CAPITAL-APPROVAL");
+  const confirmation=capitalCloseOut.getByRole("checkbox");
+  if(await confirmation.count())await confirmation.check();
+  await capitalCloseOut.getByRole("button",{name:"Confirm send to billing",exact:true}).click();
+  await expect(capitalCloseOut).toBeHidden();
+  await openSidebarPage(page,"Work orders");
+  await openWorkOrder(page,"E2E-CAPITAL-COMPLETE");
   await expect(page.getByText("7-Eleven FSM: Completed", { exact: true })).toBeVisible();
 
   await openSidebarPage(page, "Work orders");

@@ -81,7 +81,7 @@ test("actual Sel Enter selects once with field name/value and returns focus; Esc
   uiInvoke(trigger, "onClick"); tree = h.render("Sel", props);
   uiInvoke(find(tree, node => node.type === "button"), "onKeyDown", key("End", triggerElement)); tree = h.render("Sel", props);
   uiInvoke(find(tree, node => node.type === "button"), "onKeyDown", key("Enter", triggerElement));
-  assert.equal(changes.length, 1); assert.equal(changes[0].target.name, "state"); assert.equal(changes[0].target.value, "b"); assert.equal(focused, 1);
+  assert.equal(changes.length, 1); assert.equal(changes[0].target.name, "state"); assert.equal(changes[0].target.value, "b"); assert.equal(focused, 2);
   tree = h.render("Sel", props); uiInvoke(find(tree, node => node.type === "button"), "onClick"); tree = h.render("Sel", props);
   const escape = key("Escape", triggerElement); uiInvoke(find(tree, node => node.type === "button"), "onKeyDown", escape);
   assert.equal(escape.defaultPrevented, true); assert.equal(escape.stopped, true); assert.equal(changes.length, 1);
@@ -96,6 +96,49 @@ test("open Sel still consumes Escape preemptively prevented by its modal owner",
   uiInvoke(find(tree, node => node.type === "button"), "onKeyDown", escape);
   tree = h.render("Sel", props);
   assert.equal(uiNodes(tree).some(node => node.props.role === "listbox"), false);
+});
+test("pointer-opened non-searchable Sel owns keyboard focus even when the browser does not focus buttons", () => {
+  const h = primitiveHarness("src/components/ui/Sel.tsx"); let focused = 0;
+  const props = { children: [option("a", "Alpha"), option("b", "Beta")] };
+  let tree = h.render("Sel", props);
+  const trigger = find(tree, node => node.type === "button");
+  (trigger.props.ref as { current: unknown }).current = { focus() { focused++; } };
+  uiInvoke(trigger, "onClick"); tree = h.render("Sel", props);
+  assert.equal(focused, 1);
+  assert.equal(find(tree, node => node.type === "button").props["aria-expanded"], true);
+});
+test("opening searchable Sel leaves its existing search-focus effect in charge", () => {
+  const h = primitiveHarness("src/components/ui/Sel.tsx"); let focused = 0;
+  const props = { children: Array.from({ length: 10 }, (_, index) => option(String(index), `Choice ${index}`)) };
+  const tree = h.render("Sel", props), trigger = find(tree, node => node.type === "button");
+  (trigger.props.ref as { current: unknown }).current = { focus() { focused++; } };
+  uiInvoke(trigger, "onClick");
+  assert.equal(focused, 0);
+});
+test("searchable Sel waits for its positioned popup to become visible before focusing search", () => {
+  const h = primitiveHarness("src/components/ui/Sel.tsx", { window: {
+    innerWidth: 1280, innerHeight: 900, addEventListener() {}, removeEventListener() {},
+  } });
+  let focused = 0;
+  const props = { children: Array.from({ length: 10 }, (_, index) => option(String(index), `Choice ${index}`)) };
+  let tree = h.render("Sel", props);
+  const trigger = find(tree, node => node.type === "button");
+  (trigger.props.ref as { current: unknown }).current = { isConnected: true,
+    getBoundingClientRect: () => ({ top: 100, bottom: 142, left: 20, right: 220, width: 200, height: 42 }),
+  };
+  uiInvoke(trigger, "onClick"); tree = h.render("Sel", props);
+  (find(tree, node => node.type === "input" && node.props.role === "combobox").props.ref as { current: unknown }).current = {
+    focus() { focused++; },
+  };
+  assert.ok(uiNodes(tree).some(node => (node.props.style as { visibility?: string } | undefined)?.visibility === "hidden"));
+  // The first committed popup is hidden. Its positioning effect schedules a
+  // subsequent render; attempting focus in this commit is ignored by WebKit.
+  h.effects.forEach(effect => effect());
+  assert.equal(focused, 0);
+  tree = h.render("Sel", props);
+  assert.ok(uiNodes(tree).some(node => (node.props.style as { visibility?: string } | undefined)?.visibility === "visible"));
+  h.effects.forEach(effect => effect());
+  assert.equal(focused, 1);
 });
 test("searchable Sel uses named combobox, bounded search, no-results and disabled-option guard", () => {
   const h = primitiveHarness("src/components/ui/Sel.tsx"); let changes = 0;

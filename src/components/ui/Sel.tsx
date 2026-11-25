@@ -64,6 +64,7 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
   const selectedValue = value ?? innerValue;
   const selected = options.find(o => String(o.value) === String(selectedValue));
   const searchable = options.length >= 10;
+  const positioned = position !== null;
   const q = search.trim().toLowerCase();
   const visibleOptions = !searchable || !q
     ? options
@@ -135,8 +136,11 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
   }, [open]);
 
   useEffect(() => {
-    if (open && searchable) searchRef.current?.focus({ preventScroll: true });
-  }, [open, searchable]);
+    // The first popup commit is visibility:hidden until positioning finishes.
+    // WebKit ignores focus on that hidden input. Focus after the visible commit,
+    // without stealing focus again when scrolling recalculates its coordinates.
+    if (open && searchable && positioned) searchRef.current?.focus({ preventScroll: true });
+  }, [open, searchable, positioned]);
 
   useEffect(() => {
     if (!open) return;
@@ -180,6 +184,10 @@ export const Sel = forwardRef<HTMLInputElement, SelProps>(function Sel(
     setSearch("");
     setActiveIndex(selected && !selected.disabled ? selected.index : nextEnabledOption(options, -1, direction));
     setOpen(true);
+    // WebKit does not focus buttons on pointer click. Non-searchable menus
+    // receive keys through their trigger; searchable menus focus their input
+    // in the existing effect after the popup mounts.
+    if (!searchable) triggerRef.current?.focus({ preventScroll: true });
   };
   const handleKey = (event: KeyboardEvent<HTMLButtonElement | HTMLInputElement>) => {
     if (disabled) return;

@@ -25,7 +25,8 @@ for (const width of [1440, 320]) {
     const dialog = page.getByRole("dialog", { name: "Create P1 to 7-Eleven invoice", exact: true });
     await expect(dialog).toBeVisible();
     await expect(calculator).toHaveCount(1);
-    await expect(calculator.getByLabel("Cost", { exact: true })).toHaveValue("150");
+    // A new document must not inherit another document's scratch prices.
+    await expect(calculator.getByLabel("Cost", { exact: true })).toHaveValue("");
     await assertLayout(true);
     await calculator.getByLabel("Cost", { exact: true }).fill("125");
     await calculator.getByLabel("Sell price", { exact: true }).press("Enter");
@@ -35,8 +36,9 @@ for (const width of [1440, 320]) {
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "Unsaved changes" })).toHaveCount(0);
-    await expect(calculator.getByLabel("Cost", { exact: true })).toHaveValue("125");
+    await expect(calculator.getByLabel("Cost", { exact: true })).toHaveValue("");
     await assertLayout(false);
+    await calculator.getByLabel("Cost", { exact: true }).fill("125");
     await page.setViewportSize({ width: 1440, height: 900 });
     await openSidebarPage(page, "Dashboard");
     await expect(calculator).toHaveCount(0);

@@ -14,6 +14,11 @@ const text = (value: unknown): string => typeof value === "string" ? value : Arr
   : typeof value === "object" && value !== null && "props" in value ? text((value as Node).props.children) : "";
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const requireHere = createRequire(import.meta.url);
+test("directory search focuses only after its popup becomes positioned and visible", () => {
+  const source = readFileSync("src/features/directory/DirectorySelect.tsx", "utf8");
+  assert.match(source, /const positioned = position !== null/);
+  assert.match(source, /if \(!open \|\| !positioned\) return;[\s\S]*?searchInput\.current\?\.focus\(\{ preventScroll: true \}\);\s*\}, \[open, positioned\]\)/);
+});
 function componentHarness(file: string, imports: (name: string) => unknown) {
   const filename = resolve(file), slots: unknown[] = [], cleanups: (() => void)[] = [];
   let index = 0;

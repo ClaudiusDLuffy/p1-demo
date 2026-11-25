@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { localSupabaseRuntime, syntheticPassword } from "./local-supabase-runtime.mjs";
+import {localTestDatabase} from './local-test-target.mjs';
 
 const accounts = [
   ["manager_id", "e2e.manager@p1.invalid", "Synthetic Manager", "manager"],
@@ -73,7 +74,7 @@ async function main() {
   const preflight = readFileSync(resolve(process.cwd(), "scripts/e2e/assert-local-private-object-baseline.sql"), "utf8");
   execFileSync(
     "docker",
-    ["exec", "-i", "supabase_db_p1-demo-e2e", "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"],
+    ["exec", "-i", localTestDatabase, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"],
     { input: preflight, stdio: ["pipe", "pipe", "inherit"] },
   );
   const ids = await ensureUsers(runtime);
@@ -81,7 +82,7 @@ async function main() {
   const variables = Object.entries(ids).flatMap(([name, value]) => ["--set", `${name}=${value}`]);
   execFileSync(
     "docker",
-    ["exec", "-i", "supabase_db_p1-demo-e2e", "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", ...variables],
+    ["exec", "-i", localTestDatabase, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", ...variables],
     { input: sql, stdio: ["pipe", "pipe", "inherit"], maxBuffer: 4 * 1024 * 1024 },
   );
   console.log(JSON.stringify({ seeded: true, accounts: accounts.length, workOrders: 116, productionDataUsed: false }, null, 2));

@@ -660,13 +660,14 @@ html, body { width: 100%; max-width: 100%; overflow-x: hidden; overflow-x: clip;
     padding: 0 !important;
   }
   .invoice-top-header-left {
-    flex: 0 1 auto !important;
+    flex: 1 1 0 !important;
     min-width: 0 !important;
     max-width: 100% !important;
     overflow-wrap: anywhere;
   }
   .invoice-top-header-right {
-    flex: 1 !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
     text-align: right !important;
     font-size: 10px !important;
     line-height: 1.5 !important;
@@ -1607,13 +1608,16 @@ function PortalApplication({ currentUser, initialPage, refreshCurrentProfile, au
     : null;
   const { data: selectedInvoiceLookup } = useInvoiceByIdQuery(
     selectedInvoice,
-    isAuthenticated && page === "invoices" && Boolean(selectedInvoice) && !selectedInvoiceInBootstrap,
+    isAuthenticated && page === "invoices" && Boolean(selectedInvoice),
     currentUser,
   );
-  const invoiceDetailRows = selectedInvoiceLookup && !selectedInvoiceInBootstrap
-    ? [...invoices, selectedInvoiceLookup]
+  // Review can optimistically add a summary to the legacy array. That array
+  // must not disable or outrank the versioned header query: the approval
+  // transaction advances invoice_version, including for unchanged line items.
+  const invoiceDetailRows = selectedInvoiceLookup
+    ? [...invoices.filter(invoice => invoice.id !== selectedInvoice), selectedInvoiceLookup]
     : invoices;
-  const selectedInvoiceData = selectedInvoiceInBootstrap || selectedInvoiceLookup || null;
+  const selectedInvoiceData = selectedInvoiceLookup || selectedInvoiceInBootstrap || null;
   const { data: selectedInvoiceWorkOrder } = useWorkOrderByIdQuery(
     selectedInvoiceData?.wot,
     isAuthenticated && page === "invoices" && Boolean(selectedInvoice) && Boolean(selectedInvoiceData?.wot),

@@ -12,9 +12,22 @@ function storeDate(offsetDays) {
 }
 
 async function chooseDate(dialog, fieldLabel, date) {
-  await dialog.getByRole("button", { name: fieldLabel, exact: true }).click();
+  const field=dialog.getByRole("button", { name: fieldLabel, exact: true });
+  await field.scrollIntoViewIfNeeded();
+  await expect(field).toBeInViewport();
+  await field.click();
   const picker = dialog.getByRole("dialog", { name: "Choose date" });
   await expect(picker).toBeVisible();
+  // Short viewports deliberately scroll the calendar internally. Verify that
+  // its lower controls are reachable without expanding outside the screen.
+  const viewport=dialog.page().viewportSize();
+  const panel=await picker.boundingBox();
+  expect(panel.x).toBeGreaterThanOrEqual(0);expect(panel.y).toBeGreaterThanOrEqual(0);
+  expect(panel.x+panel.width).toBeLessThanOrEqual(viewport.width);
+  expect(panel.y+panel.height).toBeLessThanOrEqual(viewport.height);
+  await picker.getByRole("button",{name:"Today",exact:true}).scrollIntoViewIfNeeded();
+  await expect(picker.getByRole("button",{name:"Today",exact:true})).toBeInViewport();
+  await expect(picker.getByRole("button",{name:"Clear",exact:true})).toBeInViewport();
   // Adjacent dates can belong to a different month (including New Year's).
   for (let attempts = 0; attempts < 24; attempts += 1) {
     if (await picker.locator(`[data-day="${date}"] button`).isVisible()) break;

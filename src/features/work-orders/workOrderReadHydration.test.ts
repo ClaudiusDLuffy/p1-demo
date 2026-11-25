@@ -27,7 +27,7 @@ test("authorized child data survives every base/children response order and a la
     const previous: unknown[][] = [];
     const render = (base: unknown[], details: unknown, id = "SYNTHETIC-A") => {
       let index = 0;
-      hydrate(base, id, details, (next: (rows: unknown[]) => typeof rows) => { rows = next(rows); },
+      hydrate(base, id, details, (next: (rows: Record<string,unknown>[]) => Record<string,unknown>[]) => { rows = next(rows); },
         (effect: () => void, deps: unknown[]) => {
           const before = previous[index];
           if (!before || deps.some((value, i) => !Object.is(value, before[i]))) effect();

@@ -9,13 +9,16 @@ import type { Database } from "../../lib/supabase/database.types";
 import { uploadInvoicePdf } from "../../lib/db";
 import { readInvoiceSummary } from "./invoiceReads";
 import { useDirectoryActor } from "../directory/queries";
+import { DirectorySelect } from "../directory/DirectorySelect";
 import { canRecordExternalBilling } from "../billing/externalBillingContracts";
-import { createPriorInvoiceDraftAttempt, createPriorInvoiceSubmitAttempt, priorInvoiceContextSchema,
+import { createManualInvoiceDraftAttempt, createPriorInvoiceDraftAttempt, createPriorInvoiceSubmitAttempt, priorInvoiceContextSchema,
   priorInvoiceError, priorInvoiceFieldsSchema, type PriorInvoiceContext } from "./priorContractorInvoices";
 
 type Draft = PriorInvoiceContext["drafts"][number];
 function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceContext; draft: Draft | null; onClose(): void }) {
   const qc = useQueryClient(); const actor = useDirectoryActor();
+  const manual = Boolean(draft?.manualContractorId || (!draft && context.assignments.length === 0 && context.manualIntake?.eligible));
+  const [contractorId, setContractorId] = useState(draft?.manualContractorId ?? "");
   const [assignmentId, setAssignmentId] = useState(draft?.assignmentId ?? "");
   const [num, setNum] = useState(draft?.num ?? ""); const [date, setDate] = useState(draft?.invoiceDate ?? "");
   const [total, setTotal] = useState(draft ? String(draft.total) : "");
@@ -28,7 +31,7 @@ function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceC
   const submitAttempt = useRef<ReturnType<typeof createPriorInvoiceSubmitAttempt> | null>(null);
   const saved = useRef<{ id: string; invoiceVersion: number } | null>(null); const attached = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const dismissal = useUnsavedChangesGuard({ dirty: !done && Boolean(num || date || total || note || file || confirmed), busy,
+  const dismissal = useUnsavedChangesGuard({ dirty: !done && Boolean(assignmentId || contractorId || num || date || total || note || file || confirmed), busy,
     scopeKey: `${context.workOrderId}:${draft?.id ?? "new"}`, onClose });
   const invalidate = () => qc.invalidateQueries({ predicate: query => /^(prior-contractor|work-order|invoice|billing|portal-navigation)/.test(String(query.queryKey[0])) });
   async function save(target: "draft" | "submitted") {
@@ -42,15 +45,19 @@ function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceC
           setError("Choose a non-empty PDF no larger than 5 MB."); return;
         }
         if (target === "submitted" && (!confirmed || (!file && !draft?.hasPdf))) {
-          setError("Attach the original invoice PDF and confirm its contractor, amount and assignment before submitting."); return;
+          setError(manual
+            ? "Attach the original invoice PDF and confirm its contractor, work-order reference, amount and earlier work before submitting."
+            : "Attach the original invoice PDF and confirm its contractor, amount and assignment before submitting."); return;
         }
-        saveAttempt.current = createPriorInvoiceDraftAttempt(context, assignmentId, fields, draft);
+        saveAttempt.current = manual
+          ? createManualInvoiceDraftAttempt(context, contractorId, fields, confirmed, draft)
+          : createPriorInvoiceDraftAttempt(context, assignmentId, fields, draft);
         intent.current = target; setLocked(true);
       } catch (cause) { setError(priorInvoiceError(cause).message); return; }
     }
     sending.current = true; setBusy(true); setError("");
     try {
-      const transport = <Name extends "save_prior_contractor_invoice_v1" | "submit_prior_contractor_invoice_v1">(
+      const transport = <Name extends "save_prior_contractor_invoice_v1" | "submit_prior_contractor_invoice_v1" | "save_verified_manual_contractor_invoice_v1">(
         name: Name, args: Database["public"]["Functions"][Name]["Args"]) => supabase().rpc(name, args);
       if (!saved.current) {
         const receipt = await saveAttempt.current!(transport);
@@ -66,13 +73,22 @@ function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceC
           const current = await readInvoiceSummary(saved.current.id);
           if (!mounted.current) return;
           if (!current || current.workOrderId !== context.workOrderId) throw new Error("Invoice unavailable");
-          submitAttempt.current = createPriorInvoiceSubmitAttempt(context, { id: current.id, invoiceVersion: current.invoiceVersion });
+          submitAttempt.current = createPriorInvoiceSubmitAttempt(context, { id: current.id, invoiceVersion: current.invoiceVersion }, undefined,
+            { assignmentId: manual ? null : assignmentId, manualContractorId: manual ? contractorId : null });
         }
         await submitAttempt.current(transport);
       }
       if (mounted.current) setDone(target);
     } catch (cause) {
-      if (mounted.current) setError(`${priorInvoiceError(cause).message}${saved.current ? " Your draft is retained; reopen it from Previous contractor invoices if needed." : ""}`);
+      const failure = priorInvoiceError(cause);
+      // A definite rejection before saving rolled back the entire RPC. Let
+      // staff correct that input. Unknown outcomes and retained drafts keep
+      // their original operation frozen so a retry cannot create another bill.
+      if (!failure.uncertain && !saved.current) {
+        saveAttempt.current = null; submitAttempt.current = null; intent.current = null;
+        if (mounted.current) setLocked(false);
+      }
+      if (mounted.current) setError(`${failure.message}${saved.current ? " Your draft is retained; reopen it from Previous contractor invoices if needed." : ""}`);
     } finally {
       sending.current = false;
       void invalidate().catch(() => undefined);
@@ -81,19 +97,29 @@ function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceC
   }
   return <><Modal title="Upload previous contractor invoice" description={context.workOrderId} width={600}
     dismissDisabled={busy} onRequestClose={dismissal.requestClose}>
-    {done ? <div className="space-y-4"><p role="status">{done === "submitted" ? "Previous contractor invoice submitted for P1 review." : "Previous contractor invoice draft saved."}</p>
+    {done ? <div className="space-y-4"><p role="status">{manual
+      ? done === "submitted" ? "Staff-verified manual contractor invoice submitted for P1 review." : "Staff-verified manual contractor invoice draft saved."
+      : done === "submitted" ? "Previous contractor invoice submitted for P1 review." : "Previous contractor invoice draft saved."}</p>
       <p className="text-sm">The current contractor, work-order status, customer billing and payment records are unchanged.</p>
       <button type="button" className="btn-primary" onClick={onClose}>Done</button></div>
       : <div className="space-y-4">
-        <p className="text-sm">Record the actual bill from a past assignment. This does not reassign the WO, restore contractor access, bill 7-Eleven or mark anything paid.</p>
+        <p className="text-sm">{manual ? "This manually entered work order has no recorded past assignment. Verify the actual bill for earlier contractor work; this records a staff-verified manual bill, not a portal reassignment." : "Record the actual bill from a past assignment."} This does not reassign the WO, restore contractor access, bill 7-Eleven or mark anything paid.</p>
         <fieldset disabled={busy || locked} className="space-y-3">
-          <label className="block text-sm">Previous contractor assignment
+          {manual ? <div className="space-y-1 text-sm">
+            <div>Earlier contractor shown on the original bill</div>
+            <DirectorySelect domain="assignable_contractors" aria-label="Earlier contractor shown on the original bill"
+              value={contractorId} onChange={event => setContractorId(event.target.value)}
+              disabled={Boolean(draft) || busy || locked} selectedLabel={draft?.contractorName ?? undefined}
+              excludedIds={context.manualIntake?.currentContractorId ? [context.manualIntake.currentContractorId] : []}
+              emptyLabel="Choose the verified earlier contractor" companyLabel />
+            <p>For a bill from the current contractor, use their normal invoice workflow.</p>
+          </div> : <label className="block text-sm">Previous contractor assignment
             <select aria-label="Previous contractor assignment" className="w-full rounded border p-2" value={assignmentId} disabled={Boolean(draft)} onChange={event => setAssignmentId(event.target.value)}>
               <option value="">Select a past assignment</option>
               {context.assignments.map(assignment => <option key={assignment.id} value={assignment.id}>
                 {assignment.contractorName || "Contractor"} · assignment {assignment.assignmentVersion} · ended {new Date(assignment.endedAt).toLocaleDateString()}
               </option>)}
-            </select></label>
+            </select></label>}
           <label className="block text-sm">Contractor invoice number<input className="w-full rounded border p-2" value={num} maxLength={100} onChange={event => setNum(event.target.value)} /></label>
           <label className="block text-sm">Invoice date<input className="w-full rounded border p-2" type="date" value={date} onChange={event => setDate(event.target.value)} /></label>
           <div className="grid grid-cols-2 gap-3">
@@ -103,9 +129,9 @@ function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceC
           <label className="block text-sm">Original invoice PDF<input className="block w-full" type="file" accept="application/pdf,.pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
           {draft?.hasPdf && <p className="text-sm">An original PDF is already attached. It will be kept unless you select a replacement.</p>}
           <label className="block text-sm">Audit note<textarea aria-label="Audit note" className="w-full rounded border p-2" value={note} minLength={5} maxLength={1000}
-            placeholder="Explain which earlier work this bill covers." onChange={event => setNote(event.target.value)} /></label>
+            placeholder={manual ? "Explain how you verified the contractor and which earlier work this bill covers without portal assignment history." : "Explain which earlier work this bill covers."} onChange={event => setNote(event.target.value)} /></label>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
-            <span>I checked the original PDF, contractor, invoice number, date, total and tax. This bill covers the selected past assignment and is not a duplicate.</span></label>
+            <span>{manual ? "I verified the original invoice, earlier contractor, work-order reference, date, total and tax. This bill covers earlier work not recorded in portal assignment history and is not a duplicate." : "I checked the original PDF, contractor, invoice number, date, total and tax. This bill covers the selected past assignment and is not a duplicate."}</span></label>
         </fieldset>
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         <div className="flex flex-wrap justify-end gap-2">
@@ -131,13 +157,23 @@ export default function PriorContractorInvoicePanel({ workOrderId }: { workOrder
   if (!allowed) return null;
   return <section aria-label="Previous contractor invoices" className="card mb-4 space-y-3 p-4">
     <h3 className="font-semibold">Previous contractor invoices</h3>
-    <p className="text-sm">Staff can record bills received after reassignment. The current contractor’s work stays separate.</p>
-    {context.isError ? <><p role="alert">{priorInvoiceError(context.error).message}</p><button type="button" className="btn-soft" onClick={() => void context.refetch()}>Retry loading past assignments</button></>
-      : <button type="button" className="btn-soft" disabled={!context.data?.assignments.length || context.isFetching}
+    <p className="text-sm">Staff can record bills from recorded past assignments, or verify earlier-work bills on manually entered jobs without assignment history. The current contractor’s work stays separate.</p>
+    {(context.isPending || context.isFetching) && <p role="status" className="text-sm">Loading previous contractor assignments…</p>}
+    {context.isError ? <><p role="alert">{priorInvoiceError(context.error).uncertain
+      ? "Previous contractor assignments could not be loaded. Retry loading past assignments."
+      : priorInvoiceError(context.error).message}</p><button type="button" className="btn-soft" onClick={() => void context.refetch()}>Retry loading past assignments</button></>
+      : Boolean(context.data?.assignments.length || context.data?.manualIntake?.eligible) && <button type="button" className="btn-soft" disabled={context.isFetching}
         onClick={() => context.data && setEditor({ context: context.data, draft: null })}>Upload previous contractor invoice</button>}
-    {context.data?.assignments.length === 0 && <p className="text-sm">No recorded past contractor assignments. Staff must verify assignment history before recording a prior bill.</p>}
+    {!context.isError && context.data?.assignments.length === 0 && <div className="space-y-2 rounded border p-3 text-sm">
+      <h4 className="font-semibold">No previous contractor assignment found</h4>
+      <p>{context.data.manualIntake?.eligible ? "This work order was entered manually. Staff can use the existing upload form to verify a genuine earlier contractor bill without creating assignment history." : "This upload requires a recorded past assignment. Verified manual intake is available only on manually entered work orders."} For a bill from the current contractor, use their normal invoice workflow.</p>
+      <p>Verify the original bill and contractor before recording it. Do not reassign the work order just to enable this upload.</p>
+      <button type="button" className="btn-soft" disabled={context.isFetching} onClick={() => void context.refetch()}>
+        {context.isFetching ? "Refreshing assignment history…" : "Refresh assignment history"}
+      </button>
+    </div>}
     {context.data?.drafts.map(draft => <div key={draft.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-      <span>#{draft.num} · {draft.state === "rejected" ? "Rejected — correction needed" : "Draft"}</span>
+      <span>#{draft.num} · {draft.state === "rejected" ? "Rejected — correction needed" : "Draft"}{draft.manualContractorId ? " · Staff-verified manual bill" : ""}</span>
       <button type="button" className="btn-soft" onClick={() => context.data && setEditor({ context: context.data, draft })}>Resume prior invoice {draft.num}</button>
     </div>)}
     {editor && <PriorInvoiceModal context={editor.context} draft={editor.draft} onClose={() => setEditor(null)} />}

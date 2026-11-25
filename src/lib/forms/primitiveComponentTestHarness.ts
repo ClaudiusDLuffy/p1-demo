@@ -53,7 +53,7 @@ export function primitiveHarness(path: string, mocks: Record<string, unknown> = 
     createElement: () => ({ name: "", value: "", appendChild() {} }) };
   const code = ts.transpileModule(readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS,
     target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  runInNewContext(code, { exports, Event, document: mocks.document || document, AbortController, AbortSignal,
+  runInNewContext(code, { exports, Event, document: mocks.document || document, window: mocks.window, AbortController, AbortSignal,
     process: { env: { NODE_ENV: "test" } }, console: mocks.console || console,
     requestAnimationFrame: (callback: () => void) => { callback(); return 1; }, cancelAnimationFrame() {},
     require: (name: string) => name in mocks ? mocks[name] : name === "react" ? react

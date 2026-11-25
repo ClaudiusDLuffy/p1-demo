@@ -1,4 +1,4 @@
-import { accounts, expect, login, openSidebarPage, test } from "./fixtures.mjs";
+import { accounts, expect, login, openSidebarPage, test, waitForApplicationRequestsToSettle } from "./fixtures.mjs";
 
 async function openInvoice(page, account, invoiceNumber, tab = "All") {
   await login(page, account);
@@ -6,6 +6,7 @@ async function openInvoice(page, account, invoiceNumber, tab = "All") {
   if (tab !== "All") await page.getByRole("button", { name: tab, exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search contractor invoices" });
   await search.fill(invoiceNumber);
+  await waitForApplicationRequestsToSettle(page);
   const number = page.getByText(`#${invoiceNumber}`, { exact: true }).first();
   await expect(number).toBeVisible();
   await number.click();
@@ -56,6 +57,16 @@ test("manager downloads and approves one submitted invoice", async ({ page }) =>
   await dialog.getByRole("button", { name: "Approve", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("Approved", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Synthetic approval labor",{exact:true}).filter({visible:true}).first()).toBeVisible();
+  await expect(page.getByText(/The record changed\. Refresh and review it before trying again/)).toBeHidden();
+  await page.reload();
+  await expect(page.locator('.app-root')).toBeVisible();
+  await openSidebarPage(page,"Contractor bills");
+  await page.getByRole("button",{name:"Approved",exact:true}).click();
+  await page.getByRole("searchbox",{name:"Search contractor invoices"}).fill("E2E-SUBMITTED-APPROVE");
+  await page.getByText("#E2E-SUBMITTED-APPROVE",{exact:true}).filter({visible:true}).first().click();
+  await expect(page.getByText("Synthetic approval labor",{exact:true}).filter({visible:true}).first()).toBeVisible();
+  await expect(page.getByRole("button",{name:"Hold / Do not pay",exact:true})).toBeVisible();
 });
 
 test("manager rejects one submitted invoice with a contractor-visible reason", async ({ page }) => {
@@ -85,6 +96,9 @@ test("contractor corrects a rejected invoice, verifies dropdown contents, and re
   await openSidebarPage(page, "Invoices");
   await page.getByRole("button", { name: "Rejected", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search contractor invoices" }).fill("E2E-REJECTED");
+  // The filtered row can move while the debounced query replaces the old
+  // result set. Wait for the visible list to settle before pointer activation.
+  await waitForApplicationRequestsToSettle(page);
   await page.getByRole("button", { name: "Edit and resubmit", exact: true }).first().click();
   const dialog = page.getByRole("dialog", { name: "Correct invoice #E2E-REJECTED" });
   await expect(dialog).toBeVisible();
@@ -219,11 +233,14 @@ test("accounting stages one selected contractor bill, downloads its evidence, an
   await openSidebarPage(page, "Contractor bills");
   await page.getByRole("button", { name: "Approved", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search contractor invoices" }).fill("E2E-APPROVED-HANDOFF");
+  await waitForApplicationRequestsToSettle(page);
   await expect(page.getByText("#E2E-APPROVED-HANDOFF", { exact: true }).first()).toBeVisible();
 
   const select = page.getByRole("checkbox", {
     name: "Select contractor bill E2E-APPROVED-HANDOFF for payables handoff",
   }).first();
+  await select.scrollIntoViewIfNeeded();
+  await expect(select).toBeInViewport();
   await select.check();
   const stage = page.getByRole("button", { name: "Download selected bills (1)", exact: true });
   await expect(stage).toBeEnabled();
@@ -255,10 +272,13 @@ test("accounting can manually cancel a handoff and a later payment hold automati
   await openSidebarPage(page, "Contractor bills");
   await page.getByRole("button", { name: "Approved", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search contractor invoices" }).fill("E2E-APPROVED-CANCEL");
+  await waitForApplicationRequestsToSettle(page);
 
   const select = page.getByRole("checkbox", {
     name: "Select contractor bill E2E-APPROVED-CANCEL for payables handoff",
   });
+  await select.scrollIntoViewIfNeeded();
+  await expect(select).toBeInViewport();
   await select.check();
   let download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download selected bills (1)", exact: true }).click();

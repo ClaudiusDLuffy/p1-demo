@@ -27,7 +27,7 @@ import {
   canEditRejectedContractorInvoice,
 } from "../../lib/invoicePermissions";
 import { isInvoiceController } from "../../lib/staffPermissions";
-import { computeSlaState } from "../../lib/slaConfig";
+import { computeSlaState, formatHourMinuteDuration } from "../../lib/slaConfig";
 import { timezoneForWorkOrder } from "../../lib/billingRules";
 import { getContractorCompletionControl } from "../../lib/contractorCompletion";
 import { canonicalSevenElevenWorkOrderId } from "../../lib/workOrderIdentity";
@@ -310,7 +310,7 @@ export default function WorkOrderDetail(props: any) {
       && woData.contractorInvoicingAssignmentVersion === woData.contractorAssignmentVersion
       && woData.contractorInvoicingWorkflowCycle === woData.workflowCycle,
   );
-  const contractorInvoiceStates = woAllInvoices.filter(invoice => !invoice.priorAssignmentId).map((invoice: any) => invoice.state);
+  const contractorInvoiceStates = woAllInvoices.filter(invoice => !invoice.priorAssignmentId && !invoice.manualContractorBill).map((invoice: any) => invoice.state);
   const contractorInvoiceSetReady = contractorInvoiceStates.some(state =>
     ["submitted", "revised", "approved", "paid"].includes(state),
   ) && !contractorInvoiceStates.some(state => ["draft", "rejected"].includes(state));
@@ -873,7 +873,7 @@ export default function WorkOrderDetail(props: any) {
                                 <div className="wo-invoice-row-main" style={{ minWidth: 0, flex: 1 }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                                     <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>#{inv.num}</span>
-                                    {inv.priorAssignmentId && <span className="text-xs">Previous contractor bill · current assignment unchanged</span>}
+                                    {(inv.priorAssignmentId || inv.manualContractorBill) && <span className="text-xs">{inv.manualContractorBill ? "Staff-verified manual bill" : "Previous contractor bill"} · current assignment unchanged</span>}
                                     <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: stateColor, background: stateBg, border: `1px solid ${stateColor}33`, padding: "2px 8px", borderRadius: 999 }}>{stateLabel}</span>
                                     <span className="mono" style={{ fontSize: 12, color: T.muted }}>{fmt(inv.total || 0)}</span>
                                     {inv.invoiceDate && <span style={{ fontSize: 11, color: T.subtle }}>{inv.invoiceDate}</span>}
@@ -1609,7 +1609,7 @@ export default function WorkOrderDetail(props: any) {
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
                         <div className="display" style={{ fontSize: 28, color: sla2.headlineRemainingHours <= 0 ? T.danger : sla2.headlineRemainingHours < 2 ? T.danger : sla2.headlineRemainingHours < 4 ? T.warn : T.ink, lineHeight: 1 }}>
                           {sla2.headlineRemainingHours > 0
-                            ? `${Math.floor(sla2.headlineRemainingHours)}h ${Math.round((sla2.headlineRemainingHours % 1) * 60)}m`
+                            ? formatHourMinuteDuration(sla2.headlineRemainingHours)
                             : `-${Math.floor(-sla2.headlineRemainingHours)}h`}
                         </div>
                         <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>
@@ -1641,7 +1641,7 @@ export default function WorkOrderDetail(props: any) {
                     ) : slaR && (
                       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, color: T.subtle, marginBottom: 10 }}>SLA countdown</div>
-                        <div className="display" style={{ fontSize: 28, color: slaR.remainingHours < 2 ? T.danger : slaR.percent > 50 ? T.warn : T.ink, lineHeight: 1 }}>{slaR.remainingHours > 0 ? `${Math.floor(slaR.remainingHours)}h ${Math.round((slaR.remainingHours % 1) * 60)}m` : `-${Math.floor(-slaR.remainingHours)}h`}</div>
+                        <div className="display" style={{ fontSize: 28, color: slaR.remainingHours < 2 ? T.danger : slaR.percent > 50 ? T.warn : T.ink, lineHeight: 1 }}>{slaR.remainingHours > 0 ? formatHourMinuteDuration(slaR.remainingHours) : `-${Math.floor(-slaR.remainingHours)}h`}</div>
                         <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{PRIORITY[woData.priority]?.label || woData.priority || "Priority not set"} · {woData.responseBreachAt || woData.resolutionBreachAt ? "Stored SLA deadline" : `${slaR.slaHours}h legacy compatibility SLA`}</div>
                         {slaR.percent !== null && <div className="sla-bar" style={{ marginTop: 10 }}>
                           <div className="sla-fill" style={{ width: `${slaR.percent}%`, background: slaR.percent > 90 ? T.danger : slaR.percent > 75 ? T.accent : slaR.percent > 50 ? T.warn : T.success }} />

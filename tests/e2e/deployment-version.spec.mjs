@@ -27,7 +27,7 @@ test("a stale anonymous browser is automatically signed out and reloads the clea
   await expect(page.getByPlaceholder("you@p1pros.com")).toBeVisible();
   await expect(page.getByLabel(`Portal version ${currentVersion}`, { exact: true })).toBeVisible();
   await expect(page.getByLabel(`Sign-in portal version ${currentVersion}`, { exact: true })).toBeVisible();
-  expect(versionChecks).toBeGreaterThanOrEqual(2);
+  await expect.poll(()=>versionChecks).toBeGreaterThanOrEqual(2);
 });
 test("a deployment replaces an authenticated dirty mobile session without an unload deadlock", async ({ page }) => {
   let stale = false;
