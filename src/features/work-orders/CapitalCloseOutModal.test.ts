@@ -11,6 +11,8 @@ function setup(overrides: Record<string, unknown> = {}) {
   const work = { id: "SYNTHETIC-CAPITAL", status: "pending_capital_completion", workflowCycle: 0,
     contractorAssignmentVersion: 0, lifecycleVersion: 2 };
   const sent: Record<string, unknown>[] = []; const completed: string[] = []; let closed = 0;
+  let history: Record<string, unknown> = { isError: false, isFetching: false };
+  let historyOptions: Record<string, unknown> = {};
   let transport: (args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }> = async args => {
     const payload = args.p_payload as Record<string, unknown>;
     return { data: { applied: true, reason: "applied", operationId: args.p_operation_id, workOrderId: work.id,
@@ -22,7 +24,10 @@ function setup(overrides: Record<string, unknown> = {}) {
   const h = primitiveHarness("src/features/work-orders/CapitalCloseOutModal.tsx", {
     "../directory/queries": { useDirectoryActor: () => actor },
     "./queries": { useWorkOrderByIdQuery: () => ({ data: work, isPending: false, isError: false, refetch() {} }) },
-    "@tanstack/react-query": { useQueryClient: () => ({ invalidateQueries: () => Promise.reject(new Error("synthetic refresh failure")) }) },
+    "@tanstack/react-query": {
+      useQuery: (options: Record<string, unknown>) => { historyOptions = options; return history; },
+      useQueryClient: () => ({ invalidateQueries: () => Promise.reject(new Error("synthetic refresh failure")) }),
+    },
     "../../lib/forms/useUnsavedChangesGuard": { useUnsavedChangesGuard: ({ onClose }: { onClose(): void }) => ({ requestClose: onClose, dialog: null }) },
     "./capitalCloseOut": { createCapitalCloseOutAttempt, capitalCloseOutError, validateCapitalCloseOutForm,
       runCapitalCloseOutAttempt: (attempt: ReturnType<typeof createCapitalCloseOutAttempt>) => attempt(async (_name, args) => {
@@ -35,6 +40,7 @@ function setup(overrides: Record<string, unknown> = {}) {
   const submit = (tree: unknown) => uiInvoke(find(tree, node => node.type === "form"), "onSubmit", { preventDefault() {} });
   const setDate = (tree: unknown) => uiInvoke(find(tree, node => node.props.type === "date"), "onChange", { target: { value: "2026-10-01" } });
   return { ...h, props, work, render, submit, setDate, sent, completed, closed: () => closed,
+    setHistory: (next: Record<string, unknown>) => { history = next; }, historyOptions: () => historyOptions,
     setTransport: (next: typeof transport) => { transport = next; }, setActor: (next: typeof actor) => { actor = next; } };
 }
 
@@ -70,6 +76,51 @@ test("incomplete history, missing billing evidence, and active-visit blockers ca
   for (const overrides of [{ hasCompleteEvidence: false }, { completionBlocker: "Actual checkout required" }, {}]) {
     const h = setup(overrides); await h.submit(h.render()); assert.equal(h.sent.length, 0);
   }
+});
+
+test("incomplete history is checked automatically with a visible retry, never manual page buttons", async () => {
+  const h = setup({ hasCompleteEvidence: false });
+  let retries = 0;
+  h.setHistory({ isError: false, isFetching: true });
+  let tree = h.render();
+  assert.equal(h.historyOptions().enabled, true);
+  assert.match(uiText(tree), /Checking invoice, activity and visit history automatically/);
+  assert.equal(uiNodes(tree).some(node => uiText(node.props.children) === "Load more close-out history"), false);
+  h.setDate(tree); await h.submit(h.render()); assert.equal(h.sent.length, 0);
+  h.setHistory({ isError: true, isFetching: false, refetch: () => { retries++; } });
+  tree = h.render();
+  assert.match(uiText(tree), /Nothing was changed/);
+  uiInvoke(find(tree, node => node.type === "button" && uiText(node.props.children) === "Retry history check"), "onClick");
+  assert.equal(retries, 1); assert.equal(h.sent.length, 0);
+});
+
+test("successful automatic preflight removes only the incomplete-history blocker and still requires confirmation", async () => {
+  const h = setup({ hasCompleteEvidence: false, completionBlocker: "Load the complete invoice and activity history before choosing a billing outcome." });
+  Object.assign(h.work, { isCapital: true });
+  h.setHistory({ data: { documents: [doc], visits: [], hasUnresolvedContractorInvoices: false,
+    hasPendingSevenElevenSync: false, hasPendingContractorAttention: false } });
+  let tree = h.render(); assert.equal(h.sent.length, 0);
+  h.setDate(tree); tree = h.render(); await h.submit(tree);
+  assert.equal(h.sent.length, 1); assert.deepEqual(h.completed, ["billed"]);
+});
+
+for (const state of [{ isError: true }, { isFetching: true }]) test(`stale preflight data cannot clear history checks during ${JSON.stringify(state)}`, async () => {
+  const h = setup({ hasCompleteEvidence: false }); Object.assign(h.work, { isCapital: true });
+  h.setHistory({ ...state, data: { documents: [doc], visits: [], hasUnresolvedContractorInvoices: false,
+    hasPendingSevenElevenSync: false, hasPendingContractorAttention: false } });
+  h.setDate(h.render()); await h.submit(h.render()); assert.equal(h.sent.length, 0);
+});
+
+for (const [label, patch] of [
+  ["open visit", { visits: [{ id: "open", checkOutAt: null }] }],
+  ["unresolved contractor invoice", { hasUnresolvedContractorInvoices: true }],
+  ["pending 7-Eleven update", { hasPendingSevenElevenSync: true }],
+  ["pending contractor attention", { hasPendingContractorAttention: true }],
+] as const) test(`automatic preflight preserves the ${label} blocker`, async () => {
+  const h = setup({ hasCompleteEvidence: false }); Object.assign(h.work, { isCapital: true });
+  h.setHistory({ data: { documents: [doc], visits: [], hasUnresolvedContractorInvoices: false,
+    hasPendingSevenElevenSync: false, hasPendingContractorAttention: false, ...patch } });
+  h.setDate(h.render()); await h.submit(h.render()); assert.equal(h.sent.length, 0);
 });
 
 test("uncertain writes keep the same request frozen even if current documents, blockers, or versions refresh", async () => {

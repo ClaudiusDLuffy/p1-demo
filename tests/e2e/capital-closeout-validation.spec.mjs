@@ -13,7 +13,7 @@ const dialogFor = page => page.getByRole('dialog', {name:'Close out capital',exa
 const quoteFor = dialog => dialog.getByLabel('Quote reference in 7-Eleven (required)', {exact:true});
 const invoiceFor = dialog => dialog.getByLabel('Existing billed invoice reference (required)', {exact:true});
 const dateFor = dialog => dialog.getByLabel('Actual billing date (required)', {exact:true});
-const submitFor = dialog => dialog.getByRole('button', {name:'Confirm completed and billed',exact:true});
+const submitFor = dialog => dialog.getByRole('button', {name:'Close and send to History',exact:true});
 function record(info, role, path, action, expected, actual, status='Pass') {
   if (!auditDir) return;
   appendFileSync(join(auditDir,'coverage.jsonl'),JSON.stringify({path,role,browser:info.project.name,

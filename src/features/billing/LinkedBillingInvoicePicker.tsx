@@ -34,21 +34,31 @@ export function LinkedBillingInvoicePicker({ sourceWorkOrderId, selected, disabl
     if (lookup?.workOrderId === parsed.data.workOrderId && lookup.invoiceNumber === parsed.data.invoiceNumber) void result.refetch();
     else setLookup(parsed.data);
   }
+  function findAll() {
+    const next = { ...fields, invoiceNumber: "" };
+    setFields(next); onSelect(null); setError("");
+    setLookup(linkedBillingLookupSchema.parse(next));
+  }
   return <fieldset disabled={disabled} className="min-w-0 space-y-3 disabled:opacity-70">
+    <legend className="mb-2 text-sm font-semibold">1. Find the invoice on the other work order</legend>
     <label htmlFor={`${fieldId}-work`} className="grid gap-1 text-sm">Billing work order number (required)
       <Input id={`${fieldId}-work`} className="w-full min-w-0" value={fields.workOrderId} maxLength={128}
         onChange={event => edit("workOrderId", event.target.value)} placeholder="Enter the other work order number" />
     </label>
     <label htmlFor={`${fieldId}-invoice`} className="grid gap-1 text-sm">Exact invoice number (optional)
       <Input id={`${fieldId}-invoice`} className="w-full min-w-0" value={fields.invoiceNumber} maxLength={100}
+        placeholder="Leave blank if unknown" aria-describedby={`${fieldId}-invoice-help`}
         onChange={event => edit("invoiceNumber", event.target.value)} />
     </label>
+    <p id={`${fieldId}-invoice-help`} className="text-xs">Leave this blank if you only know the work order number. Anything entered here, including NA or N/A, is an exact invoice-number filter.</p>
     <button type="button" className="btn-soft" disabled={result.isFetching || disabled} onClick={find}>Find submitted invoices</button>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     {lookup && result.isFetching && <p role="status" className="text-sm">Loading submitted invoices…</p>}
     {lookup && result.isError && <p role="alert" className="text-sm text-red-700">Invoices could not be loaded. Try Find submitted invoices again.</p>}
     {lookup && result.isSuccess && !result.isFetching && <div className="space-y-2">
-      {result.data.items.length === 0 && <p className="text-sm">No eligible submitted P1 invoices found. Check the number, or submit the invoice on the other work order first. Drafts, rejected invoices, quotes, and contractor bills are excluded.</p>}
+      {result.data.items.length === 0 && <><p className="text-sm">No eligible submitted P1 invoices found. Check the number, or submit the invoice on the other work order first. Drafts, rejected invoices, quotes, and contractor bills are excluded.</p>
+        {lookup.invoiceNumber && <button type="button" className="btn-soft min-h-11" onClick={findAll}>Search all invoices on this WO</button>}</>}
+      {result.data.items.length > 0 && <p className="text-sm font-semibold">2. Select the invoice that covers this work</p>}
       {result.data.items.map(candidate => <label key={candidate.invoiceId} className="flex min-w-0 items-start gap-2 rounded-lg border border-p1-border p-3 text-sm">
         <input type="radio" name={`${fieldId}-selection`} className="mt-1 shrink-0" checked={selected?.invoiceId === candidate.invoiceId}
           onChange={() => onSelect(candidate)} />
@@ -57,5 +67,6 @@ export function LinkedBillingInvoicePicker({ sourceWorkOrderId, selected, disabl
       </label>)}
       {result.data.hasMore && <p className="text-sm">More than 25 invoices match. Enter the exact invoice number to find the right one.</p>}
     </div>}
+    {selected && <p className="break-words text-sm">Selected invoice: <strong>#{selected.invoiceNumber}</strong> on {selected.workOrderId}.</p>}
   </fieldset>;
 }

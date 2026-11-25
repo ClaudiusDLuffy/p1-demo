@@ -71,7 +71,6 @@ export function WorkOrderCloseOutPanel(props: Props) {
     {selected?.action === "choose" && capital && <CapitalCloseOutModal workOrderId={work.id} documents={props.capitalDocuments || []}
       hasCompleteEvidence={props.hasCompleteEvidence} billedBlocker={options.find(option => option.action === "capital_billed")?.blocked}
       completionBlocker={options.find(option => option.action === "capital_to_billing")?.blocked}
-      canLoadMoreHistory={props.canLoadMoreHistory} historyLoading={props.historyLoading} onLoadMoreHistory={props.onLoadMoreHistory}
       onReviewDocument={invoiceId => { close(); props.onOpenBilling(work.id, invoiceId); }} onClose={close} onDone={props.onCapitalDone} />}
     {selected?.action === "choose" && !capital && <Modal title="Close out work order" description={work.id} width={600} onRequestClose={close}>
       <div className="space-y-4">

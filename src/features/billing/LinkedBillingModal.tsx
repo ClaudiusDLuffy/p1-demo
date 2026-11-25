@@ -24,12 +24,18 @@ export function LinkedBillingModal({ workOrderId, onClose, guidedCloseOut = fals
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [uncertain, setUncertain] = useState(false); const [receipt, setReceipt] = useState<LinkedBillingReceipt | null>(null);
   const sending = useRef(false); const attempt = useRef<ReturnType<typeof createLinkedBillingAttempt> | null>(null);
+  const picker = useRef<HTMLDivElement>(null); const confirmation = useRef<HTMLInputElement>(null);
   const dismissal = useUnsavedChangesGuard({ dirty: !receipt && Boolean(candidate || note || confirmed), busy, scopeKey: workOrderId, onClose });
   const unavailable = work.data ? billingClosureUnavailableReason(work.data.status) : null;
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending.current || receipt) return;
+    if (!candidate) {
+      setError("Select a submitted invoice: enter the other work order number, click Find submitted invoices, then select the invoice that covers this work.");
+      picker.current?.querySelector("button")?.focus(); picker.current?.scrollIntoView({ block: "nearest" }); return;
+    }
+    if (!confirmed) { setError("Confirm that the selected invoice covers this completed work before closing."); confirmation.current?.focus(); return; }
     let auditNote = note;
     try {
       if (guidedCloseOut) auditNote = closeOutAuditNote({ id: workOrderId, workflowCycle: work.data?.workflowCycle },
@@ -64,16 +70,19 @@ export function LinkedBillingModal({ workOrderId, onClose, guidedCloseOut = fals
         {work.isPending && <p role="status">Loading current work order…</p>}
         {work.isError && <p role="alert">The work order could not be loaded. <button type="button" className="btn-soft" onClick={() => void work.refetch()}>Retry loading</button></p>}
         {unavailable && !uncertain && <p className="text-sm">{unavailable}</p>}
-        <LinkedBillingInvoicePicker sourceWorkOrderId={workOrderId} selected={candidate} disabled={busy || uncertain}
-          onSelect={value => { setCandidate(value); setConfirmed(false); setError(""); }} />
+        <div ref={picker}><LinkedBillingInvoicePicker sourceWorkOrderId={workOrderId} selected={candidate} disabled={busy || uncertain}
+          onSelect={value => { setCandidate(value); setConfirmed(false); setError(""); }} /></div>
         <fieldset disabled={busy || uncertain} className="min-w-0 space-y-3 disabled:opacity-70">
           <label htmlFor={`${fieldId}-note`} className="grid gap-1 text-sm">{guidedCloseOut ? "Additional details (optional)" : "Audit note (required)"}
             <TA id={`${fieldId}-note`} className="w-full min-w-0" rows={3} minLength={guidedCloseOut ? undefined : 5} maxLength={guidedCloseOut ? 350 : 1000}
               value={note} onChange={event => { setNote(event.target.value); setError(""); }} />
           </label>
           <p className="text-xs">{guidedCloseOut ? "Your confirmed invoice coverage supplies the audit note automatically. Add any useful details." : "5–1,000 characters. Explain why billing is under the other work order."}</p>
-          <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" className="mt-1 shrink-0" checked={confirmed} disabled={!candidate || busy || uncertain}
+          <p className="text-sm font-semibold">3. Confirm coverage and close</p>
+          {!candidate && <p id={`${fieldId}-selection-help`} className="text-sm">First find and select an invoice above to enable the confirmation box.</p>}
+          <label className="flex min-h-11 items-start gap-2 rounded-lg border border-p1-border p-3 text-sm">
+            <input ref={confirmation} type="checkbox" className="mt-1 shrink-0" checked={confirmed} disabled={!candidate || busy || uncertain}
+              aria-describedby={!candidate ? `${fieldId}-selection-help` : undefined}
               onChange={event => { setConfirmed(event.target.checked); setError(""); }} />
             <span>{guidedCloseOut ? "I confirm field work is finished, the selected submitted invoice covers this work order's current work, and no separate invoice is needed." : "I confirm the selected submitted invoice covers this work order and no separate invoice is needed."}</span>
           </label>
