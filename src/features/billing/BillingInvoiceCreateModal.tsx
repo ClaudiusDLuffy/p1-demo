@@ -1813,7 +1813,7 @@ export default function BillingInvoiceCreateModal(props: any) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: T.ink }}>Contractor invoices on {selectedWorkOrderId}</div>
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>Select the source invoices used to build this 7-Eleven invoice.</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>Select the source invoices used to build this 7-Eleven invoice. Earlier-work and current-contractor bills can be selected together; verify each contractor and original bill.</div>
               </div>
               {selectedSourceInvoices.length > 0 && (
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
@@ -1839,10 +1839,16 @@ export default function BillingInvoiceCreateModal(props: any) {
                     <div key={invoice.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: `1px solid ${checked ? T.accent : T.borderSoft}`, background: T.surface, opacity: linkedElsewhere ? 0.6 : 1 }}>
                       <label style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1, cursor: linkedElsewhere ? "not-allowed" : "pointer" }}>
                         <input type="checkbox" checked={checked} disabled={linkedElsewhere} onChange={() => toggleSourceInvoice(invoice.id)} />
-                        <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>#{invoice.num}</span>
-                        <span style={{ fontSize: 11, color: T.muted, textTransform: "capitalize" }}>{invoice.state}</span>
-                        <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.ink }}>{fmt(Number(invoice.total || 0))}</span>
-                        {linkedElsewhere && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo?.num}</span>}
+                        <span style={{ display: "grid", gap: 4, minWidth: 0, flex: 1 }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: T.accent, overflowWrap: "anywhere" }}>#{invoice.num}</span>
+                            <span style={{ fontSize: 11, color: T.muted, textTransform: "capitalize" }}>{invoice.state}</span>
+                            <span className="mono" style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: T.ink }}>{fmt(Number(invoice.total || 0))}</span>
+                          </span>
+                          <span style={{ fontSize: 11, color: T.muted, overflowWrap: "anywhere" }}>{invoice.contractorName?.trim() || "Contractor not recorded"}</span>
+                          {invoice.manualContractorBill && <span style={{ fontSize: 10, color: T.muted }}>Staff-verified earlier-work bill</span>}
+                          {linkedElsewhere && <span style={{ fontSize: 10, color: T.warn }}>Used by {linkedTo?.num}</span>}
+                        </span>
                       </label>
                       <button
                         type="button"
