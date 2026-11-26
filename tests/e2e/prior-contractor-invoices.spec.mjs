@@ -200,7 +200,7 @@ test('reject a prior bill, correct the same bill as staff, resubmit and approve 
 });
 
 for (const width of [1280, 390]) {
-  test(`email-source WO without history explains unavailable upload and refreshes verified history at ${width}px`, async ({ page }) => {
+  test(`unsupported-source WO without history explains unavailable upload and refreshes verified history at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 568 : 900 });
     const f = priorInvoiceFixture({ noPreviousAssignment: true });
     sql(`update public.work_orders set source='email' where id=${q(f.work)}`);

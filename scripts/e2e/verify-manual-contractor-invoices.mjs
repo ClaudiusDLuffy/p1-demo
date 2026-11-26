@@ -24,8 +24,10 @@ function denied(f,statement,code,label,actor,before=''){
     end; $probe$;`,actor,false,before);
   checks.push(label);
 }
-for(const options of [{},{capital:true},{closed:true}]){
-  const f=priorInvoiceFixture({...options,noPreviousAssignment:true}),command=call(f);
+for(const source of ['manual','email_intake']){
+const fixture=options=>priorInvoiceFixture({...options,source});
+for(const options of [{},{capital:true},{closed:true},{awaitingParts:true}]){
+  const f=fixture({...options,noPreviousAssignment:true}),command=call(f);
   priorSqlAs(`do $probe$ declare r jsonb; again jsonb; parent jsonb; context jsonb; summary jsonb; begin
     select to_jsonb(w) into parent from public.work_orders w where id=${q(f.work)};
     context:=public.get_prior_contractor_invoice_context_v1(${q(f.work)});
@@ -48,9 +50,9 @@ for(const options of [{},{capital:true},{closed:true}]){
       ${f.assignment},${f.cycle},gen_random_uuid()); raise exception 'Missing original PDF accepted';
       exception when sqlstate '22023' then null; end;
     end; $probe$;`);
-  checks.push(`draft, replay, tax, exact header, audit, missing-PDF rejection and unchanged full parent ${JSON.stringify(options)}`);
+  checks.push(`${source}: draft, replay, tax, exact header, audit, missing-PDF rejection and unchanged full parent ${JSON.stringify(options)}`);
 }
-const f=priorInvoiceFixture({noPreviousAssignment:true});
+const f=fixture({noPreviousAssignment:true});
 for(const actor of ['e2e.controller@p1.invalid','e2e.direct@p1.invalid','e2e.company.admin@p1.invalid','e2e.invoice.tech@p1.invalid','e2e.va.coordinator@p1.invalid'])
   denied(f,call(f),'42501',`forbidden actor ${actor}`,actor);
 denied(f,call(f,{vendor:current}),'22023','current contractor cannot use earlier-work fallback');
@@ -61,9 +63,11 @@ const payload={num:'SYNTHETIC-INVALID',invoiceDate:f.day,total:125.50,salesTax:5
 for(const extra of [{verified:false},{verified:'true'},{total:0},{total:1.001},{salesTax:999},{note:'     '},
   {invoiceDate:'2999-01-01'},{assignmentId:randomUUID()}])
   denied(f,call(f,{payload:{...payload,...extra}}),'22023',`invalid manual payload ${checks.length}`);
-denied(f,call(f),'22023','email-source WO cannot use manual fallback',undefined,
+denied(f,call(f),'22023',`${source}: unsupported legacy email alias cannot use verified fallback`,undefined,
   `update public.work_orders set source='email' where id=${q(f.work)};`);
-const historical=priorInvoiceFixture();
+for(const unsupported of [null,'import','MANUAL'])denied(f,call(f),'22023',`${source}: unsupported source ${unsupported}`,undefined,
+  `update public.work_orders set source=${unsupported===null?'null':q(unsupported)} where id=${q(f.work)};`);
+const historical=fixture();
 denied(historical,call(historical),'22023','recorded history must use recorded-assignment workflow');
 denied(f,call(f),'42501','revoked operational staff denied','e2e.manager@p1.invalid',
   "update public.profiles set active=false where email='e2e.manager@p1.invalid';");
@@ -86,4 +90,5 @@ checks.push('raw provenance/note/audit writes denied');
 const ctx=JSON.parse(priorSqlAs(`select public.get_prior_contractor_invoice_context_v1(${q(f.work)});`).split('\n').at(-1));
 assert.equal(ctx.drafts[0].manualContractorId,vendor);assert.equal(ctx.drafts[0].assignmentId,null);
 checks.push('retained manual draft exposes verified contractor without fake assignment');
+}
 console.log(JSON.stringify({passed:checks.length,checks},null,2));
