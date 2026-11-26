@@ -72,11 +72,15 @@ async function upload(intent: UploadIntent, file: Blob, signal?: AbortSignal) {
   if (!response.ok) throw new PhotoUploadError("Upload was not confirmed. Retry this file to check the same reserved object.");
 }
 
+// Only a matching server-confirmed cleanup permits a fresh attachment
+// reservation. Unknown outcomes must keep retrying the original identity.
+const cleanedAttachmentIntents = new WeakSet<UploadIntent>();
 export async function cancelUnattachedUpload(intent: UploadIntent): Promise<UploadIntent> {
   const result = await objectRequest("cancel", { intentId: intent.intentId }, uploadIntentSchema);
   if (result.intentId !== intent.intentId || result.operationId !== intent.operationId || result.objectPath !== intent.objectPath) {
     throw new PhotoUploadError("The attachment recovery receipt could not be verified.");
   }
+  if (result.status === "cleaned") cleanedAttachmentIntents.add(intent);
   return result;
 }
 
@@ -130,7 +134,9 @@ export async function uploadBoundAttachment(parentId: string, purpose: Exclude<O
   if (!attempts) { attempts = new Map(); attachmentAttempts.set(file, attempts); }
   const key = `${purpose}:${parentId}`;
   let attempt = attempts.get(key);
-  if (!attempt) { attempt = { operationId: crypto.randomUUID() }; attempts.set(key, attempt); }
+  if (!attempt || (attempt.intent && cleanedAttachmentIntents.has(attempt.intent))) {
+    attempt = { operationId: crypto.randomUUID() }; attempts.set(key, attempt);
+  }
   if (attempt.promise) return attempt.promise;
   const current = attempt;
   current.promise = (async () => {
