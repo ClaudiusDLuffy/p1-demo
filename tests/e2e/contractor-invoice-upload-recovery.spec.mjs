@@ -30,8 +30,10 @@ async function attach(d,name='synthetic-original.pdf',buffer){
  await(await chooser).setFiles({name,mimeType:name.endsWith('.pdf')?'application/pdf':'text/plain',buffer});
 }
 async function shot(page,info,name){await page.screenshot({path:info.outputPath(name+'.png'),animations:'disabled'});}
+for(const source of ['manual','email_intake'])test.describe(`verified upload recovery: ${source}`,()=>{
+const fixture=()=>priorInvoiceFixture({source,noPreviousAssignment:true});
 test('reported upload negatives > unknown/current vendor > invalid amounts/note > invalid PDF > corrected verified draft',async({page},info)=>{
- const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),d=await open(page,f);
+ const f=fixture(),before=parent(f),d=await open(page,f);
  const pick=d.getByRole('button',{name:'Earlier contractor shown on the original bill',exact:true});await pick.click();
  const search=page.getByRole('searchbox',{name:'Search Earlier contractor shown on the original bill'});await search.fill('SYNTHETIC-VENDOR-NOT-REGISTERED-999');
  const empty=page.getByRole('listbox',{name:'Earlier contractor shown on the original bill'});
@@ -52,7 +54,7 @@ test('reported upload negatives > unknown/current vendor > invalid amounts/note 
  expect(sql(`select count(*) from public.work_order_assignment_history where work_order_id=${q(f.work)}`)).toBe('0');
 });
 test('reported upload pending save > repeat Enter/Escape/dismissal > one retained invoice and one submission',async({page},info)=>{
- const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),d=await open(page,f);await fields(d,f);await attach(d);
+ const f=fixture(),before=parent(f),d=await open(page,f);await fields(d,f);await attach(d);
  let release,calls=0;const held=new Promise(resolve=>{release=resolve;});
  await page.route('**/rest/v1/rpc/save_verified_manual_contractor_invoice_v1',async route=>{calls++;await held;await route.fallback();});
  try{
@@ -68,7 +70,7 @@ test('reported upload pending save > repeat Enter/Escape/dismissal > one retaine
  expect(bills(f)[0].state).toBe('submitted');expect(parent(f)).toEqual(before);
 });
 test('reported original PDF attach failure > retained draft > retry same submission > original identity retained',async({page,diagnostics},info)=>{
- const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),d=await open(page,f);await fields(d,f);await attach(d);let calls=0;
+ const f=fixture(),before=parent(f),d=await open(page,f);await fields(d,f);await attach(d);let calls=0;
  await page.route('**/rest/v1/rpc/attach_contractor_invoice_pdf',async route=>{
   if(++calls===1)await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'P0001',message:'Synthetic recoverable original attachment failure'})});
   else await route.fallback();
@@ -80,4 +82,5 @@ test('reported original PDF attach failure > retained draft > retry same submiss
  expect(bills(f)[0].pdf_storage_path).toBeTruthy();expect(parent(f)).toEqual(before);expect(calls).toBe(2);
  const injected=diagnostics.filter(event=>event.kind==='http'&&event.status===503&&event.url==='http://127.0.0.1:54331/rest/v1/rpc/attach_contractor_invoice_pdf');
  expect(injected).toHaveLength(1);diagnostics.splice(diagnostics.indexOf(injected[0]),1);
+});
 });

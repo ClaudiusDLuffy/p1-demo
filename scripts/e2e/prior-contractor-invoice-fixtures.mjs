@@ -3,17 +3,18 @@ import { randomUUID } from 'node:crypto';
 import { linkedBillingSql as sql } from './linked-billing-test-support.mjs';
 
 export const quotePrior = value => `'${String(value).replaceAll("'", "''")}'`;
-export function priorInvoiceFixture({ capital = false, closed = false, returning = false, noPreviousAssignment = false } = {}) {
+export function priorInvoiceFixture({ capital = false, closed = false, returning = false, noPreviousAssignment = false, source = 'manual', awaitingParts = false } = {}) {
+  assert.ok(['manual','email_intake'].includes(source),'Synthetic intake source must be explicit and supported');
   assert.equal(sql("select count(*) from auth.users where email not like '%@p1.invalid'"), '0');
   const work = `E2E-PRIOR-${randomUUID().slice(0, 8)}`;
-  sql(`insert into public.work_orders(id,contractor_id,status,functional_status,is_capital,store_number,store_state,summary)
-    select ${quotePrior(work)},id,'assigned','Dispatched',${capital},'E2E001','TX','Synthetic prior contractor billing'
+  sql(`insert into public.work_orders(id,contractor_id,status,functional_status,is_capital,store_number,store_state,summary,source)
+    select ${quotePrior(work)},id,'assigned','Dispatched',${capital},'E2E001','TX','Synthetic prior contractor billing',${quotePrior(source)}
     from public.profiles where email='e2e.direct@p1.invalid';
     ${noPreviousAssignment ? '' : `update public.work_orders set contractor_id=(select id from public.profiles where email='e2e.company.admin@p1.invalid')
       where id=${quotePrior(work)};`}
     ${returning ? `update public.work_orders set contractor_id=(select id from public.profiles where email='e2e.direct@p1.invalid') where id=${quotePrior(work)};` : ''}
-    update public.work_orders set status='${closed ? 'closed' : capital ? 'capital' : 'assigned'}',
-      functional_status='${closed ? 'Completed' : 'Dispatched'}'${closed ? ',closed_at=clock_timestamp()' : ''} where id=${quotePrior(work)};`);
+    update public.work_orders set status='${closed ? 'closed' : capital ? 'capital' : awaitingParts ? 'parts' : 'assigned'}',
+      functional_status='${closed ? 'Completed' : awaitingParts ? 'Awaiting Parts' : 'Dispatched'}'${closed ? ',closed_at=clock_timestamp()' : ''} where id=${quotePrior(work)};`);
   return JSON.parse(sql(`select jsonb_build_object('work',w.id,'assignment',w.contractor_assignment_version,
     'cycle',w.workflow_cycle,'history',(select id from public.work_order_assignment_history h where h.work_order_id=w.id
       and h.contractor_id=(select id from public.profiles where email='e2e.direct@p1.invalid') order by assignment_version limit 1),

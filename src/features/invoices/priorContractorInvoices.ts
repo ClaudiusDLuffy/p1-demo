@@ -80,7 +80,7 @@ export function createManualInvoiceDraftAttempt(context: PriorInvoiceContext, co
   }
   if (existing ? existing.assignmentId !== null || existing.manualContractorId !== contractorId
     : !c.manualIntake?.eligible || c.assignments.length !== 0) {
-    throw new PriorInvoiceError("Verified manual intake is only available when this manually entered work order has no recorded past assignment.");
+    throw new PriorInvoiceError("Verified earlier-work intake requires an eligible manual or email-intake work order with no recorded past assignment.");
   }
   const payload = Object.freeze({ ...priorInvoiceFieldsSchema.parse(fields), verified: true });
   const args: Functions["save_verified_manual_contractor_invoice_v1"]["Args"] = Object.freeze({

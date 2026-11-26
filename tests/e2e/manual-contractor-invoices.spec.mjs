@@ -23,7 +23,7 @@ async function openPanel(page,f){
 }
 async function open(page,f,actor=accounts.manager){
   await login(page,actor);const panel=await openPanel(page,f);
-  await expect(panel).toContainText('This work order was entered manually');
+  await expect(panel).toContainText('verify a genuine earlier contractor bill without creating assignment history');
   await panel.getByRole('button',{name:'Upload previous contractor invoice',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Upload previous contractor invoice',exact:true});
   await expect(dialog).toContainText('not a portal reassignment');return dialog;
@@ -57,9 +57,12 @@ async function finish(dialog,action='Upload and send for review',state='submitte
   await dialog.getByRole('button',{name:'Done',exact:true}).click();
 }
 async function actions(page,row,num){if(page.viewportSize().width<=720)await row.getByRole('button',{name:`Invoice ${num} actions`,exact:true}).click();}
-for(const [name,options,actor] of [['regular',{},accounts.manager],['capital',{capital:true},accounts.backoffice],['closed',{closed:true},accounts.dispatcher]]){
+for(const source of ['manual','email_intake'])test.describe(`verified earlier-work intake: ${source}`,()=>{
+const fixture=options=>priorInvoiceFixture({...options,source});
+for(const [name,options,actor] of [['regular',{},accounts.manager],['capital',{capital:true},accounts.backoffice],['closed',{closed:true},accounts.dispatcher],['awaiting parts',{awaitingParts:true},accounts.backoffice]]){
   test(`manual ${name}: original PDF > submit > approve > download preserves full parent and no history`,async({page},info)=>{
-    const f=priorInvoiceFixture({...options,noPreviousAssignment:true}),before=parent(f);
+    const f=fixture({...options,noPreviousAssignment:true}),before=parent(f);
+    expect(before.source).toBe(source);expect(before.contractor_assignment_version).toBe(1);
     const dialog=await open(page,f,actor),number=await fill(dialog,f);await finish(dialog);
     expect(bill(f)).toMatchObject({num:number,manual_contractor_bill:true,prior_assignment_id:null,prior_assignment_note:null,
       state:'submitted',total:125.5,sales_tax:5.5,paid_at:null,qbo_synced_at:null});
@@ -74,7 +77,7 @@ for(const [name,options,actor] of [['regular',{},accounts.manager],['capital',{c
   });
 }
 test('manual draft requires verification, can resume without a PDF and submits the same invoice after attachment',async({page})=>{
-  const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
+  const f=fixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
   const number=await fill(dialog,f,{file:false});
   await dialog.getByRole('button',{name:'Save draft',exact:true}).click();await expect(dialog.getByRole('alert')).toContainText('Verify the original');expect(count(f)).toBe('0');
   await finish(dialog,'Save draft','draft');const id=bill(f).id;
@@ -87,7 +90,7 @@ test('manual draft requires verification, can resume without a PDF and submits t
   expect(bill(f).id).toBe(id);expect(count(f)).toBe('1');expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');
 });
 test('manual rejection > retained correction > resubmit > approve preserves identity and current work',async({page})=>{
-  const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
+  const f=fixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
   const number=await fill(dialog,f);await finish(dialog);const id=bill(f).id;
   let row=page.locator('.wo-invoice-row').filter({hasText:`#${number}`});await row.getByRole('button',{name:'Reject',exact:true}).click();
   const reject=page.getByRole('dialog',{name:/Reject invoice/});await reject.getByRole('textbox').fill('Synthetic original total needs correction.');
@@ -101,7 +104,7 @@ test('manual rejection > retained correction > resubmit > approve preserves iden
 });
 for(const command of ['save_verified_manual_contractor_invoice_v1','submit_prior_contractor_invoice_v1']){
   test(`manual lost ${command} response retries one frozen operation without duplicate invoice`,async({page})=>{
-    const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);await fill(dialog,f);
+    const f=fixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);await fill(dialog,f);
     let lost=false;const operations=[];
     await page.route(`**/rest/v1/rpc/${command}`,async route=>{
       operations.push(route.request().postDataJSON().p_operation_id);
@@ -116,7 +119,7 @@ for(const command of ['save_verified_manual_contractor_invoice_v1','submit_prior
   });
 }
 test('manual duplicate rejection permits correction but does not duplicate the original bill',async({page})=>{
-  const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f);let dialog=await open(page,f);
+  const f=fixture({noPreviousAssignment:true}),before=parent(f);let dialog=await open(page,f);
   const number=await fill(dialog,f,{file:false});await finish(dialog,'Save draft','draft');
   await page.getByRole('region',{name:'Previous contractor invoices',exact:true}).getByRole('button',{name:'Upload previous contractor invoice',exact:true}).click();
   dialog=page.getByRole('dialog',{name:'Upload previous contractor invoice',exact:true});await fill(dialog,f,{number,file:false});await confirm(dialog);
@@ -126,7 +129,7 @@ test('manual duplicate rejection permits correction but does not duplicate the o
   await finish(dialog,'Save draft','draft');expect(count(f)).toBe('2');expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');
 });
 test('manual selection > Escape > cancel unsaved changes > discard saves no invoice',async({page})=>{
-  const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
+  const f=fixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
   const picker=dialog.getByRole('button',{name:'Earlier contractor shown on the original bill',exact:true});await picker.click();
   await expect(page.getByRole('searchbox',{name:'Search Earlier contractor shown on the original bill'})).toBeFocused();
   await page.keyboard.press('Escape');await expect(page.getByRole('listbox',{name:'Earlier contractor shown on the original bill'})).toBeHidden();
@@ -137,7 +140,7 @@ test('manual selection > Escape > cancel unsaved changes > discard saves no invo
   await expect(dialog).toBeHidden();expect(count(f)).toBe('0');expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');
 });
 test('manual stale parent is rejected without creating a bill or assignment history',async({page})=>{
-  const f=priorInvoiceFixture({noPreviousAssignment:true}),dialog=await open(page,f);await fill(dialog,f,{file:false});await confirm(dialog);
+  const f=fixture({noPreviousAssignment:true}),dialog=await open(page,f);await fill(dialog,f,{file:false});await confirm(dialog);
   sql(`update public.work_orders set workflow_cycle=workflow_cycle+1 where id=${q(f.work)}`);const before=parent(f);
   await dialog.getByRole('button',{name:'Save draft',exact:true}).click();await expect(dialog.getByRole('alert')).toContainText('changed');
   expect(count(f)).toBe('0');expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');
@@ -145,7 +148,7 @@ test('manual stale parent is rejected without creating a bill or assignment hist
 for(const width of [390,320])test.describe(`manual touch-enabled narrow layout ${width}`,()=>{
   test.use({viewport:{width,height:664},hasTouch:true});
   test('verify > native PDF picker > submit > reload retains manual marker and original work',async({page})=>{
-    const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f,accounts.backoffice);
+    const f=fixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f,accounts.backoffice);
     const number=await fill(dialog,f,{file:false});await confirm(dialog);await dialog.getByRole('button',{name:'Upload and send for review',exact:true}).click();
     await expect(dialog.getByRole('alert')).toContainText('Attach the original invoice PDF');await attach(dialog,number);await finish(dialog);
     await page.reload();await expect(page.locator('.app-root')).toBeVisible();await openPanel(page,f);
@@ -156,7 +159,7 @@ for(const width of [390,320])test.describe(`manual touch-enabled narrow layout $
 });
 
 test('manual contractor-bill detail > cancel approval > approve > reload preserves provenance and current work',async({page})=>{
-  const f=priorInvoiceFixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
+  const f=fixture({noPreviousAssignment:true}),before=parent(f),dialog=await open(page,f);
   const number=await fill(dialog,f);await finish(dialog);
   async function detail(tab){
     await openSidebarPage(page,'Contractor bills');
@@ -186,7 +189,7 @@ test('manual contractor-bill detail > cancel approval > approve > reload preserv
 for(const [width,currentFirst] of [[1440,true],[390,false]])test.describe(`earlier plus current contractor bills at ${width}px`,()=>{
   test.use({viewport:{width,height:900},hasTouch:width===390});
   test('same invoice number on different contractors > both contractor bills > one customer draft > reload keeps both source links',async({page},info)=>{
-    const f=priorInvoiceFixture({noPreviousAssignment:true}),number=`SYNTHETIC-TWO-VENDORS-${randomUUID().slice(0,8)}`;
+    const f=fixture({noPreviousAssignment:true}),number=`SYNTHETIC-TWO-VENDORS-${randomUUID().slice(0,8)}`;
     const currentId=randomUUID();
     const current=()=>JSON.parse(sql(`select to_jsonb(i) from public.invoices i where id=${q(currentId)}`));
     const seedCurrent=()=>sql(`insert into public.invoices(id,num,work_order_id,contractor_id,invoice_type,document_kind,state,
@@ -255,4 +258,29 @@ for(const [width,currentFirst] of [[1440,true],[390,false]])test.describe(`earli
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width+1);
     await reopened.getByRole('button',{name:'Close',exact:true}).click();await expect(reopened).toBeHidden();
   });
+});
+});
+
+for(const width of [1440,1280,1024,768,390,320])test(`reported email-intake Awaiting Parts replica: full and simplified upload discovery at ${width}px`,async({page},info)=>{
+  await page.setViewportSize({width,height:width<=390?568:900});
+  const f=priorInvoiceFixture({source:'email_intake',noPreviousAssignment:true,awaitingParts:true}),before=parent(f);
+  expect(before).toMatchObject({source:'email_intake',status:'parts',contractor_assignment_version:1});
+  await login(page,accounts.backoffice);await openPanel(page,f);
+  const panel=page.getByRole('region',{name:'Previous contractor invoices',exact:true});
+  const upload=panel.getByRole('button',{name:'Upload previous contractor invoice',exact:true});
+  await expect(upload).toBeEnabled();await upload.scrollIntoViewIfNeeded();
+  await page.screenshot({path:info.outputPath('email-intake-full-view-upload-visible.png')});
+  await upload.click();const dialog=page.getByRole('dialog',{name:'Upload previous contractor invoice',exact:true});
+  await expect(dialog.getByRole('button',{name:'Earlier contractor shown on the original bill',exact:true})).toBeVisible();
+  await expect(dialog).not.toContainText('This manually entered work order');
+  await expect(dialog.getByLabel('Previous contractor assignment',{exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');await expect(dialog).toBeHidden();
+  await page.getByRole('button',{name:'Show simplified details',exact:true}).click();
+  const disclosure=page.locator('summary').filter({hasText:'Invoices, estimates and documents'});
+  await disclosure.click();await expect(upload).toBeVisible();await upload.scrollIntoViewIfNeeded();
+  await page.screenshot({path:info.outputPath('email-intake-simplified-upload-visible.png')});
+  await upload.click();await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(dialog).toBeHidden();await page.reload();await expect(page.locator('.app-root')).toBeVisible();
+  expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');expect(count(f)).toBe('0');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width+1);
 });

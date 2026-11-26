@@ -103,7 +103,7 @@ function PriorInvoiceModal({ context, draft, onClose }: { context: PriorInvoiceC
       <p className="text-sm">The current contractor, work-order status, customer billing and payment records are unchanged.</p>
       <button type="button" className="btn-primary" onClick={onClose}>Done</button></div>
       : <div className="space-y-4">
-        <p className="text-sm">{manual ? "This manually entered work order has no recorded past assignment. Verify the actual bill for earlier contractor work; this records a staff-verified manual bill, not a portal reassignment." : "Record the actual bill from a past assignment."} This does not reassign the WO, restore contractor access, bill 7-Eleven or mark anything paid.</p>
+        <p className="text-sm">{manual ? "This work order has no recorded past assignment. Verify the actual bill for earlier contractor work; this records a staff-verified manual bill, not a portal reassignment." : "Record the actual bill from a past assignment."} This does not reassign the WO, restore contractor access, bill 7-Eleven or mark anything paid.</p>
         <fieldset disabled={busy || locked} className="space-y-3">
           {manual ? <div className="space-y-1 text-sm">
             <div>Earlier contractor shown on the original bill</div>
@@ -157,7 +157,7 @@ export default function PriorContractorInvoicePanel({ workOrderId }: { workOrder
   if (!allowed) return null;
   return <section aria-label="Previous contractor invoices" className="card mb-4 space-y-3 p-4">
     <h3 className="font-semibold">Previous contractor invoices</h3>
-    <p className="text-sm">Staff can record bills from recorded past assignments, or verify earlier-work bills on manually entered jobs without assignment history. Keep the current contractor’s bill in their normal invoice workflow. Both bills can stay on this work order and be selected together when preparing 7-Eleven billing.</p>
+    <p className="text-sm">Staff can record bills from recorded past assignments, or verify earlier-work bills without assignment history on work orders created manually or received through email intake. Keep the current contractor’s bill in their normal invoice workflow. Both bills can stay on this work order and be selected together when preparing 7-Eleven billing.</p>
     {(context.isPending || context.isFetching) && <p role="status" className="text-sm">Loading previous contractor assignments…</p>}
     {context.isError ? <><p role="alert">{priorInvoiceError(context.error).uncertain
       ? "Previous contractor assignments could not be loaded. Retry loading past assignments."
@@ -166,7 +166,7 @@ export default function PriorContractorInvoicePanel({ workOrderId }: { workOrder
         onClick={() => context.data && setEditor({ context: context.data, draft: null })}>Upload previous contractor invoice</button>}
     {!context.isError && context.data?.assignments.length === 0 && <div className="space-y-2 rounded border p-3 text-sm">
       <h4 className="font-semibold">No previous contractor assignment found</h4>
-      <p>{context.data.manualIntake?.eligible ? "This work order was entered manually. Staff can use the existing upload form to verify a genuine earlier contractor bill without creating assignment history." : "This upload requires a recorded past assignment. Verified manual intake is available only on manually entered work orders."} For a bill from the current contractor, use their normal invoice workflow.</p>
+      <p>{context.data.manualIntake?.eligible ? "Staff can use the existing upload form to verify a genuine earlier contractor bill without creating assignment history." : "This upload requires a recorded past assignment. Verified staff intake without assignment history is available only on work orders created manually or received through email intake."} For a bill from the current contractor, use their normal invoice workflow.</p>
       <p>Verify the original bill and contractor before recording it. Do not reassign the work order just to enable this upload.</p>
       <button type="button" className="btn-soft" disabled={context.isFetching} onClick={() => void context.refetch()}>
         {context.isFetching ? "Refreshing assignment history…" : "Refresh assignment history"}
