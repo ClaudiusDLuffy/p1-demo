@@ -157,7 +157,7 @@ export default function PriorContractorInvoicePanel({ workOrderId }: { workOrder
   if (!allowed) return null;
   return <section aria-label="Previous contractor invoices" className="card mb-4 space-y-3 p-4">
     <h3 className="font-semibold">Previous contractor invoices</h3>
-    <p className="text-sm">Staff can record bills from recorded past assignments, or verify earlier-work bills on manually entered jobs without assignment history. The current contractor’s work stays separate.</p>
+    <p className="text-sm">Staff can record bills from recorded past assignments, or verify earlier-work bills on manually entered jobs without assignment history. Keep the current contractor’s bill in their normal invoice workflow. Both bills can stay on this work order and be selected together when preparing 7-Eleven billing.</p>
     {(context.isPending || context.isFetching) && <p role="status" className="text-sm">Loading previous contractor assignments…</p>}
     {context.isError ? <><p role="alert">{priorInvoiceError(context.error).uncertain
       ? "Previous contractor assignments could not be loaded. Retry loading past assignments."

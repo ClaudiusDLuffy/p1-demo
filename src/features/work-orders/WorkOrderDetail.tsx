@@ -873,6 +873,7 @@ export default function WorkOrderDetail(props: any) {
                                 <div className="wo-invoice-row-main" style={{ minWidth: 0, flex: 1 }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                                     <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>#{inv.num}</span>
+                                    {inv.contractorName && <span style={{ fontSize: 11, color: T.muted, overflowWrap: "anywhere" }}>{inv.contractorName}</span>}
                                     {(inv.priorAssignmentId || inv.manualContractorBill) && <span className="text-xs">{inv.manualContractorBill ? "Staff-verified manual bill" : "Previous contractor bill"} · current assignment unchanged</span>}
                                     <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, color: stateColor, background: stateBg, border: `1px solid ${stateColor}33`, padding: "2px 8px", borderRadius: 999 }}>{stateLabel}</span>
                                     <span className="mono" style={{ fontSize: 12, color: T.muted }}>{fmt(inv.total || 0)}</span>

@@ -182,3 +182,77 @@ test('manual contractor-bill detail > cancel approval > approve > reload preserv
   await expect(page.getByRole('button',{name:'Hold / Do not pay',exact:true})).toBeVisible();
   expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');expect(count(f)).toBe('1');
 });
+
+for(const [width,currentFirst] of [[1440,true],[390,false]])test.describe(`earlier plus current contractor bills at ${width}px`,()=>{
+  test.use({viewport:{width,height:900},hasTouch:width===390});
+  test('same invoice number on different contractors > both contractor bills > one customer draft > reload keeps both source links',async({page},info)=>{
+    const f=priorInvoiceFixture({noPreviousAssignment:true}),number=`SYNTHETIC-TWO-VENDORS-${randomUUID().slice(0,8)}`;
+    const currentId=randomUUID();
+    const current=()=>JSON.parse(sql(`select to_jsonb(i) from public.invoices i where id=${q(currentId)}`));
+    const seedCurrent=()=>sql(`insert into public.invoices(id,num,work_order_id,contractor_id,invoice_type,document_kind,state,
+      invoice_date,subtotal,sales_tax,total) select ${q(currentId)},${q(number)},id,contractor_id,'contractor','invoice','approved',
+      current_date,200,0,200 from public.work_orders where id=${q(f.work)};
+      insert into public.invoice_lines(invoice_id,position,type,description,qty,rate)
+      values(${q(currentId)},1,'Other','Current contractor completion service',1,200);`);
+    if(currentFirst)seedCurrent();
+    const before=parent(f),existing=currentFirst?current():null;
+    const upload=await open(page,f,accounts.backoffice);await fill(upload,f,{number});await finish(upload);
+    expect(parent(f)).toEqual(before);expect(history(f)).toBe('0');
+    if(existing)expect(current()).toEqual(existing);
+    const earlierId=bill(f).id;
+    const earlierRow=page.locator('.wo-invoice-row').filter({hasText:'Staff-verified manual bill'}).filter({hasText:`#${number}`});
+    await expect(earlierRow).toContainText(/Synthetic (Company Admin|Service Company)/i);
+    await actions(page,earlierRow,number);await earlierRow.getByRole('button',{name:'Approve',exact:true}).click();
+    await expect.poll(()=>bill(f).state).toBe('approved');expect(parent(f)).toEqual(before);
+    if(!currentFirst)seedCurrent();
+    const beforeBilling=parent(f),currentBefore=current(),earlierBefore=bill(f);
+    await page.reload();await expect(page.locator('.app-root')).toBeVisible();await openPanel(page,f);
+    const rows=page.locator('.wo-invoice-row').filter({hasText:`#${number}`});await expect(rows).toHaveCount(2);
+    await expect(rows.filter({hasText:/Synthetic Direct (Services|Contractor)/i})).toHaveCount(1);
+    await expect(rows.filter({hasText:'Staff-verified manual bill'})).toHaveCount(1);
+    await rows.first().scrollIntoViewIfNeeded();
+    await page.screenshot({path:info.outputPath('two-contractor-bills-same-work-order.png')});
+
+    await openSidebarPage(page,'7-Eleven billing');await page.getByRole('button',{name:'+ Create Invoice',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'Create P1 to 7-Eleven invoice',exact:true});
+    await dialog.getByLabel('Search work order',{exact:true}).fill(f.work);
+    await page.getByRole('listbox',{name:'Matching work orders'}).getByRole('option',{name:new RegExp(`^${f.work} `)}).click();
+    const earlierSource=dialog.getByRole('checkbox',{name:/Synthetic (Company Admin|Service Company)/i});
+    const currentSource=dialog.getByRole('checkbox',{name:/Synthetic Direct (Services|Contractor)/i});
+    await expect(earlierSource).toBeVisible();await expect(currentSource).toBeVisible();
+    await expect(earlierSource).toHaveAccessibleName(/Staff-verified earlier-work bill/);
+    await earlierSource.check();await currentSource.check();
+    await expect(earlierSource).toBeChecked();await expect(currentSource).toBeChecked();
+    await page.screenshot({path:info.outputPath('two-distinguishable-selected-source-bills.png')});
+    await dialog.getByRole('button',{name:'Pull lines + calculate',exact:true}).click();
+    await expect(page.getByText('Pulled 2 line items',{exact:true})).toBeVisible();
+    const customerNumber=`P1-SYNTHETIC-TWO-${randomUUID().slice(0,8)}`;
+    await dialog.getByLabel('Invoice #',{exact:true}).fill(customerNumber);
+    await dialog.getByLabel('Manual sales tax amount',{exact:true}).fill('0');
+    await dialog.getByRole('button',{name:'Save as Draft',exact:true}).click();await expect(dialog).toBeHidden();
+    const saved=()=>JSON.parse(sql(`select jsonb_build_object('id',i.id,'state',i.state,'total',i.total,
+      'workOrderId',i.work_order_id,'sources',(select jsonb_agg(s.contractor_invoice_id order by s.contractor_invoice_id)
+      from public.staff_invoice_sources s where s.staff_invoice_id=i.id),
+      'lines',(select count(*) from public.invoice_lines l where l.invoice_id=i.id))
+      from public.invoices i where i.num=${q(customerNumber)} and i.deleted_at is null`));
+    expect(saved()).toMatchObject({state:'draft',total:320,workOrderId:f.work,lines:2,sources:[earlierId,currentId].sort()});
+    expect(current()).toEqual(currentBefore);expect(bill(f)).toEqual(earlierBefore);expect(history(f)).toBe('0');
+    expect(parent(f).contractor_id).toBe(beforeBilling.contractor_id);
+    expect(parent(f).status).toBe(beforeBilling.status);
+    await page.reload();await expect(page.locator('.app-root')).toBeVisible();await openSidebarPage(page,'7-Eleven billing');
+    await page.getByRole('searchbox',{name:'Search billing invoices and work orders'}).fill(customerNumber);
+    const drafts=page.getByRole('button',{name:/^Drafts /});
+    if(await drafts.getAttribute('aria-expanded')!=='true')await drafts.click();
+    const draftBucket=drafts.locator('xpath=ancestor::article[1]');
+    await draftBucket.getByText(`#${customerNumber}`,{exact:true}).filter({visible:true}).first().click();
+    await page.getByRole('button',{name:'Edit invoice',exact:true}).click();
+    const reopened=page.getByRole('dialog',{name:`Edit invoice #${customerNumber}`,exact:true});
+    await expect(reopened.getByRole('checkbox',{name:/Synthetic (Company Admin|Service Company)/i})).toBeChecked();
+    await expect(reopened.getByRole('checkbox',{name:/Synthetic Direct (Services|Contractor)/i})).toBeChecked();
+    expect(saved().sources).toEqual([earlierId,currentId].sort());
+    await reopened.getByRole('checkbox',{name:/Synthetic (Company Admin|Service Company)/i}).scrollIntoViewIfNeeded();
+    await page.screenshot({path:info.outputPath('reopened-draft-both-source-links-retained.png')});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width+1);
+    await reopened.getByRole('button',{name:'Close',exact:true}).click();await expect(reopened).toBeHidden();
+  });
+});
